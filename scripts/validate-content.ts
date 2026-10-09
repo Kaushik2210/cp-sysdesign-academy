@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 
+const only = process.argv[2]; // optional path prefix filter, e.g. `cp/math-basics`
 const errors: string[] = [];
 let lessons: ReturnType<typeof getAllLessons> = [];
 try {
@@ -17,7 +18,7 @@ const routes = new Set<string>(["/", "/cp/", "/sd/", "/dashboard/", "/review/", 
 const problemsDir = path.join(process.cwd(), "content", "problems");
 
 const seen = new Map<string, string>();
-for (const l of lessons) {
+for (const l of lessons.filter((x) => !only || x.id.startsWith(only))) {
   const key = `${l.track}/${l.module}#${l.order}`;
   if (seen.has(key)) errors.push(`${l.id}: duplicate order ${l.order} (also ${seen.get(key)})`);
   seen.set(key, l.id);

@@ -42,7 +42,8 @@ function runTests(label: string, cmd: string, args: string[], cwd: string, tests
   });
 }
 
-for (const p of getAllProblems()) {
+const only = process.argv[2]; // optional id prefix filter, e.g. `pnpm verify cp3-`
+for (const p of getAllProblems().filter((x) => !only || x.id.startsWith(only))) {
   for (const [lang, code] of Object.entries(p.solutions)) {
     const label = `${p.id}/${lang}`;
     if (!toolchains[lang as keyof typeof toolchains]) {
