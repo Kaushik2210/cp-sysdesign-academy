@@ -1,0 +1,84 @@
+---
+title: Verdicts, Contests and Ratings
+track: cp
+module: how-cp-works
+order: 1
+difficulty: beginner
+estMinutes: 15
+prerequisites: []
+tags: [basics, platforms, verdicts]
+type: lesson
+furtherReading:
+  - title: Codeforces rules and contest formats
+    url: https://codeforces.com/blog/entry/456
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+A competitive programming problem is a tiny contract: *given input in this exact format, print output in that exact format, within a time and memory budget.* A judge compiles your program, feeds it many hidden inputs, and compares output. You never see most tests, so correctness and speed must come from reasoning, not trial and error.
+
+## Where you compete
+
+| Platform | Style | Good for |
+| --- | --- | --- |
+| Codeforces | Weekly rated rounds, hacking in some formats | Rating growth, huge archive |
+| AtCoder | Clean problems, ABC/ARC/AGC tiers | Problem quality, math flavour |
+| CSES | Fixed curated problem set | Learning the standard techniques in order |
+| LeetCode | Function-style problems, interview focus | Interview prep, not contest speed |
+
+## Contest formats
+
+- **ICPC style:** solved count first, then penalty time. A wrong submission adds penalty (typically 20 minutes) only if the problem is eventually solved.
+- **Codeforces rounds:** points decay with time; wrong attempts cost a small amount. Some divisions allow hacking after the round.
+- **AtCoder:** points per problem fixed by difficulty; penalty time is the tiebreak.
+
+## Verdicts you will see
+
+| Verdict | Meaning | First thing to check |
+| --- | --- | --- |
+| AC | Accepted | Celebrate, then read the editorial |
+| WA | Wrong answer on some test | Edge cases: `n = 1`, all equal, negatives, overflow |
+| TLE | Too slow | Compare your complexity to the constraints |
+| MLE | Memory limit exceeded | Array sizes, recursion depth, copies |
+| RE | Runtime error | Out-of-bounds index, division by zero, stack overflow |
+| CE | Compile error | Compiler flags and language version |
+
+<Callout type="pitfall" title="Overflow is the classic silent WA">
+Multiplying two values near `10^9` overflows a 32-bit integer. In C++ use `long long` whenever a product or sum can exceed about `2 * 10^9`. Python integers never overflow, which is one reason it is good for prototyping.
+</Callout>
+
+## Ratings
+
+Rating systems are Elo-like: you gain points when you outperform your expected rank. Colours on Codeforces run from grey (below 1200) through green, cyan, blue (1600+), violet, orange and red (2400+). Ratings are for orientation, not identity: most improvement comes from steady practice, not any single contest.
+
+## Reading a problem
+
+1. Restate the task in one sentence.
+2. Write down the constraints. They hint at the intended complexity (see the Complexity Analysis module).
+3. Work the sample by hand, then invent a tiny case of your own.
+4. Look for the brute force first. Optimising something correct is far easier than debugging something clever.
+
+## A first program
+
+```python
+# Read n then n integers; print their sum.
+n = int(input())
+a = list(map(int, input().split()))
+print(sum(a))
+```
+
+## A practice routine that works
+
+- Solve 1 to 3 problems a day slightly *above* your comfort level (about +100 to +200 rating).
+- Give a problem 30 to 45 minutes, then read hints, then the editorial. Never stay stuck for hours.
+- After reading an editorial, close it and re-implement from memory the next day.
+- Keep a log of mistakes (overflow, off-by-one, missed edge case). Review it weekly.
+- Take part in contests regularly and **upsolve** the problems you missed.
+
+## Pitfalls
+
+- Memorising solutions instead of the *idea* behind them.
+- Skipping the brute force and sample checks.
+- Comparing your rating to others instead of to last month's you.

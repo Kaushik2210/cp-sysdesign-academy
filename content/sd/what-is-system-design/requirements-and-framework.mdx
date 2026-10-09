@@ -1,0 +1,73 @@
+---
+title: Requirements and the Design Framework
+track: sd
+module: what-is-system-design
+order: 1
+difficulty: beginner
+estMinutes: 20
+prerequisites: []
+tags: [requirements, framework, interview]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 1
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+System design is deciding *what boxes exist, what each box owns, and how they talk*, so the whole thing keeps working as users, data and failures grow. There is rarely a single right answer; there are answers that fit the requirements and answers that do not. So the first job is always pinning down the requirements.
+
+## Functional vs non-functional requirements
+
+**Functional requirements** are what the system does: "a user can shorten a URL", "a user can follow another user".
+
+**Non-functional requirements** are how well it does it:
+
+| Quality | Question to ask |
+| --- | --- |
+| Scale | How many users, requests per second, bytes stored? |
+| Latency | What response time is acceptable at p50 and p99? |
+| Availability | How much downtime is tolerable (99.9% allows about 8.8 h per year)? |
+| Consistency | Can users ever see stale data? For how long? |
+| Durability | Can we ever lose data? |
+| Cost | What is the budget, and what dominates it? |
+
+<Callout type="tip">
+Nearly every design trade-off is a non-functional trade-off. If you cannot name which quality you are optimising, you cannot justify the design.
+</Callout>
+
+## The framework
+
+Use this order for interviews and real design docs alike:
+
+1. **Clarify** scope and requirements; agree on what is out of scope.
+2. **Estimate** load and storage (back-of-envelope).
+3. **API** the core operations and their contracts.
+4. **Data model** entities, keys, access patterns, choice of store.
+5. **High-level design** the main components and request flow.
+6. **Deep dive** the one or two hardest parts.
+7. **Bottlenecks** single points of failure, hot spots, scaling limits, failure modes.
+
+## Worked mini-example: a paste service
+
+*Clarify:* users upload text and get a link; links expire after a chosen time; reads outnumber writes about 10 to 1.
+
+*Estimate:* 1M new pastes per day is about 12 writes per second on average; with 10x reads, about 120 reads per second. Average 10 KB per paste gives 10 GB per day, about 3.6 TB per year.
+
+*API:* `POST /pastes {text, ttl} -> {id}` and `GET /pastes/{id} -> text`.
+
+*Data model:* key-value access by `id`, so a key-value or object store fits; metadata (expiry) lives beside the blob.
+
+*HLD:* clients, then a load balancer, then stateless app servers, then a cache for hot reads, then a store. An ID generator avoids collisions.
+
+*Bottlenecks:* ID generation as a single point of failure, hot pastes in the cache, expiry cleanup cost.
+
+## Pitfalls
+
+- Starting to draw boxes before knowing the scale.
+- Naming technologies (Kafka, Redis) without saying what problem each solves.
+- Ignoring failure: always ask "what happens when this box dies?".
+
+## What would you choose and why?
+
+The paste service gets 100x more reads than expected. Which single change helps most: a bigger database, a CDN/cache in front of reads, or sharding the store? Write down your reasoning before reading the Caching module.

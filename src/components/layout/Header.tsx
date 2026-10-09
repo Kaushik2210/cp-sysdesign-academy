@@ -1,0 +1,31 @@
+import Link from "next/link";
+import { ThemeToggle } from "./theme";
+
+export function Header() {
+  return (
+    <header className="sticky top-0 z-30 border-b border-border bg-bg/90 backdrop-blur">
+      <nav
+        aria-label="Main"
+        className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6"
+      >
+        <Link href="/" className="font-semibold tracking-tight">
+          CP &amp; SysDesign <span className="text-accent">Academy</span>
+        </Link>
+        <div className="ml-2 flex gap-4 text-sm text-muted-fg">
+          <Link href="/cp/" className="hover:text-fg">
+            Competitive Programming
+          </Link>
+          <Link href="/sd/" className="hover:text-fg">
+            System Design
+          </Link>
+          <Link href="/dashboard/" className="hover:text-fg">
+            Dashboard
+          </Link>
+        </div>
+        <div className="ml-auto">
+          <ThemeToggle />
+        </div>
+      </nav>
+    </header>
+  );
+}
