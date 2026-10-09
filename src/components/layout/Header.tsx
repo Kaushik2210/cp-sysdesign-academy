@@ -18,6 +18,9 @@ export function Header() {
           <Link href="/sd/" className="hover:text-fg">
             System Design
           </Link>
+          <Link href="/review/" className="hover:text-fg">
+            Review
+          </Link>
           <Link href="/dashboard/" className="hover:text-fg">
             Dashboard
           </Link>

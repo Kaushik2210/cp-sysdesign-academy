@@ -6,7 +6,7 @@ import { extractHeadings } from "@/lib/content/toc";
 import { TRACK_META, TRACKS, type Track } from "@/lib/content/schema";
 import { Mdx } from "@/components/mdx/Mdx";
 import { Sidebar } from "@/components/layout/Sidebar";
-import { LessonActions } from "@/components/layout/LessonActions";
+import { LessonActions, LessonNotes } from "@/components/layout/LessonActions";
 
 type Params = { track: string; module: string; lesson: string };
 
@@ -65,12 +65,14 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
               {lesson.difficulty} · ~{lesson.estMinutes} min · {lesson.type}
             </p>
           </div>
-          <LessonActions id={lesson.id} />
+          <LessonActions id={lesson.id} title={lesson.title} />
         </div>
 
         <article className="prose prose-neutral max-w-none dark:prose-invert">
           <Mdx source={source} />
         </article>
+
+        <LessonNotes id={lesson.id} />
 
         {lesson.furtherReading.length > 0 && (
           <section className="mt-10 border-t border-border pt-6">

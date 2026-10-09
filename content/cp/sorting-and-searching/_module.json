@@ -1,0 +1,1 @@
+{ "title": "Sorting and Binary Search", "level": "Level 1: Core Data Structures & Techniques", "order": 6, "summary": "Binary search on indices and on answers, the invariant that makes it bug-free, and when sorting unlocks a problem." }

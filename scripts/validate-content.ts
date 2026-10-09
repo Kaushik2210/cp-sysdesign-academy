@@ -13,7 +13,7 @@ try {
 }
 
 const ids = new Set(lessons.map((l) => l.id));
-const routes = new Set<string>(["/", "/cp/", "/sd/", "/dashboard/", ...lessons.map((l) => l.href)]);
+const routes = new Set<string>(["/", "/cp/", "/sd/", "/dashboard/", "/review/", ...lessons.map((l) => l.href)]);
 const problemsDir = path.join(process.cwd(), "content", "problems");
 
 const seen = new Map<string, string>();

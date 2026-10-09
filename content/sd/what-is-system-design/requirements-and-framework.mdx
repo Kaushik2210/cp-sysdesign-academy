@@ -71,3 +71,51 @@ Use this order for interviews and real design docs alike:
 ## What would you choose and why?
 
 The paste service gets 100x more reads than expected. Which single change helps most: a bigger database, a CDN/cache in front of reads, or sharding the store? Write down your reasoning before reading the Caching module.
+
+## Interactive: the paste service
+
+Click a component to see its role, failure modes and trade-offs.
+
+<Diagram kind="flow" caption="High-level design of the paste service" nodes={[
+  { id: "client", label: "Client", x: 0, y: 80, role: "Browser or app that creates and reads pastes.", failureModes: ["Retries on timeout can create duplicate pastes unless writes are idempotent"] },
+  { id: "lb", label: "Load balancer", x: 180, y: 80, role: "Spreads requests across stateless app servers and removes unhealthy ones.", failureModes: ["Single point of failure unless made redundant"], tradeoffs: ["L7 gives routing flexibility at higher CPU cost than L4"] },
+  { id: "app", label: "App servers", x: 360, y: 80, role: "Validate input, generate IDs, talk to cache and store. Stateless, so they scale horizontally.", failureModes: ["Crash mid-write: store must stay consistent"] },
+  { id: "cache", label: "Cache", x: 540, y: 0, role: "Holds hot pastes in memory to absorb read traffic.", failureModes: ["Stampede when a hot key expires", "Stale data after delete"], tradeoffs: ["Faster reads vs. extra invalidation complexity"] },
+  { id: "store", label: "Object/KV store", x: 540, y: 160, role: "Durable storage of paste bodies and metadata, keyed by ID.", failureModes: ["Node loss: needs replication", "Hot partition on viral pastes"], tradeoffs: ["Key-value is simple and scales; no ad-hoc queries"] }
+]} edges={[
+  { from: "client", to: "lb" }, { from: "lb", to: "app" }, { from: "app", to: "cache", label: "read" }, { from: "app", to: "store", label: "read/write" }
+]} />
+
+The same flow as text, drawn with Mermaid:
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant A as App server
+  participant K as Cache
+  participant S as Store
+  C->>A: GET /pastes/abc
+  A->>K: get abc
+  alt hit
+    K-->>A: body
+  else miss
+    A->>S: get abc
+    S-->>A: body
+    A->>K: set abc
+  end
+  A-->>C: 200 body`} />
+
+## Trade-offs: where do reads get served?
+
+<TradeOffs caption="Options for absorbing 100x read growth" rows={[
+  { option: "Bigger database", pros: "No code change", cons: "Vertical limit, expensive, single failure domain", chooseWhen: "Short-term relief only" },
+  { option: "Cache in front", pros: "Cheap, big win for hot pastes", cons: "Invalidation and stampede handling", chooseWhen: "Read-heavy with skewed popularity (this case)" },
+  { option: "Shard the store", pros: "Scales writes and storage", cons: "Operational complexity, hot shards", chooseWhen: "Storage or write volume outgrows one node" }
+]} />
+
+## Quiz
+
+<Quiz id="sd-framework-1" tags={["requirements"]} questions={[
+  { type: "mcq", q: "Which is a NON-functional requirement?", options: ["Users can follow each other", "p99 read latency under 200 ms", "Users can upload photos", "Admins can ban accounts"], answer: 1, explain: "Latency is a quality attribute, not a feature." },
+  { type: "mcq", q: "A system must be available 99.9% of the time. Roughly how much downtime per year is allowed?", options: ["About 5 minutes", "About 8.8 hours", "About 3.6 days", "About 36 days"], answer: 1, explain: "0.1% of 8760 hours is 8.76 hours." },
+  { type: "multi", q: "Which belong in the 'estimate' step?", options: ["Requests per second", "Storage per year", "Choice of font", "Bandwidth"], answer: [0, 1, 3], explain: "Estimation sizes load, storage and bandwidth so later choices are justified." }
+]} />

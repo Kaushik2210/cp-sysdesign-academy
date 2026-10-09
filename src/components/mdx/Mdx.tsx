@@ -1,29 +1,25 @@
-import { MDXRemote } from "next-mdx-remote/rsc";
-import rehypeSlug from "rehype-slug";
-import rehypePrettyCode from "rehype-pretty-code";
-import remarkGfm from "remark-gfm";
 import { Callout } from "./Callout";
+import { MdxBase } from "./MdxBase";
+import { Tab, Tabs } from "./Tabs";
+import { Complexity, TradeOffs } from "./Tables";
+import { CodeRunner, Diagram, Visualizer } from "./lazy";
+import { Quiz } from "@/components/quiz/Quiz";
+import { Problem } from "@/components/problem/Problem";
 
-/** Components available inside every MDX file. Phase 2 extends this map. */
-export const mdxComponents = { Callout };
+/** Components available inside every lesson MDX file. */
+export const mdxComponents = {
+  Callout,
+  Tabs,
+  Tab,
+  Complexity,
+  TradeOffs,
+  CodeRunner,
+  Visualizer,
+  Diagram,
+  Quiz,
+  Problem,
+};
 
 export function Mdx({ source }: { source: string }) {
-  return (
-    <MDXRemote
-      source={source}
-      components={mdxComponents}
-      options={{
-        mdxOptions: {
-          remarkPlugins: [remarkGfm],
-          rehypePlugins: [
-            rehypeSlug,
-            [
-              rehypePrettyCode,
-              { theme: { light: "github-light", dark: "github-dark" }, keepBackground: false },
-            ],
-          ],
-        },
-      }}
-    />
-  );
+  return <MdxBase source={source} components={mdxComponents} />;
 }

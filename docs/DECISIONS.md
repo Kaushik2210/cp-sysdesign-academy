@@ -8,3 +8,8 @@ Format: date — decision — why.
 - 2026-10-09 — Local machine has no `g++`; C++ reference solutions are verified in CI only, Python/Java locally. COVERAGE.md states this.
 - 2026-10-09 — Depth over breadth: Levels 0–2 first; higher levels marked Planned if not reached.
 - 2026-10-09 — Python solutions are the canonical tested solutions for every problem (executable in-browser too); C++/Java variants are added where verified.
+- 2026-10-09 — `blockJS: false` in next-mdx-remote: it silently strips expression props like `questions={[...]}`; content is repo-authored and trusted.
+- 2026-10-09 — Pyodide stdin uses the raw-byte `read` API: the line-based `stdin()` callback truncated lines over ~8 KB (found by the max-size test).
+- 2026-10-09 — Browser-judged problems keep test data small (~50 KB) because tests ship to the client; full-scale constraints are discussed in editorials. Reference solutions are never sent to the client.
+- 2026-10-09 — MDX exposes the trade-off table as `<TradeOffs>` (JSX tag names cannot contain a hyphen).
+- 2026-10-09 — Memory usage is not measurable in browser workers; shown as "n/a" unless an external runner reports it.
