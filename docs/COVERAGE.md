@@ -1,39 +1,58 @@
 # Content coverage
 
-Status legend: **Complete** (full module as specified, all code/solutions executed), **Partial** (some lessons written), **Planned** (not started). Updated honestly after every phase.
+Legend: **Complete** = module as specified, all code/solutions executed; **Partial** = some lessons or less depth than specified; **Planned** = not started. Updated honestly after each phase.
 
 ## Platform
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Static site, lessons, sidebar, TOC, progress | Complete | |
-| Code runner (Python/JS in browser) | Complete | Python via Pyodide (CDN), JS in a Worker |
-| C++/Java execution | Partial | Needs `NEXT_PUBLIC_JUDGE0_URL`; otherwise "run locally" message |
-| Problem judge (AC/WA/TLE/RE, hints, editorial, complexity check) | Complete | Hidden tests ship to the client (static site) |
-| Quiz (MCQ/multi/predict) + SM-2 review queue | Complete | |
-| Visualizer framework | Complete | 2 visualizers so far (binary search, bubble sort) |
-| Diagram (Mermaid + React Flow) | Complete | |
-| Search (Cmd/K), learning paths, achievements, streak calendar | Planned | |
-| Playwright e2e | Planned | Browser checks were done manually against the static export |
+| Static site, lessons, sidebar, TOC, progress, notes, bookmarks | Complete | |
+| Code runner (Python/JS in browser) | Complete | Pyodide via CDN, JS in a Worker |
+| C++/Java execution | Partial | Needs `NEXT_PUBLIC_JUDGE0_URL` |
+| Problem judge, quizzes, SM-2 review queue | Complete | Hidden tests ship to the client |
+| Visualizers | Partial | binary search, bubble sort, two pointers, sliding window (spec lists 9+) |
+| Diagrams (Mermaid, React Flow) | Complete | |
+| Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
+| Sitemap, link checker, validator (incl. MDX compile) | Complete | |
+| Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
+| Design canvas and other SD sandboxes | Planned | |
+| Pattern library, template library, problem ladder, glossary, cheat sheets, interview playbook | Planned | |
+| PDF per module | Partial | print CSS only |
 
 ## Track 1: Competitive Programming
 
-| Module | Status | Lessons written |
+| Module | Status | Lessons |
 | --- | --- | --- |
-| 1 How CP works | Partial | 1 of ~5 |
-| 6 Sorting and binary search | Partial | 1 (Binary Search) |
-| All other modules (2-5, 7-26) | Planned | 0 |
-| Pattern library, template library, problem ladder | Planned | |
+| 1 How CP works | Complete (4 lessons) | 4 |
+| 2 Language setup, fast I/O | Complete (4) | 4 |
+| 3 Math basics | Complete (5) | 5 |
+| 4 Complexity analysis | Complete (5) | 5 |
+| 5 Arrays, strings, windows | In progress (agent writing; check folder) | - |
+| 6 Sorting and binary search | Partial (1 committed; more in progress) | 1+ |
+| 7 Stacks and queues, 8 Hashing | In progress (agent writing; check folders) | - |
+| 9 Recursion and bitmasks | Complete (5) | 5 |
+| 10 Greedy | Complete (5) | 5 |
+| 11-26 (Levels 2-3) | Planned | 0 |
 
 ## Track 2: System Design
 
-| Module | Status | Lessons written |
+| Module | Status | Lessons |
 | --- | --- | --- |
-| 1 What is system design | Partial | 1 of ~3 |
-| All other modules (2-28) | Planned | 0 |
-| Interview playbook, glossary, cheat sheets, sandboxes | Planned | |
+| 1 What is system design | Complete (4) | 4 |
+| 2 Networking and APIs | Complete (5) | 5 |
+| 3 Estimation | Complete (4; calculator is a runnable Python estimator, not a widget) | 4 |
+| 4 Databases I | Complete (4) | 4 |
+| 5 Load balancing | Complete (4) | 4 |
+| 6 Caching | Complete (5) | 5 |
+| 7 Databases II | Complete (5; no interactive hash-ring visualizer yet) | 5 |
+| 8 Queues and streaming | Complete (5) | 5 |
+| 9 Storage | Complete (4) | 4 |
+| 10 Scalability and rate limiting | Complete (5; no interactive simulator yet) | 5 |
+| 11-28 (Levels 2-4, case studies, LLD) | Planned | 0 |
 
-## Verification
+## Known gaps and caveats
 
-- Problems: 2 (`array-total`, `count-at-most`), each with 7 tests and reference solutions in Python, JavaScript, Java and C++.
-- `pnpm verify` runs Python/JS/Java locally; C++ is verified only in CI (no `g++` on the authoring machine).
+- `furtherReading` and problem-ladder URLs were written from memory and have **not** been link-checked.
+- C++ reference solutions are verified only in CI (no `g++` on the authoring machine); Python, JS and Java run locally via `pnpm verify`.
+- Problems are scaled down (tests ship to the browser); editorials state real-scale constraints.
+- Lessons per module are 4-5, below the 4-10 target for some modules; practice problems per lesson are about 1 embedded plus external ladder links, not 3-8 embedded.
