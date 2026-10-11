@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SearchDialog } from "./SearchDialog";
 import { ThemeToggle } from "./theme";
 
 export function Header() {
@@ -25,7 +26,8 @@ export function Header() {
             Dashboard
           </Link>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <SearchDialog />
           <ThemeToggle />
         </div>
       </nav>

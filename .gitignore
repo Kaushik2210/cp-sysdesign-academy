@@ -8,3 +8,7 @@ next-env.d.ts
 test-results
 playwright-report
 
+public/search-index.json
+public/sitemap.xml
+public/robots.txt
+public/stats.json
