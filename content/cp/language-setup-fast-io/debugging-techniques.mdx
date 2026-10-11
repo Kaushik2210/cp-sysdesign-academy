@@ -1,0 +1,179 @@
+---
+title: Debugging Techniques
+track: cp
+module: language-setup-fast-io
+order: 2
+difficulty: beginner
+estMinutes: 25
+prerequisites: ["cp/language-setup-fast-io/cpp-template-and-fast-io"]
+tags: [debugging, asserts, sanitizers, edge-cases]
+type: lesson
+problems: [m02-rotate-left]
+furtherReading:
+  - title: Codeforces Blog, Debugging tips for contests
+    url: https://codeforces.com/blog/entry/79024
+  - title: GCC/Clang AddressSanitizer documentation
+    url: https://github.com/google/sanitizers/wiki/AddressSanitizer
+  - title: cp-algorithms, Main page
+    url: https://cp-algorithms.com/
+---
+
+## Intuition
+
+A wrong answer is a *symptom*. Debugging is the science of finding the first place where reality departs from what you believed. The worst way to debug is to stare at the code and "feel" where the bug is; the best way is to **shrink the failing input** and **observe** what the program actually does.
+
+In contests you do not get the judge's failing test, so you must manufacture your own. This lesson gives a toolbox, ordered from cheapest to most powerful.
+
+## The debugging loop
+
+1. **Reproduce** with an input you control.
+2. **Shrink** it: smaller `n`, smaller values, until removing anything makes the bug vanish.
+3. **Hypothesise**: "I think `k` is not reduced modulo `n`".
+4. **Observe**: print the relevant values or assert the belief.
+5. **Fix** one thing, re-run all your cases.
+
+<Callout type="tip" title="Small cases first">
+Bugs almost always show up on inputs with `n <= 5` and values in `[0, 5]`. A failing case with 3 elements can be solved by hand; a failing case with 200 elements cannot.
+</Callout>
+
+## Tool 1: print to stderr
+
+Print debugging is fine if it does not pollute the answer. Judges read **stdout**; write debug output to **stderr**.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+#ifdef LOCAL
+#define dbg(x) cerr << #x << " = " << (x) << endl
+#else
+#define dbg(x)
+#endif
+
+// compile locally with: g++ -DLOCAL -std=c++17 sol.cpp
+// ...
+dbg(n); dbg(k);
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+import sys
+def dbg(*args):
+    print(*args, file=sys.stderr)
+
+dbg("n =", n, "k =", k)
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+// System.err is separate from System.out
+System.err.println("n = " + n + ", k = " + k);
+```
+
+</Tab>
+</Tabs>
+
+The `#ifdef LOCAL` trick means you can leave the debugging in and it is compiled out on the judge, so no accidental output or slowdown.
+
+## Tool 2: assertions
+
+An `assert` states something you **believe** is true. When it fails, the program stops at the first violated belief instead of producing a mystery later.
+
+<CodeRunner language="python" code={`def rotate_left(a, k):
+    n = len(a)
+    k = k % n                       # the fix: reduce k first
+    assert 0 <= k < n, "k must be reduced into [0, n)"
+    res = a[k:] + a[:k]
+    assert len(res) == n and sorted(res) == sorted(a), "rotation must keep the same multiset"
+    return res
+
+print(rotate_left([1, 2, 3, 4, 5], 2))
+print(rotate_left([1, 2, 3, 4, 5], 12))   # k > n
+print(rotate_left([9], 1000000000))        # n = 1
+`} />
+
+In C++: `#include <cassert>` and `assert(0 <= k && k < n);`. Asserts are removed when compiled with `-DNDEBUG`, which you should not use while testing. Useful invariants to assert: array indices in range, sizes match, a value is non-negative, a loop pointer never crosses another.
+
+## Tool 3: sanitizers (C++)
+
+Out-of-bounds reads and signed overflow often "work" silently and fail only on the judge. Compile with sanitizers locally:
+
+```bash
+g++ -std=c++17 -g -O1 -fsanitize=address,undefined -D_GLIBCXX_DEBUG -o sol sol.cpp
+./sol < in.txt
+```
+
+| Flag | Catches |
+| --- | --- |
+| `-fsanitize=address` | Out-of-bounds on arrays and heap, use after free |
+| `-fsanitize=undefined` | Signed integer overflow, shift out of range, division by zero |
+| `-D_GLIBCXX_DEBUG` | Out-of-range `vector[]`, invalid iterators (as runtime errors) |
+
+<Callout type="note">
+Sanitizers slow the program down by a few times. Use them for small tests during debugging, never to measure speed.
+</Callout>
+
+## Tool 4: rubber-duck trace by hand
+
+Take your smallest failing case and write a table of variable values after each iteration. Compare against what the statement says. The row where the table deviates from your expectation is the bug.
+
+For `rotate_left([1,2,3], 4)` a buggy solution that skips the modulo reads index `0+4 = 4` out of a 3-element array. The table makes it obvious: the index leaves `[0, n)` in the very first row.
+
+## Tool 5: bisect the program
+
+When the bug is somewhere in 60 lines, print an intermediate result **in the middle**. If it is already wrong, the bug is in the first half; otherwise in the second. Repeat. This is binary search applied to debugging.
+
+## A catalogue of bugs worth checking by default
+
+<TradeOffs caption="Frequent culprits and the quick check for each" rows={[
+  { option: "Off-by-one", pros: "Easy to fix once seen", cons: "Often passes samples", chooseWhen: "Test n = 1 and n = 2, the first and last index, l = r queries" },
+  { option: "Integer overflow", pros: "Easy fix: 64-bit", cons: "Silent wrong answer", chooseWhen: "Any sum, product or count that may exceed 2 * 10^9; run with -fsanitize=undefined" },
+  { option: "Uninitialised variable or stale global", pros: "Simple cause", cons: "Behaves differently locally and on the judge", chooseWhen: "Multi-test problems: reset everything per test; compile with -Wall -Wextra" },
+  { option: "Wrong loop bound / wrong type of indexing", pros: "Quick to spot with prints", cons: "Easy to repeat", chooseWhen: "1-indexed statement vs 0-indexed arrays; check the converting line" },
+]} />
+
+## A full example: debugging "Rotate Left"
+
+**Buggy program** (Python, but the same in any language):
+
+```python
+n, k = map(int, input().split())
+a = list(map(int, input().split()))
+res = [a[(i + k) % n] for i in range(n)]
+print(*res)
+```
+
+It passes the samples. Is it correct? Here the modulo is applied to the **index**, so it is actually right, but notice how similar it looks to this broken version that fails on `k >= n`:
+
+```python
+res = a[k:] + a[:k]          # for k > n: a[k:] is empty, a[:k] is the whole array
+```
+
+For `a = [1,2,3]`, `k = 4` this gives `[1,2,3]`, but the correct answer (rotate by `4 mod 3 = 1`) is `[2,3,1]`. The shrinking step finds this: with `n = 3` and `k = 4` the output is already wrong. The hypothesis "`k` is not reduced" is then confirmed by `print(k, n)`, and the fix is a single line `k %= n`. The key habit: **always test `k = 0`, `k = n`, `k = n + 1`**.
+
+## Practice
+
+<Problem id="m02-rotate-left" />
+
+### Problem ladder
+
+Use the debugging loop on each; log which tool found the bug.
+
+- [CSES, Weird Algorithm](https://cses.fi/problemset/task/1068) (about 800): overflow if you use `int`.
+- [CSES, Increasing Array](https://cses.fi/problemset/task/1094) (about 800): the answer needs 64-bit.
+- [CSES, Number Spiral](https://cses.fi/problemset/task/1071) (about 1000): off-by-one and parity; draw small cases.
+- [Codeforces 263A, Beautiful Matrix](https://codeforces.com/problemset/problem/263/A) (800): index conversions.
+- [Codeforces 61A, Ultra-Fast Mathematician](https://codeforces.com/problemset/problem/61/A) (800): careful reading and string handling.
+
+## Quiz
+
+<Quiz id="cp-language-setup-2" tags={["debugging"]} questions={[
+  { type: "mcq", q: "Where should debug prints go so they do not break the judge's check?", options: ["stdout", "stderr", "A file in the current directory", "They must be removed entirely before every run"], answer: 1, explain: "The judge compares stdout. stderr is ignored (and is also conventionally unbuffered)." },
+  { type: "multi", q: "Which are detected by `-fsanitize=address,undefined`?", options: ["Reading a[n] on a vector via operator[] with -D_GLIBCXX_DEBUG or raw array out of bounds", "Signed integer overflow", "A wrong algorithm choice", "Division by zero"], answer: [0, 1, 3], explain: "Sanitizers catch memory and undefined-behaviour errors, not logical errors." },
+  { type: "predict", q: "What does this print?", code: "a = [1, 2, 3]\nk = 4\nprint(a[k:] + a[:k])", options: ["[2, 3, 1]", "[1, 2, 3]", "[3, 1, 2]", "IndexError"], answer: 1, explain: "Slicing past the end is allowed in Python: a[4:] is empty and a[:4] is the whole list, so the original comes back. This is the silent rotation bug when k is not reduced." },
+  { type: "mcq", q: "You have a failing input of 200 numbers. What should you do first?", options: ["Read the code again", "Shrink the input while the failure persists", "Switch to a faster language", "Submit again"], answer: 1, explain: "A small failing case can be traced by hand and is the basis of every other debugging step." }
+]} />

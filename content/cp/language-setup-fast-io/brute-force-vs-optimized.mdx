@@ -1,0 +1,205 @@
+---
+title: Brute Force vs Optimized Solutions
+track: cp
+module: language-setup-fast-io
+order: 4
+difficulty: easy
+estMinutes: 30
+prerequisites: ["cp/language-setup-fast-io/stress-testing"]
+tags: [brute-force, optimization, complexity, kadane, validation]
+type: lesson
+problems: [m02-best-segment]
+furtherReading:
+  - title: cp-algorithms, Maximum subarray (Kadane)
+    url: https://cp-algorithms.com/others/maximum_average_segment.html
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+  - title: Codeforces Blog, Complexity and constraints
+    url: https://codeforces.com/blog/entry/21344
+---
+
+## Intuition
+
+A brute force is a promise: *"I will examine every possibility, so I cannot miss the answer."* It is slow, but it is **trustworthy**. An optimised solution is a claim: *"I can skip most possibilities and still not miss the answer."* Optimising is the art of justifying that claim, and then **validating** it against the brute force.
+
+This lesson gives a method to go from the first to the second without losing correctness.
+
+## The method
+
+1. **Write the brute force and name its cost** (`O(n^2)`, `O(2^n)`...).
+2. **Find what is repeated.** Which sub-computation does the brute force perform again and again? That is the opportunity.
+3. **Name an invariant or a reusable quantity** (a running sum, the best answer ending here, a sorted order, a map from value to last index).
+4. **Derive the optimised algorithm** and argue why it covers every case the brute force did.
+5. **Validate** with a stress test against the brute force, then time it at maximum size.
+
+<Callout type="note">
+Step 4 is a short *argument*, not a proof in the formal sense: "the best segment ending at `i` either extends the best one ending at `i-1` or starts at `i`" is already a complete justification for Kadane's algorithm.
+</Callout>
+
+## Worked example: maximum segment sum
+
+**Problem.** Given `n` integers (possibly negative), find the maximum sum of a non-empty contiguous segment.
+
+**Brute force.** Try every pair `(i, j)`; summing each from scratch is `O(n^3)`. Maintaining a running sum while extending `j` makes it `O(n^2)`.
+
+**The repeated work.** For a fixed end `j`, the brute force looks at every start `i` again, even though the best start for `j` is closely related to the best start for `j - 1`.
+
+**The reusable quantity.** Let `cur(j)` be the best sum of a segment **ending at `j`**. Then
+
+`cur(j) = max(a[j], cur(j-1) + a[j])`
+
+because a segment ending at `j` is either just `a[j]`, or a segment ending at `j-1` extended by `a[j]`. The answer is `max_j cur(j)`.
+
+<CodeRunner language="python" code={`import random
+
+def brute(a):
+    best = a[0]
+    for i in range(len(a)):
+        s = 0
+        for j in range(i, len(a)):
+            s += a[j]
+            best = max(best, s)
+    return best
+
+def kadane(a):
+    cur = best = a[0]
+    for x in a[1:]:
+        cur = max(x, cur + x)
+        best = max(best, cur)
+    return best
+
+random.seed(5)
+for _ in range(2000):
+    n = random.randint(1, 9)
+    a = [random.randint(-6, 6) for _ in range(n)]
+    assert brute(a) == kadane(a), a
+print("2000 random tests agree")
+
+# operation counts for n = 3000
+n = 3000
+print("brute inner steps:", n * (n + 1) // 2)
+print("kadane steps     :", n)
+`} />
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+#include <bits/stdc++.h>
+using namespace std;
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    int n;
+    cin >> n;
+    long long cur, best;
+    cin >> cur;
+    best = cur;                       // not 0: the segment must be non-empty
+    for (int i = 1; i < n; i++) {
+        long long x;
+        cin >> x;
+        cur = max(x, cur + x);
+        best = max(best, cur);
+    }
+    cout << best << "\n";
+}
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+n = int(input())
+a = list(map(int, input().split()))
+cur = best = a[0]
+for x in a[1:]:
+    cur = max(x, cur + x)
+    best = max(best, cur)
+print(best)
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+import java.util.*;
+import java.io.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+        int n = Integer.parseInt(br.readLine().trim());
+        StringTokenizer st = new StringTokenizer(br.readLine());
+        long cur = Long.parseLong(st.nextToken());
+        long best = cur;
+        for (int i = 1; i < n; i++) {
+            long x = Long.parseLong(st.nextToken());
+            cur = Math.max(x, cur + x);
+            best = Math.max(best, cur);
+        }
+        System.out.println(best);
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(n)" space="O(1)" note="brute force: O(n^2)" />
+
+## How much faster is "faster"?
+
+Count operations rather than guess. For `n = 2 * 10^5`:
+
+| Algorithm | Steps | Approximate time at `10^8` steps/s |
+| --- | --- | --- |
+| `O(n^3)` brute force | `8 * 10^15` | about 80 million seconds |
+| `O(n^2)` brute force | `2 * 10^10` | about 200 seconds |
+| `O(n)` Kadane | `2 * 10^5` | 0.002 seconds |
+
+An optimisation is only *needed* when the brute force exceeds the budget. If `n <= 1000`, `O(n^2)` is the better answer: simpler and safer.
+
+## Validating an optimisation: a checklist
+
+- **Equal on random small inputs** (stress test with `n` from 1 to 8 and small values including negatives).
+- **Equal on handcrafted edge cases**: `n = 1`, all negative, all zero, alternating signs, single huge value.
+- **Fast on the maximum input**: generate `n = 2 * 10^5` of the worst shape and time it; for `O(n^2)` vs `O(n)` the difference is dramatic.
+- **No overflow at maximum values**: use the largest possible magnitudes in the generator once.
+
+<Callout type="pitfall" title="Typical optimisation bugs">
+- Initialising the best answer to `0`, which silently allows the empty segment (wrong when all values are negative).
+- Using `int` when sums reach `n * 10^9`.
+- An optimisation that is only correct under an assumption (sorted input, distinct values) that the brute force did not need.
+- Forgetting that the optimised version has a different **tie-breaking** behaviour when the problem asks for a specific index.
+</Callout>
+
+## Trading memory or simplicity for speed
+
+<TradeOffs caption="Choosing between brute force and an optimised solution" rows={[
+  { option: "Brute force", pros: "Simple, easy to prove, an oracle for tests", cons: "May be too slow", chooseWhen: "Constraints are small (n up to a few thousand for O(n^2)), or as the reference in stress tests" },
+  { option: "Optimised, simple (one pass, running state)", pros: "Fast, small code", cons: "Needs an insight", chooseWhen: "You can state the recurrence in one line" },
+  { option: "Optimised, heavy (data structure)", pros: "Handles large input and updates", cons: "More code, more bugs, slower constants", chooseWhen: "A simpler idea does not fit the constraints" },
+]} />
+
+## Practice
+
+<Problem id="m02-best-segment" />
+
+### Problem ladder
+
+For each: write the brute force first, state its complexity, then optimise.
+
+- [CSES, Maximum Subarray Sum](https://cses.fi/problemset/task/1643) (about 1300): the full-scale version of this lesson's problem.
+- [CSES, Subarray Sums I](https://cses.fi/problemset/task/1660) (about 1300): positive numbers; two pointers beat the quadratic loop.
+- [CSES, Sum of Two Values](https://cses.fi/problemset/task/1640) (about 1200): sort plus two pointers instead of all pairs.
+- [Codeforces 1352A, Sum of Round Numbers](https://codeforces.com/problemset/problem/1352/A) (800): direct construction.
+- [Codeforces 1605A, A.M. Deviation](https://codeforces.com/problemset/problem/1605/A) (800): brute force small cases to see the pattern.
+
+## Quiz
+
+<Quiz id="cp-language-setup-4" tags={["brute-force", "optimization"]} questions={[
+  { type: "mcq", q: "In Kadane's algorithm, what does `cur` represent after processing index j?", options: ["The best sum of any segment in the prefix", "The best sum of a segment ending exactly at j", "The sum of the whole prefix", "The maximum element so far"], answer: 1, explain: "cur is the best segment ending at j; best is the maximum of cur over all j." },
+  { type: "multi", q: "Which are good checks for an optimised maximum-segment solution?", options: ["All numbers negative", "n = 1", "Compare to O(n^2) on random small arrays", "Only the provided samples"], answer: [0, 1, 2], explain: "The samples alone are far too weak; boundaries and randomised comparison are the strong checks." },
+  { type: "predict", q: "What does this print?", code: "a = [-3, -1, -2]\ncur = best = a[0]\nfor x in a[1:]:\n    cur = max(x, cur + x)\n    best = max(best, cur)\nprint(best)", options: ["0", "-1", "-6", "-2"], answer: 1, explain: "All values are negative, so the best non-empty segment is the single element -1." },
+  { type: "mcq", q: "n is at most 2000 and the time limit is 2 seconds. Which is the most reasonable choice?", options: ["An O(n^2) loop, since it is about 4 * 10^6 steps", "A complex segment tree", "An O(2^n) search", "Give up"], answer: 0, explain: "4 * 10^6 steps are tiny. Prefer the simplest correct algorithm that fits the budget." }
+]} />

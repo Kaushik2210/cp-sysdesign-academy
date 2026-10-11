@@ -1,0 +1,220 @@
+---
+title: Setup, a C++ Template and Fast I/O
+track: cp
+module: language-setup-fast-io
+order: 1
+difficulty: beginner
+estMinutes: 25
+prerequisites: ["cp/how-cp-works/verdicts-and-contests"]
+tags: [setup, cpp, fast-io, templates]
+type: lesson
+problems: [m02-range-sums]
+furtherReading:
+  - title: cp-algorithms, Main page
+    url: https://cp-algorithms.com/
+  - title: Codeforces Blog, Fast I/O in C++
+    url: https://codeforces.com/blog/entry/925
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+Before algorithms, you need a **tool chain that gets out of your way**: an editor, a compiler with sensible flags, a template you trust, and input/output code that is fast enough that it is never the reason you fail. This lesson sets that up, with C++ as the main language and Python and Java equivalents.
+
+Why does I/O speed matter? A problem with `2 * 10^5` numbers means roughly a megabyte of text. Naive reading in some languages (C++ `cin` with default settings, Python `input()` in a loop, Java `Scanner`) can take longer than your whole algorithm. A correct `O(n)` solution that times out because of reading is a very avoidable loss.
+
+## Your local setup
+
+- **Editor:** anything you can type quickly in (VS Code, CLion, Vim). Turn on a bracket matcher and syntax colours; avoid heavy autocomplete you do not control.
+- **Compiler (C++):** `g++` with `-std=c++17 -O2` and, for development, warnings and sanitizers:
+
+```bash
+g++ -std=c++17 -O2 -Wall -Wextra -Wshadow -o sol sol.cpp
+./sol < in.txt
+```
+
+- **Input redirection:** put the sample in `in.txt` and run with `< in.txt`. Never type samples by hand repeatedly.
+- **Folder per contest:** `A.cpp`, `B.cpp`, ... plus `in.txt`. Keep a `template.cpp` you copy.
+
+## A C++ template
+
+Keep it small. Every line you do not understand is a future bug.
+
+```cpp
+#include <bits/stdc++.h>
+using namespace std;
+
+using ll = long long;
+
+int main() {
+    ios::sync_with_stdio(false);   // do not sync C and C++ streams
+    cin.tie(nullptr);              // do not flush cout before every cin
+
+    int t = 1;
+    // cin >> t;                   // uncomment for multi-test problems
+    while (t--) {
+        int n;
+        cin >> n;
+        vector<ll> a(n);
+        for (auto &x : a) cin >> x;
+        // solve
+        ll s = 0;
+        for (ll x : a) s += x;
+        cout << s << '\n';         // '\n' is much faster than endl
+    }
+    return 0;
+}
+```
+
+What each piece buys you:
+
+| Line | Why |
+| --- | --- |
+| `#include <bits/stdc++.h>` | One include for the whole standard library (a GCC extension; fine on contest judges) |
+| `using ll = long long;` | Short alias to make 64-bit the default habit |
+| `sync_with_stdio(false)` | Makes `cin`/`cout` about as fast as `scanf`/`printf` |
+| `cin.tie(nullptr)` | Avoids a flush on every read |
+| `'\n'` not `endl` | `endl` flushes the buffer every line, which is slow for large output |
+
+<Callout type="pitfall" title="After sync_with_stdio(false), never mix C and C++ I/O">
+Do not use `scanf`/`printf` together with `cin`/`cout` in one program once synchronisation is off; the order of output can become scrambled. Also, `cout << flush` or `endl` is needed only for **interactive** problems.
+</Callout>
+
+## Reading input in each language
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+// Read n then n integers, print their sum (see template above)
+int n; cin >> n;
+long long s = 0;
+for (int i = 0; i < n; i++) { long long x; cin >> x; s += x; }
+cout << s << '\n';
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+import sys
+data = sys.stdin.buffer.read().split()   # read everything once, as bytes
+n = int(data[0])
+s = 0
+for i in range(n):
+    s += int(data[1 + i])
+sys.stdout.write(str(s) + "\n")
+
+# Lines instead of tokens:
+# input = sys.stdin.readline
+# n = int(input())
+# a = list(map(int, input().split()))
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+import java.util.*;
+import java.io.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+        StreamTokenizer in = new StreamTokenizer(br);   // fast, but doubles: fine up to 2^53
+        in.nextToken();
+        int n = (int) in.nval;
+        long s = 0;
+        for (int i = 0; i < n; i++) { in.nextToken(); s += (long) in.nval; }
+        PrintWriter out = new PrintWriter(new BufferedWriter(new OutputStreamWriter(System.out)));
+        out.println(s);
+        out.flush();   // never forget to flush
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+<Callout type="note" title="Java: tokenizer choice">
+`StreamTokenizer` parses numbers as `double`, which is exact up to `2^53` (about `9 * 10^15`) but loses precision for 64-bit values near `10^18`. For those, read lines with `BufferedReader` and split with `StringTokenizer`, then `Long.parseLong`.
+</Callout>
+
+## Measuring the difference
+
+You can feel the cost of per-call overhead even in Python. The runner below reads the same data two ways and counts how many *separate read calls* are made; real timings differ by machine, but the call count is the reason one is slower.
+
+<CodeRunner language="python" code={`import sys
+data = sys.stdin.read().split()
+n = int(data[0])
+nums = list(map(int, data[1:1 + n]))
+print("sum =", sum(nums))
+print("read calls: 1 bulk read for", n, "numbers")
+`} stdin={"5\n10 20 30 40 50\n"} />
+
+## Output speed: build once, print once
+
+When you print many lines, collect them and write once.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+// cout << x << '\n' in a loop is fine with sync off. For huge output:
+string out;
+for (int i = 0; i < n; i++) { out += to_string(res[i]); out += '\n'; }
+cout << out;
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+print("\n".join(map(str, results)))   # one write, not n prints
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+StringBuilder sb = new StringBuilder();
+for (int i = 0; i < n; i++) sb.append(res[i]).append('\n');
+System.out.print(sb);
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(total input size)" space="O(total input size)" note="reading everything at once costs memory equal to the input; usually fine for 10^6 tokens" />
+
+## Pitfalls
+
+- Using `int` for values that can exceed `2 * 10^9`: define `ll` and use it by default for sums, products and prefix arrays.
+- Reading `n` and then fewer or more numbers than the format promises (the program silently continues with garbage).
+- Forgetting to reset global arrays between test cases in multi-test problems.
+- Forgetting `flush()` in Java's `PrintWriter` so nothing is printed.
+- Printing floating point without fixing precision: `cout << fixed << setprecision(9) << x`.
+
+## Practice
+
+The problem below has many queries, so both the algorithm (prefix sums) and fast I/O matter. Treat the tests here as small, but write it as if `q = 2 * 10^5`.
+
+<Problem id="m02-range-sums" />
+
+### Problem ladder
+
+- [CSES, Static Range Sum Queries](https://cses.fi/problemset/task/1646) (about 1100): same task at full scale; I/O really matters.
+- [CSES, Distinct Numbers](https://cses.fi/problemset/task/1621) (about 800): read up to `2 * 10^5` numbers quickly, then sort.
+- [CSES, Missing Number](https://cses.fi/problemset/task/1083) (about 800): large input, small logic.
+- [Codeforces 1, Theatre Square](https://codeforces.com/problemset/problem/1/A) (1000): 64-bit arithmetic with fast reading.
+- [Codeforces 118A, String Task](https://codeforces.com/problemset/problem/118/A) (1000): practise string input and output formatting.
+
+## Quiz
+
+<Quiz id="cp-language-setup-1" tags={["fast-io", "cpp"]} questions={[
+  { type: "mcq", q: "What is the main effect of `ios::sync_with_stdio(false)` in C++?", options: ["It makes cin/cout much faster by decoupling them from C stdio", "It enables multi-threading", "It makes integers 64-bit", "It disables output buffering"], answer: 0, explain: "It removes synchronisation with C stdio, so cin and cout stop doing extra work per call." },
+  { type: "multi", q: "Which are reasons to prefer '\\n' over endl for large outputs?", options: ["endl flushes the buffer on every call", "'\\n' is shorter to type", "Flushing 10^5 times is slow", "'\\n' produces a different line ending on Linux"], answer: [0, 2], explain: "endl = newline + flush. Flushing very often is the slow part. Both produce the same newline character." },
+  { type: "predict", q: "In Java, what happens if you forget `out.flush()` on a PrintWriter wrapped in a BufferedWriter?", code: "PrintWriter out = new PrintWriter(new BufferedWriter(new OutputStreamWriter(System.out)));\nout.println(42);\n// no flush, no close", options: ["Prints 42 as normal", "Usually prints nothing", "Compile error", "Prints 42 twice"], answer: 1, explain: "The data sits in the buffer and is never written when the program ends without flush or close." },
+  { type: "mcq", q: "n = 2 * 10^5 numbers are read. Which Python approach is the right default?", options: ["input() inside a loop with print per answer", "sys.stdin.read().split() once, and one join for the output", "Reading character by character", "Using eval on each line"], answer: 1, explain: "Bulk reading and bulk writing minimises per-call overhead." }
+]} />

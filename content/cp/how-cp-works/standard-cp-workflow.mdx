@@ -1,0 +1,200 @@
+---
+title: The Standard Contest Workflow
+track: cp
+module: how-cp-works
+order: 4
+difficulty: beginner
+estMinutes: 25
+prerequisites: ["cp/how-cp-works/reading-problems"]
+tags: [workflow, brute-force, testing, mistake-log]
+type: lesson
+problems: [m01-window-sum]
+furtherReading:
+  - title: cp-algorithms, Main page
+    url: https://cp-algorithms.com/
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+  - title: Codeforces Blog, Educational rounds
+    url: https://codeforces.com/blog/entry/51037
+---
+
+## Intuition
+
+Strong competitors do not solve each problem from scratch each time. They follow the **same loop** every time: understand, brute force, optimise, test, submit, review. The loop is boring on purpose. It reduces cognitive load so your brain can spend its energy on the one hard step that differs per problem: the key idea.
+
+This lesson walks through that loop on a concrete problem, shows how to use the samples as a first (not last) test, and sets up a mistake log you will actually use.
+
+## The loop
+
+1. **Understand** (the five-pass reading from the previous lesson).
+2. **Brute force on paper.** State a correct, slow algorithm and its complexity.
+3. **Optimise.** Compare the complexity with the constraints; find the property that removes the redundant work.
+4. **Implement.** Choose types after computing the worst-case values.
+5. **Test.** Samples, then your own edge cases, then (when unsure) a randomised comparison against the brute force.
+6. **Submit** only when you can argue it is correct.
+7. **Review.** After the verdict, log what happened.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  A[Read statement] --> B[Brute force + complexity]
+  B --> C{Fast enough?}
+  C -- no --> D[Find redundancy / optimise]
+  D --> C
+  C -- yes --> E[Implement]
+  E --> F[Samples + own edge cases]
+  F --> G{Unsure?}
+  G -- yes --> H[Stress test vs brute force]
+  G -- no --> I[Submit]
+  H --> I
+  I --> J[Log mistakes]`} caption="The standard workflow. The stress-test branch is covered in module 2." />
+
+## Worked example: Best Window
+
+**Statement (informal).** Given `n` readings and a number `k`, find the maximum sum of exactly `k` consecutive readings.
+
+**Brute force.** For every start index `i`, add up `a[i..i+k-1]`. That is `(n-k+1) * k` additions, at most about `n^2 / 4`. For `n = 2 * 10^5` this is `10^10`, too slow, but perfectly good for `n <= 5000` and, more importantly, **an excellent reference to compare against later**.
+
+**Where is the redundancy?** Window `i` and window `i+1` share `k-1` elements. Going from one to the next, exactly one element enters (`a[i+k]`) and one leaves (`a[i]`). So the new sum is the old sum plus `a[i+k] - a[i]`.
+
+**Optimised.** One pass, `O(n)`:
+
+<CodeRunner language="python" code={`def brute(a, k):
+    return max(sum(a[i:i + k]) for i in range(len(a) - k + 1))
+
+def fast(a, k):
+    s = sum(a[:k])
+    best = s
+    for i in range(k, len(a)):
+        s += a[i] - a[i - k]
+        best = max(best, s)
+    return best
+
+a = [4, -1, 2, 1, -7, 5, 3]
+for k in range(1, len(a) + 1):
+    assert brute(a, k) == fast(a, k)
+    print(k, fast(a, k))
+`} />
+
+The assertion loop above is a miniature version of the stress test you will build in module 2: the slow, obviously-correct version checks the fast one.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+#include <bits/stdc++.h>
+using namespace std;
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    int n, k;
+    cin >> n >> k;
+    vector<long long> a(n);
+    for (auto &x : a) cin >> x;
+    long long s = 0;
+    for (int i = 0; i < k; i++) s += a[i];
+    long long best = s;
+    for (int i = k; i < n; i++) {
+        s += a[i] - a[i - k];
+        best = max(best, s);
+    }
+    cout << best << "\n";
+}
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+n, k = map(int, input().split())
+a = list(map(int, input().split()))
+s = sum(a[:k])
+best = s
+for i in range(k, n):
+    s += a[i] - a[i - k]
+    best = max(best, s)
+print(best)
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+import java.util.*;
+import java.io.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+        StringTokenizer st = new StringTokenizer(br.readLine());
+        int n = Integer.parseInt(st.nextToken());
+        int k = Integer.parseInt(st.nextToken());
+        st = new StringTokenizer(br.readLine());
+        long[] a = new long[n];
+        for (int i = 0; i < n; i++) a[i] = Long.parseLong(st.nextToken());
+        long s = 0;
+        for (int i = 0; i < k; i++) s += a[i];
+        long best = s;
+        for (int i = k; i < n; i++) {
+            s += a[i] - a[i - k];
+            best = Math.max(best, s);
+        }
+        System.out.println(best);
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(n)" space="O(1)" note="brute force: O(n * k)" />
+
+## Using the samples well
+
+- A passing sample proves almost nothing. A failing sample proves the program is wrong. Treat samples as a smoke test.
+- **Add your own cases** at the boundaries of every constraint: `n = 1`, `k = n`, `k = 1`, all values negative, all values equal, values at `10^9`. For this problem, the all-negative case is the one that breaks `best = 0` initialisation.
+- Check the **largest** possible answer against your type: here `n * 10^9` up to `2 * 10^14` in a real contest, so `long long`.
+
+## Brute force or optimised first?
+
+<TradeOffs caption="When to write which" rows={[
+  { option: "Brute force first", pros: "Quick, nearly bug-free, doubles as a test oracle", cons: "May cost minutes you do not have in a short contest", chooseWhen: "Constraints are small, or you do not trust your optimised idea yet" },
+  { option: "Optimised directly", pros: "Saves time when the idea is clear and simple", cons: "No oracle; a subtle bug is hard to find", chooseWhen: "You can prove it in two sentences and the implementation is short" },
+  { option: "Both", pros: "Stress test finds the failing case automatically", cons: "More typing", chooseWhen: "Anything you submit that has gotten WA once" },
+]} />
+
+## The mistake log
+
+Keep one plain text file or spreadsheet. One line per *verdict that was not AC*:
+
+```text
+date | problem | verdict | root cause category | one-line fix habit
+2026-03-02 | CF 1234B | WA 5 | missed-edge-case (n=1) | always test n=1 and all-equal
+2026-03-05 | CSES 1643 | WA 3 | overflow | choose type from worst-case value
+2026-03-09 | CF 1301C | TLE 12 | wrong-complexity | check n against 1e8 budget first
+```
+
+Categories to start with: *misread statement*, *edge case*, *overflow*, *off-by-one*, *wrong complexity*, *wrong idea*, *implementation slip*. Review it on a fixed day each week and turn the top category into a checklist item.
+
+<Callout type="warning" title="Do not resubmit blindly">
+Resubmitting after a WA without changing your reasoning teaches you nothing and, in rated contests, costs penalty. Before each resubmission, name the specific test case you believe was failing.
+</Callout>
+
+## Practice
+
+<Problem id="m01-window-sum" />
+
+### Problem ladder
+
+- [CSES, Maximum Subarray Sum](https://cses.fi/problemset/task/1643) (about 1300): a classic where the all-negative case matters.
+- [CSES, Static Range Sum Queries](https://cses.fi/problemset/task/1646) (about 1100): prefix sums, many queries.
+- [CSES, Coin Piles](https://cses.fi/problemset/task/1754) (about 1100): brute force on small cases reveals the pattern.
+- [Codeforces 1352A, Sum of Round Numbers](https://codeforces.com/problemset/problem/1352/A) (800): implementation with careful reading.
+- [Codeforces 1520A, Do Not Be Distracted!](https://codeforces.com/problemset/problem/1520/A) (800): simulate and track a set.
+
+## Quiz
+
+<Quiz id="cp-how-cp-works-workflow-1" tags={["workflow", "brute-force"]} questions={[
+  { type: "mcq", q: "Why write a brute force even when you believe you have the optimal solution?", options: ["It is required by the judge", "It gives you an oracle to compare against on random small inputs", "It makes the solution run faster", "It replaces reading the statement"], answer: 1, explain: "A correct but slow solution is the oracle used by stress testing." },
+  { type: "multi", q: "Which cases should you add to the samples for the sliding window problem?", options: ["k = n", "k = 1", "all readings negative", "n = 10^9"], answer: [0, 1, 2], explain: "n = 10^9 violates the constraints. The others sit at boundaries of the allowed ranges." },
+  { type: "predict", q: "What does this print?", code: "a = [2, -5, 3]\nk = 2\nbest = sum(a[:k])\ns = best\nfor i in range(k, len(a)):\n    s += a[i] - a[i - k]\n    best = max(best, s)\nprint(best)", options: ["-3", "-2", "3", "0"], answer: 1, explain: "Windows are [2,-5] = -3 and [-5,3] = -2, so the maximum is -2." },
+  { type: "mcq", q: "A solution gets WA on test 6. What should you do before resubmitting?", options: ["Resubmit with a minor tweak", "Form a hypothesis about which input fails and test it locally", "Change language", "Wait ten minutes"], answer: 1, explain: "Resubmitting without a hypothesis rarely helps and may add penalty." }
+]} />

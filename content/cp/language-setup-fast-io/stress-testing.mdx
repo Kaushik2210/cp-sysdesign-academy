@@ -1,0 +1,208 @@
+---
+title: Stress Testing with a Brute Force, Generator and Checker
+track: cp
+module: language-setup-fast-io
+order: 3
+difficulty: easy
+estMinutes: 30
+prerequisites: ["cp/language-setup-fast-io/debugging-techniques"]
+tags: [stress-testing, brute-force, generator, testing]
+type: lesson
+problems: [m02-nearest-twin]
+furtherReading:
+  - title: Codeforces Blog, Stress testing (Errichto)
+    url: https://codeforces.com/blog/entry/98275
+  - title: cp-algorithms, Main page
+    url: https://cp-algorithms.com/
+  - title: Codeforces Blog, Polygon, test generators and checkers
+    url: https://codeforces.com/blog/entry/3771
+---
+
+## Intuition
+
+You submit, the verdict is "Wrong answer on test 14", and you cannot see test 14. What now? You **build the failing test yourself**.
+
+The idea is simple and extremely powerful. Write two programs:
+
+- a **brute force**: slow, obviously correct, maybe `O(n^2)` or `O(2^n)`;
+- your **solution**: fast, possibly buggy.
+
+Then feed both thousands of small random inputs and compare outputs. The first time they disagree you have a concrete, tiny counterexample, which is the hard part of debugging solved for you.
+
+## The three parts
+
+| Part | Job | Properties |
+| --- | --- | --- |
+| Generator | Print a random valid input for a given seed | Small sizes, small values, so collisions and edge cases are frequent; reproducible from the seed |
+| Brute force | Compute the answer the simple way | Trusted: simple enough to verify by reading |
+| Checker (compare) | Decide if two outputs are equivalent | Exact `diff` normally; a custom checker when several answers are valid |
+
+<Diagram kind="mermaid" code={`flowchart LR
+  G[generator seed] --> I[input.txt]
+  I --> S[solution]
+  I --> B[brute force]
+  S --> C{outputs equal?}
+  B --> C
+  C -- yes --> G
+  C -- no --> F[print failing input, stop]`} caption="The stress-test loop: repeat until a mismatch is found or the budget of tests is exhausted." />
+
+## An in-process harness you can run right here
+
+The fastest stress test lives inside one file: write the brute force and the solution as functions and loop. Below, the "solution" for *Nearest Twin* has a classic bug: it stores only the **first** occurrence of each value, so later closer pairs are missed. Watch the harness find a tiny counterexample.
+
+<CodeRunner language="python" code={`import random
+
+def brute(a):
+    best = -1
+    for i in range(len(a)):
+        for j in range(i + 1, len(a)):
+            if a[i] == a[j] and (best == -1 or j - i < best):
+                best = j - i
+    return best
+
+def fast_buggy(a):
+    last = {}
+    best = -1
+    for i, x in enumerate(a):
+        if x in last:
+            d = i - last[x]
+            if best == -1 or d < best:
+                best = d
+        else:
+            last[x] = i          # BUG: never updated after the first sighting
+    return best
+
+def stress(fast, trials=500, seed=1):
+    random.seed(seed)
+    for n in range(1, 9):                       # small sizes first: shortest counterexample
+        for _ in range(trials):
+            a = [random.randint(1, 4) for _ in range(n)]   # few distinct values: many duplicates
+            if brute(a) != fast(a):
+                return a, brute(a), fast(a)
+    return None
+
+print("counterexample (array, brute, fast):", stress(fast_buggy))
+
+def fast_ok(a):
+    last = {}
+    best = -1
+    for i, x in enumerate(a):
+        if x in last and (best == -1 or i - last[x] < best):
+            best = i - last[x]
+        last[x] = i
+    return best
+
+print("fixed version:", stress(fast_ok))
+`} />
+
+Two design choices make this effective:
+
+1. **Iterate sizes from small to large**, so the first failure is the *smallest* one (`[4, 3, 4, 4]` here: the pair at positions 2 and 3 is closer than the pair at 0 and 2).
+2. **Use a tiny value range** (`1..4`) so that equal elements, the interesting case, are frequent. Random numbers in `1..10^9` would almost never collide.
+
+## The file-based harness (any language)
+
+When your solution is a real C++ or Java program, run both as processes. Here is a Python driver; it works with any commands.
+
+```python
+# stress.py   usage: python stress.py
+import subprocess, sys
+
+def run(cmd, data):
+    return subprocess.run(cmd, input=data, capture_output=True, text=True, timeout=5).stdout.split()
+
+for seed in range(1, 1001):
+    inp = subprocess.run([sys.executable, "gen.py", str(seed)],
+                         capture_output=True, text=True).stdout
+    expected = run([sys.executable, "brute.py"], inp)
+    got = run(["./sol"], inp)               # or [sys.executable, "fast.py"], ["java", "Main"], ...
+    if expected != got:
+        print("DIFFERENT on seed", seed)
+        print(inp)
+        print("brute:", expected)
+        print("sol  :", got)
+        break
+else:
+    print("1000 tests passed")
+```
+
+A matching generator for Nearest Twin:
+
+```python
+# gen.py
+import random, sys
+random.seed(int(sys.argv[1]))
+n = random.randint(1, 8)
+print(n)
+print(*[random.randint(1, 4) for _ in range(n)])
+```
+
+The harness above was run against the buggy version and reports a difference immediately (for example on a 7-element input where the true answer is 2 and the buggy output is 3).
+
+A bash equivalent, handy on Linux or macOS:
+
+```bash
+for i in $(seq 1 1000); do
+    python3 gen.py $i > in.txt
+    ./brute < in.txt > expected.txt
+    ./sol   < in.txt > got.txt
+    if ! diff -q expected.txt got.txt > /dev/null; then
+        echo "DIFFERENT on seed $i"; cat in.txt; break
+    fi
+done
+```
+
+<Callout type="tip" title="Compare with sanitizers on">
+Compile the solution with `-fsanitize=address,undefined` while stress testing, so crashes and overflows are caught in addition to wrong answers.
+</Callout>
+
+## Writing a good generator
+
+- **Valid by construction**: respect every constraint and promise ("distinct", "sorted", "connected").
+- **Small**: `n` from 1 to 8 is enough to find most bugs, and brute forces stay fast.
+- **Biased towards edges**: small value ranges, all equal, already sorted, max values, `n = 1`.
+- **Parameterised**: allow `gen.py seed maxN maxV` so you can explore.
+- **Several modes**: purely random, nearly sorted, all-negative, one huge value.
+
+## When there can be multiple correct answers
+
+If the problem says "print any valid construction", output equality is the wrong check. Write a **checker** that reads the input and the program's output and validates it (and, for optimisation problems, compares the *score* with the brute force's score). For a problem like "find any pair with sum `k`", the checker verifies that the printed indices are valid and sum to `k`; whether a pair exists is compared with the brute force.
+
+<TradeOffs caption="Where to run the stress test" rows={[
+  { option: "In-process functions", pros: "Fastest, trivial to set up, runs in the browser", cons: "Needs the solution in the same language as the harness", chooseWhen: "Python solution, or a quick idea check before writing the real program" },
+  { option: "Process-based driver", pros: "Works with any language, tests the exact submitted code", cons: "Process start overhead; slower per test", chooseWhen: "C++ or Java solutions and real input parsing" },
+  { option: "Shell loop with diff", pros: "No extra code, simple to read", cons: "Platform dependent; harder to add a custom checker", chooseWhen: "Quick check on Linux/macOS with exact-match outputs" },
+]} />
+
+## Pitfalls
+
+- **Testing the brute force with the same bug as the solution.** Keep the brute force structurally different (e.g. all pairs vs map).
+- **A generator that never produces the interesting case** (too wide a value range).
+- **Not seeding**: you cannot reproduce a failure. Always print the seed.
+- **Stress testing before samples pass**: run the samples first.
+- **Treating "stress passed" as proof**: it is strong evidence for small inputs; also test max-size timing separately.
+
+## Practice
+
+Write the brute force and the optimised solution for the problem below, then stress test them against each other.
+
+<Problem id="m02-nearest-twin" />
+
+### Problem ladder
+
+Use a stress test on each; note how many seeds it took to find your first bug.
+
+- [CSES, Distinct Numbers](https://cses.fi/problemset/task/1621) (about 800): compare a set-based answer with an all-pairs one.
+- [CSES, Maximum Subarray Sum](https://cses.fi/problemset/task/1643) (about 1300): Kadane vs `O(n^2)`.
+- [CSES, Collecting Numbers](https://cses.fi/problemset/task/2216) (about 1300): the simulation is a perfect brute force.
+- [Codeforces 1352C, K-th Not Divisible by n](https://codeforces.com/problemset/problem/1352/C) (1200): brute force reveals the formula.
+- [Codeforces 1473B, String LCM](https://codeforces.com/problemset/problem/1473/B) (1000): brute force on short strings.
+
+## Quiz
+
+<Quiz id="cp-language-setup-3" tags={["stress-testing"]} questions={[
+  { type: "mcq", q: "Why should a stress-test generator use a small value range (for example 1 to 4)?", options: ["Large values are not allowed by the judge", "Equal elements and edge cases then occur frequently", "It makes the brute force faster", "The checker needs it"], answer: 1, explain: "Bugs often trigger on duplicates or boundaries; random large values almost never produce them." },
+  { type: "multi", q: "Which are essential components of a stress test?", options: ["A trusted slow solution", "A reproducible random input generator", "A way to compare outputs", "A maximum-size input"], answer: [0, 1, 2], explain: "Maximum-size inputs are useful for timing but are not needed to find logical bugs." },
+  { type: "predict", q: "What is the brute-force answer for this array under Nearest Twin?", code: "a = [4, 3, 4, 4]\nbest = -1\nfor i in range(4):\n    for j in range(i + 1, 4):\n        if a[i] == a[j] and (best == -1 or j - i < best):\n            best = j - i\nprint(best)", options: ["1", "2", "3", "-1"], answer: 0, explain: "The equal pair at positions 2 and 3 has distance 1, the pair at 0 and 2 has distance 2, and 0 and 3 gives 3." },
+  { type: "mcq", q: "A problem accepts any valid answer. What must replace the plain output comparison?", options: ["A checker that validates the output against the input", "Sorting both outputs", "Running the test fewer times", "Nothing; diff is fine"], answer: 0, explain: "Two different outputs may both be right, so the comparison has to verify validity rather than equality." }
+]} />

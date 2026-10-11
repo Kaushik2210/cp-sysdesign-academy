@@ -1,0 +1,130 @@
+---
+title: A Practice Routine, Editorials and Upsolving
+track: cp
+module: how-cp-works
+order: 3
+difficulty: beginner
+estMinutes: 25
+prerequisites: ["cp/how-cp-works/verdicts-and-contests"]
+tags: [practice, editorials, upsolving, learning]
+type: lesson
+problems: [m01-longest-streak]
+furtherReading:
+  - title: Codeforces, How to practice (Errichto's blog posts)
+    url: https://codeforces.com/blog/entry/66909
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+  - title: AtCoder Problems
+    url: https://kenkoooo.com/atcoder/
+---
+
+## Intuition
+
+Strength in competitive programming comes from **deliberate practice**: working on problems that are just beyond what you can do now, getting precise feedback, and fixing the specific gap that feedback revealed. Solving fifty problems you already know how to solve builds speed but not skill. Reading fifty editorials without struggling first builds familiarity but not skill either.
+
+The goal of this lesson is a concrete weekly routine and a protocol for turning every failed attempt into a permanent improvement.
+
+## The struggle window
+
+When you meet a problem you cannot solve, three rules keep you productive:
+
+1. **Timebox.** Give yourself a fixed window: about 20 minutes for a 800 to 1000 rated problem, 40 to 60 minutes for harder ones. Stuck for the whole window is information, not failure.
+2. **Think on paper.** Write the five-pass summary from the previous lesson, then try small cases and look for patterns. Do not stare at the screen.
+3. **Escalate in stages**, never jump straight to the full solution:
+
+| Stage | What you read | What you keep |
+| --- | --- | --- |
+| 0 | Nothing, just think | The pride of solving it |
+| 1 | The tags (e.g. "greedy, sortings") | Most of the discovery |
+| 2 | One hint (if the site has hints) | The implementation |
+| 3 | The first paragraph of the editorial's idea | The proof and the code |
+| 4 | The full editorial and reference code | Only a re-implementation from memory |
+
+Each stage consumed makes the problem count less toward "I can do this". Tracking the stage at which you got unstuck is itself a useful metric: it tells you which skills (ideas, proofs, implementation) are your bottleneck.
+
+## What upsolving means
+
+**Upsolving** is finishing a problem after a contest or after a failed attempt, using any help you need. It is where most of the learning happens. A good upsolve has four parts:
+
+1. Understand the editorial *idea* well enough to explain it to a friend in 30 seconds.
+2. Re-implement it **without looking** at the reference code. Look only when stuck.
+3. Submit and get AC. A solution you have not got accepted is not understood.
+4. Write one line in your **mistake log**: the category of the gap (missed observation, wrong complexity estimate, implementation bug, edge case) and one sentence on what would have prevented it.
+
+Two days later, re-solve the problem from scratch with no notes. If you cannot, the problem goes back on your list.
+
+<Callout type="tip" title="Read the editorial like a proof">
+After reading, ask three questions: *What was the key observation?* *Why is it true?* *Where in the statement could I have noticed it?* The third question trains the pattern recognition that makes the next problem easier.
+</Callout>
+
+## A weekly routine
+
+A sustainable plan for roughly 5 hours a week:
+
+- **3 sessions of 60 to 75 minutes**: each one has 1 to 2 new problems in the +100 to +200 rating zone plus one re-solve from your list.
+- **1 contest** (Codeforces Div. 3 / Div. 2 or an AtCoder Beginner Contest), taken live.
+- **1 upsolve session**: the problems you could not finish in the contest, plus an update of the mistake log.
+
+Topic-wise, alternate between *depth* (a CSES section in order, such as sorting and searching) and *breadth* (mixed problems from recent contests) so you learn techniques and also learn to recognise which one applies.
+
+<CodeRunner language="python" code={`# A tiny mistake-log analyser: which category costs you most?
+log = [
+    ("overflow", "m3"), ("edge-case", "m1"), ("overflow", "m5"),
+    ("complexity", "m2"), ("edge-case", "m4"), ("overflow", "m6"),
+]
+counts = {}
+for cat, _ in log:
+    counts[cat] = counts.get(cat, 0) + 1
+for cat, c in sorted(counts.items(), key=lambda kv: -kv[1]):
+    print(cat, c)
+`} />
+
+Review the counts weekly. If "overflow" appears three times, the fix is not "be more careful"; it is a concrete habit such as *always compute the maximum possible answer before choosing a type*.
+
+## Self-assessment: where are you?
+
+Answer honestly. Each "yes" is a point.
+
+- I can solve most 800-rated problems in under 15 minutes without hints.
+- I can explain why a loop is `O(n^2)` vs `O(n log n)` and check it against the constraints.
+- I know the standard library calls for sorting, `lower_bound`, maps and sets in my language.
+- I read the whole statement, constraints included, before coding.
+- I write a brute force when I am unsure of a solution.
+- I can re-solve yesterday's problem without notes.
+
+| Score | What to do next |
+| --- | --- |
+| 0 to 2 | Stay on CSES introductory problems and Codeforces 800s; focus on implementation and reading |
+| 3 to 4 | Mix 900 to 1200 problems; learn sorting, binary search, prefix sums, two pointers |
+| 5 to 6 | Take live contests weekly; start the Level 1 algorithm modules in order |
+
+<Callout type="pitfall" title="Common traps in practice">
+- **Tutorial hell:** watching explanations without implementing. Always code the idea yourself.
+- **Hard-problem fixation:** a 1900 problem when you are 1000 teaches little. Stay within +200.
+- **Rating chasing:** judging yourself by each contest. Look at a 3-month trend.
+- **No review:** solving without logging means making the same mistakes forever.
+</Callout>
+
+## Practice
+
+This problem is itself about streaks, the metric of a good routine.
+
+<Problem id="m01-longest-streak" />
+
+### Problem ladder
+
+- [CSES, Increasing Array](https://cses.fi/problemset/task/1094) (about 800): a single-pass scan with a running value.
+- [CSES, Repetitions](https://cses.fi/problemset/task/1069) (about 800): longest run of equal characters; same pattern as the streak problem.
+- [CSES, Weird Algorithm](https://cses.fi/problemset/task/1068) (about 800): direct simulation with 64-bit values.
+- [Codeforces 231A, Team](https://codeforces.com/problemset/problem/231/A) (800): counting with a simple condition.
+- [Codeforces 158A, Next Round](https://codeforces.com/problemset/problem/158/A) (800): read carefully and handle the tie rule.
+
+## Quiz
+
+<Quiz id="cp-how-cp-works-practice-1" tags={["practice", "upsolving"]} questions={[
+  { type: "mcq", q: "You are stuck on a problem after your timebox. What is the best next step?", options: ["Read the full editorial and copy the code", "Look at the tags or one hint, then try again", "Skip it forever", "Resubmit your current code"], answer: 1, explain: "Escalating gradually keeps most of the discovery and the learning value." },
+  { type: "multi", q: "Which are parts of a good upsolve?", options: ["Re-implement without looking at the reference code", "Get an accepted submission", "Memorise the code character by character", "Write down the category of the mistake"], answer: [0, 1, 3], explain: "Understanding and re-implementing matter; memorising code does not transfer to new problems." },
+  { type: "mcq", q: "Your mistake log shows overflow three times this month. What is the most useful response?", options: ["Resolve to be more careful", "Adopt a rule: compute the largest possible answer and pick the type before coding", "Only use Python", "Ignore it"], answer: 1, explain: "A concrete checklist step is repeatable; vague resolutions are not." },
+  { type: "predict", q: "What does the streak scan print for days = [3, 0, 2, 2, 1, 0, 4]?", code: "best = cur = 0\nfor x in [3, 0, 2, 2, 1, 0, 4]:\n    cur = cur + 1 if x > 0 else 0\n    best = max(best, cur)\nprint(best)", options: ["1", "3", "5", "7"], answer: 1, explain: "Runs of positive days have lengths 1, 3 and 1, so the longest is 3." },
+  { type: "mcq", q: "Why re-solve a problem two days later with no notes?", options: ["To check that you learned the idea, not just read it", "To increase the submission count", "Because the judge requires it", "To avoid writing a mistake log"], answer: 0, explain: "Spaced recall reveals whether the idea is really yours." }
+]} />

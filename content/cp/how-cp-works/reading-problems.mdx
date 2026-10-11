@@ -1,0 +1,175 @@
+---
+title: Reading Problems and Turning Statements into Algorithms
+track: cp
+module: how-cp-works
+order: 2
+difficulty: beginner
+estMinutes: 25
+prerequisites: ["cp/how-cp-works/verdicts-and-contests"]
+tags: [basics, constraints, problem-solving]
+type: lesson
+problems: [m01-min-gap]
+furtherReading:
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+  - title: cp-algorithms, Main page
+    url: https://cp-algorithms.com/
+  - title: Codeforces Problemset
+    url: https://codeforces.com/problemset
+---
+
+## Intuition
+
+Most wrong submissions in the first months of contest practice are not caused by weak algorithms. They are caused by **solving a slightly different problem than the one asked**. A statement is a specification: the story is decoration, and the input format, the output format and the constraints are the contract. Reading well is a skill you can practise just like binary search.
+
+This lesson gives you a repeatable procedure to go from raw statement to a candidate algorithm, in under five minutes, before you type a single line of code.
+
+## The five-pass reading procedure
+
+1. **Strip the story.** Replace "a museum has artifacts with age ratings" by "an array of integers". Name the objects (array, graph, string, grid) and the operation (count, minimise, check existence, construct).
+2. **Pin down the output.** Is it a number, YES/NO, a construction, `-1` when impossible? How many lines? Does the order of printed items matter?
+3. **List every constraint.** Sizes (`n`, `q`), value ranges, special promises ("the array is sorted", "all values are distinct", "the graph is connected").
+4. **Hand-simulate the sample.** Work the first sample by hand until you can explain *why* the answer is what it is. Then make up one tiny case of your own, ideally an edge case, and compute its answer by hand.
+5. **Write the brute force in words.** Say aloud: "I try all pairs / all subsets / all orderings, and take the best." Only then ask how to speed it up.
+
+<Callout type="tip" title="Underline the words that hide edge cases">
+"Non-empty", "distinct", "at least", "exactly", "different positions", "strictly increasing", "may be negative". Each one changes the answer on some tests. Re-read the statement once more after you have a plan, hunting only for these words.
+</Callout>
+
+## Constraints are a hint about the intended complexity
+
+A typical judge runs on the order of `10^8` simple operations per second in C++ (less in Python, roughly `10^7`). With a 1 to 2 second limit you can budget about `10^8` basic steps. So the size of `n` tells you what is expected:
+
+| Constraint on `n` | Complexity you can afford | Typical technique |
+| --- | --- | --- |
+| `n <= 10` | `O(n!)` | Try every permutation |
+| `n <= 20` | `O(2^n * n)` | Bitmask / subset enumeration |
+| `n <= 500` | `O(n^3)` | Triple loops, Floyd-Warshall |
+| `n <= 5 000` | `O(n^2)` | Double loops, simple DP |
+| `n <= 2 * 10^5` | `O(n log n)` | Sorting, heaps, binary search, segment tree |
+| `n <= 10^6` | `O(n)` | One pass, prefix sums, two pointers |
+| `n <= 10^18` | `O(log n)` or `O(1)` | Math, binary exponentiation |
+
+This is a heuristic, not a law, but it is right often enough that you should *always* do this mapping before choosing an approach. It also protects you from over-engineering: if `n <= 20`, a clever data structure is the wrong tool.
+
+<Callout type="note">
+The value range matters as much as the count. If `a_i` can be `10^9` and you add 2000 of them, the total is `2 * 10^12`, which needs a 64-bit integer. Make a habit of computing the **largest possible answer** and checking it against `2^31 - 1 = 2 147 483 647`.
+</Callout>
+
+## Worked example: from statement to algorithm
+
+Take the practice problem at the end of this lesson, "Closest Pair of Values": given `n` integers, print the minimum `|a_i - a_j|` over `i != j`.
+
+**Step 1, strip the story.** An array of integers; we want a minimum over pairs of a difference.
+
+**Step 2, output.** One integer, always defined because `n >= 2`.
+
+**Step 3, constraints.** `n` up to `2 * 10^5` in a real contest, values up to `10^9` in absolute value, so differences up to `2 * 10^9`.
+
+**Step 4, sample by hand.** For `[5, 1, 9, 5, 2]` the two fives give `0`. For `[3, 9, 4]` the closest are `3` and `4`, giving `1`. Note the duplicate case: "different positions" allows equal *values*.
+
+**Step 5, brute force.** All pairs: `n(n-1)/2` differences, `O(n^2)`. At `n = 2 * 10^5` that is about `2 * 10^10` steps, which is about 100 times too much. The constraints are asking for `O(n log n)`.
+
+**Optimisation idea.** Which pairs could possibly be the closest? If three values satisfy `x <= y <= z`, then `z - x` is at least `y - x` and at least `z - y`. So skipping over a value never helps: after sorting, only **adjacent** elements need to be compared. Sort in `O(n log n)`, scan in `O(n)`.
+
+<CodeRunner language="python" code={`import sys
+data = sys.stdin.read().split()
+n = int(data[0])
+a = sorted(map(int, data[1:1 + n]))
+print(min(a[i + 1] - a[i] for i in range(n - 1)))
+`} stdin={"5\n5 1 9 5 2\n"} />
+
+The same program in the three main languages. Note `long long` / `long` for the subtraction:
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+#include <bits/stdc++.h>
+using namespace std;
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+    int n;
+    cin >> n;
+    vector<long long> a(n);
+    for (auto &x : a) cin >> x;
+    sort(a.begin(), a.end());
+    long long best = LLONG_MAX;
+    for (int i = 0; i + 1 < n; i++) best = min(best, a[i + 1] - a[i]);
+    cout << best << "\n";
+}
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+import sys
+data = sys.stdin.read().split()
+n = int(data[0])
+a = sorted(map(int, data[1:1 + n]))
+print(min(a[i + 1] - a[i] for i in range(n - 1)))
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+import java.util.*;
+import java.io.*;
+
+public class Main {
+    public static void main(String[] args) throws IOException {
+        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+        int n = Integer.parseInt(br.readLine().trim());
+        StringTokenizer st = new StringTokenizer(br.readLine());
+        long[] a = new long[n];
+        for (int i = 0; i < n; i++) a[i] = Long.parseLong(st.nextToken());
+        Arrays.sort(a);
+        long best = Long.MAX_VALUE;
+        for (int i = 0; i + 1 < n; i++) best = Math.min(best, a[i + 1] - a[i]);
+        System.out.println(best);
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(n log n)" space="O(n)" note="dominated by the sort" />
+
+## Common ways a statement is misread
+
+<TradeOffs caption="Typical misreadings and how to guard against them" rows={[
+  { option: "Ignoring a promise", pros: "Simpler solution when the promise is relied on correctly", cons: "Solving a harder problem than needed, or relying on a promise that was not given", chooseWhen: "Always list promises (sorted, distinct, connected) explicitly before designing" },
+  { option: "Assuming 0-indexing", pros: "Matches your array", cons: "Off-by-one on every query when the statement is 1-indexed", chooseWhen: "Convert at the input boundary: read l, r then use l-1" },
+  { option: "Skipping the output format", pros: "Saves seconds", cons: "WA for a missing -1, wrong line count, or separators", chooseWhen: "Never skip it; reread the output section before submitting" },
+]} />
+
+<Callout type="pitfall" title="Test your understanding with a different sample">
+If your program passes the provided sample but you cannot explain *why* the sample answer is correct in words, you have probably not understood the problem. Samples are chosen to be small and are rarely adversarial.
+</Callout>
+
+## Practice
+
+<Problem id="m01-min-gap" />
+
+### Problem ladder
+
+Solve these in order. For each one write down the five-pass summary *before* coding.
+
+- [CSES, Distinct Numbers](https://cses.fi/problemset/task/1621) (about 800): sort, then scan neighbours.
+- [CSES, Missing Number](https://cses.fi/problemset/task/1083) (about 800): what does the sum formula give you?
+- [CSES, Apartments](https://cses.fi/problemset/task/1084) (about 1200): sort both arrays and match greedily.
+- [Codeforces 4A, Watermelon](https://codeforces.com/problemset/problem/4/A) (800): a statement where a one-line parity argument replaces any loop.
+- [Codeforces 71A, Way Too Long Words](https://codeforces.com/problemset/problem/71/A) (800): pure careful reading and string output.
+
+## Quiz
+
+<Quiz id="cp-how-cp-works-reading-1" tags={["basics", "constraints"]} questions={[
+  { type: "mcq", q: "A problem has n up to 200 000 and a 2-second limit. Which complexity is the most plausible intended solution?", options: ["O(n^2)", "O(n log n)", "O(2^n)", "O(n^3)"], answer: 1, explain: "n^2 would be 4 * 10^10 steps, far beyond roughly 10^8 per second. O(n log n) is about 3.5 million steps." },
+  { type: "multi", q: "Which of these words in a statement should make you double check an edge case?", options: ["non-empty", "may be negative", "the tree is rooted at vertex 1", "distinct"], answer: [0, 1, 3], explain: "Non-empty, sign of values, and distinctness all change what is valid or optimal. Rooting at vertex 1 just fixes a convention." },
+  { type: "predict", q: "n = 2000 values, each up to 10^9. In C++, which accumulator type is safe for their sum?", code: "// a[i] <= 1e9, n <= 2000\n// worst-case sum = ?", options: ["int (max about 2.1e9)", "long long (max about 9.2e18)", "short", "unsigned int (max about 4.3e9)"], answer: 1, explain: "The worst case is 2 * 10^12, which exceeds both int and unsigned int. long long holds it comfortably." },
+  { type: "mcq", q: "After sorting, why can the closest pair always be found among adjacent elements?", options: ["Sorting makes all differences equal", "A pair that skips an element is never strictly closer than the adjacent pairs it spans", "Adjacent elements are always equal", "Because n is small"], answer: 1, explain: "If x <= y <= z then z - x >= y - x, so the skipping pair (x, z) is at least as far as (x, y)." }
+]} />
