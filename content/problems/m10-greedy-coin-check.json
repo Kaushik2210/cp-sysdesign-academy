@@ -1,0 +1,98 @@
+{
+  "id": "m10-greedy-coin-check",
+  "title": "Does Greedy Make Change?",
+  "source": {
+    "name": "Canonical coin systems; Kozen and Zaks bound on the smallest counterexample"
+  },
+  "rating": 1900,
+  "tags": [
+    "greedy",
+    "dp",
+    "coin-change"
+  ],
+  "statement": "A coin system has coin values `c_1 = 1 < c_2 < ... < c_n`, each available in unlimited quantity. The **greedy** payer, for an amount `v`, repeatedly takes the largest coin that is at most the remaining amount. Find the smallest amount `v` for which greedy uses **more** coins than the minimum possible, or print `-1` if greedy is optimal for every amount.\n\n**Input.** First line `n`. Second line: `c_1 ... c_n` in increasing order, `c_1 = 1`.\n\n**Output.** The smallest bad amount, or `-1`.",
+  "constraints": [
+    "1 ≤ n ≤ 30",
+    "1 = c_1 < c_2 < ... < c_n ≤ 2000"
+  ],
+  "timeLimitMs": 3000,
+  "hints": [
+    "For one amount, greedy count is easy and the true optimum is a standard DP. But amounts are unbounded, so you need a limit.",
+    "A known theorem: if greedy fails for some amount, it fails for one that is smaller than `c_{n-1} + c_n`.",
+    "Compute the DP for amounts up to `c_{n-1} + c_n`, compare with greedy for each amount in increasing order, and print the first mismatch (or -1; for `n = 1` the answer is always -1)."
+  ],
+  "editorial": "Kozen and Zaks (1994) proved that if the greedy algorithm is non-optimal for some amount, then the smallest such amount is less than `c_{n-1} + c_n`. So it is enough to check all amounts below that bound: compute `dp[v]`, the minimum number of coins, by the usual unbounded-coin DP, and compare with the greedy count for each `v` in increasing order. Cost `O((c_{n-1} + c_n) * n)`. This is the bridge from greedy to dynamic programming: the DP is always correct, and greedy is only correct on special coin systems such as `{1, 5, 10, 25}`; the system `{1, 3, 4}` fails at `6` (greedy `4+1+1`, optimal `3+3`).",
+  "complexity": {
+    "time": "O(n^2)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "n = int(input())\nc = list(map(int, input().split()))\n# dp up to c[-1] + c[-2], compare with greedy\n",
+    "javascript": "const n = parseInt(readLine());\nconst c = readLine().split(' ').map(Number);\n// dp up to c[n-1] + c[n-2], compare with greedy\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int n = sc.nextInt();\n        // coins in increasing order\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n; cin >> n;  // read ascending coins; compare greedy with DP\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "n = int(input())\nc = list(map(int, input().split()))\nif n == 1:\n    print(-1)\nelse:\n    lim = c[-1] + c[-2]\n    INF = 10 ** 9\n    dp = [0] + [INF] * lim\n    for v in range(1, lim + 1):\n        best = INF\n        for x in c:\n            if x <= v and dp[v - x] + 1 < best:\n                best = dp[v - x] + 1\n        dp[v] = best\n    ans = -1\n    for v in range(1, lim):\n        g = 0\n        r = v\n        for x in reversed(c):\n            g += r // x\n            r %= x\n        if g > dp[v]:\n            ans = v\n            break\n    print(ans)\n",
+    "javascript": "const n = parseInt(readLine());\nconst c = readLine().split(' ').map(Number);\nlet ans = -1;\nif (n > 1) {\n  const lim = c[n - 1] + c[n - 2];\n  const INF = 1e9;\n  const dp = new Array(lim + 1).fill(INF);\n  dp[0] = 0;\n  for (let v = 1; v <= lim; v++) {\n    for (const x of c) {\n      if (x <= v && dp[v - x] + 1 < dp[v]) dp[v] = dp[v - x] + 1;\n    }\n  }\n  for (let v = 1; v < lim; v++) {\n    let g = 0, r = v;\n    for (let i = n - 1; i >= 0; i--) {\n      g += Math.floor(r / c[i]);\n      r %= c[i];\n    }\n    if (g > dp[v]) { ans = v; break; }\n  }\n}\nconsole.log(ans);\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int n = sc.nextInt();\n        int[] c = new int[n];\n        for (int i = 0; i < n; i++) c[i] = sc.nextInt();\n        if (n == 1) {\n            System.out.println(-1);\n            return;\n        }\n        int lim = c[n - 1] + c[n - 2];\n        int INF = 1000000000;\n        int[] dp = new int[lim + 1];\n        Arrays.fill(dp, INF);\n        dp[0] = 0;\n        for (int v = 1; v <= lim; v++) {\n            for (int x : c) {\n                if (x <= v && dp[v - x] + 1 < dp[v]) dp[v] = dp[v - x] + 1;\n            }\n        }\n        int ans = -1;\n        for (int v = 1; v < lim; v++) {\n            int g = 0, r = v;\n            for (int i = n - 1; i >= 0; i--) {\n                g += r / c[i];\n                r %= c[i];\n            }\n            if (g > dp[v]) {\n                ans = v;\n                break;\n            }\n        }\n        System.out.println(ans);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n;\n    cin >> n;\n    vector<int> c(n);\n    for (auto &v : c) cin >> v;\n    if (n == 1) {\n        cout << -1 << endl;\n        return 0;\n    }\n    int lim = c[n - 1] + c[n - 2];\n    const int INF = 1000000000;\n    vector<int> dp(lim + 1, INF);\n    dp[0] = 0;\n    for (int v = 1; v <= lim; v++) {\n        for (int x : c) {\n            if (x <= v && dp[v - x] + 1 < dp[v]) dp[v] = dp[v - x] + 1;\n        }\n    }\n    int ans = -1;\n    for (int v = 1; v < lim; v++) {\n        int g = 0, r = v;\n        for (int i = n - 1; i >= 0; i--) {\n            g += r / c[i];\n            r %= c[i];\n        }\n        if (g > dp[v]) {\n            ans = v;\n            break;\n        }\n    }\n    cout << ans << endl;\n    return 0;\n}\n"
+  },
+  "tests": [
+    {
+      "input": "3\n1 3 4\n",
+      "output": "6\n",
+      "hidden": false
+    },
+    {
+      "input": "4\n1 5 10 25\n",
+      "output": "-1\n",
+      "hidden": false
+    },
+    {
+      "input": "5\n1 5 10 20 25\n",
+      "output": "40\n",
+      "hidden": true
+    },
+    {
+      "input": "1\n1\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n1 2 5 10 20 50 100 200\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "11\n1 2 4 8 16 32 64 128 256 512 1024\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n1 1999 2000\n",
+      "output": "3998\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n1 2 3 6 7\n",
+      "output": "12\n",
+      "hidden": true
+    },
+    {
+      "input": "30\n1 66 71 142 241 286 315 334 455 474 568 577 697 724 876 905 926 1002 1105 1128 1389 1412 1445 1608 1647 1648 1713 1726 1890 1930\n",
+      "output": "132\n",
+      "hidden": true
+    },
+    {
+      "input": "30\n1 5 12 19 63 87 155 496 497 527 574 584 622 701 806 892 1046 1111 1143 1273 1322 1329 1374 1420 1555 1841 1882 1885 1957 1959\n",
+      "output": "15\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n1 1000 1999\n",
+      "output": "-1\n",
+      "hidden": true
+    }
+  ]
+}

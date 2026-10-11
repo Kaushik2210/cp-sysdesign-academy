@@ -1,0 +1,200 @@
+---
+title: Backtracking and Pruning
+track: cp
+module: recursion-and-bitmasks
+order: 2
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/recursion-and-bitmasks/recursion-and-call-stack]
+tags: [backtracking, recursion, subsets, permutations, n-queens, pruning]
+type: lesson
+problems: [m09-queens-blocked]
+furtherReading:
+  - title: cp-algorithms, Generating all K-combinations
+    url: https://cp-algorithms.com/combinatorics/generating_combinations.html
+  - title: CSES Problem Set, Introductory Problems
+    url: https://cses.fi/problemset/list/
+  - title: Knuth, The Art of Computer Programming vol. 4A (combinatorial generation)
+    url: https://www-cs-faculty.stanford.edu/~knuth/taocp.html
+---
+
+## Intuition
+
+Solving a maze: at every junction pick a corridor; if you hit a dead end, walk back to the last junction and try the next corridor. You never need a map of all paths. You only need the **current path** and the discipline to undo your last choice.
+
+Backtracking is a depth-first search over the tree of **partial solutions**. Each level makes one decision, and a partial solution that can no longer be completed into a valid answer is abandoned immediately (**pruning**). It is exhaustive search made affordable by cutting dead branches early.
+
+## The choose, explore, unchoose template
+
+```python
+def search(state):
+    if is_complete(state):
+        record(state)
+        return
+    for choice in candidates(state):
+        if not feasible(state, choice):     # prune
+            continue
+        apply(state, choice)                # choose
+        search(state)                       # explore
+        undo(state, choice)                 # unchoose (backtrack)
+```
+
+Three things to get right:
+
+1. **What is a state?** The smallest data that describes the partial solution and the remaining decisions (an index, a set of used elements, a running sum).
+2. **Undo exactly what you did.** The shared structure must look identical after the recursive call returns.
+3. **Prune soundly.** A pruning rule may only discard branches that provably contain no valid (or no better) solution.
+
+## Example 1: all subsets
+
+For each element decide **take** or **skip**. The tree has `2^n` leaves, one subset each.
+
+<CodeRunner language="python" code={`def subsets(a):
+    out, cur = [], []
+    def go(i):
+        if i == len(a):
+            out.append(cur[:])      # copy: cur keeps changing
+            return
+        go(i + 1)                   # skip a[i]
+        cur.append(a[i])            # choose
+        go(i + 1)                   # explore
+        cur.pop()                   # unchoose
+    go(0)
+    return out
+
+res = subsets([1, 2, 3])
+print(len(res))
+for s in res:
+    print(s)
+`} />
+
+Cost: `2^n` leaves, and copying each subset costs up to `n`, so `O(n * 2^n)` including output.
+
+## Example 2: all permutations
+
+At position `i` pick any unused element. There are `n * (n-1) * ... = n!` leaves.
+
+<CodeRunner language="python" code={`def permutations(a):
+    n = len(a)
+    used = [False] * n
+    cur, out = [], []
+    def go():
+        if len(cur) == n:
+            out.append(cur[:])
+            return
+        for j in range(n):
+            if used[j]:
+                continue
+            used[j] = True
+            cur.append(a[j])
+            go()
+            cur.pop()
+            used[j] = False
+    go()
+    return out
+
+for p in permutations([1, 2, 3]):
+    print(p)
+`} />
+
+**Duplicates in the input.** If `a = [1, 1, 2]`, naive code prints equal permutations repeatedly. Sort `a` first and, at one position, never try a value equal to an earlier **unused** sibling: `if j > 0 and a[j] == a[j-1] and not used[j-1]: continue`. This visits each distinct permutation exactly once.
+
+## Example 3: N-Queens with pruning
+
+Place one queen per row. A placement is feasible when its column and both diagonals are free. Squares on one diagonal share `r - c`, squares on one anti-diagonal share `r + c`, so three boolean sets give `O(1)` feasibility checks.
+
+<CodeRunner language="python" code={`def queens(n):
+    cols, d1, d2 = set(), set(), set()
+    nodes = 0
+    def go(r):
+        nonlocal nodes
+        nodes += 1
+        if r == n:
+            return 1
+        total = 0
+        for c in range(n):
+            if c in cols or (r - c) in d1 or (r + c) in d2:
+                continue                      # prune
+            cols.add(c); d1.add(r - c); d2.add(r + c)
+            total += go(r + 1)
+            cols.remove(c); d1.remove(r - c); d2.remove(r + c)
+        return total
+    return go(0), nodes
+
+for n in range(4, 9):
+    print(n, queens(n))
+`} />
+
+The brute force "choose any `n` of `n^2` squares" has about `C(64, 8) = 4.4 * 10^9` candidates for `n = 8`. Row-by-row search with pruning visits only a couple of thousand nodes. The honest worst-case bound is still `O(n!)`, but pruning makes real runs dramatically smaller.
+
+## Example 4: pruning with a bound
+
+Count subsets of `a` (all positive) with sum exactly `S`. Sort descending and keep the suffix sum. Prune when the running sum already exceeds `S`, or when even taking **everything** left cannot reach `S`.
+
+<CodeRunner language="python" code={`def count_subsets(a, S):
+    a = sorted(a, reverse=True)
+    n = len(a)
+    suffix = [0] * (n + 1)
+    for i in range(n - 1, -1, -1):
+        suffix[i] = suffix[i + 1] + a[i]
+    calls = 0
+    def go(i, s):
+        nonlocal calls
+        calls += 1
+        if s == S:
+            return 1                      # values are positive: the rest must be skipped
+        if i == n or s > S or s + suffix[i] < S:
+            return 0
+        return go(i + 1, s + a[i]) + go(i + 1, s)
+    return go(0, 0), calls
+
+print(count_subsets(list(range(1, 21)), 40))
+`} />
+
+The bounds `s > S` and `s + suffix[i] < S` are sound because every value is positive. Note the early return when `s == S`: with positive values, adding any more element would overshoot, so exactly one subset (the current one) ends here.
+
+<Callout type="note" title="Pruning is not magic">
+Pruning shrinks typical runs, not the worst-case bound. If the data is adversarial (for example, many zero values or sums that all sit just below the target), the search can still be exponential. Always compute the **worst case** before trusting a backtracking solution, and compare it with the limits: `n!` is fine up to about `n = 10`, `2^n` up to about `n = 25`.
+</Callout>
+
+## Worked analysis: how big is the search?
+
+- Subsets: `2^n` leaves, `2^(n+1) - 1` nodes.
+- Permutations: `n!` leaves, about `e * n!` nodes in total.
+- N-Queens: at most `n!` (one queen per row **and** column), far fewer after diagonal pruning.
+- Subset sum with bounds: between a handful of calls and `2^n`, data dependent.
+
+When the count is larger than about `10^8` basic steps, backtracking alone will not do and you need a smarter method: bitmask DP (when the state is a subset of at most 20 items), meet in the middle (when `n` is about 40, see the later lessons of this module), or dynamic programming over a compact state.
+
+## Pitfalls
+
+<Callout type="pitfall" title="Backtracking bugs">
+1. **Forgetting to undo** (or undoing in the wrong order) leaves stale marks that silently corrupt later branches. Place `choose` and `unchoose` as a visible pair.
+2. **Recording a reference, not a copy:** `out.append(cur)` stores the same list that keeps mutating. Copy it (`cur[:]`, `new ArrayList<>(cur)`).
+3. **Mutating the loop collection** while iterating it.
+4. **Unsound pruning:** a bound that is only valid for non-negative numbers applied to data with negatives.
+5. **Duplicates:** forgetting to deduplicate equal inputs gives repeated answers and exponential blow-up.
+6. **Checking feasibility late:** test the cheap constraint at the moment of choosing, not at the leaf.
+</Callout>
+
+## Practice
+
+<Problem id="m09-queens-blocked" />
+
+### Problem ladder
+
+- [CSES Chessboard and Queens](https://cses.fi/problemset/task/1624), the exact flavour of the problem above
+- [CSES Creating Strings](https://cses.fi/problemset/task/1622), permutations of a multiset
+- [CSES Apple Division](https://cses.fi/problemset/task/1623), subset enumeration
+- [LeetCode 51, N-Queens](https://leetcode.com/problems/n-queens/)
+- [LeetCode 90, Subsets II](https://leetcode.com/problems/subsets-ii/), deduplication
+- [LeetCode 39, Combination Sum](https://leetcode.com/problems/combination-sum/), pruning with a target
+
+## Quiz
+
+<Quiz id="cp-m09-backtracking-1" tags={["backtracking"]} questions={[
+  { type: "mcq", q: "How many leaves does the take-or-skip subset recursion have for n distinct elements?", options: ["n", "n^2", "2^n", "n!"], answer: 2, explain: "Each element is independently taken or skipped, so there are 2^n leaves." },
+  { type: "mcq", q: "In the N-Queens search, why do we index the diagonal arrays by r - c and r + c?", options: ["They give the row of the next queen", "All squares on one diagonal share r - c, all on one anti-diagonal share r + c", "They keep the queens in sorted order", "They avoid recursion"], answer: 1, explain: "Moving one step along a diagonal changes r and c by the same amount, so r - c is constant; along an anti-diagonal r + c is constant." },
+  { type: "multi", q: "Which statements about backtracking are true?", options: ["Unchoose must restore the shared state exactly", "Pruning always improves the worst-case big-O bound", "Storing the current path without copying it at a leaf is a common bug", "It explores partial solutions depth first"], answer: [0, 2, 3], explain: "Pruning generally shrinks typical runs; adversarial inputs can keep the worst case exponential." },
+  { type: "predict", q: "What does this print?", code: "res = []\ndef go(i, cur):\n    if i == 2:\n        res.append(cur)\n        return\n    cur.append(i)\n    go(i + 1, cur)\n    cur.pop()\n    go(i + 1, cur)\ngo(0, [])\nprint(res)", options: ["[[0, 1], [0], [1], []]", "[[], [], [], []]", "[[0, 1], [0, 1]]", "[[]]"], answer: 1, explain: "The same list object is appended four times (once per leaf) and is empty at the end after all undos, because no copy is made." }
+]} />

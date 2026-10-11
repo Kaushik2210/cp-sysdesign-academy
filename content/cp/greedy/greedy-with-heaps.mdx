@@ -1,0 +1,223 @@
+---
+title: Greedy with Sorting and Heaps
+track: cp
+module: greedy
+order: 4
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/greedy/interval-greedy]
+tags: [greedy, heap, priority-queue, scheduling, regret-greedy, huffman]
+type: lesson
+problems: [m10-job-sequencing]
+furtherReading:
+  - title: CSES, Towers and Room Allocation (heap-flavoured greedy)
+    url: https://cses.fi/problemset/task/1164
+  - title: CLRS, Section 16.3, Huffman codes
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: Python docs, heapq
+    url: https://docs.python.org/3/library/heapq.html
+---
+
+## Intuition
+
+Plain greedy sorts once and sweeps. Many harder greedy problems cannot commit that early: you want to **take every item tentatively**, and when a constraint is violated, **throw away the least valuable item you hold**. You need to find and remove "the worst so far" quickly, again and again. That is exactly what a **priority queue (heap)** does in `O(log n)`.
+
+So the recurring shape is:
+
+1. Sort by one key (deadline, start time, due date) to define the order of arrival.
+2. Keep a heap keyed by another quantity (profit, duration, end time).
+3. For each item: push it, then repair any violation by popping the heap's top.
+
+## A heap in one minute
+
+A binary heap keeps one extreme element at the top. `push` and `pop` cost `O(log n)`, `peek` is `O(1)`.
+
+- Python `heapq` is a **min-heap** (push `-x` for a max-heap).
+- C++ `priority_queue<T>` is a **max-heap**; `priority_queue<T, vector<T>, greater<T>>` is a min-heap.
+- Java `PriorityQueue<T>` is a **min-heap**; pass `Collections.reverseOrder()` for a max-heap.
+
+<CodeRunner language="python" code={`import heapq
+
+h = []
+for x in [5, 1, 8, 3, 2]:
+    heapq.heappush(h, x)
+print([heapq.heappop(h) for _ in range(len(h))])
+
+mx = []
+for x in [5, 1, 8, 3, 2]:
+    heapq.heappush(mx, -x)
+print(-mx[0])
+`} />
+
+## Pattern 1: always combine the two smallest (Huffman)
+
+Merging two piles of size `a` and `b` costs `a + b`. Merge all piles into one with minimum total cost. Always merge the **two smallest** piles.
+
+**Why.** In the final merge tree each pile contributes `size * depth`. The two smallest piles can always be made siblings at the deepest level without increasing cost: if a smaller pile sits higher than a larger one, swapping them reduces or keeps the cost (exchange). Merge them into one pile and repeat on the smaller instance. This is also how Huffman coding builds an optimal prefix code, with symbol frequencies as pile sizes.
+
+<CodeRunner language="python" code={`import heapq
+
+def merge_cost(piles):
+    h = list(piles)
+    heapq.heapify(h)
+    total = 0
+    while len(h) > 1:
+        a = heapq.heappop(h)
+        b = heapq.heappop(h)
+        total += a + b
+        heapq.heappush(h, a + b)
+    return total
+
+print(merge_cost([1, 2, 3, 4, 5]))
+`} />
+
+The answer is 33: merges cost `3, 6, 9, 15`. Time `O(n log n)`.
+
+## Pattern 2: scheduling unit jobs with deadlines and profits
+
+Each job takes one time unit, has a deadline `d` and a profit `p`. Maximise total profit.
+
+A chosen set is feasible exactly when, for every time `t`, at most `t` chosen jobs have deadline at most `t` (they all must be done by `t`, and only `t` slots exist). Process jobs in deadline order, tentatively accept each, and whenever the accepted count exceeds the current deadline, **drop the cheapest accepted job**.
+
+Why dropping the minimum is right: when job `k` (deadline `d_k`, the largest so far) is added and the set becomes infeasible, the only violated constraint is "at most `d_k` jobs by time `d_k`", because all earlier constraints held before. Any feasible solution must discard at least one job among the accepted ones; discarding the cheapest of them loses the least. The set that remains is a maximum-profit feasible set among the processed jobs, and induction carries this through. (Formally, feasible sets form a **matroid**, and the greedy algorithm is optimal on matroids.)
+
+<CodeRunner language="python" code={`import heapq
+
+def job_sequencing(jobs):
+    jobs = sorted(jobs)               # by deadline
+    heap = []
+    total = 0
+    for d, p in jobs:
+        heapq.heappush(heap, p)
+        total += p
+        if len(heap) > d:
+            total -= heapq.heappop(heap)
+    return total
+
+print(job_sequencing([(2, 100), (1, 19), (2, 27), (1, 25), (3, 15)]))
+`} />
+
+The result is 142 (jobs with profits 100, 27 and 15). Trace: deadline 1 jobs arrive first, `19` is accepted, then `25` pushes the size to 2 which exceeds deadline 1, so `19` is dropped, and so on.
+
+## Pattern 3: regret greedy
+
+"Take it now, undo it if it turns out to be a mistake". Scheduling courses with a duration and a last day: take as many courses as possible, each finished by its last day, one after another.
+
+Sort by last day. Add each course to the plan. If the total time now exceeds this course's last day, **regret** the **longest** course in the plan (possibly the one just added): removing the longest course frees the most time while losing exactly one course from the count.
+
+<CodeRunner language="python" code={`import heapq
+
+def max_courses(courses):
+    courses = sorted(courses, key=lambda c: c[1])
+    heap = []                 # negated durations: acts as a max-heap
+    total = 0
+    for dur, last in courses:
+        heapq.heappush(heap, -dur)
+        total += dur
+        if total > last:
+            total += heapq.heappop(heap)   # removes the longest course
+    return len(heap)
+
+print(max_courses([(100, 200), (200, 1300), (1000, 1250), (2000, 3200)]))
+`} />
+
+It prints 3. The key fact (an exchange argument): among plans with the same number of courses, the one with the **smallest total duration** is best for the future, so after each step keep the plan of the largest feasible size and, among those, the smallest total time.
+
+## Pattern 4: rooms with a heap of end times
+
+Allocate each meeting a room; reuse a room if its current meeting has ended. Sort meetings by start, and keep a min-heap of the end times of the rooms in use. If the earliest ending room is free by the new start, reuse it, otherwise open a new room.
+
+<CodeRunner language="python" code={`import heapq
+
+def rooms(meetings):
+    heap = []
+    for s, e in sorted(meetings):
+        if heap and heap[0] <= s:
+            heapq.heapreplace(heap, e)    # reuse the freed room
+        else:
+            heapq.heappush(heap, e)       # open a new room
+    return len(heap)
+
+print(rooms([(0, 30), (5, 10), (15, 20), (10, 15)]))
+`} />
+
+The heap size at the end is the number of rooms, and it equals the maximum overlap from the sweep in the interval lesson.
+
+## Code skeleton: tentative accept, drop the minimum
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+sort(jobs.begin(), jobs.end());                       // by deadline
+priority_queue<long long, vector<long long>, greater<long long>> pq;
+long long total = 0;
+for (auto& [d, p] : jobs) {
+    pq.push(p); total += p;
+    if ((long long)pq.size() > d) { total -= pq.top(); pq.pop(); }
+}
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+jobs.sort()
+heap, total = [], 0
+for d, p in jobs:
+    heapq.heappush(heap, p)
+    total += p
+    if len(heap) > d:
+        total -= heapq.heappop(heap)
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+Arrays.sort(jobs, (a, b) -> Long.compare(a[0], b[0]));
+PriorityQueue<Long> pq = new PriorityQueue<>();
+long total = 0;
+for (long[] j : jobs) {
+    pq.add(j[1]); total += j[1];
+    if (pq.size() > j[0]) total -= pq.poll();
+}
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(n log n)" space="O(n)" note="each item is pushed once and popped at most once" />
+
+## Pitfalls
+
+<Callout type="pitfall" title="Heap greedy bugs">
+1. **Wrong heap direction.** Python and Java give you a min-heap; a "drop the most expensive" rule needs negation or a reverse comparator.
+2. **Popping before pushing:** in tentative-accept algorithms push the new item first, then repair; otherwise you may never consider dropping the new item itself.
+3. **Stale totals:** when you pop an element, subtract exactly its value from the running sum (and watch the sign when you store negated values).
+4. **Wrong sort key:** deadline for job sequencing and course schedule, start time for rooms. A heap does not replace the sort.
+5. **Overflow:** profit sums need 64-bit integers.
+6. **Using `heap[0]` on an empty heap.** Guard with a length check.
+</Callout>
+
+## Practice
+
+<Problem id="m10-job-sequencing" />
+
+### Problem ladder
+
+- [CSES Towers](https://cses.fi/problemset/task/1073), greedy with an ordered structure
+- [CSES Room Allocation](https://cses.fi/problemset/task/1164), the heap-of-rooms pattern
+- [CSES Movie Festival II](https://cses.fi/problemset/task/1632), k people, sorted multiset
+- [LeetCode 630, Course Schedule III](https://leetcode.com/problems/course-schedule-iii/), regret greedy
+- [LeetCode 1167, Minimum Cost to Connect Sticks](https://leetcode.com/problems/minimum-cost-to-connect-sticks/), Huffman merging
+- [LeetCode 253, Meeting Rooms II](https://leetcode.com/problems/meeting-rooms-ii/)
+
+## Quiz
+
+<Quiz id="cp-m10-heaps-1" tags={["greedy", "heap"]} questions={[
+  { type: "mcq", q: "In the deadline-and-profit job sequencing greedy, what do you pop when the heap size exceeds the current deadline?", options: ["The job with the latest deadline", "The job with the smallest profit", "The job with the largest profit", "The job added first"], answer: 1, explain: "Dropping the cheapest accepted job keeps the feasible set with the largest total profit." },
+  { type: "mcq", q: "What is the time complexity of the heap-based job sequencing for n jobs?", options: ["O(n)", "O(n log n)", "O(n^2)", "O(n * max deadline)"], answer: 1, explain: "Sorting costs O(n log n) and each job is pushed and popped at most once at O(log n) per heap operation." },
+  { type: "multi", q: "Which problems use the pattern 'sort by one key, keep a heap of another quantity'?", options: ["Course Schedule III (drop the longest course)", "Room allocation (heap of end times)", "Computing the median of a sorted array", "Job sequencing with deadlines and profits"], answer: [0, 1, 3], explain: "Computing the median of a sorted array is a direct index lookup." },
+  { type: "predict", q: "What does this print?", code: "import heapq\nh = [4, 1, 7]\nheapq.heapify(h)\nheapq.heappush(h, 0)\nprint(heapq.heappop(h), heapq.heappop(h))", options: ["0 1", "1 0", "0 4", "7 4"], answer: 0, explain: "heapq is a min-heap, so the two smallest values 0 and 1 pop first, in increasing order." }
+]} />

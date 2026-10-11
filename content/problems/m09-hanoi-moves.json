@@ -1,0 +1,70 @@
+{
+  "id": "m09-hanoi-moves",
+  "title": "Tower Moves",
+  "source": {
+    "name": "Original exercise (classic technique)"
+  },
+  "rating": 1000,
+  "tags": [
+    "recursion"
+  ],
+  "statement": "There are three pegs numbered `1`, `2`, `3`. Peg `1` holds `n` disks of distinct sizes, stacked with the largest at the bottom. In one move you take the top disk of one peg and put it on another peg, but you may never place a disk on top of a smaller disk.\n\nMove the whole stack from peg `1` to peg `3` using the fewest possible moves, and print the moves. The minimal solution is unique, so there is exactly one correct output.\n\n**Input.** One integer `n`.\n\n**Output.** First line: the number of moves `k`. Then `k` lines `a b`, meaning \"move the top disk of peg `a` to peg `b`\".",
+  "constraints": [
+    "1 ≤ n ≤ 10 (output has 2^n − 1 lines)"
+  ],
+  "timeLimitMs": 2000,
+  "hints": [
+    "To move the biggest disk you need every other disk out of the way, sitting on one single peg.",
+    "Let `move(k, from, to, via)` move the top `k` disks. Move `k-1` disks to `via`, move one disk, then move the `k-1` disks from `via` to `to`.",
+    "Base case `k = 0` does nothing. The count obeys `T(k) = 2T(k-1) + 1`, so `T(n) = 2^n - 1`; append moves in the middle of the two recursive calls."
+  ],
+  "editorial": "Let `move(k, a, b, c)` transfer `k` disks from peg `a` to peg `b` using `c` as spare. The largest of the `k` disks can only move when all smaller ones are on the spare peg, so the unique optimal plan is: `move(k-1, a, c, b)`, record `a -> b`, `move(k-1, c, b, a)`. The number of moves satisfies `T(k) = 2T(k-1) + 1`, `T(0) = 0`, giving `2^k - 1`. The recursion depth is only `n`, so the call stack is tiny even though the output is exponential.",
+  "complexity": {
+    "time": "O(2^n)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "n = int(input())\n\ndef go(k, a, b, c):\n    # move k disks from a to b using c\n    pass\n\n# print the number of moves, then the moves\n",
+    "javascript": "const n = parseInt(readLine());\n// print the number of moves, then each move as 'a b'\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        int n = new Scanner(System.in).nextInt();\n        // print the number of moves, then each move\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n; cin >> n;  // print the number of moves, then the moves\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "n = int(input())\nout = []\n\ndef go(k, a, b, c):\n    if k == 0:\n        return\n    go(k - 1, a, c, b)\n    out.append(str(a) + \" \" + str(b))\n    go(k - 1, c, b, a)\n\ngo(n, 1, 3, 2)\nprint(len(out))\nprint(\"\\n\".join(out))\n",
+    "javascript": "const n = parseInt(readLine());\nconst out = [];\nfunction go(k, a, b, c) {\n  if (k === 0) return;\n  go(k - 1, a, c, b);\n  out.push(a + ' ' + b);\n  go(k - 1, c, b, a);\n}\ngo(n, 1, 3, 2);\nconsole.log(out.length + '\\n' + out.join('\\n'));\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    static StringBuilder sb = new StringBuilder();\n    static int cnt = 0;\n\n    static void go(int k, int a, int b, int c) {\n        if (k == 0) return;\n        go(k - 1, a, c, b);\n        sb.append(a).append(' ').append(b).append('\\n');\n        cnt++;\n        go(k - 1, c, b, a);\n    }\n\n    public static void main(String[] args) {\n        int n = new Scanner(System.in).nextInt();\n        go(n, 1, 3, 2);\n        System.out.println(cnt);\n        System.out.print(sb);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nstring out;\nint cnt = 0;\n\nvoid go(int k, int a, int b, int c) {\n    if (k == 0) return;\n    go(k - 1, a, c, b);\n    out += to_string(a) + \" \" + to_string(b) + \"\n\";\n    cnt++;\n    go(k - 1, c, b, a);\n}\n\nint main() {\n    int n;\n    cin >> n;\n    go(n, 1, 3, 2);\n    cout << cnt << \"\n\" << out;\n    return 0;\n}\n"
+  },
+  "tests": [
+    {
+      "input": "2\n",
+      "output": "3\n1 2\n1 3\n2 3\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n",
+      "output": "1\n1 3\n",
+      "hidden": false
+    },
+    {
+      "input": "3\n",
+      "output": "7\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n",
+      "output": "15\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n",
+      "hidden": true
+    },
+    {
+      "input": "7\n",
+      "output": "127\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n1 2\n3 2\n3 1\n2 1\n3 2\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n2 1\n3 2\n3 1\n2 1\n2 3\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n1 2\n3 2\n3 1\n2 1\n3 2\n1 3\n1 2\n3 2\n3 1\n2 1\n2 3\n1 3\n2 1\n3 2\n3 1\n2 1\n3 2\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n1 2\n3 2\n3 1\n2 1\n3 2\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n2 1\n3 2\n3 1\n2 1\n2 3\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n2 1\n3 2\n3 1\n2 1\n3 2\n1 3\n1 2\n3 2\n3 1\n2 1\n2 3\n1 3\n2 1\n3 2\n3 1\n2 1\n2 3\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n1 2\n3 2\n3 1\n2 1\n3 2\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n2 1\n3 2\n3 1\n2 1\n2 3\n1 3\n1 2\n3 2\n1 3\n2 1\n2 3\n1 3\n",
+      "hidden": true
+    },
+    {
+      "input": "10\n",
+      "output": "1023\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n3 2\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n2 1\n3 1\n3 2\n1 2\n3 1\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n1 2\n3 1\n3 2\n1 2\n1 3\n2 3\n2 1\n3 1\n2 3\n1 2\n1 3\n2 3\n",
+      "hidden": true
+    }
+  ]
+}

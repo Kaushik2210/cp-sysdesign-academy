@@ -1,0 +1,1 @@
+{ "title": "Recursion, Backtracking and Bitmasks", "level": "Level 1: Core Data Structures & Techniques", "order": 9, "summary": "Recursion and the call stack, backtracking with pruning, bit tricks, enumerating subsets with masks, and meet in the middle for n up to about 40." }

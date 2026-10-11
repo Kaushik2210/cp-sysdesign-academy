@@ -1,0 +1,229 @@
+---
+title: Interval Greedy
+track: cp
+module: greedy
+order: 3
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/greedy/exchange-arguments]
+tags: [greedy, intervals, sorting, sweep-line, activity-selection]
+type: lesson
+problems: [m10-min-stabbing]
+furtherReading:
+  - title: CSES, Movie Festival
+    url: https://cses.fi/problemset/task/1629
+  - title: CLRS, Section 15.1, An activity-selection problem
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: cp-algorithms, Scanline-style problems (search the index for events and sweeps)
+    url: https://cp-algorithms.com/
+---
+
+## Intuition
+
+Intervals (meetings, jobs, ranges of a number line) are the home turf of greedy algorithms. They come with a natural order, the number line, so "sort, then sweep once" is usually all it takes. Which end you sort by, **start or finish**, and what you do when you meet an overlap is the whole game.
+
+This lesson covers five patterns:
+
+1. Maximum number of non-overlapping intervals (activity selection): sort by **finish**.
+2. Merge overlapping intervals: sort by **start**.
+3. Minimum number of points that hit every interval: sort by **finish**.
+4. Maximum overlap, or the number of rooms needed: **sweep** over events.
+5. Cover a segment with the fewest intervals: sort by **start**, extend as far as possible.
+
+## 1. Activity selection
+
+Given intervals `[s_i, e_i)` (the end is excluded, so `[1,3)` and `[3,5)` do not conflict), choose the most pairwise disjoint intervals.
+
+**Greedy.** Sort by end time. Take an interval if its start is at least the end of the last taken one.
+
+**Proof (exchange).** Let `g` be the interval with the smallest end. Take any optimal solution `O`, ordered by time, and let `o_1` be its first interval. Because `end(g) <= end(o_1)` and every other interval of `O` starts at or after `end(o_1)`, replacing `o_1` with `g` keeps `O` valid and the same size. So some optimal solution contains `g`. Everything that conflicts with `g` is removed, and what remains (intervals starting at or after `end(g)`) is the same problem again. By induction greedy is optimal. ∎
+
+<CodeRunner language="python" code={`def activity_selection(iv):
+    iv = sorted(iv, key=lambda x: x[1])      # by finish time
+    last = -10**18
+    chosen = []
+    for s, e in iv:
+        if s >= last:
+            chosen.append((s, e))
+            last = e
+    return chosen
+
+iv = [(1, 4), (3, 5), (0, 6), (5, 7), (3, 9), (5, 9), (6, 10), (8, 11), (8, 12), (2, 14), (12, 16)]
+res = activity_selection(iv)
+print(len(res), res)
+`} />
+
+**Rules that look reasonable and are wrong.** Run them against each other:
+
+- Earliest **start** first: `[0,10), [1,2), [3,4)`. Greedy takes the long one and gets 1, optimal is 2.
+- **Shortest** first: `[0,5), [4,6), [5,10)`. The shortest `[4,6)` conflicts with both others; greedy gets 1, optimal is 2.
+
+<CodeRunner language="python" code={`def pick(iv, key):
+    last = -10**9
+    n = 0
+    for s, e in sorted(iv, key=key):
+        if s >= last:
+            n += 1
+            last = e
+    return n
+
+a = [(0, 10), (1, 2), (3, 4)]
+b = [(0, 5), (4, 6), (5, 10)]
+for name, iv in (("A", a), ("B", b)):
+    print(name,
+          "by end:", pick(iv, lambda x: x[1]),
+          "by start:", pick(iv, lambda x: x[0]),
+          "by length:", pick(iv, lambda x: x[1] - x[0]))
+`} />
+
+## 2. Merging intervals
+
+Sort by start and sweep, extending the current block while the next interval starts at or before the block's end.
+
+<CodeRunner language="python" code={`def merge(iv):
+    iv = sorted(iv)
+    out = []
+    for s, e in iv:
+        if out and s <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([s, e])
+    return out
+
+print(merge([(1, 3), (2, 6), (8, 10), (15, 18), (17, 20), (6, 7)]))
+`} />
+
+For closed intervals, touching endpoints merge (`s <= end`); for half-open intervals, `[1,3)` and `[3,5)` also join into `[1,5)` in the sense of covered points, so the same test applies when you want the covered set.
+
+## 3. Minimum points that hit every interval
+
+Place the fewest integer points so that every closed interval `[l, r]` contains a point. Sort by right end; whenever the next interval is **not** hit by the last point (`l > last`), place a point at its right end `r`.
+
+**Proof.** The interval with the smallest right end `r` must receive a point somewhere in `[l, r]`. Every other interval has right end at least `r`; if it contains some `x <= r` of this one's range, it also contains `r` (it extends from at most `x` to at least `r`). So a point at `r` hits whatever any other position in `[l, r]` could hit: moving the point to `r` never hurts. Remove everything containing `r` and repeat. ∎
+
+<CodeRunner language="python" code={`def min_points(iv):
+    iv = sorted(iv, key=lambda x: x[1])
+    last = None
+    pts = []
+    for l, r in iv:
+        if last is None or l > last:
+            last = r
+            pts.append(r)
+    return pts
+
+print(min_points([(1, 3), (2, 5), (4, 6), (7, 9), (8, 12)]))
+`} />
+
+This is the same sort order as activity selection, and in fact the minimum number of points equals the maximum number of pairwise disjoint intervals (a duality worth remembering).
+
+## 4. Maximum overlap by sweeping events
+
+How many rooms are needed for a set of meetings? Turn every interval into two **events**: `+1` at the start and `-1` at the end. Sort events by time and keep a running count; the maximum of the count is the answer. For half-open intervals, process `-1` before `+1` at the same time, so `[1,3)` and `[3,5)` share a room.
+
+<CodeRunner language="python" code={`def max_overlap(iv):
+    events = []
+    for s, e in iv:
+        events.append((s, 1))
+        events.append((e, -1))
+    events.sort()                 # at equal time, -1 comes before +1
+    cur = best = 0
+    for _, d in events:
+        cur += d
+        best = max(best, cur)
+    return best
+
+print(max_overlap([(1, 3), (2, 5), (3, 6), (4, 7), (7, 9)]))
+`} />
+
+(`(3, -1)` sorts before `(3, 1)`, which is exactly the tie rule we want.) Cost `O(n log n)` for the sort, `O(n)` for the sweep.
+
+## 5. Cover a segment with the fewest intervals
+
+Given a target `[0, L]` and a set of intervals, pick the fewest whose union covers it. Sort by start. Keep the current covered prefix `[0, cur]`. Among all intervals with `start <= cur`, take the one with the largest end; if it does not extend `cur`, covering is impossible. Repeat until `cur >= L`. The proof is the "farthest reach" argument from the refuel problem: any interval starting at or before `cur` and reaching less far than the best one is dominated.
+
+<CodeRunner language="python" code={`def cover(iv, L):
+    iv = sorted(iv)
+    cur, i, used = 0, 0, 0
+    while cur < L:
+        best = cur
+        while i < len(iv) and iv[i][0] <= cur:
+            best = max(best, iv[i][1])
+            i += 1
+        if best == cur:
+            return -1
+        used += 1
+        cur = best
+    return used
+
+print(cover([(0, 3), (2, 6), (5, 9), (1, 4), (8, 12)], 12))
+print(cover([(0, 3), (5, 9)], 9))
+`} />
+
+## Code skeleton: activity selection
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+sort(iv.begin(), iv.end(), [](auto& a, auto& b) { return a.second < b.second; });
+int cnt = 0; long long last = LLONG_MIN;
+for (auto& [s, e] : iv) if (s >= last) { cnt++; last = e; }
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+iv.sort(key=lambda x: x[1])
+cnt, last = 0, float("-inf")
+for s, e in iv:
+    if s >= last:
+        cnt += 1
+        last = e
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+Arrays.sort(iv, (a, b) -> Long.compare(a[1], b[1]));
+int cnt = 0; long last = Long.MIN_VALUE;
+for (long[] x : iv) if (x[0] >= last) { cnt++; last = x[1]; }
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(n log n)" space="O(n)" note="sorting dominates; the sweep itself is linear" />
+
+## Pitfalls
+
+<Callout type="pitfall" title="Interval bugs">
+1. **Open vs closed ends:** decide whether touching intervals conflict, then use `>=` or `>` consistently, including in the tie order of sweep events.
+2. **Sorting by start when you need end** (activity selection and point stabbing), or the reverse for merging.
+3. **Using the previous interval's end instead of the running maximum** when merging: `[1,10], [2,3], [4,5]` has to keep end 10 after the nested interval.
+4. **Integer vs real points:** for closed integer intervals a point can sit at an endpoint; for real intervals the same greedy still applies.
+5. **Ties on the sort key:** with the same end, order by start is irrelevant for activity selection but a second key keeps output deterministic.
+</Callout>
+
+## Practice
+
+<Problem id="m10-min-stabbing" />
+
+### Problem ladder
+
+- [CSES Movie Festival](https://cses.fi/problemset/task/1629), activity selection
+- [CSES Restaurant Customers](https://cses.fi/problemset/task/1619), maximum overlap by events
+- [CSES Room Allocation](https://cses.fi/problemset/task/1164), sweep with a heap (next lessons)
+- [LeetCode 56, Merge Intervals](https://leetcode.com/problems/merge-intervals/)
+- [LeetCode 435, Non-overlapping Intervals](https://leetcode.com/problems/non-overlapping-intervals/)
+- [LeetCode 452, Minimum Number of Arrows to Burst Balloons](https://leetcode.com/problems/minimum-number-of-arrows-to-burst-balloons/)
+
+## Quiz
+
+<Quiz id="cp-m10-intervals-1" tags={["greedy", "intervals"]} questions={[
+  { type: "mcq", q: "For maximum non-overlapping intervals, which order is correct?", options: ["Earliest start first", "Shortest first", "Earliest finish first", "Fewest conflicts first"], answer: 2, explain: "Earliest finish leaves the most room and has a clean exchange proof; the others have counterexamples." },
+  { type: "mcq", q: "How should events at the same time be ordered in a sweep for half-open intervals [s, e)?", options: ["Starts before ends", "Ends before starts", "Arbitrary", "By interval length"], answer: 1, explain: "An interval ending at time t does not overlap one starting at t, so process the -1 before the +1." },
+  { type: "multi", q: "Which are correct statements?", options: ["The minimum number of points hitting all intervals equals the maximum number of pairwise disjoint intervals", "Merging intervals requires sorting by end time", "Covering a segment: among intervals starting at or before the covered prefix pick the one reaching farthest", "A sweep of 2n events is O(n log n)"], answer: [0, 2, 3], explain: "Merging sorts by start." },
+  { type: "predict", q: "What does this print?", code: "iv = [(1, 5), (2, 3), (4, 8), (9, 10)]\niv.sort()\nout = []\nfor s, e in iv:\n    if out and s <= out[-1][1]:\n        out[-1][1] = max(out[-1][1], e)\n    else:\n        out.append([s, e])\nprint(out)", options: ["[[1, 5], [4, 8], [9, 10]]", "[[1, 8], [9, 10]]", "[[1, 3], [4, 8], [9, 10]]", "[[1, 10]]"], answer: 1, explain: "(1,5) absorbs (2,3) keeping end 5, then (4,8) overlaps and extends to 8; (9,10) is separate." }
+]} />

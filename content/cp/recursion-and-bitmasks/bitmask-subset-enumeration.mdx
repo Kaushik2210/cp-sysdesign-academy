@@ -1,0 +1,254 @@
+---
+title: Bitmask Subset Enumeration
+track: cp
+module: recursion-and-bitmasks
+order: 4
+difficulty: medium
+estMinutes: 30
+prerequisites: [cp/recursion-and-bitmasks/bit-manipulation-basics]
+tags: [bitmask, subsets, submask, brute-force, enumeration]
+type: lesson
+problems: [m09-split-weights]
+furtherReading:
+  - title: cp-algorithms, Submask enumeration
+    url: https://cp-algorithms.com/algebra/all-submasks.html
+  - title: cp-algorithms, Bit manipulation
+    url: https://cp-algorithms.com/algebra/bit-manipulation.html
+  - title: CSES Problem Set, Dynamic Programming (Elevator Rides)
+    url: https://cses.fi/problemset/task/1653
+---
+
+## Intuition
+
+With `n` items, every subset is a yes/no answer per item, an `n`-bit number. So "try every subset" is simply `for mask in range(2^n)`. No recursion, no undo, trivial to get right, and with `n` up to about 20 it is fast enough: `2^20 = 1,048,576`.
+
+Two questions then decide whether the approach works:
+
+1. How cheaply can you compute the quantity of interest (sum, validity) for each mask?
+2. Do you need pairs (a mask and one of its submasks)? That costs `3^n`, not `4^n`.
+
+## Enumerating all subsets
+
+Bit `i` of `mask` says whether item `i` is in the subset.
+
+<CodeRunner language="python" code={`items = ["a", "b", "c", "d"]
+n = len(items)
+for mask in range(1 << n):
+    chosen = [items[i] for i in range(n) if mask >> i & 1]
+    print(format(mask, "04b"), chosen)
+`} />
+
+Scanning all `n` bits per mask costs `O(n * 2^n)`. To visit only set bits, repeatedly take the lowest one:
+
+```python
+m = mask
+while m:
+    low = m & -m                       # lowest set bit as a value
+    i = low.bit_length() - 1           # its index
+    # use item i
+    m ^= low                           # remove it
+```
+
+## Computing a value for every mask in O(1) each
+
+The sum of a subset equals the sum of the subset without its lowest bit, plus that one item. That is a tiny dynamic program over masks, and it generalises to any aggregate (sum, xor, or, max, validity).
+
+<CodeRunner language="python" code={`w = [3, 5, 8, 13]
+n = len(w)
+total = [0] * (1 << n)
+for mask in range(1, 1 << n):
+    low = mask & -mask
+    total[mask] = total[mask ^ low] + w[low.bit_length() - 1]
+
+target = 16
+print([format(m, "04b") for m in range(1 << n) if total[m] == target])
+`} />
+
+Total time `O(2^n)`, memory `O(2^n)`. Always store the result in a 64-bit type when weights are large.
+
+## Complement and full masks
+
+With `full = (1 << n) - 1`:
+
+- complement of `mask` within the universe: `full ^ mask`
+- `mask` is a subset of `other`: `mask & other == mask` (parenthesize!)
+- number of subsets of `mask`: `1 << popcount(mask)`
+
+## Submask enumeration
+
+All submasks `s` of a mask `m` (including `m` and `0`) are visited by the loop
+
+```python
+s = m
+while True:
+    visit(s)
+    if s == 0:
+        break
+    s = (s - 1) & m
+```
+
+Why it works: `s - 1` flips the lowest set bit of `s` and all bits below it to 1; the `& m` then drops everything that is not in `m`. The result is exactly the next smaller submask in numeric order, so every submask is visited once, in decreasing order.
+
+### Why the total over all masks is 3^n
+
+Sum, over all masks `m`, of the number of submasks `2^popcount(m)`. Count the pairs `(s, m)` with `s` a submask of `m` directly: each of the `n` items is in exactly one of three states, **not in `m`**, **in `m` but not in `s`**, **in both**. That gives `3^n` pairs. Equivalently, by the binomial theorem the sum is `sum_k C(n, k) * 2^k = (1 + 2)^n = 3^n`.
+
+<CodeRunner language="python" code={`def count_pairs(n):
+    total = 0
+    for m in range(1 << n):
+        s = m
+        while True:
+            total += 1
+            if s == 0:
+                break
+            s = (s - 1) & m
+    return total
+
+for n in range(1, 9):
+    print(n, count_pairs(n), 3 ** n)
+`} />
+
+Growth check: `3^15 = 14 million` is fine, `3^18 = 387 million` is borderline, `3^20 = 3.5 billion` is too slow. So submask loops are for `n` up to about 15 to 18.
+
+## Worked example: fewest groups
+
+You have `n` items with weights and a capacity `C`. Pack all items into the fewest groups where each group's total weight is at most `C`. Let `best[m]` be the fewest groups needed for item set `m`. The group containing some chosen submask `s` of `m` must fit (`total[s] <= C`), and the rest is the smaller problem `m ^ s`:
+
+`best[m] = min over submasks s of m with total[s] <= C of best[m ^ s] + 1`.
+
+<CodeRunner language="python" code={`w = [5, 4, 3, 3, 2, 7, 1]
+cap = 10
+n = len(w)
+full = (1 << n) - 1
+total = [0] * (1 << n)
+for m in range(1, 1 << n):
+    low = m & -m
+    total[m] = total[m ^ low] + w[low.bit_length() - 1]
+
+INF = 10 ** 9
+best = [0] + [INF] * full
+for m in range(1, 1 << n):
+    s = m
+    while s:
+        if total[s] <= cap and best[m ^ s] + 1 < best[m]:
+            best[m] = best[m ^ s] + 1
+        s = (s - 1) & m
+print(best[full])
+`} />
+
+Total time `O(3^n)`. A common refinement forces the lowest set bit of `m` to be inside `s`, which does not change the bound but halves the work and avoids counting the same partition in different orders.
+
+## All masks with exactly k bits (Gosper's hack)
+
+To visit only masks with `k` set bits in increasing order, compute the next one from the current `x`:
+
+```
+c = x & -x
+r = x + c
+next = (((r ^ x) >> 2) // c) | r
+```
+
+<CodeRunner language="python" code={`def next_comb(x):
+    c = x & -x
+    r = x + c
+    return (((r ^ x) >> 2) // c) | r
+
+n, k = 5, 3
+x = (1 << k) - 1
+limit = 1 << n
+out = []
+while x < limit:
+    out.append(format(x, "05b"))
+    x = next_comb(x)
+print(len(out), out)
+`} />
+
+It prints `C(5,3) = 10` masks. In C++ use `/` on unsigned integers; the `//` above is Python's integer division.
+
+## Code skeleton
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+int n = w.size();
+vector<long long> sum(1 << n, 0);
+for (int m = 1; m < (1 << n); m++) {
+    int low = m & -m;
+    sum[m] = sum[m ^ low] + w[__builtin_ctz(m)];
+}
+// all submasks of m
+for (int s = m; ; s = (s - 1) & m) {
+    // use s
+    if (s == 0) break;
+}
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+total = [0] * (1 << n)
+for m in range(1, 1 << n):
+    low = m & -m
+    total[m] = total[m ^ low] + w[low.bit_length() - 1]
+s = m
+while True:
+    # use s
+    if s == 0:
+        break
+    s = (s - 1) & m
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] sum = new long[1 << n];
+for (int m = 1; m < (1 << n); m++) {
+    int low = m & -m;
+    sum[m] = sum[m ^ low] + w[Integer.numberOfTrailingZeros(m)];
+}
+for (int s = m; ; s = (s - 1) & m) {
+    // use s
+    if (s == 0) break;
+}
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(2^n) for all subsets, O(3^n) for all submask pairs" space="O(2^n)" />
+
+## Pitfalls
+
+<Callout type="pitfall" title="Mask enumeration bugs">
+1. **Infinite loop on submasks:** the loop `for (s = m; s > 0; s = (s - 1) & m)` skips the empty submask; the loop `for (s = m; ; ...)` must break at `0`. Writing `s >= 0` with an unsigned or never-negative `s` never terminates.
+2. **Using `int` for sums or `1 << k`** with `k` up to 31 or more. Use `long long` / `1LL`.
+3. **Memory:** `2^20` longs is 8 MB, `2^25` is 256 MB. Check the limit before allocating.
+4. **Forgetting `3^n` is not `2^n`:** nested loops "for every mask, for every submask" are `3^n`; add a mental budget check for `n`.
+5. **Operator precedence:** write `(mask >> i) & 1` and `(a & b) == a`.
+6. **Counting ordered partitions:** iterating all submasks gives each unordered split twice or more; if you count partitions, fix a canonical element (the lowest bit) to be in the chosen part.
+</Callout>
+
+## Practice
+
+<Problem id="m09-split-weights" />
+
+### Problem ladder
+
+- [CSES Apple Division](https://cses.fi/problemset/task/1623), the problem above at `n = 20`
+- [CSES Elevator Rides](https://cses.fi/problemset/task/1653), the group-packing DP of this lesson
+- [CSES Counting Bits](https://cses.fi/problemset/task/1146), bit reasoning rather than enumeration
+- [LeetCode 78, Subsets](https://leetcode.com/problems/subsets/)
+- [LeetCode 698, Partition to K Equal Sum Subsets](https://leetcode.com/problems/partition-to-k-equal-sum-subsets/), submask DP
+- [LeetCode 1986, Minimum Number of Work Sessions to Finish the Tasks](https://leetcode.com/problems/minimum-number-of-work-sessions-to-finish-the-tasks/), the same DP as Elevator Rides
+
+## Quiz
+
+<Quiz id="cp-m09-enumeration-1" tags={["bitmask"]} questions={[
+  { type: "mcq", q: "What is the total number of (mask, submask) pairs over all masks of n bits?", options: ["2^n", "n * 2^n", "3^n", "4^n"], answer: 2, explain: "Each item is not in the mask, in the mask only, or in both: 3 choices, so 3^n." },
+  { type: "mcq", q: "Which update visits the next smaller submask s of m?", options: ["s = s - 1", "s = (s - 1) & m", "s = (s >> 1) & m", "s = s ^ m"], answer: 1, explain: "Subtracting 1 and masking with m skips everything that is not a submask of m." },
+  { type: "multi", q: "For which n would an O(3^n) submask DP be comfortable in 1-2 seconds?", options: ["n = 12", "n = 15", "n = 17", "n = 22"], answer: [0, 1], explain: "3^12 = 531 thousand and 3^15 = 14 million are fine; 3^17 = 129 million is risky and 3^22 = 31 billion is impossible." },
+  { type: "predict", q: "How many values does this loop print for m = 0b101?", code: "m = 0b101\ns = m\nwhile True:\n    print(s)\n    if s == 0:\n        break\n    s = (s - 1) & m", options: ["2", "3", "4", "5"], answer: 2, explain: "Submasks of 101 are 101, 100, 001, 000, which is 2^2 = 4 values." }
+]} />

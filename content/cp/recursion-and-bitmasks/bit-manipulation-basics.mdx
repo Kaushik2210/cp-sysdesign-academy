@@ -1,0 +1,182 @@
+---
+title: Bit Manipulation Basics
+track: cp
+module: recursion-and-bitmasks
+order: 3
+difficulty: easy
+estMinutes: 30
+prerequisites: []
+tags: [bit-manipulation, xor, popcount, lowbit, bitmask]
+type: lesson
+problems: [m09-two-lonely]
+furtherReading:
+  - title: cp-algorithms, Bit manipulation
+    url: https://cp-algorithms.com/algebra/bit-manipulation.html
+  - title: CSES Problem Set, Introductory Problems
+    url: https://cses.fi/problemset/list/
+  - title: Hacker's Delight, Henry S. Warren Jr.
+    url: https://en.wikipedia.org/wiki/Hacker%27s_Delight
+---
+
+## Intuition
+
+An integer is a row of `0/1` switches. Bitwise operators work on all switches at once, so one machine instruction can do what would otherwise be a loop of 32 or 64 steps. In contests this gives three superpowers: **compact sets** (a subset of up to 20 to 60 items in one integer), **fast tricks** (power-of-two tests, lowest set bit), and **xor cancellation**.
+
+## The operators
+
+For non-negative integers written in binary:
+
+- `a & b` (and): bit is 1 only if both are 1. Used to **test** and **clear** bits, and to intersect sets.
+- `a | b` (or): bit is 1 if either is 1. Used to **set** bits and to union sets.
+- `a ^ b` (xor): bit is 1 if the bits differ. Toggle bits, symmetric difference, cancellation.
+- `~a` (not): flips every bit. In two's complement `~a == -a - 1`.
+- `a << k`: shifts left, multiplies by `2^k` (while it fits).
+- `a >> k`: shifts right, floor division by `2^k` for non-negative values.
+
+Xor facts you will use constantly: `a ^ a = 0`, `a ^ 0 = a`, xor is commutative and associative. So the xor of a list in which every value appears twice except one value is that one value.
+
+## Two's complement and `-x`
+
+Signed integers store `-x` as `~x + 1`. That is why `x & -x` isolates the **lowest set bit**: negation flips all bits above the lowest `1` (and leaves that `1` and the zeros below it alone), so the only bit that is `1` in both `x` and `-x` is the lowest set bit.
+
+```
+x      = 0110 1000
+-x     = 1001 1000
+x & -x = 0000 1000
+```
+
+## The toolbox
+
+Let `i` be a bit index counted from 0 at the right.
+
+- Test bit `i`: `(x >> i) & 1`
+- Set bit `i`: `x | (1 << i)`
+- Clear bit `i`: `x & ~(1 << i)`
+- Toggle bit `i`: `x ^ (1 << i)`
+- Lowest set bit: `x & -x`
+- Clear the lowest set bit: `x & (x - 1)`
+- Is `x` a power of two (for `x > 0`)? `x & (x - 1) == 0`
+- Mask of the lowest `k` bits: `(1 << k) - 1`
+- Popcount (number of set bits): loop `x &= x - 1` and count, or the built-in.
+- Index of the lowest set bit: `(x & -x).bit_length() - 1` in Python; `__builtin_ctz(x)` in C++; `Integer.numberOfTrailingZeros(x)` in Java.
+- Highest set bit index: `x.bit_length() - 1` in Python; `31 - __builtin_clz(x)` in C++; `31 - Integer.numberOfLeadingZeros(x)` in Java.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+int pc   = __builtin_popcount(x);        // unsigned int / int
+int pcl  = __builtin_popcountll(y);      // long long
+int low  = x & -x;
+int idx  = __builtin_ctz(x);             // x must be non-zero
+long long bit = 1LL << 40;               // 1 << 40 on an int is undefined
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+pc = bin(x).count("1")        # works everywhere
+pc = x.bit_count()            # Python 3.10+
+low = x & -x                  # works for negative ints too (infinite two's complement)
+idx = (x & -x).bit_length() - 1
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int pc = Integer.bitCount(x);
+long pcl = Long.bitCount(y);
+int low = x & -x;
+int idx = Integer.numberOfTrailingZeros(x);
+long bit = 1L << 40;          // note the L
+```
+
+</Tab>
+</Tabs>
+
+Run them:
+
+<CodeRunner snippets={{ python: `x = 0b01101000
+print("popcount", bin(x).count("1"))
+print("lowbit", x & -x)
+print("clear lowest", bin(x & (x - 1)))
+print("bit 3 set?", (x >> 3) & 1)
+print("set bit 0", bin(x | 1))
+print("toggle bit 6", bin(x ^ (1 << 6)))
+print("power of two?", [n for n in range(1, 40) if n & (n - 1) == 0])
+`, javascript: `const x = 0b01101000;
+let pc = 0;
+for (let y = x; y; y &= y - 1) pc++;
+console.log("popcount", pc);
+console.log("lowbit", x & -x);
+console.log("clear lowest", (x & (x - 1)).toString(2));
+console.log("bit 3 set?", (x >> 3) & 1);
+console.log("toggle bit 6", (x ^ (1 << 6)).toString(2));
+` }} />
+
+## Worked example: the two lonely numbers
+
+An array holds every value twice except two values `p != q`, each once. Xor of everything is `x = p ^ q`, non-zero. Pick any set bit of `x`, say `low = x & -x`. At that bit `p` and `q` differ, so splitting all numbers by that bit puts `p` and `q` in different groups; each duplicated value stays together in one group and cancels. Xor each group to get `p` and `q`. One pass, `O(1)` memory.
+
+<CodeRunner language="python" code={`a = [4, 6, 4, 9, 6, 2, 7, 7]
+x = 0
+for v in a:
+    x ^= v
+low = x & -x
+p = q = 0
+for v in a:
+    if v & low:
+        p ^= v
+    else:
+        q ^= v
+print(sorted([p, q]))
+`} />
+
+## Worked example: counting bits and parity
+
+`popcount(x)` can be computed from `popcount(x >> 1)` plus the last bit, which gives a table of all values `0..n` in `O(n)`:
+
+<CodeRunner language="python" code={`n = 16
+pc = [0] * (n + 1)
+for i in range(1, n + 1):
+    pc[i] = pc[i >> 1] + (i & 1)
+print(pc)
+print("total set bits in 0..16:", sum(pc))
+`} />
+
+Another everyday trick: **subset masks as sets.** With items numbered `0..n-1`, the integer `mask` represents the set of items whose bit is 1. Union is `|`, intersection `&`, difference `a & ~b`, membership `mask >> i & 1`, size `popcount(mask)`. The next lesson turns this into enumeration of all subsets.
+
+## Pitfalls
+
+<Callout type="pitfall" title="Bit trick bugs">
+1. **Precedence:** in C++ and Java the comparison `==` binds tighter than `&`, so `x & 1 == 0` parses as `x & (1 == 0)`, which is not what you meant. (Python orders them the other way, which makes the bug easy to miss when you switch languages.) Always parenthesize: `(x & 1) == 0`.
+2. **Overflow on shifts:** `1 << 40` on a 32-bit `int` is undefined in C++ and wraps in Java. Use `1LL << k` / `1L << k`. Shifting by an amount greater than or equal to the width is also undefined.
+3. **Sign:** `>>` on negative numbers is arithmetic (keeps the sign) in Java and C++ (on typical compilers); Java has `>>>` for logical shift.
+4. **JavaScript** applies bitwise operators to **32-bit signed** integers. `1 << 31` is negative and anything above 2^31 is truncated; use `BigInt` for wide masks.
+5. **`~x` in Python** is `-x - 1`, an infinite-width negative number. To flip only the low `k` bits use `x ^ ((1 << k) - 1)`.
+6. **Zero is not a power of two:** `x & (x - 1)` is `0` for `x = 0` too, so test `x > 0` as well.
+</Callout>
+
+## Practice
+
+<Problem id="m09-two-lonely" />
+
+### Problem ladder
+
+- [CSES Counting Bits](https://cses.fi/problemset/task/1146), popcount sums over a range
+- [CSES Gray Code](https://cses.fi/problemset/task/2205), xor with a shifted copy
+- [CSES Hamming Distance](https://cses.fi/problemset/task/2136), popcount of xors
+- [LeetCode 136, Single Number](https://leetcode.com/problems/single-number/)
+- [LeetCode 260, Single Number III](https://leetcode.com/problems/single-number-iii/), the problem above
+- [LeetCode 191, Number of 1 Bits](https://leetcode.com/problems/number-of-1-bits/)
+
+## Quiz
+
+<Quiz id="cp-m09-bits-1" tags={["bit-manipulation"]} questions={[
+  { type: "mcq", q: "What does x & (x - 1) compute for a positive integer x?", options: ["The lowest set bit of x", "x with its lowest set bit cleared", "x with all bits flipped", "x divided by 2"], answer: 1, explain: "Subtracting 1 flips the lowest set bit and the zeros below it; anding clears exactly that bit." },
+  { type: "mcq", q: "Which expression correctly tests that x is a positive power of two?", options: ["x & (x - 1) == 0", "x > 0 && (x & (x - 1)) == 0", "x | (x - 1) == 0", "x ^ (x - 1) == 0"], answer: 1, explain: "Parentheses are required for the comparison precedence, and x = 0 must be excluded." },
+  { type: "multi", q: "Which of these are true?", options: ["a ^ a is 0 for every a", "~x equals -x - 1 in two's complement", "1 << 40 is safe on a 32-bit int in C++", "x & -x isolates the lowest set bit"], answer: [0, 1, 3], explain: "Shifting a 32-bit int by 40 is undefined; use 1LL << 40." },
+  { type: "predict", q: "What does this print?", code: "x = 0b101100\nprint((x & -x).bit_length() - 1, bin(x & (x - 1)))", options: ["2 0b101000", "3 0b100100", "2 0b100100", "5 0b100000"], answer: 0, explain: "The lowest set bit of 101100 is bit 2 (value 4). Clearing it gives 101000." }
+]} />

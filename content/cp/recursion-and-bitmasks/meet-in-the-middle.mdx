@@ -1,0 +1,185 @@
+---
+title: Meet in the Middle
+track: cp
+module: recursion-and-bitmasks
+order: 5
+difficulty: hard
+estMinutes: 30
+prerequisites: [cp/recursion-and-bitmasks/bitmask-subset-enumeration]
+tags: [meet-in-the-middle, subset-sum, hashing, two-pointers]
+type: lesson
+problems: [m09-count-subsets-mitm]
+furtherReading:
+  - title: cp-algorithms (search for meet in the middle / subset problems)
+    url: https://cp-algorithms.com/
+  - title: CSES Problem Set, Meet in the Middle
+    url: https://cses.fi/problemset/task/1628
+  - title: Horowitz and Sahni, Computing partitions with applications to the knapsack problem (1974)
+    url: https://dl.acm.org/doi/10.1145/321812.321823
+---
+
+## Intuition
+
+Two friends are searching for each other in a huge maze. Instead of one walking through every corridor to find the other, **both walk toward the middle** and meet. Each only covers the square root of the work.
+
+For subset problems on `n` items, brute force costs `2^n`. At `n = 40` that is `10^12`, far too slow, but `2^20 = 10^6` is trivial. So split the items into two halves, enumerate the subsets of **each half** separately (`2 * 2^(n/2)` work), and combine the two lists cleverly instead of trying all `2^(n/2) * 2^(n/2)` pairs.
+
+## The idea, precisely
+
+Let the set be `A ∪ B` with `|A| = |B| = n/2`. A subset of the whole set is exactly a pair (subset of `A`, subset of `B`). If the quantity you want decomposes, as a sum does, `value(X ∪ Y) = value(X) + value(Y)`, then the question "does some pair satisfy a condition" becomes a **lookup** problem on two lists of size `2^(n/2)`:
+
+- **Exists / count with an exact target `S`:** for each left sum `v`, look up `S - v` among right sums (hash map, or sort and binary search).
+- **Closest to a target (or at most a limit):** sort the right sums; for each left sum use binary search or two pointers for the best partner.
+
+Generating all `2^k` subset sums of `k` items by doubling takes `O(2^k)`: start with `[0]` and for each item append every existing value plus the item.
+
+## Worked example: count subsets with sum S
+
+<CodeRunner language="python" code={`from collections import Counter
+
+def sums(xs):
+    r = [0]
+    for x in xs:
+        r += [v + x for v in r]
+    return r
+
+def count_subsets(a, S):
+    h = len(a) // 2
+    right = Counter(sums(a[h:]))
+    return sum(right.get(S - v, 0) for v in sums(a[:h]))
+
+def brute(a, S):
+    n = len(a)
+    c = 0
+    for m in range(1 << n):
+        t = sum(a[i] for i in range(n) if m >> i & 1)
+        c += t == S
+    return c
+
+a = [3, 34, 4, 12, 5, 2, 7, 1, 9, 10, 6, 8]
+for S in (0, 9, 20, 50):
+    print(S, count_subsets(a, S), brute(a, S))
+`} />
+
+The two columns agree. Now the point of the technique: the same function handles `n = 34` (and in a compiled language `n = 40`) quickly, while the brute force over `2^34` subsets would take hours.
+
+<CodeRunner language="python" code={`import random
+from collections import Counter
+
+def sums(xs):
+    r = [0]
+    for x in xs:
+        r += [v + x for v in r]
+    return r
+
+random.seed(5)
+a = [random.randint(1, 10**9) for _ in range(34)]
+S = sum(a[:7]) + sum(a[17:22])
+h = len(a) // 2
+right = Counter(sums(a[h:]))
+print(sum(right.get(S - v, 0) for v in sums(a[:h])) >= 1)
+`} />
+
+(The planted target guarantees at least one subset, so it prints `True`. Each half has `2^17 = 131,072` sums.)
+
+## Complexity
+
+- Enumeration: `O(2^(n/2))` per half.
+- Combine with a hash map: `O(2^(n/2))` expected, with sorting plus binary search `O(2^(n/2) * n)` since `log 2^(n/2) = n/2`.
+- Memory: `O(2^(n/2))`. For `n = 40` that is about 1M entries per half, quite acceptable; for `n = 50` it would be 33M and too large, which is the practical ceiling of the method.
+
+Compare with brute force `O(2^n)`: the exponent is halved.
+
+## Variants
+
+1. **Closest sum to a target `T`:** sort the right sums; for each left sum `v`, binary search for `T - v` and test the two neighbours.
+2. **Existence with two pointers:** sort left ascending and right descending, walk `i` up and `j` down while comparing `left[i] + right[j]` with the target. No hashing needed.
+3. **Counting with duplicates:** use a map from value to count (not a set), so equal sums contribute multiplicatively.
+4. **Large-weight knapsack:** when both weights and values are large but `n <= 40`, enumerate `(weight, value)` pairs of each half, sort the right half by weight, build a prefix maximum of value, and binary search per left pair.
+5. **Four-sum style problems:** split four lists into two pairs, store all `n^2` pair sums of one side, look up complements of the other. This is the same idea at array level (`O(n^2)` instead of `O(n^4)`).
+
+## Code skeleton
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+vector<long long> sums(const vector<long long>& a, int from, int to) {
+    vector<long long> r(1, 0);
+    for (int i = from; i < to; i++) {
+        size_t m = r.size();
+        for (size_t j = 0; j < m; j++) r.push_back(r[j] + a[i]);
+    }
+    return r;
+}
+// count: sort right, then equal_range(S - v) for each left sum v
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+def sums(xs):
+    r = [0]
+    for x in xs:
+        r += [v + x for v in r]
+    return r
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] sums(long[] a, int from, int to) {
+    long[] r = new long[1 << (to - from)];
+    int size = 1;
+    for (int i = from; i < to; i++) {
+        for (int j = 0; j < size; j++) r[size + j] = r[j] + a[i];
+        size *= 2;
+    }
+    return r;
+}
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(2^(n/2))" space="O(2^(n/2))" note="n up to about 40 to 44" />
+
+## When to reach for it
+
+- `n` is around 30 to 45 and the structure is "choose a subset"; `2^n` is too large and `2^(n/2)` is small.
+- The objective **splits additively** over the two halves (sums, counts, xor, or any value you can combine with a lookup).
+- There is no better polynomial algorithm available (if the numbers are small, plain subset-sum DP over values is faster and uses less memory).
+
+## Pitfalls
+
+<Callout type="pitfall" title="Meet in the middle bugs">
+1. **Overflow:** sums of up to 20 values near `10^9` already exceed 32 bits; counts can reach `2^n` (use 64-bit).
+2. **Uneven split with `n` odd:** use `h = n / 2` for the left and `n - h` for the right; both lists must be fully enumerated.
+3. **Counting the empty subset twice or not at all:** the empty subset is one subset of each half; their pair is the empty subset of the whole. Decide if the problem counts it.
+4. **Memory blow-up:** keeping all sums of both halves as Python lists of ints costs tens of bytes each; for `n = 40` that is already hundreds of MB in naive code. Use arrays or sort in place when the limit is tight.
+5. **Using a hash set when you need counts:** duplicates in the right list must add up, not collapse.
+6. **Anti-hash inputs:** on adversarial judges, prefer sorting plus binary search to unordered hash maps.
+</Callout>
+
+## Practice
+
+<Problem id="m09-count-subsets-mitm" />
+
+### Problem ladder
+
+- [CSES Meet in the Middle](https://cses.fi/problemset/task/1628), the problem above at `n = 40`
+- [CSES Apple Division](https://cses.fi/problemset/task/1623), a warm-up where `2^n` is still enough
+- [LeetCode 1755, Closest Subsequence Sum](https://leetcode.com/problems/closest-subsequence-sum/), closest-sum variant
+- [LeetCode 454, 4Sum II](https://leetcode.com/problems/4sum-ii/), pair sums stored in a map
+- [Codeforces 888E, Maximum Subsequence](https://codeforces.com/problemset/problem/888/E), meet in the middle with a modulus
+
+## Quiz
+
+<Quiz id="cp-m09-mitm-1" tags={["meet-in-the-middle"]} questions={[
+  { type: "mcq", q: "For n = 40 items, how many subset sums does meet in the middle enumerate in total (roughly)?", options: ["40", "2 * 2^20, about two million", "2^40", "40!"], answer: 1, explain: "Each half of 20 items has 2^20 subsets, and there are two halves." },
+  { type: "mcq", q: "What is the key reason the combine step avoids 2^(n/2) * 2^(n/2) pair checks?", options: ["Left sums are sorted", "For each left sum the needed right sum S - v is found by a lookup", "The answer is always zero", "Subsets of the two halves are disjoint"], answer: 1, explain: "A hash map or binary search turns an inner loop over all right sums into one lookup." },
+  { type: "multi", q: "Which are typical requirements for meet in the middle to apply?", options: ["n is small enough that 2^(n/2) is feasible", "The objective combines additively (or can be looked up) across two halves", "All numbers must be positive", "No polynomial-time alternative is available or applicable"], answer: [0, 1, 3], explain: "Positivity is not needed; negatives are fine because sums are enumerated exhaustively." },
+  { type: "predict", q: "What does this print?", code: "def sums(xs):\n    r = [0]\n    for x in xs:\n        r += [v + x for v in r]\n    return r\nprint(sums([1, 10, 100]))", options: ["[0, 1, 10, 11, 100, 101, 110, 111]", "[0, 1, 10, 100]", "[1, 10, 100, 111]", "[0, 1, 11, 111]"], answer: 0, explain: "The list doubles each step: [0], [0,1], [0,1,10,11], then adding 100 to each." }
+]} />

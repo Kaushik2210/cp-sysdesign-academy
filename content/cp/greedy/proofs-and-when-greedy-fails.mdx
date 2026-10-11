@@ -1,0 +1,212 @@
+---
+title: Proof Techniques and When Greedy Fails
+track: cp
+module: greedy
+order: 5
+difficulty: hard
+estMinutes: 35
+prerequisites: [cp/greedy/greedy-with-heaps]
+tags: [greedy, proofs, counterexample, coin-change, dynamic-programming, matroid]
+type: lesson
+problems: [m10-greedy-coin-check]
+furtherReading:
+  - title: Kozen and Zaks, Optimal bounds for the change-making problem (1994)
+    url: https://www.sciencedirect.com/science/article/pii/0304397594900633
+  - title: CLRS, Chapter 16, Greedy Algorithms (includes matroids)
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: CSES, Minimizing Coins
+    url: https://cses.fi/problemset/task/1634
+---
+
+## Intuition
+
+By now you have seen greedy algorithms that are provably right and a couple that are subtly wrong. Competitive programming is largely the skill of **knowing which is which before you submit**. A wrong greedy often passes the samples and fails at test 7 with no explanation, so the habits in this lesson (proof templates, adversarial thinking, and a stress test) are worth more than any single algorithm.
+
+## Four proof templates
+
+**1. Exchange argument.** Take an optimal solution that differs from greedy; show that you can change it, step by step, toward greedy without making it worse. Best for orderings and for "the greedy choice is part of some optimal solution" (activity selection, Smith's rule).
+
+**2. Greedy stays ahead.** Define a measure that tracks progress after `k` steps and prove, by induction on `k`, that greedy's value is at least that of any other solution. Best for "maximise the count" or "reach farthest" (fewest refuels: after `k` refuels greedy reaches at least as far as any plan; interval cover).
+
+**3. Structural or counting argument.** Show a lower bound on the answer that greedy meets exactly. Example: the minimum number of rooms is at least the maximum overlap (at the busiest moment that many meetings are in progress simultaneously), and the heap greedy never uses more than the maximum overlap, so it is optimal.
+
+**4. Matroid argument.** If the feasible sets form a matroid (a hereditary family with the exchange property: whenever `|A| < |B|` both independent, some element of `B \ A` can be added to `A`), then "sort items by weight and add each one if the set stays independent" is optimal for maximising total weight. Examples: maximum spanning tree (Kruskal), job sequencing with unit times and deadlines. You rarely need the full theory, but recognising the pattern ("independent sets you extend one element at a time") is useful.
+
+## The template of a failure: a counterexample
+
+To refute a greedy rule you only need **one** input where it loses. Hunt for it systematically:
+
+1. Shrink: try `n = 2, 3, 4` with tiny numbers.
+2. Make the greedy choice **block** two good alternatives (the long interval that kills two short ones; the high-ratio item that wastes capacity).
+3. Make a small early sacrifice that pays off later (coins `{1, 3, 4}`).
+4. Let the computer search (below).
+
+### Coin change
+
+For coins `{1, 3, 4}` and amount `6` greedy uses `4 + 1 + 1` (3 coins) but `3 + 3` needs 2. For many real currencies greedy is optimal; the right question is "is this coin **system** canonical?" It can be decided: **if greedy is non-optimal for some amount, the smallest such amount is less than `c_(n-1) + c_n`** (the two largest coins; Kozen and Zaks, 1994). So it is enough to compare greedy with the DP for amounts up to that bound, which is what the practice problem asks.
+
+### Always have a slow reference
+
+Write the dumbest correct solution (brute force or DP) and compare on thousands of random small cases. If greedy ever disagrees, print the case.
+
+<CodeRunner language="python" code={`import random
+
+def greedy_count(coins, v):
+    cnt = 0
+    for c in reversed(coins):
+        cnt += v // c
+        v %= c
+    return cnt
+
+def dp_table(coins, top):
+    INF = 10**9
+    dp = [0] + [INF] * top
+    for v in range(1, top + 1):
+        dp[v] = min(dp[v - c] + 1 for c in coins if c <= v)
+    return dp
+
+random.seed(3)
+bad_systems = 0
+bound_ok = True
+shown = 0
+for _ in range(500):
+    k = random.randint(2, 4)
+    coins = [1] + sorted(random.sample(range(2, 20), k))
+    dp = dp_table(coins, 3 * coins[-1])
+    first = next((v for v in range(1, 3 * coins[-1] + 1) if greedy_count(coins, v) != dp[v]), None)
+    if first is not None:
+        bad_systems += 1
+        bound_ok = bound_ok and first < coins[-1] + coins[-2]
+        if shown < 3:
+            print("counterexample", coins, "amount", first, greedy_count(coins, first), dp[first])
+            shown += 1
+print("non-canonical systems:", bad_systems, "of 500; Kozen-Zaks bound held:", bound_ok)
+`} />
+
+## Weighted interval scheduling: when the weight breaks greedy
+
+Activity selection (maximise the **number**) is greedy. Give every interval a **weight** and maximise the total weight, and "earliest finish" fails: a short cheap interval can block one big valuable interval. The correct approach is dynamic programming over intervals sorted by end: `dp[i] = max(dp[i-1], w_i + dp[p(i)])`, where `p(i)` is the number of intervals that end no later than interval `i` starts.
+
+<CodeRunner language="python" code={`from bisect import bisect_right
+
+iv = [(1, 4, 1), (3, 5, 100), (4, 7, 2)]      # (start, end, weight)
+iv.sort(key=lambda x: x[1])
+
+# greedy by finish time, ignoring weights
+last, g = -10**9, 0
+for s, e, w in iv:
+    if s >= last:
+        g += w
+        last = e
+
+# dynamic programming
+ends = [e for _, e, _ in iv]
+dp = [0] * (len(iv) + 1)
+for i, (s, e, w) in enumerate(iv, 1):
+    j = bisect_right(ends, s, 0, i - 1)
+    dp[i] = max(dp[i - 1], dp[j] + w)
+
+print("greedy", g, "dp", dp[-1])
+`} />
+
+It prints `greedy 3 dp 100`.
+
+## Greedy versus DP: how to choose
+
+| Question | Greedy usually fits | DP usually needed |
+| --- | --- | --- |
+| Can I commit without looking at alternatives? | Yes, with a proof | No, a small early sacrifice may pay off |
+| What do I optimise? | Count, a single scalar order | Weighted sums over constrained choices, exact amounts |
+| Are items divisible or interchangeable? | Often yes | Indivisible items with several constraints |
+| What does the sample suggest? | Sorted order resolves everything | The right answer needs comparing branches |
+
+A practical workflow:
+
+1. Propose a greedy. Try to prove it with one of the templates. If the proof goes through, implement.
+2. If the proof gets stuck on a specific situation, **that situation is your counterexample**. Construct it.
+3. If greedy fails, formulate the problem as `dp[state] = best over choices`, where the state is what the remaining decisions depend on (a prefix, a remaining capacity, a subset). The coin DP `dp[v] = 1 + min dp[v - c]` is the natural successor of the greedy coin loop.
+4. Mixed solutions exist: DP across a small part, greedy elsewhere.
+
+<Callout type="tip" title="A rule of thumb for contests">
+If you can invent a sixty-second counterexample for your greedy, it is wrong. If you have tried for five minutes and also have a one-paragraph exchange argument, it is probably right. If you have neither, write the brute force and stress test before submitting.
+</Callout>
+
+## Code: greedy vs DP for coins
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+// dp[v] = fewest coins for amount v
+vector<int> dp(top + 1, INT_MAX);
+dp[0] = 0;
+for (int v = 1; v <= top; v++)
+    for (int c : coins)
+        if (c <= v && dp[v - c] != INT_MAX) dp[v] = min(dp[v], dp[v - c] + 1);
+// greedy count, coins sorted ascending
+int g = 0, r = v;
+for (int i = coins.size() - 1; i >= 0; i--) { g += r / coins[i]; r %= coins[i]; }
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+dp = [0] + [10**9] * top
+for v in range(1, top + 1):
+    dp[v] = min(dp[v - c] + 1 for c in coins if c <= v)
+g, r = 0, v
+for c in reversed(coins):
+    g += r // c
+    r %= c
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] dp = new int[top + 1];
+Arrays.fill(dp, Integer.MAX_VALUE);
+dp[0] = 0;
+for (int v = 1; v <= top; v++)
+    for (int c : coins)
+        if (c <= v && dp[v - c] != Integer.MAX_VALUE) dp[v] = Math.min(dp[v], dp[v - c] + 1);
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(top * n) for the DP, O(n) per amount for greedy" space="O(top)" />
+
+## Pitfalls
+
+<Callout type="pitfall" title="Greedy proof and testing mistakes">
+1. **Proving only that greedy is feasible**, not that it is optimal. Feasible and optimal are different claims.
+2. **"By induction it is obvious"** without verifying the inductive step on the item that greedy picked.
+3. **Testing with too-nice random data.** Random large values rarely produce ties or tight packings. Test small value ranges (`1..5`) and many ties.
+4. **Stress testing only on sample-like sizes:** counterexamples are usually tiny (`n <= 5`), so brute-force comparison with `n` up to 6 or 7 is both feasible and enough.
+5. **Assuming a real-world system is canonical:** US coins are, `{1, 3, 4}` is not, and other systems must be checked.
+6. **Using greedy where "exactly" or "number of ways" appears** in the statement.
+</Callout>
+
+## Practice
+
+<Problem id="m10-greedy-coin-check" />
+
+### Problem ladder
+
+- [CSES Minimizing Coins](https://cses.fi/problemset/task/1634), the DP that always works
+- [CSES Money Sums](https://cses.fi/problemset/task/1745), reachability DP instead of greed
+- [LeetCode 322, Coin Change](https://leetcode.com/problems/coin-change/), the classic failure of greedy
+- [LeetCode 135, Candy](https://leetcode.com/problems/candy/), a two-pass greedy with a proof
+- [LeetCode 763, Partition Labels](https://leetcode.com/problems/partition-labels/)
+- [LeetCode 1235, Maximum Profit in Job Scheduling](https://leetcode.com/problems/maximum-profit-in-job-scheduling/), weighted intervals need DP
+
+## Quiz
+
+<Quiz id="cp-m10-proofs-1" tags={["greedy", "dp"]} questions={[
+  { type: "mcq", q: "Which technique proves that greedy reaches at least as far as any other plan after k steps?", options: ["Exchange argument on adjacent swaps", "Greedy stays ahead (induction on k)", "Amortized analysis", "Divide and conquer"], answer: 1, explain: "Defining a progress measure and showing greedy is never behind after each step is the 'stays ahead' template." },
+  { type: "mcq", q: "Coins {1, 3, 4}. What is the smallest amount for which greedy is not optimal?", options: ["4", "5", "6", "7"], answer: 2, explain: "Greedy on 6 gives 4+1+1 (3 coins), optimal is 3+3 (2 coins). Amounts 1 to 5 are fine." },
+  { type: "multi", q: "Which of these are standard reasons to switch from greedy to dynamic programming?", options: ["A weighted objective where an early cheap choice can block a valuable one", "The answer must be an exact amount made from indivisible pieces", "The input is sorted", "You found a tiny counterexample to the greedy rule"], answer: [0, 1, 3], explain: "A sorted input does not make greedy wrong or right by itself." },
+  { type: "predict", q: "What does this print?", code: "coins = [1, 5, 12]\nv = 15\ncnt = 0\nfor c in reversed(coins):\n    cnt += v // c\n    v %= c\nprint(cnt)", options: ["2", "3", "4", "5"], answer: 2, explain: "Greedy takes 12 and then three 1s: 4 coins, while 5+5+5 uses only 3." }
+]} />

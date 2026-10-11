@@ -1,0 +1,90 @@
+{
+  "id": "m09-count-subsets-mitm",
+  "title": "Count Subsets, Meet in the Middle",
+  "source": {
+    "name": "Classic meet-in-the-middle; compare CSES 'Meet in the Middle'",
+    "url": "https://cses.fi/problemset/"
+  },
+  "rating": 1700,
+  "tags": [
+    "meet-in-the-middle",
+    "bitmask",
+    "hashing"
+  ],
+  "statement": "Given `n` integers (negatives and duplicates allowed) and a target `S`, count the subsets of **positions** whose elements sum to exactly `S`. Two subsets are different if they use different index sets. The empty subset has sum `0` and counts when `S = 0`.\n\n**Input.** First line `n` and `S`. Second line `n` integers.\n\n**Output.** The number of subsets.",
+  "constraints": [
+    "1 ≤ n ≤ 34 in this browser version (the idea targets n = 40)",
+    "|a_i| ≤ 10^9, |S| ≤ 4·10^10",
+    "The answer can be as large as 2^34"
+  ],
+  "timeLimitMs": 8000,
+  "hints": [
+    "`2^34` is far too many subsets, but `2^17` is small. Split the array into two halves.",
+    "Every subset is one subset of the left half plus one subset of the right half; list all sums of each half.",
+    "Count right-half sums in a hash map, then for each left sum `v` add `count[S - v]`. Use 64-bit counters."
+  ],
+  "editorial": "Split into `A` (first `n/2` items) and `B`. Generate all `2^(n/2)` subset sums of each by repeated doubling. A subset of the whole array is a pair (subset of A, subset of B) and sums to `S` iff `sumA + sumB = S`. Put sums of `B` in a frequency map and for each sum `v` of `A` add `freq[S - v]`. Time `O(2^(n/2))` expected (with sorting `O(2^(n/2) * n)`), memory `O(2^(n/2))`; for `n = 40` that is about a million entries per half instead of `10^12` subsets. The answer needs 64 bits: with all zeros and `n = 34` it is `2^34`.",
+  "complexity": {
+    "time": "O(2^n)",
+    "space": "O(2^n)"
+  },
+  "starter": {
+    "python": "import sys\nd = sys.stdin.read().split()\nn, S = int(d[0]), int(d[1])\na = list(map(int, d[2:2 + n]))\n# split in halves, enumerate sums of each\n",
+    "javascript": "// tokens: n S then the n numbers\nconst [n, S] = readLine().split(' ').map(Number);\nconst a = readLine().split(' ').map(Number);\n// split in halves, enumerate sums of each\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int n = sc.nextInt();\n        long S = sc.nextLong();\n        // answer may reach 2^34: use long\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n; long long S; cin >> n >> S;  // meet in the middle; answer may be 2^34\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\nfrom collections import Counter\nd = sys.stdin.read().split()\nn, S = int(d[0]), int(d[1])\na = list(map(int, d[2:2 + n]))\n\ndef sums(xs):\n    r = [0]\n    for x in xs:\n        r += [v + x for v in r]\n    return r\n\nh = n // 2\ncnt = Counter(sums(a[h:]))\nprint(sum(cnt.get(S - v, 0) for v in sums(a[:h])))\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length);\nconst n = parseInt(tok[0]);\nconst S = Number(tok[1]);\nconst a = tok.slice(2, 2 + n).map(Number);\nfunction sums(xs) {\n  let r = [0];\n  for (const x of xs) {\n    const m = r.length;\n    for (let i = 0; i < m; i++) r.push(r[i] + x);\n  }\n  return r;\n}\nconst h = n >> 1;\nconst cnt = new Map();\nfor (const v of sums(a.slice(h))) cnt.set(v, (cnt.get(v) || 0) + 1);\nlet ans = 0;\nfor (const v of sums(a.slice(0, h))) ans += cnt.get(S - v) || 0;\nconsole.log(String(ans));\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    static long[] sums(long[] a, int from, int to) {\n        long[] r = new long[1 << (to - from)];\n        int size = 1;\n        for (int i = from; i < to; i++) {\n            for (int j = 0; j < size; j++) r[size + j] = r[j] + a[i];\n            size *= 2;\n        }\n        return r;\n    }\n\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int n = sc.nextInt();\n        long S = sc.nextLong();\n        long[] a = new long[n];\n        for (int i = 0; i < n; i++) a[i] = sc.nextLong();\n        int h = n / 2;\n        HashMap<Long, Integer> cnt = new HashMap<>();\n        for (long v : sums(a, h, n)) cnt.merge(v, 1, Integer::sum);\n        long ans = 0;\n        for (long v : sums(a, 0, h)) ans += cnt.getOrDefault(S - v, 0);\n        System.out.println(ans);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nvector<long long> sums(const vector<long long>& a, int from, int to) {\n    vector<long long> r(1, 0);\n    for (int i = from; i < to; i++) {\n        size_t m = r.size();\n        for (size_t j = 0; j < m; j++) {\n            long long v = r[j] + a[i];\n            r.push_back(v);\n        }\n    }\n    return r;\n}\n\nint main() {\n    int n;\n    long long S;\n    cin >> n >> S;\n    vector<long long> a(n);\n    for (auto &v : a) cin >> v;\n    int h = n / 2;\n    vector<long long> right = sums(a, h, n), left = sums(a, 0, h);\n    sort(right.begin(), right.end());\n    long long ans = 0;\n    for (long long v : left) {\n        auto range = equal_range(right.begin(), right.end(), S - v);\n        ans += range.second - range.first;\n    }\n    cout << ans << endl;\n    return 0;\n}\n"
+  },
+  "tests": [
+    {
+      "input": "6 9\n3 34 4 12 5 2\n",
+      "output": "2\n",
+      "hidden": false
+    },
+    {
+      "input": "1 5\n5\n",
+      "output": "1\n",
+      "hidden": false
+    },
+    {
+      "input": "4 2\n1 1 1 1\n",
+      "output": "6\n",
+      "hidden": true
+    },
+    {
+      "input": "3 0\n1 2 3\n",
+      "output": "1\n",
+      "hidden": true
+    },
+    {
+      "input": "34 0\n0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n",
+      "output": "17179869184\n",
+      "hidden": true
+    },
+    {
+      "input": "20 0\n-118926998 -987750309 -634179498 -956938361 558075712 546505973 20995570 -957466532 115329233 885682089 260725529 -696794378 -867622015 420402533 -823582419 -132731280 -398223215 -563265689 523021752 187745308\n",
+      "output": "1\n",
+      "hidden": true
+    },
+    {
+      "input": "34 55\n6 1 5 1 5 6 0 1 1 1 2 5 6 0 4 3 2 4 6 2 1 3 3 0 6 0 0 1 0 5 2 5 6 5\n",
+      "output": "547964864\n",
+      "hidden": true
+    },
+    {
+      "input": "34 10\n-3 1 2 1 5 1 0 5 -2 5 1 3 5 1 4 0 3 -1 -1 3 -3 1 1 2 3 -3 2 3 3 -2 4 1 3 2\n",
+      "output": "152296424\n",
+      "hidden": true
+    },
+    {
+      "input": "34 6678501788\n1716296 637412421 609803428 361074679 708522077 901061050 390027433 982986936 57146523 946021199 643542427 795842188 213487450 149104732 793339035 501225054 151701112 522385917 177135529 866696040 583066004 655326685 167147791 990505586 651021486 129374241 53927103 67405585 720216123 274613402 421226080 568990664 757333916 764010684\n",
+      "output": "2\n",
+      "hidden": true
+    }
+  ]
+}

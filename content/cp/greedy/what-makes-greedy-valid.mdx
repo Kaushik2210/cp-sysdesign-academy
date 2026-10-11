@@ -1,0 +1,145 @@
+---
+title: What Makes a Greedy Valid
+track: cp
+module: greedy
+order: 1
+difficulty: easy
+estMinutes: 30
+prerequisites: []
+tags: [greedy, greedy-choice, optimal-substructure, counterexample]
+type: lesson
+problems: [m10-fewest-stops]
+furtherReading:
+  - title: cp-algorithms (greedy and scheduling topics)
+    url: https://cp-algorithms.com/
+  - title: CLRS, Chapter 15.3, Elements of the greedy strategy
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: CSES Problem Set, Sorting and Searching
+    url: https://cses.fi/problemset/list/
+---
+
+## Intuition
+
+You must make change, choose which tasks to do, or drive across a country. A **greedy** algorithm makes the choice that looks best right now, commits to it permanently, and repeats. No backtracking, no table of subproblems. When it works it is the simplest and fastest algorithm available, often just "sort, then one pass".
+
+The danger: "looks best now" is a feeling, not a proof. The same recipe that gives the optimum on one problem gives a wrong answer on a very similar one. This lesson is about telling the two apart before you code.
+
+## Definition: two properties
+
+A greedy algorithm is **correct** for a problem when both of these hold.
+
+1. **Greedy choice property.** There is an optimal solution that contains the greedy first choice. (Some optimal solution agrees with what greedy picks.)
+2. **Optimal substructure.** After making that choice, what remains is a smaller instance of the same problem, and an optimal solution to it combines with the choice into an optimal solution of the whole.
+
+If both hold, induction finishes the proof: greedy's first choice is safe, the rest is a smaller instance, and greedy solves that optimally by the induction hypothesis.
+
+Optimal substructure alone is **not** enough (that is also what dynamic programming relies on). The greedy choice property is the extra, strong requirement: you may commit **without looking at the alternatives**.
+
+## A greedy that works: fewest refuels
+
+A car with tank range `K` drives along a line with fuel stations. You want the fewest refuels to reach the destination.
+
+Greedy: drive as far as possible, and when forced to stop, refuel at the **farthest** station you can still reach.
+
+Why the choice is safe: among the stations reachable on the current tank, the farthest one gives the largest reach after refuelling (`p + K` is increasing in `p`). Any plan that refuels at a nearer reachable station can instead refuel at the farthest one: it reaches at least as far, so it never needs more refuels. After committing, the remaining task, "get from here to the destination with a full tank", is the same kind of problem. Both properties hold. (Implement it in the practice problem below.)
+
+## A greedy that works: fractional knapsack
+
+Items have weight `w` and value `v`; you may take any fraction of an item. Take items by decreasing `v / w` until the sack is full.
+
+Why: suppose an optimal solution leaves some of the best-ratio item unused while holding some lower-ratio material. Swap a little of the lower-ratio material for the same weight of the best item: the value does not go down. So there is an optimal solution that takes as much of the best item as possible. That is the greedy choice property.
+
+<CodeRunner language="python" code={`def fractional(items, cap):
+    # items: (value, weight); returns best value as a float
+    items = sorted(items, key=lambda it: it[0] / it[1], reverse=True)
+    total = 0.0
+    for v, w in items:
+        if cap == 0:
+            break
+        take = min(w, cap)
+        total += v * take / w
+        cap -= take
+    return total
+
+print(fractional([(60, 10), (100, 20), (120, 30)], 50))
+`} />
+
+The answer is 240.0: take items 1 and 2 whole (30 weight, 160 value) and 20 of the third (80 value).
+
+## A greedy that fails: 0/1 knapsack
+
+The same ratio rule on the **indivisible** version (take an item whole or not at all) is wrong on the same data. By ratio the items rank `6, 5, 4`. Greedy takes the first two (weight 30, value 160) and cannot add the third (weight 30 would exceed capacity 50). But taking items 2 and 3 gives weight 50 and value 220.
+
+<CodeRunner language="python" code={`items = [(60, 10), (100, 20), (120, 30)]   # (value, weight)
+cap = 50
+
+# greedy by ratio, whole items only
+g_val, g_cap = 0, cap
+for v, w in sorted(items, key=lambda it: it[0] / it[1], reverse=True):
+    if w <= g_cap:
+        g_val += v
+        g_cap -= w
+print("greedy", g_val)
+
+# exact, try all subsets
+best = 0
+n = len(items)
+for m in range(1 << n):
+    wt = sum(items[i][1] for i in range(n) if m >> i & 1)
+    if wt <= cap:
+        best = max(best, sum(items[i][0] for i in range(n) if m >> i & 1))
+print("optimal", best)
+`} />
+
+It prints `greedy 160` and `optimal 220`. The greedy choice property breaks: committing to the highest ratio item can leave unusable capacity ("a hole") that no other item fills.
+
+## A greedy that fails: coin change
+
+Coins `{1, 3, 4}`, amount `6`. Largest-first picks `4 + 1 + 1` (3 coins), but `3 + 3` uses 2. For the coin system `{1, 5, 10, 25}` largest-first is optimal, but "is it optimal?" depends on the system, not the problem statement. The lesson on proof techniques returns to this and to dynamic programming.
+
+## A checklist before trusting a greedy
+
+1. **State the greedy rule precisely** (what is sorted, by which key, what ties do).
+2. **Try to break it:** think of tiny cases where taking the best-looking item blocks two good items, or where a small early sacrifice pays off later.
+3. **Brute-force compare** on random small inputs (write a slow exact solver; see the template in the last lesson of this module).
+4. **Prove it** with an exchange argument or a "stays ahead" argument (next lesson).
+5. If you cannot prove it and cannot break it, suspect DP or a more careful structure.
+
+<Callout type="tip" title="Signals that greedy might be right">
+Sorting by a clean key resolves the order. Items are interchangeable except for one number. The objective is a sum or a count where earlier choices do not "use up" different resources for different later items. Matroid-like structure (independent sets you may extend one element at a time).
+</Callout>
+
+<Callout type="pitfall" title="Signals that greedy is probably wrong">
+Items consume several different resources at once. Choices have indivisible sizes that must fit exactly. The problem asks for "exactly" something, or counts the number of ways. A choice early changes the **feasibility** of later choices in complicated ways.
+</Callout>
+
+## Pitfalls
+
+<Callout type="pitfall" title="Greedy mistakes">
+1. **Trusting intuition or the sample cases.** Samples are usually consistent with several wrong greedy rules.
+2. **Sorting by a derived float** (`v / w`, `t / w`): equal or nearly equal ratios compare wrongly. Cross-multiply with integers.
+3. **Ignoring ties:** if two items tie on the key, an unspecified order can matter. Prove tie order is irrelevant or define it.
+4. **Choosing by a local rule without feasibility check:** the "best" item may not be allowed any more.
+5. **Greedy for an `exactly` or `count the ways` problem:** these almost always need DP.
+</Callout>
+
+## Practice
+
+<Problem id="m10-fewest-stops" />
+
+### Problem ladder
+
+- [CSES Ferris Wheel](https://cses.fi/problemset/task/1090), sort and pair the lightest with the heaviest
+- [CSES Movie Festival](https://cses.fi/problemset/task/1629), earliest finishing time first
+- [LeetCode 45, Jump Game II](https://leetcode.com/problems/jump-game-ii/), the same "farthest reach" greedy
+- [LeetCode 134, Gas Station](https://leetcode.com/problems/gas-station/)
+- [LeetCode 455, Assign Cookies](https://leetcode.com/problems/assign-cookies/)
+
+## Quiz
+
+<Quiz id="cp-m10-valid-1" tags={["greedy"]} questions={[
+  { type: "mcq", q: "Which statement is the greedy choice property?", options: ["Subproblems overlap", "Some optimal solution contains the greedy first choice", "The algorithm runs in O(n log n)", "Every optimal solution is unique"], answer: 1, explain: "It says the locally best choice can be extended to a globally optimal solution." },
+  { type: "mcq", q: "Coins {1, 3, 4}, amount 6. How many coins does the largest-first greedy use, and what is optimal?", options: ["Greedy 2, optimal 2", "Greedy 3, optimal 2", "Greedy 3, optimal 3", "Greedy 2, optimal 1"], answer: 1, explain: "Greedy takes 4+1+1 (3 coins); 3+3 uses 2." },
+  { type: "multi", q: "Which problems are solved correctly by a ratio-based greedy?", options: ["Fractional knapsack (items can be split)", "0/1 knapsack", "Fewest refuels on a line (farthest reachable station)", "Minimum coins for coins {1, 3, 4}"], answer: [0, 2], explain: "The 0/1 knapsack and the {1,3,4} coin system have counterexamples." },
+  { type: "predict", q: "What does this print?", code: "coins = [4, 3, 1]\nv, cnt = 6, 0\nfor c in coins:\n    cnt += v // c\n    v %= c\nprint(cnt)", options: ["2", "3", "4", "6"], answer: 1, explain: "Greedy takes one 4, then two 1s: 3 coins, while 3+3 would use 2." }
+]} />
