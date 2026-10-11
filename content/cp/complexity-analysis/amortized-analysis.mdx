@@ -1,0 +1,157 @@
+---
+title: Amortized Analysis
+track: cp
+module: complexity-analysis
+order: 2
+difficulty: medium
+estMinutes: 30
+prerequisites: [cp/complexity-analysis/big-o-notation]
+tags: [complexity, amortized, two-pointers, dynamic-array, monotonic-stack]
+type: lesson
+problems: [m04-longest-window]
+furtherReading:
+  - title: CLRS, Introduction to Algorithms, chapter 16 (Amortized Analysis)
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: Wikipedia, Amortized analysis
+    url: https://en.wikipedia.org/wiki/Amortized_analysis
+---
+
+## Intuition
+
+You pay rent once a month, not every day. Per day it is a small cost even though one day each month is expensive. **Amortized analysis** asks the same question about algorithms: if a *sequence* of `m` operations costs `T` in total, then the amortized cost per operation is `T / m`, even if a single operation is occasionally expensive.
+
+It is a statement about the **worst-case total over any sequence of operations**, not an average over random inputs. No probability is involved.
+
+## Formal idea
+
+Three standard ways to prove an amortized bound; you only need to know which one fits:
+
+1. **Aggregate.** Bound the total cost of `m` operations directly and divide by `m`.
+2. **Accounting (banker's).** Charge each operation a fixed amount; cheap operations overpay and bank the surplus as credit, which later pays for the expensive operations.
+3. **Potential.** Define a potential `Phi` of the data structure; amortized cost `= actual cost + (Phi after - Phi before)`.
+
+In contests the aggregate argument nearly always works: *find the quantity that can only move in one direction, and bound how far it can move in total.*
+
+## Example 1: the dynamic array
+
+An array of capacity `c` is full; appending triggers allocation of a new array of capacity `2c` and copying `c` elements. That single `append` costs `O(c)`. But the expensive step happens after `c` cheap ones:
+
+Starting from capacity 1 and appending `n` elements, copies happen at sizes `1, 2, 4, ..., 2^k` with `2^k < n`. Total copying is `1 + 2 + 4 + ... + 2^k < 2 * 2^k <= 2n`. Add `n` for the plain writes: **less than `3n` operations for `n` appends, so `O(1)` amortized.**
+
+The growth must be **multiplicative**. If you grow by a fixed `+10` each time, you copy about `n/10` times, each costing `O(n)`: total `Theta(n^2)`. Measure it:
+
+<CodeRunner snippets={{ python: `def total_copies(n, grow):
+    cap, size, copies = 1, 0, 0
+    for _ in range(n):
+        if size == cap:
+            copies += size
+            cap = grow(cap)
+        size += 1
+    return copies
+
+n = 100000
+print(total_copies(n, lambda c: c * 2))    # < 2n
+print(total_copies(n, lambda c: c + 10))   # about n^2 / 20
+`, javascript: `function totalCopies(n, grow) {
+  let cap = 1, size = 0, copies = 0;
+  for (let i = 0; i < n; i++) {
+    if (size === cap) { copies += size; cap = grow(cap); }
+    size++;
+  }
+  return copies;
+}
+const n = 100000;
+console.log(totalCopies(n, c => c * 2), totalCopies(n, c => c + 10));
+` }} />
+
+<Callout type="note" title="Which growth factor?">
+Any constant factor `k > 1` gives `O(1)` amortized. Real libraries differ: GCC's `std::vector` doubles, MSVC and Java's `ArrayList` grow by about 1.5, CPython lists by about 1.125 plus a constant. Smaller factors waste less memory but copy more often.
+</Callout>
+
+## Example 2: two pointers
+
+Longest subarray of positive numbers with sum at most `K`:
+
+```python
+l = 0; s = 0; best = 0
+for r in range(n):
+    s += a[r]
+    while s > K:        # inner loop inside outer loop...
+        s -= a[l]
+        l += 1
+    best = max(best, r - l + 1)
+```
+
+Naively "loop in a loop" says `O(n^2)`. But `l` only increases and never exceeds `n`, so the `while` body runs at most `n` times **in total over the whole execution**. The outer loop runs `n` times. Total `<= 2n` pointer moves: `O(n)`. The inner loop is expensive only occasionally; it is `O(1)` amortized per outer step.
+
+## Example 3: monotonic stack
+
+For each element find the next greater element to its right. Keep a stack of indices with decreasing values; each new element pops everything smaller than it.
+
+<CodeRunner snippets={{ python: `def next_greater(a):
+    n = len(a)
+    res = [-1] * n
+    st = []                 # indices, values decreasing
+    pops = 0
+    for i, x in enumerate(a):
+        while st and a[st[-1]] < x:
+            res[st.pop()] = x
+            pops += 1
+        st.append(i)
+    return res, pops
+
+a = [4, 5, 2, 25, 7, 8, 1, 30]
+res, pops = next_greater(a)
+print(res)     # [5, 25, 25, 30, 8, 30, 30, -1]
+print(pops, "pops for", len(a), "elements")   # at most n
+`, javascript: `function nextGreater(a) {
+  const res = new Array(a.length).fill(-1), st = [];
+  let pops = 0;
+  a.forEach((x, i) => {
+    while (st.length && a[st[st.length - 1]] < x) { res[st.pop()] = x; pops++; }
+    st.push(i);
+  });
+  return [res, pops];
+}
+console.log(nextGreater([4, 5, 2, 25, 7, 8, 1, 30]));
+` }} />
+
+Each index is pushed once and popped at most once, so all `while` iterations together are `<= n`: `O(n)` total.
+
+## Example 4: binary counter
+
+Incrementing a `k`-bit counter flips a run of trailing `1`s to `0` and one `0` to `1`. A single increment can flip `k` bits (`0111...1 -> 1000...0`). Yet `n` increments from zero flip fewer than `2n` bits in total: bit `i` flips once every `2^i` increments, so `n * (1 + 1/2 + 1/4 + ...) < 2n`. Amortized `O(1)` per increment. This is the standard model for "rare carries".
+
+## When amortization breaks
+
+- **You need worst-case latency.** An amortized `O(1)` append may still have a single `O(n)` hiccup, which matters for real-time systems but not for contest totals.
+- **Operations can be undone or repeated at the expensive point.** If you can undo the last append (or use a persistent version of the structure), an adversary can alternate "expensive op, undo, expensive op, ..." and every operation pays full price. Rollback structures (for example DSU with rollback) must use worst-case bounds.
+- **Shrinking carelessly.** If a dynamic array doubles at full and halves at half-full, alternating append/remove at the boundary costs `O(n)` every time. Shrink when the array is a *quarter* full.
+
+## Pitfalls
+
+1. **Nested loop does not mean quadratic.** Check whether the inner loop's index is a monotone global pointer.
+2. **Calling an average over random inputs "amortized".** That is *expected* complexity (e.g. hash table lookups). Amortized is deterministic.
+3. **Multiplying instead of summing.** Over `n` operations of amortized cost `c`, the total is `n * c`, not `n * (worst single op)`.
+4. **Forgetting resets.** In sliding-window code, a single counter that is reset inside the loop can silently re-introduce `O(n^2)`.
+
+## Practice
+
+<Problem id="m04-longest-window" />
+
+### Problem ladder
+
+- [CSES, Playlist](https://cses.fi/problemset/task/1141), about 1300 (longest window with distinct values)
+- [CSES, Sum of Two Values](https://cses.fi/problemset/task/1640), about 1100 (sort plus two pointers)
+- [CSES, Subarray Sums I](https://cses.fi/problemset/task/1660), about 1300 (positive values, window sums)
+- [CSES, Nearest Smaller Values](https://cses.fi/problemset/task/1645), about 1300 (monotonic stack)
+- [LeetCode 3, Longest Substring Without Repeating Characters](https://leetcode.com/problems/longest-substring-without-repeating-characters/), medium
+
+## Quiz
+
+<Quiz id="cp-complexity-amortized-1" tags={["amortized"]} questions={[
+  { type: "mcq", q: "A dynamic array doubles its capacity when full. What is the amortized cost of append?", options: ["O(n)", "O(log n)", "O(1)", "O(n log n)"], answer: 2, explain: "Total copying over n appends is below 2n, so the average per append is constant." },
+  { type: "mcq", q: "A dynamic array grows by a constant +100 slots when full. Total cost of n appends is:", options: ["Theta(n)", "Theta(n log n)", "Theta(n^2)", "Theta(1)"], answer: 2, explain: "n/100 resizes, each copying up to n elements: about n^2/200 total." },
+  { type: "multi", q: "Which loops run in O(n) total?", options: ["Two pointers on a sorted array where l and r only move forward", "A monotonic stack where each element is pushed once and popped at most once", "for i in range(n): while j < n: j += 1 (j is never reset)", "for i in range(n): for j in range(n): ..."], answer: [0, 1, 2], explain: "The first three have a monotone pointer or a push/pop budget bounded by n. The last is plainly n^2." },
+  { type: "predict", q: "How many bit flips happen in total when a binary counter goes from 0 to 7 (seven increments)?", code: "# increments: 000->001->010->011->100->101->110->111\n# count flips at every step", options: ["7", "11", "14", "8"], answer: 1, explain: "Flips: 1, 2, 1, 3, 1, 2, 1 = 11, which is below 2*7 = 14." }
+]} />

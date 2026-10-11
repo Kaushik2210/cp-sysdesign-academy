@@ -1,0 +1,145 @@
+---
+title: Estimating From Constraints
+track: cp
+module: complexity-analysis
+order: 3
+difficulty: easy
+estMinutes: 25
+prerequisites: [cp/complexity-analysis/big-o-notation]
+tags: [complexity, constraints, estimation, time-limit]
+type: lesson
+problems: [m04-zero-triples]
+furtherReading:
+  - title: Competitive Programmer's Handbook (Laaksonen), chapter 2 Time complexity
+    url: https://cses.fi/book/book.pdf
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+Before writing a single line, a strong competitor reads the constraints and says: "n is 2 * 10^5, so the intended solution is about `n log n`." The input size is a *hint about the solution*, because problem setters choose limits so that the intended solution passes and the naive one fails.
+
+This lesson turns that instinct into arithmetic.
+
+## The budget
+
+A typical judge executes about **10^8 simple operations per second** in a compiled language (C++, Java, Rust). "Simple" means an addition, comparison, array access, not a map lookup or a memory allocation. With a time limit of 1 to 2 seconds, plan for **at most about 10^8 to 3 * 10^8** simple operations.
+
+```text
+operations needed (as a function of n)   <=   budget (about 10^8 per second of time limit)
+```
+
+Python and JavaScript are slower: Python executes roughly `10^7` simple loop iterations per second, so either use a better algorithm, vectorised built-ins, or accept a smaller feasible `n`.
+
+## The table to memorise
+
+| Max `n` | Fits | Typical algorithm families |
+| --- | --- | --- |
+| `n <= 10` | `O(n!)`, `O(n^6)` | permutations, brute-force search |
+| `n <= 20` to `25` | `O(2^n * n)` | subsets, bitmask DP |
+| `n <= 40` | `O(2^(n/2) * n)` | meet in the middle |
+| `n <= 100` | `O(n^4)` | Floyd-Warshall (`n^3`), small DP with 4 loops |
+| `n <= 500` | `O(n^3)` | matrix DP, Floyd-Warshall |
+| `n <= 5000` | `O(n^2)` | pairs, 2D DP, LIS `n^2` |
+| `n <= 10^5` | `O(n sqrt n)`, `O(n log^2 n)` | Mo's algorithm, sqrt decomposition |
+| `n <= 2 * 10^5` to `10^6` | `O(n log n)` | sorting, heaps, segment trees, binary search |
+| `n <= 10^7` | `O(n)` | linear sieve, single scan, prefix sums |
+| `n <= 10^9` | `O(sqrt n)`, `O(log n)` | trial division, number theory |
+| `n <= 10^18` | `O(log n)`, `O(1)` | closed form, binary exponentiation, gcd |
+
+These are guides, not laws. A `O(n^2)` algorithm with `n = 5000` is `2.5 * 10^7` steps: easy. `n = 10^5` with `n^2/2 = 5 * 10^9` is not.
+
+## Worked examples
+
+**Example 1.** `n = 2 * 10^5`, time limit 2 s, "count pairs `i < j` with `a_i + a_j = S`".
+
+- `n^2 / 2 = 2 * 10^10`: about 200 seconds. Rejected.
+- `n log n = 2 * 10^5 * 18 = 3.6 * 10^6`: trivially fast. Sort plus two pointers, or a hash map.
+
+**Example 2.** `n = 20`, "can you split the numbers into two groups of equal sum?" `2^20 = 10^6` subsets: even `2^20 * 20 = 2 * 10^7` passes. A bitmask loop is intended; a greedy proof would be a trap.
+
+**Example 3.** `n <= 10^12`, "is `n` prime?" A loop to `n` is `10^12`. A loop to `sqrt n = 10^6` is fast.
+
+**Example 4.** `n <= 1500` and values small, "count zero-sum triples". Triple loop is `n^3 / 6 = 5.6 * 10^8`: borderline in C++, hopeless in Python. Fix one index and look up in a table: `n^2 / 2 = 10^6`. That is the problem below.
+
+Turn the table into code: given `n`, print how many operations each class needs and whether it fits `2 * 10^8`.
+
+<CodeRunner snippets={{ python: `import math
+BUDGET = 2 * 10**8
+n = int(input())
+lg = max(1, math.log2(n))
+costs = [
+    ("O(log n)", lg),
+    ("O(n)", n),
+    ("O(n log n)", n * lg),
+    ("O(n sqrt n)", n * math.sqrt(n)),
+    ("O(n^2)", n ** 2),
+    ("O(n^3)", n ** 3),
+    ("O(2^n)", 2.0 ** n if n < 1000 else float("inf")),
+]
+for name, c in costs:
+    print(f"{name:12s} {c:14.3e}  {'OK' if c <= BUDGET else 'too slow'}")
+`, javascript: `const n = Number(readLine());
+const BUDGET = 2e8;
+const lg = Math.max(1, Math.log2(n));
+const costs = [
+  ["O(log n)", lg], ["O(n)", n], ["O(n log n)", n * lg],
+  ["O(n sqrt n)", n * Math.sqrt(n)], ["O(n^2)", n ** 2], ["O(n^3)", n ** 3],
+  ["O(2^n)", n < 1000 ? 2 ** n : Infinity],
+];
+for (const [name, c] of costs) console.log(name.padEnd(12), c.toExponential(2), c <= BUDGET ? "OK" : "too slow");
+` }} stdin={"200000\n"} />
+
+Try `n = 5000`, `n = 20`, `n = 100000` by editing the input.
+
+## Beyond the headline `n`
+
+1. **Multiple test cases.** If the statement says "sum of `n` over all tests is at most `2 * 10^5`", the total work is bounded by the sum, so `O(n log n)` per test is fine. If instead there are `10^4` tests each with `n = 2 * 10^5` there is no such guarantee and you must read the limits carefully.
+2. **Several parameters.** `n` items and `q` queries: naive `O(n * q)` is too slow at `2 * 10^5` each (`4 * 10^10`), the intended `O((n + q) log n)` is `7 * 10^6`.
+3. **Hidden constants.** A hash map operation is ~20 to 50 simple operations, `std::sort` at `n = 10^6` takes ~80 ms, a recursive call costs more than a loop iteration. Memory access patterns matter: a `1000 x 1000` grid scanned row by row is much faster than column by column.
+4. **Output size.** If the answer is a list of `n^2` items, you cannot be faster than `n^2`. The limits often reveal this.
+5. **Answer range.** Values up to `10^18` suggest 64-bit integers and a counting formula; values up to `10^9+7` suggest modular counting (see [modular arithmetic](/cp/math-basics/modular-arithmetic/)).
+6. **Language factor.** Use roughly `10^7` per second for pure Python loops. Prefer built-ins (`sorted`, `sum`, `bisect`, slicing on `bytearray`) which run at C speed.
+
+## When the constraints do not match
+
+If you can only find an `O(n^2)` solution for `n = 2 * 10^5`, the problem contains a structural property you are missing: sortedness, monotonicity, small answer, offline processing, a data structure, or math. Common mappings from slow to fast:
+
+| Naive | Fast replacement | Typical enabler |
+| --- | --- | --- |
+| scan all pairs | sort + two pointers | order |
+| scan for a value | hash set / map | membership |
+| scan for max/min over range | sparse table, segment tree | range queries |
+| try all answers | binary search on answer | monotone feasibility |
+| recompute from scratch | prefix sums / incremental update | overlapping work |
+| enumerate all subsets | meet in the middle, DP | small sums or structure |
+
+## Pitfalls
+
+1. **Ignoring the log factor** when `n = 10^6` and the limit is tight, or when the constant is large (segment tree with `n = 10^6` and `q = 10^6` is about `4 * 10^7` node visits times a constant).
+2. **Trusting the table over reading the statement**: always check whether the limit is on `n`, on `sum of n`, or on a value.
+3. **Overflow while estimating**: `n^2` for `n = 10^5` is `10^10`, which does not fit 32 bits. This applies to your *answer* too.
+4. **Estimating with the wrong `n`.** For graphs use both `V` and `E`: BFS is `O(V + E)`.
+5. **Optimising a pass that is not the bottleneck.** Estimate each phase and fix the largest one.
+
+## Practice
+
+<Problem id="m04-zero-triples" />
+
+### Problem ladder
+
+- [CSES, Sum of Three Values](https://cses.fi/problemset/task/1641), about 1500 (3-sum with sorting and two pointers)
+- [CSES, Sum of Four Values](https://cses.fi/problemset/task/1642), about 1700 (`n^2` with a map)
+- [CSES, Distinct Values Subarrays](https://cses.fi/problemset/task/2428), about 1500 (two pointers with a counter)
+- [Codeforces 1352C, K-th Not Divisible by n](https://codeforces.com/problemset/problem/1352/C), rating 1200 (constraints force a closed form)
+- [LeetCode 15, 3Sum](https://leetcode.com/problems/3sum/), medium
+
+## Quiz
+
+<Quiz id="cp-complexity-estimate-1" tags={["complexity", "constraints"]} questions={[
+  { type: "mcq", q: "n = 2 * 10^5 and the time limit is 2 seconds in C++. Which complexity is the most likely target?", options: ["O(n^2)", "O(n log n)", "O(2^n)", "O(n^3)"], answer: 1, explain: "n log n is about 3.6 * 10^6 operations. n^2 is 4 * 10^10, hopeless." },
+  { type: "mcq", q: "n = 20 and you need to consider every subset of the items. Roughly how many subsets are there?", options: ["About 400", "About 10^6", "About 10^9", "About 10^18"], answer: 1, explain: "2^20 = 1 048 576, so a bitmask enumeration is comfortable." },
+  { type: "multi", q: "Which constraint combinations suggest an O(n^2) algorithm is intended?", options: ["n <= 3000", "n <= 5000", "n <= 2 * 10^5", "n <= 10^6"], answer: [0, 1], explain: "n^2 is 9 * 10^6 and 2.5 * 10^7 respectively; the last two are far beyond 10^8." },
+  { type: "predict", q: "About how many operations does the nested loop run for n = 10^5 (ignore the constant)?", code: "for i in range(n):\n    for j in range(i + 1, n):\n        check(i, j)", options: ["10^5", "About 5 * 10^9", "About 10^7", "About 10^10 * 10^5"], answer: 1, explain: "n(n-1)/2 is about 5 * 10^9, which would take tens of seconds: too slow." }
+]} />

@@ -1,0 +1,203 @@
+---
+title: GCD and LCM
+track: cp
+module: math-basics
+order: 2
+difficulty: easy
+estMinutes: 25
+prerequisites: [cp/math-basics/modular-arithmetic]
+tags: [math, gcd, lcm, euclid, overflow]
+type: lesson
+problems: [m03-gcd-lcm-cap]
+furtherReading:
+  - title: cp-algorithms, Euclidean algorithm for computing the greatest common divisor
+    url: https://cp-algorithms.com/algebra/euclid-algorithm.html
+  - title: cp-algorithms, Extended Euclidean algorithm
+    url: https://cp-algorithms.com/algebra/extended-euclid-algorithm.html
+---
+
+## Intuition
+
+You have a `252 x 105` rectangular floor and want to tile it with identical squares, no cutting, no gaps. The biggest square that works has side `21`: that is `gcd(252, 105)`. The **greatest common divisor** is the largest number that divides both inputs.
+
+Now the dual question: two lights blink every 12 and every 18 seconds. When do they blink together again? After `36` seconds: the **least common multiple**.
+
+Computing a gcd by factoring both numbers is slow. Euclid found a method over two thousand years ago that needs only division and takes a few dozen steps even for 64-bit inputs.
+
+## Euclid's algorithm
+
+**Claim.** For `b > 0`, `gcd(a, b) = gcd(b, a mod b)`.
+
+*Why.* Write `a = q b + r` with `r = a mod b`. Any common divisor of `a` and `b` divides `a - q b = r`, and any common divisor of `b` and `r` divides `q b + r = a`. The two pairs have exactly the same set of common divisors, hence the same greatest one.
+
+Repeat until the second argument is `0`; then `gcd(a, 0) = a`.
+
+```text
+gcd(252, 105): 252 = 2*105 + 42   ->  gcd(105, 42)
+               105 = 2*42  + 21   ->  gcd(42, 21)
+                42 = 2*21  + 0    ->  gcd(21, 0) = 21
+```
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+long long gcd_ll(long long a, long long b) {
+    while (b) { long long r = a % b; a = b; b = r; }
+    return a;
+}
+// C++17: std::gcd(a, b) in <numeric>, std::lcm(a, b) as well
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+from math import gcd, lcm   # lcm needs Python 3.9+
+
+def my_gcd(a, b):
+    while b:
+        a, b = b, a % b
+    return a
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long gcd(long a, long b) {
+    while (b != 0) { long r = a % b; a = b; b = r; }
+    return a;
+}
+```
+
+</Tab>
+</Tabs>
+
+### How fast?
+
+After two steps the larger argument at least halves (`a mod b < a / 2` whenever `a >= b`), so the loop runs `O(log min(a, b))` times. The worst case is consecutive Fibonacci numbers: `gcd(F(k+1), F(k))` takes about `k` steps. Since `F(87)` is near `7 * 10^17`, even 64-bit inputs need under about 90 iterations.
+
+<Complexity time="O(log min(a, b))" space="O(1)" note="about 90 iterations for 64-bit inputs" />
+
+Count the steps yourself and compare random pairs with a Fibonacci pair:
+
+<CodeRunner snippets={{ python: `def steps(a, b):
+    c = 0
+    while b:
+        a, b = b, a % b
+        c += 1
+    return c
+
+fib = [1, 1]
+while len(fib) < 80:
+    fib.append(fib[-1] + fib[-2])
+print(steps(fib[79], fib[78]))      # worst case, about 78
+print(steps(10**18, 10**18 - 1))    # 2: tiny
+print(steps(123456789012345678, 987654321098765432))
+`, javascript: `function steps(a, b) {
+  let c = 0;
+  while (b > 0n) { [a, b] = [b, a % b]; c++; }
+  return c;
+}
+const fib = [1n, 1n];
+while (fib.length < 80) fib.push(fib[fib.length - 1] + fib[fib.length - 2]);
+console.log(steps(fib[79], fib[78]));
+console.log(steps(10n ** 18n, 10n ** 18n - 1n));
+console.log(steps(123456789012345678n, 987654321098765432n));
+` }} />
+
+## LCM and the product identity
+
+For positive integers, `gcd(a, b) * lcm(a, b) = a * b`. (Look at the exponent of each prime: `min + max = sum`.) Therefore
+
+```text
+lcm(a, b) = a / gcd(a, b) * b
+```
+
+**Divide first.** Computing `a * b` first can overflow even when the LCM itself fits. For `a = b = 10^18` the product is `10^36`, but the LCM is just `10^18`. Since `gcd` divides `a`, the quotient `a / g` is exact, and the multiplication by `b` then equals the answer.
+
+If the answer might not fit, test *before* multiplying. With `x = a / g` and a limit `L`, the product `x * b` is at most `L` exactly when `x <= L / b` (integer division):
+
+<CodeRunner snippets={{ python: `from math import gcd
+LIM = 10**18
+
+def capped_lcm(a, b):
+    g = gcd(a, b)
+    x = a // g
+    # in C++/Java this check avoids overflow; Python ints are unbounded
+    if x > LIM // b:
+        return -1
+    return x * b
+
+print(capped_lcm(10**9, 10**9 - 1))   # 999999999000000000
+print(capped_lcm(10**9 + 1, 10**9))   # -1 (just above 10^18)
+`, javascript: `const LIM = 10n ** 18n;
+function gcd(a, b) { while (b) [a, b] = [b, a % b]; return a; }
+function cappedLcm(a, b) {
+  const x = a / gcd(a, b);
+  return x > LIM / b ? -1n : x * b;
+}
+console.log(String(cappedLcm(10n ** 9n, 10n ** 9n - 1n)));
+console.log(String(cappedLcm(10n ** 9n + 1n, 10n ** 9n)));
+` }} />
+
+### GCD / LCM of many numbers
+
+Both operations are associative, so fold: `g = gcd(g, a[i])` for the gcd. The running gcd only shrinks and stays a divisor of the first element, so it cannot overflow. The running **LCM** can blow up quickly (the LCM of `1..43` already exceeds `2^63`), so decide early whether you need it exactly, capped, or modulo a prime. Modulo a prime you cannot just reduce the running LCM: you would need prime factorisations or inverses.
+
+## Extended Euclid (mention)
+
+Sometimes you need integers `x, y` with `a x + b y = gcd(a, b)`. Run Euclid recursively and back-substitute:
+
+<CodeRunner snippets={{ python: `def ext_gcd(a, b):
+    if b == 0:
+        return a, 1, 0
+    g, x, y = ext_gcd(b, a % b)
+    # b*x + (a % b)*y = g  and  a % b = a - (a // b) * b
+    return g, y, x - (a // b) * y
+
+g, x, y = ext_gcd(240, 46)
+print(g, x, y, 240 * x + 46 * y)   # 2 -9 47 2
+`, javascript: `function extGcd(a, b) {
+  if (b === 0) return [a, 1, 0];
+  const [g, x, y] = extGcd(b, a % b);
+  return [g, y, x - Math.floor(a / b) * y];
+}
+const [g, x, y] = extGcd(240, 46);
+console.log(g, x, y, 240 * x + 46 * y);
+` }} />
+
+Uses you will meet later:
+
+- `a x ≡ 1 (mod m)` has a solution exactly when `gcd(a, m) = 1`, and `x` from extended Euclid is the **modular inverse** (it works for composite `m`, unlike Fermat).
+- `a x + b y = c` has integer solutions iff `gcd(a, b)` divides `c`.
+- Simplifying a fraction `p / q`: divide both by `gcd(p, q)`.
+
+## Pitfalls
+
+1. **`gcd(0, x) = x`** and `gcd(0, 0) = 0`. Starting a fold from `0` is the right identity; starting from `1` makes every answer `1`.
+2. **Negative inputs.** `%` can yield negatives in C++/Java. Take absolute values first if the input may be negative.
+3. **Multiply before dividing.** `a * b / g` overflows; `a / g * b` does not (unless the true LCM does).
+4. **LCM of a long list.** It explodes; plan for capping or modular tricks.
+5. **`int` vs `long long`.** `gcd` itself is safe in 32 bits for 32-bit inputs, but the LCM of two 32-bit numbers needs 64 bits.
+
+## Practice
+
+<Problem id="m03-gcd-lcm-cap" />
+
+### Problem ladder
+
+- [AtCoder ABC 070 C, Multiple Clocks](https://atcoder.jp/contests/abc070/tasks/abc070_c), beginner (LCM of many numbers)
+- [Codeforces 1325A, EhAb AnD gCd](https://codeforces.com/problemset/problem/1325/A), rating 800 (build numbers with a given lcm)
+- [CSES, Common Divisors](https://cses.fi/problemset/task/1081), about 1400 (gcd and divisor counting)
+- [CSES, Counting Coprime Pairs](https://cses.fi/problemset/task/2417), harder (gcd with inclusion-exclusion)
+
+## Quiz
+
+<Quiz id="cp-math-gcd-1" tags={["gcd", "lcm"]} questions={[
+  { type: "mcq", q: "What is gcd(84, 36)?", options: ["6", "12", "18", "4"], answer: 1, explain: "84 = 2*36 + 12, 36 = 3*12 + 0, so the gcd is 12." },
+  { type: "mcq", q: "a and b are both close to 10^18 and their LCM is known to fit in 64 bits. Which formula is safe in C++ with long long?", options: ["a * b / gcd(a, b)", "a / gcd(a, b) * b", "(a + b) / gcd(a, b)", "a * (b / gcd(a, b)) * gcd(a, b)"], answer: 1, explain: "a / g is exact and the following multiplication equals the LCM. a * b overflows first in the first option." },
+  { type: "multi", q: "Which statements are true?", options: ["gcd(a, b) * lcm(a, b) = a * b for positive integers", "Euclid's algorithm needs O(min(a, b)) steps in the worst case", "gcd(0, x) = x", "The running LCM of a long list always fits in 64 bits if every element does"], answer: [0, 2], explain: "The product identity and gcd(0, x) = x hold. Euclid is logarithmic, and running LCMs grow very fast." },
+  { type: "predict", q: "What does this print?", code: "def g(a, b):\n    while b:\n        a, b = b, a % b\n    return a\nprint(g(0, 9), g(9, 0), g(7, 3))", options: ["9 9 1", "0 9 1", "9 0 3", "0 0 1"], answer: 0, explain: "gcd(0, 9) = 9, gcd(9, 0) = 9, gcd(7, 3) = 1." }
+]} />

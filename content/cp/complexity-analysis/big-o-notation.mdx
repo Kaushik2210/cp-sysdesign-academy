@@ -1,0 +1,155 @@
+---
+title: Big-O, Theta and Omega
+track: cp
+module: complexity-analysis
+order: 1
+difficulty: easy
+estMinutes: 30
+prerequisites: []
+tags: [complexity, big-o, theta, omega, counting-operations]
+type: lesson
+problems: [m04-product-pairs]
+furtherReading:
+  - title: CLRS, Introduction to Algorithms, chapter 3 (Characterizing running times)
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: Big-O Cheat Sheet
+    url: https://www.bigocheatsheet.com/
+---
+
+## Intuition
+
+You cannot time an algorithm on every computer, and a stopwatch tells you nothing about the next input size. What you can do is ask: *how does the amount of work grow when the input grows?* Doubling `n` makes a linear algorithm twice as slow, a quadratic one four times as slow, and a logarithmic one only one step slower.
+
+Big-O notation is a way to talk about that growth while ignoring constants and low-order terms: `3n^2 + 50n + 7` and `n^2` are "the same shape" for large `n`.
+
+## Formal definitions
+
+Let `f(n)` be the number of basic steps the algorithm takes on an input of size `n`, and `g(n)` a simple comparison function.
+
+| Notation | Meaning | Formal statement |
+| --- | --- | --- |
+| `f = O(g)` | `f` grows **no faster** than `g` (upper bound) | exist `c > 0`, `n0` with `f(n) <= c * g(n)` for all `n >= n0` |
+| `f = Omega(g)` | `f` grows **at least as fast** as `g` (lower bound) | exist `c > 0`, `n0` with `f(n) >= c * g(n)` for all `n >= n0` |
+| `f = Theta(g)` | both: `f` has the **same growth** as `g` | `f = O(g)` and `f = Omega(g)` |
+
+Example: `f(n) = 3n^2 + 50n + 7`. For `n >= 17` we have `50n + 7 <= 3n^2`, so `f(n) <= 6n^2`; choose `c = 6, n0 = 17`. Hence `f = O(n^2)`. Also `f(n) >= 3n^2`, so `f = Omega(n^2)`, thus `f = Theta(n^2)`. Note that `f = O(n^3)` is also true, merely a useless bound.
+
+<Callout type="pitfall" title="O is not 'worst case'">
+Big-O describes the growth of a function; "worst case" is which input you measure. You can say "the worst case of insertion sort is `Theta(n^2)`" and "the best case is `Theta(n)`". Saying "insertion sort is `O(n^2)`" is true for all its cases, but "insertion sort is `Theta(n^2)`" is false because the best case is linear.
+</Callout>
+
+## Common growth rates, slowest growing first
+
+| Class | Name | `n = 10^6` takes about | Typical source |
+| --- | --- | --- | --- |
+| `O(1)` | constant | 1 | array index, hash lookup (expected) |
+| `O(log n)` | logarithmic | 20 | binary search, halving loops |
+| `O(sqrt n)` | square root | 1 000 | trial division |
+| `O(n)` | linear | `10^6` | one scan |
+| `O(n log n)` | linearithmic | `2 * 10^7` | sorting, divide and conquer |
+| `O(n^2)` | quadratic | `10^12` | all pairs, nested loops |
+| `O(n^3)` | cubic | `10^18` | triple loops, matrix multiply |
+| `O(2^n)` | exponential | astronomically large | all subsets |
+| `O(n!)` | factorial | astronomically large | all permutations |
+
+## How to count operations
+
+1. **Sequential blocks add**: `O(A) + O(B) = O(max(A, B))`.
+2. **Nested loops multiply**, if the inner bound does not depend on the outer variable: `n` iterations of `m` is `n * m`.
+3. **Dependent loops need a sum.** `for i in 0..n: for j in 0..i` runs `0 + 1 + ... + (n-1) = n(n-1)/2`, which is `Theta(n^2)`.
+4. **Halving or doubling gives a logarithm.** `while i < n: i *= 2` runs `ceil(log2 n)` times.
+5. **Harmonic loops give `n log n`.** `for i in 1..n: for j in i, 2i, 3i, ... <= n` does `n/i` steps for each `i`, in total `n * (1 + 1/2 + ... + 1/n) = n ln n + O(n)`.
+6. **Drop constants and lower-order terms**, keep every variable that is independent: a grid scan is `O(h * w)`; `O(n + m)` is not `O(n)`.
+7. **Function calls cost what they cost.** `len(list)` is `O(1)`, `list.pop(0)` is `O(n)`, `s += c` on an immutable string can be `O(n)`.
+
+Verify these counts by running them (the function returns the number of times the innermost statement runs):
+
+<CodeRunner snippets={{ python: `def triangle(n):
+    c = 0
+    for i in range(n):
+        for j in range(i):
+            c += 1
+    return c
+
+def halving(n):
+    c, i = 0, 1
+    while i < n:
+        i *= 2
+        c += 1
+    return c
+
+def harmonic(n):
+    c = 0
+    for i in range(1, n + 1):
+        for j in range(i, n + 1, i):
+            c += 1
+    return c
+
+print(triangle(100))     # n(n-1)/2 = 4950
+print(halving(1000))     # ceil(log2 1000) = 10
+print(harmonic(1000))    # about n ln n + 0.15 n: 7069
+`, javascript: `function triangle(n) { let c = 0; for (let i = 0; i < n; i++) for (let j = 0; j < i; j++) c++; return c; }
+function halving(n) { let c = 0; for (let i = 1; i < n; i *= 2) c++; return c; }
+function harmonic(n) { let c = 0; for (let i = 1; i <= n; i++) for (let j = i; j <= n; j += i) c++; return c; }
+console.log(triangle(100), halving(1000), harmonic(1000));
+` }} />
+
+## Worked example: what does this cost?
+
+```python
+def solve(a):                 # a has n elements
+    n = len(a)
+    best = 0
+    for i in range(n):        # n iterations
+        s = 0
+        for j in range(i, n): # n - i iterations
+            s += a[j]
+            best = max(best, s)
+    a.sort()                  # n log n
+    return best
+```
+
+The double loop does `n + (n-1) + ... + 1 = n(n+1)/2 = Theta(n^2)` steps, the sort `Theta(n log n)`. Total `Theta(n^2)`: the larger term dominates. The space is `O(1)` extra apart from whatever `sort` uses internally.
+
+## Beyond a single `n`: what is the input size?
+
+Sometimes `n` is a *value*, not a count of items. Trial division on a number `n` takes `O(sqrt n)` divisions, which is exponential in the number of bits of `n` (`b = log2 n` bits gives `2^(b/2)`). Euclid's gcd runs in `O(log n)`, i.e. linear in the bit length. When the statement says `n <= 10^12`, decide whether `n` is a count (you can only afford a few operations per unit) or a value (a loop to `sqrt n` or a logarithmic algorithm).
+
+<CodeRunner snippets={{ python: `n = 10**12
+# counting loop up to n is impossible (1e12 steps), but sqrt is fine:
+import math
+print(math.isqrt(n))                 # 1000000 trial divisions
+print(n.bit_length())                # 40 bits -> gcd needs ~60 steps
+`, javascript: `const n = 1e12;
+console.log(Math.floor(Math.sqrt(n)));       // 1000000
+console.log(Math.ceil(Math.log2(n)));        // 40
+` }} />
+
+## Pitfalls
+
+1. **Constants matter when `n` is moderate.** An `O(n log n)` algorithm with a huge constant can lose to a simple `O(n^2)` for `n = 50`. Big-O is about asymptotics; the constraint table in the [estimating lesson](/cp/complexity-analysis/estimating-from-constraints/) turns it into a budget.
+2. **Hidden costs.** Slicing (`a[i:]`), string concatenation in a loop, `x in list`, and `list.insert(0, x)` each hide a linear factor.
+3. **Confusing `O` and `Theta`.** If someone asks for the complexity of an algorithm they usually mean the tight bound.
+4. **Forgetting a variable.** BFS on a graph is `O(V + E)`, not `O(V)`.
+5. **Recursion hides loops.** Count the number of calls times the cost per call (see [recurrences](/cp/complexity-analysis/recurrences-and-master-theorem/)).
+6. **Amortized is not worst case.** Some operations are occasionally expensive; see the [amortized lesson](/cp/complexity-analysis/amortized-analysis/).
+
+## Practice
+
+<Problem id="m04-product-pairs" />
+
+### Problem ladder
+
+- [CSES, Sum of Divisors](https://cses.fi/problemset/task/1082), about 1700 (harmonic sum and its `sqrt` shortcut)
+- [CSES, Counting Divisors](https://cses.fi/problemset/task/1713), about 1300 (`n log n` sieve of divisor counts)
+- [CSES, Two Sets](https://cses.fi/problemset/task/1092), introductory (spot the closed form)
+- [LeetCode 204, Count Primes](https://leetcode.com/problems/count-primes/), easy (`n log log n`)
+
+## Quiz
+
+<Quiz id="cp-complexity-bigo-1" tags={["big-o", "complexity"]} questions={[
+  { type: "mcq", q: "What is the tight bound of this loop: for i in range(n): for j in range(i): work()?", options: ["Theta(n)", "Theta(n log n)", "Theta(n^2)", "Theta(2^n)"], answer: 2, explain: "The inner loop runs 0 + 1 + ... + (n-1) = n(n-1)/2 times, which is Theta(n^2)." },
+  { type: "multi", q: "Which statements are true for f(n) = 5n + 20?", options: ["f = O(n)", "f = Omega(n)", "f = Theta(n)", "f = Theta(n^2)"], answer: [0, 1, 2], explain: "5n+20 is bounded above and below by constant multiples of n for large n, so it is Theta(n), and therefore also O(n) and Omega(n). It is O(n^2) but not Theta(n^2)." },
+  { type: "mcq", q: "How many iterations does 'i = 1; while i < n: i *= 3' make for n = 10^9?", options: ["About 19", "About 1000", "About 10^9 / 3", "About 31622"], answer: 0, explain: "log3(10^9) is about 18.9, so 19 iterations. Multiplying by a constant factor gives a logarithm." },
+  { type: "predict", q: "How many times does the innermost statement run?", code: "n = 6\nc = 0\nfor i in range(1, n + 1):\n    for j in range(i, n + 1, i):\n        c += 1\nprint(c)", options: ["12", "14", "21", "36"], answer: 1, explain: "floor(6/1)+floor(6/2)+floor(6/3)+floor(6/4)+floor(6/5)+floor(6/6) = 6+3+2+1+1+1 = 14." }
+]} />

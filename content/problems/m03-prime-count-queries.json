@@ -1,0 +1,79 @@
+{
+  "id": "m03-prime-count-queries",
+  "title": "Primes in a Range",
+  "source": {
+    "name": "Original exercise on the sieve of Eratosthenes"
+  },
+  "rating": 1200,
+  "tags": [
+    "math",
+    "primes",
+    "sieve",
+    "prefix-sums"
+  ],
+  "statement": "You are given `q` queries. Each query gives two integers `l` and `r`; print how many prime numbers `p` satisfy `l ≤ p ≤ r`.\n\n**Input.** First line: `q`. Then `q` lines, each holding `l` and `r`.\n\n**Output.** `q` lines, the count for each query in order.",
+  "constraints": [
+    "1 ≤ q ≤ 200",
+    "1 ≤ l ≤ r ≤ 10^6"
+  ],
+  "timeLimitMs": 3000,
+  "hints": [
+    "Testing each number in [l, r] by trial division for each query is far too slow when r is 10^6 and q is 200.",
+    "All queries share the same universe 1..10^6, so do the expensive work once: run a sieve of Eratosthenes up to 10^6.",
+    "Turn the sieve into prefix counts: pi[x] = number of primes <= x. Then the answer to a query is pi[r] - pi[l - 1]."
+  ],
+  "editorial": "Sieve once: mark every multiple of each prime `p` starting at `p*p`, for `p` up to `sqrt(10^6) = 1000`. That costs `O(N log log N)`. Then build `pi[x]`, the number of primes up to `x`, with a running sum and answer each query as `pi[r] - pi[l - 1]` in `O(1)`.\n\nThe total is `O(N log log N + q)`. Note that 1 is not prime and `l` can be 1, so `pi[0] = 0` must exist.",
+  "complexity": {
+    "time": "O(n log n)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\nN = 10**6\ndata = sys.stdin.read().split()\nq = int(data[0])\n# build a sieve and prefix counts once, then answer q queries\n",
+    "javascript": "const q = Number(readLine());\nconst N = 1000000;\n// build a sieve (Uint8Array) and prefix counts, then read q lines\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int q;\n    cin >> q;\n    const int N = 1000000;\n    // sieve + prefix counts, then answer each query\n}\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StringTokenizer st = new StringTokenizer(new String(System.in.readAllBytes()));\n        int q = Integer.parseInt(st.nextToken());\n        final int N = 1_000_000;\n        // sieve + prefix counts, then answer each query\n    }\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nq = int(data[0])\nN = max(int(data[2 + 2 * i]) for i in range(q))\nsieve = bytearray([1]) * (N + 1)\nsieve[0] = sieve[1] = 0\nfor i in range(2, int(N ** 0.5) + 1):\n    if sieve[i]:\n        sieve[i * i::i] = bytearray(len(range(i * i, N + 1, i)))\npi = [0] * (N + 1)\nc = 0\nfor i in range(N + 1):\n    c += sieve[i]\n    pi[i] = c\nout = []\nfor i in range(q):\n    l = int(data[1 + 2 * i])\n    r = int(data[2 + 2 * i])\n    out.append(str(pi[r] - pi[l - 1]))\nprint('\\n'.join(out))\n",
+    "javascript": "const tok = [];\nlet line;\nwhile ((line = readLine()) !== null) for (const t of line.split(/\\s+/)) if (t) tok.push(t);\nlet pos = 0;\nconst q = Number(tok[pos++]);\nconst N = 1000000;\nconst comp = new Uint8Array(N + 1);\ncomp[0] = comp[1] = 1;\nfor (let i = 2; i * i <= N; i++) {\n  if (!comp[i]) for (let j = i * i; j <= N; j += i) comp[j] = 1;\n}\nconst pi = new Int32Array(N + 1);\nfor (let i = 1; i <= N; i++) pi[i] = pi[i - 1] + (comp[i] ? 0 : 1);\nconst out = [];\nfor (let i = 0; i < q; i++) {\n  const l = Number(tok[pos++]);\n  const r = Number(tok[pos++]);\n  out.push(pi[r] - pi[l - 1]);\n}\nconsole.log(out.join('\\n'));\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int q;\n    cin >> q;\n    const int N = 1000000;\n    vector<char> comp(N + 1, 0);\n    comp[0] = comp[1] = 1;\n    for (long long i = 2; i * i <= N; i++)\n        if (!comp[i])\n            for (long long j = i * i; j <= N; j += i) comp[j] = 1;\n    vector<int> pi(N + 1, 0);\n    for (int i = 1; i <= N; i++) pi[i] = pi[i - 1] + (comp[i] ? 0 : 1);\n    while (q--) {\n        int l, r;\n        cin >> l >> r;\n        cout << pi[r] - pi[l - 1] << \"\\n\";\n    }\n}\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StringTokenizer st = new StringTokenizer(new String(System.in.readAllBytes()));\n        int q = Integer.parseInt(st.nextToken());\n        final int N = 1_000_000;\n        boolean[] comp = new boolean[N + 1];\n        comp[0] = comp[1] = true;\n        for (long i = 2; i * i <= N; i++)\n            if (!comp[(int) i])\n                for (long j = i * i; j <= N; j += i) comp[(int) j] = true;\n        int[] pi = new int[N + 1];\n        for (int i = 1; i <= N; i++) pi[i] = pi[i - 1] + (comp[i] ? 0 : 1);\n        StringBuilder sb = new StringBuilder();\n        while (q-- > 0) {\n            int l = Integer.parseInt(st.nextToken());\n            int r = Integer.parseInt(st.nextToken());\n            sb.append(pi[r] - pi[l - 1]).append('\\n');\n        }\n        System.out.print(sb);\n    }\n}\n"
+  },
+  "tests": [
+    {
+      "input": "4\n1 10\n2 2\n14 16\n1 1\n",
+      "output": "4\n1\n0\n0\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n1 1\n",
+      "output": "0\n",
+      "hidden": false
+    },
+    {
+      "input": "4\n2 3\n4 4\n97 97\n90 100\n",
+      "output": "2\n0\n1\n1\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n1 1000000\n2 1000000\n999900 1000000\n999983 999983\n",
+      "output": "78498\n78498\n8\n1\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n500000 500100\n1 100\n100 1000\n1000 10000\n",
+      "output": "6\n25\n143\n1061\n",
+      "hidden": true
+    },
+    {
+      "input": "190\n249524 870953\n570666 639045\n387927 885008\n656116 960649\n68712 703729\n13808 966773\n878150 939653\n271953 849492\n245714 446772\n751985 875261\n567253 855418\n499493 707705\n670112 749078\n243188 908887\n158988 707583\n408879 424761\n704026 737596\n167143 962205\n619813 642246\n315903 348421\n863577 934206\n495714 807534\n753742 994955\n921503 972307\n748820 955418\n965842 993821\n414150 880368\n981034 985429\n921559 969468\n102189 139818\n142574 661496\n227528 498040\n704687 933361\n816812 981084\n896770 936226\n441607 973489\n873965 924541\n601907 785885\n560048 866795\n427375 671049\n948125 970195\n715111 730137\n898002 934660\n635248 987188\n729354 814865\n732552 903674\n568083 867952\n596753 651318\n748492 920330\n221381 885104\n872005 947179\n280059 578858\n130480 197023\n505416 953127\n669787 923284\n92818 453612\n839486 856947\n430401 588489\n21103 329270\n447891 883256\n915163 930749\n46337 680713\n644385 667946\n396158 743188\n577610 723924\n529972 653678\n37763 362475\n7585 88294\n113372 742268\n561595 578045\n994990 996606\n427753 733530\n640122 778205\n163787 887024\n44498 954430\n356321 685396\n377694 522739\n940216 996688\n396141 791193\n482775 938848\n545337 747813\n675167 987459\n714050 767827\n650250 916078\n284480 736617\n665102 789691\n981925 991791\n458696 729472\n546442 705297\n575072 752757\n12015 838708\n435380 765551\n21027 415833\n645711 954623\n662890 732761\n62999 727306\n657815 832114\n488900 673929\n712279 897130\n638441 784677\n773886 902206\n23261 641267\n63520 772378\n22285 409382\n263321 921794\n478478 635049\n621462 936797\n335571 521610\n381635 575879\n327859 714944\n884832 962901\n276968 591964\n825546 924416\n109966 919753\n852552 859609\n596911 955383\n770885 805336\n325077 849376\n233348 918826\n842854 913469\n250291 593999\n196498 907499\n456377 558112\n106789 736693\n337606 687572\n707713 825394\n459728 637235\n83832 436898\n778117 948571\n228611 824623\n473015 756759\n235959 362752\n35557 590911\n200073 530522\n845968 996657\n192505 484630\n356631 446319\n845423 935936\n618116 686110\n441737 747861\n543580 959792\n891261 926804\n487296 668885\n664986 883564\n304506 744667\n595940 810647\n37271 470611\n163576 372841\n4889 505429\n989089 999290\n534922 762647\n586020 962070\n232880 266768\n781738 901451\n877343 976090\n695193 967306\n303083 873362\n357637 596152\n903381 912302\n899659 976818\n300954 426779\n849548 913651\n47267 84118\n947504 992966\n537184 641238\n940119 998023\n943378 971551\n604980 630857\n13784 518199\n781502 813172\n180168 707797\n314456 565114\n695097 705501\n550465 832005\n433849 489682\n984658 999617\n641901 701453\n357935 489432\n264740 831999\n500378 925864\n820328 836415\n368933 600461\n206920 335078\n560608 988852\n125002 304625\n251089 538145\n966543 974963\n863502 865469\n511183 840754\n598628 808488\n",
+      "output": "47163\n5128\n37283\n22388\n49994\n74486\n4479\n43781\n15779\n9076\n21394\n15628\n5853\n50455\n42518\n1235\n2505\n60516\n1644\n2583\n5167\n23295\n17618\n3686\n15149\n1992\n34930\n311\n3467\n3208\n40453\n21162\n16813\n11966\n2870\n39548\n3702\n13667\n22773\n18436\n1587\n1117\n2671\n25855\n6306\n12559\n22267\n4061\n12634\n50469\n5474\n23066\n5534\n33191\n18682\n29011\n1272\n12060\n25973\n32516\n1148\n50328\n1769\n26203\n10930\n9273\n26953\n7599\n48951\n1242\n114\n23065\n10247\n55344\n70604\n24987\n11155\n4055\n29740\n33879\n15102\n22902\n3965\n19600\n34482\n9233\n704\n20380\n11901\n13237\n65356\n24807\n32701\n22741\n5207\n52269\n12921\n13926\n13598\n10848\n9413\n49575\n55545\n32064\n49771\n11833\n23240\n14344\n14848\n29428\n5661\n24285\n7219\n62261\n515\n26428\n2550\n39561\n51949\n5169\n26581\n54134\n7741\n49100\n26630\n8705\n13439\n28537\n12481\n45452\n21279\n10060\n44629\n25873\n10933\n22995\n6940\n6613\n5040\n23005\n30758\n2608\n13679\n16143\n33489\n15944\n35332\n16758\n41296\n743\n16985\n27735\n2706\n8785\n7173\n19955\n43087\n18244\n675\n5603\n9831\n4692\n3326\n3261\n7793\n4166\n2027\n1919\n41294\n2336\n40779\n19297\n777\n20961\n4269\n1077\n4435\n10123\n43112\n31607\n1196\n17684\n10263\n31570\n14641\n22310\n614\n151\n24560\n15577\n",
+      "hidden": true
+    },
+    {
+      "input": "200\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n1 1000000\n",
+      "output": "78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n78498\n",
+      "hidden": true
+    }
+  ]
+}

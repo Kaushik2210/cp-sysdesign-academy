@@ -1,0 +1,78 @@
+{
+  "id": "m03-binomial-queries",
+  "title": "Binomial Coefficients Modulo p",
+  "source": {
+    "name": "Original exercise on nCr with factorials and modular inverses"
+  },
+  "rating": 1400,
+  "tags": [
+    "math",
+    "combinatorics",
+    "modular-arithmetic"
+  ],
+  "statement": "For each of `q` queries `(n, r)` print the binomial coefficient `C(n, r) = n! / (r! (n - r)!)` modulo `p = 1 000 000 007`.\n\n**Input.** First line: `q`. Then `q` lines, each holding `n` and `r`.\n\n**Output.** `q` lines, one answer per query.",
+  "constraints": [
+    "1 ≤ q ≤ 200",
+    "0 ≤ r ≤ n ≤ 10^6"
+  ],
+  "timeLimitMs": 3000,
+  "hints": [
+    "C(n, r) is astronomically large, so you cannot compute it exactly and then reduce (except in Python). Work modulo p from the start.",
+    "Precompute fact[i] = i! mod p for i up to 10^6. Then C(n, r) = fact[n] * inverse(fact[r]) * inverse(fact[n-r]).",
+    "p is prime, so the inverse of x is x^(p-2) mod p (Fermat). Compute inverse(fact[N]) once with fast exponentiation, then get every other inverse factorial by walking down: inv_fact[i-1] = inv_fact[i] * i."
+  ],
+  "editorial": "Precompute `fact[0..N]` in `O(N)`. Since `p` is prime and larger than `N`, no factorial is divisible by `p`, so each has a modular inverse. Compute `inv_fact[N] = fact[N]^(p-2) mod p` once with binary exponentiation, then fill downwards using `inv_fact[i-1] = inv_fact[i] * i`. Every query is then `fact[n] * inv_fact[r] % p * inv_fact[n-r] % p` in `O(1)`.\n\nAlternatives such as Pascal's triangle need `O(n^2)` time and memory and are too slow at `n = 10^6`. Pitfalls checked by the tests: `r = 0` and `r = n`, and forgetting to reduce between the two multiplications.",
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\nMOD = 10**9 + 7\ndata = sys.stdin.read().split()\nq = int(data[0])\n# precompute factorials and inverse factorials up to max n, then answer\n",
+    "javascript": "// BigInt keeps products exact.\nconst q = Number(readLine());\nconst MOD = 1000000007n;\n// read q lines: n r\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int q;\n    cin >> q;\n    const long long MOD = 1000000007LL;\n    // factorials, inverse factorials, queries\n}\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StringTokenizer st = new StringTokenizer(new String(System.in.readAllBytes()));\n        int q = Integer.parseInt(st.nextToken());\n        final long MOD = 1_000_000_007L;\n        // factorials, inverse factorials, queries\n    }\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\nMOD = 10**9 + 7\ndata = sys.stdin.read().split()\nq = int(data[0])\nqs = [(int(data[1 + 2 * i]), int(data[2 + 2 * i])) for i in range(q)]\nN = max(n for n, _ in qs)\nfact = [1] * (N + 1)\nfor i in range(1, N + 1):\n    fact[i] = fact[i - 1] * i % MOD\ninv = [1] * (N + 1)\ninv[N] = pow(fact[N], MOD - 2, MOD)\nfor i in range(N, 0, -1):\n    inv[i - 1] = inv[i] * i % MOD\nout = [str(fact[n] * inv[r] % MOD * inv[n - r] % MOD) for n, r in qs]\nprint('\\n'.join(out))\n",
+    "javascript": "const tok = [];\nlet line;\nwhile ((line = readLine()) !== null) for (const t of line.split(/\\s+/)) if (t) tok.push(t);\nlet pos = 0;\nconst q = Number(tok[pos++]);\nconst MOD = 1000000007n;\nconst qs = [];\nlet N = 0;\nfor (let i = 0; i < q; i++) {\n  const n = Number(tok[pos++]);\n  const r = Number(tok[pos++]);\n  qs.push([n, r]);\n  if (n > N) N = n;\n}\nfunction power(a, b) {\n  let r = 1n;\n  a %= MOD;\n  while (b > 0n) {\n    if (b & 1n) r = (r * a) % MOD;\n    a = (a * a) % MOD;\n    b >>= 1n;\n  }\n  return r;\n}\nconst fact = new Array(N + 1);\nfact[0] = 1n;\nfor (let i = 1; i <= N; i++) fact[i] = (fact[i - 1] * BigInt(i)) % MOD;\nconst inv = new Array(N + 1);\ninv[N] = power(fact[N], MOD - 2n);\nfor (let i = N; i >= 1; i--) inv[i - 1] = (inv[i] * BigInt(i)) % MOD;\nconst out = qs.map(([n, r]) => ((fact[n] * inv[r]) % MOD * inv[n - r] % MOD).toString());\nconsole.log(out.join('\\n'));\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int q;\n    cin >> q;\n    const long long MOD = 1000000007LL;\n    vector<pair<int, int>> qs(q);\n    int N = 0;\n    for (auto &pr : qs) { cin >> pr.first >> pr.second; N = max(N, pr.first); }\n    vector<long long> fact(N + 1, 1), inv(N + 1, 1);\n    for (int i = 1; i <= N; i++) fact[i] = fact[i - 1] * i % MOD;\n    auto power = [&](long long a, long long b) {\n        long long r = 1;\n        a %= MOD;\n        while (b > 0) {\n            if (b & 1) r = r * a % MOD;\n            a = a * a % MOD;\n            b >>= 1;\n        }\n        return r;\n    };\n    inv[N] = power(fact[N], MOD - 2);\n    for (int i = N; i >= 1; i--) inv[i - 1] = inv[i] * i % MOD;\n    for (auto &pr : qs) {\n        int n = pr.first, r = pr.second;\n        cout << fact[n] * inv[r] % MOD * inv[n - r] % MOD << \"\\n\";\n    }\n}\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StringTokenizer st = new StringTokenizer(new String(System.in.readAllBytes()));\n        int q = Integer.parseInt(st.nextToken());\n        final long MOD = 1_000_000_007L;\n        int[][] qs = new int[q][2];\n        int N = 0;\n        for (int i = 0; i < q; i++) {\n            qs[i][0] = Integer.parseInt(st.nextToken());\n            qs[i][1] = Integer.parseInt(st.nextToken());\n            N = Math.max(N, qs[i][0]);\n        }\n        long[] fact = new long[N + 1];\n        long[] inv = new long[N + 1];\n        fact[0] = 1;\n        for (int i = 1; i <= N; i++) fact[i] = fact[i - 1] * i % MOD;\n        long r = 1, a = fact[N], b = MOD - 2;\n        while (b > 0) {\n            if ((b & 1) == 1) r = r * a % MOD;\n            a = a * a % MOD;\n            b >>= 1;\n        }\n        inv[N] = r;\n        for (int i = N; i >= 1; i--) inv[i - 1] = inv[i] * i % MOD;\n        StringBuilder sb = new StringBuilder();\n        for (int[] qq : qs) {\n            sb.append(fact[qq[0]] * inv[qq[1]] % MOD * inv[qq[0] - qq[1]] % MOD).append('\\n');\n        }\n        System.out.print(sb);\n    }\n}\n"
+  },
+  "tests": [
+    {
+      "input": "4\n5 2\n10 0\n10 10\n0 0\n",
+      "output": "10\n1\n1\n1\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n1 1\n",
+      "output": "1\n",
+      "hidden": false
+    },
+    {
+      "input": "3\n52 5\n100 50\n1000 500\n",
+      "output": "2598960\n538992043\n159835829\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n1000000 500000\n1000000 0\n1000000 1000000\n1000000 1\n1000000 999999\n",
+      "output": "996692777\n1\n1\n1000000\n1000000\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n1000000 3\n999999 123456\n1000 7\n",
+      "output": "500336845\n984332785\n96828751\n",
+      "hidden": true
+    },
+    {
+      "input": "150\n653159 267853\n777820 375951\n833820 723985\n988230 882388\n775839 683704\n967127 555787\n30414 27536\n488240 406825\n989181 261150\n680499 54372\n944662 164470\n118705 48731\n491854 455315\n258550 99813\n570174 106927\n601820 261442\n13751 11979\n227257 106994\n293058 95460\n960857 909596\n802921 408354\n167357 18856\n145508 116611\n132853 34666\n1861 1784\n5571 1715\n811171 225948\n173913 43642\n303358 164443\n208550 141354\n918677 710756\n656125 214726\n190493 181047\n206442 100459\n313302 11309\n378735 217530\n174017 38194\n276626 34151\n347974 157998\n857106 632406\n614613 3547\n624929 354310\n69229 40626\n372612 160465\n504097 365124\n331133 96874\n504594 247746\n738899 184675\n59769 16789\n984625 23976\n995329 786217\n375016 211966\n18945 17991\n826003 439172\n383972 197323\n606620 9519\n474818 24498\n742138 189707\n654010 206067\n124802 99055\n258040 243703\n859300 484657\n361110 268695\n372027 275094\n263081 242666\n113301 77301\n784752 385139\n901454 310235\n38410 28375\n991743 95609\n218610 89323\n537793 380240\n962684 155394\n356473 144533\n969091 736736\n571624 96545\n327627 166094\n321043 93049\n837574 81994\n657253 156099\n756164 722651\n324328 253647\n169375 12727\n84890 78728\n559447 425604\n33372 15554\n776531 622812\n360534 131181\n477799 341293\n442244 76351\n58413 41833\n34310 32346\n350418 108559\n136914 34806\n661021 433924\n111810 22127\n455664 195558\n156495 15406\n885767 441079\n309133 74030\n475167 325269\n893651 177513\n547560 475571\n511871 361150\n764941 333134\n502312 143673\n305159 246457\n423403 76811\n118028 49414\n861987 557582\n188110 164355\n982667 523577\n909953 354920\n188869 23366\n515754 142768\n540204 527249\n378878 33087\n824204 812539\n372977 364168\n616021 35985\n796538 320548\n381085 293241\n738689 700771\n294494 254638\n277724 154063\n991478 356592\n681251 187327\n608867 12143\n497343 286780\n811301 262869\n341736 143489\n485426 151428\n856350 524654\n678886 373891\n364783 143589\n675349 362368\n773668 428310\n367048 90425\n912168 909085\n721773 471632\n381969 175290\n543308 148749\n555053 174244\n208302 94903\n982915 895331\n500421 148299\n725012 82666\n754645 703445\n765831 436871\n180173 161685\n",
+      "output": "498036521\n372680318\n556697931\n5244244\n175587571\n296767365\n89995082\n732503266\n468181393\n892387354\n254059786\n641274756\n649668889\n711056032\n951693117\n803944673\n887377610\n579172963\n121080349\n314156667\n727745148\n185100687\n252366614\n472630157\n998771820\n505541356\n950751388\n954193930\n848102033\n65900638\n846711402\n443236292\n382866872\n841805463\n900056951\n522456116\n244655843\n139780960\n237057235\n657167173\n922396753\n657601683\n517431597\n339566934\n431277291\n860588109\n370868935\n784737801\n386668986\n259560162\n94718182\n774133784\n593648450\n548509187\n262578346\n337696985\n405911389\n136697585\n838539087\n73125592\n316730148\n985705871\n620176206\n978493556\n224057859\n692212651\n149968208\n341388432\n616159467\n174563574\n275838619\n192295503\n885350807\n820033547\n90077213\n432295998\n667605924\n437526270\n660922057\n162342536\n898074293\n880141937\n79231393\n595569961\n987339831\n438695510\n743491026\n426899368\n198608940\n440376239\n476585929\n207313707\n56876629\n61930179\n606682652\n879644741\n717133874\n854913391\n817120843\n343444340\n466665752\n263689948\n761260783\n606742302\n854889582\n602407790\n634491465\n9976575\n496444058\n931523064\n179983483\n866640445\n981706011\n803165679\n875688850\n531644558\n183329035\n39784348\n239606900\n901067066\n653084493\n361839928\n26728096\n222192330\n908563879\n31736328\n661757403\n537982568\n424919665\n357969924\n775466115\n610017180\n140638686\n445785179\n727740118\n976636667\n224102312\n192942778\n492725889\n386885146\n1703979\n867822078\n619583249\n820650973\n419102871\n249140582\n155506414\n229141653\n848308164\n91916692\n",
+      "hidden": true
+    },
+    {
+      "input": "29\n0 0\n7 3\n14 7\n21 10\n28 14\n35 17\n42 21\n49 24\n56 28\n63 31\n70 35\n77 38\n84 42\n91 45\n98 49\n105 52\n112 56\n119 59\n126 63\n133 66\n140 70\n147 73\n154 77\n161 80\n168 84\n175 87\n182 91\n189 94\n196 98\n",
+      "output": "1\n35\n3432\n352716\n40116600\n537567622\n257870674\n302776441\n547219610\n57110819\n358906215\n964632427\n769030701\n683369943\n267422234\n936625674\n72441818\n666504998\n899707189\n859462760\n673542582\n362390557\n620033287\n418178482\n964149357\n653542697\n124181707\n950290120\n211518471\n",
+      "hidden": true
+    }
+  ]
+}

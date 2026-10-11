@@ -1,0 +1,92 @@
+{
+  "id": "m04-product-pairs",
+  "title": "Pairs With Small Product",
+  "source": {
+    "name": "Original exercise on harmonic sums and counting loop iterations"
+  },
+  "rating": 1500,
+  "tags": [
+    "math",
+    "complexity",
+    "harmonic-sum"
+  ],
+  "statement": "Count the ordered pairs `(i, j)` of positive integers with `i * j ≤ n`.\n\n**Input.** One integer `n`.\n\n**Output.** The number of such pairs.",
+  "constraints": [
+    "1 ≤ n ≤ 10^12"
+  ],
+  "timeLimitMs": 2000,
+  "hints": [
+    "For a fixed i, how many j satisfy i * j <= n? So the answer is a sum over i.",
+    "The answer is the sum over i from 1 to n of floor(n / i). That is O(n) terms, far too many for n = 10^12.",
+    "Pairs are symmetric in i and j. Count pairs with i <= s where s = floor(sqrt(n)), double the result, and subtract the s*s pairs where both i and j are at most s: answer = 2 * sum_{i<=s} floor(n/i) - s*s."
+  ],
+  "editorial": "For a fixed `i` there are `floor(n / i)` valid `j`, so the answer is `S = sum_{i=1..n} floor(n / i)`. Evaluating that directly is `O(n)`, which is hopeless at `10^12` (about `10^12` operations versus a budget near `10^8`).\n\nUse the symmetry of the hyperbola `i * j <= n`. Let `s = floor(sqrt(n))`. Every valid pair has `i <= s` or `j <= s`, because `i, j >= s + 1` would give `i*j > n`. Pairs with `i <= s` number `T = sum_{i<=s} floor(n / i)`; by symmetry so do pairs with `j <= s`; the pairs counted twice are those with both `i, j <= s`, which is `s * s` (all of them satisfy `i*j <= s*s <= n`). Hence the answer is `2T - s^2`, computed in `O(sqrt n)`, about `10^6` steps.\n\nNote the answer is about `n ln n ~ 2.8 * 10^13`, so 32-bit integers overflow.",
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(1)"
+  },
+  "starter": {
+    "python": "import math\nn = int(input())\n# count pairs (i, j), i*j <= n, in about sqrt(n) steps\n",
+    "javascript": "const n = Number(readLine());\n// answer can reach ~3e13: fine for a double, not for int32\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    long long n;\n    cin >> n;\n    // count pairs (i, j) with i*j <= n in O(sqrt n)\n}\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StringTokenizer st = new StringTokenizer(new String(System.in.readAllBytes()));\n        long n = Long.parseLong(st.nextToken());\n        // count pairs (i, j) with i*j <= n in O(sqrt n)\n    }\n}\n"
+  },
+  "solutions": {
+    "python": "import math\nn = int(input())\ns = math.isqrt(n)\nt = 0\nfor i in range(1, s + 1):\n    t += n // i\nprint(2 * t - s * s)\n",
+    "javascript": "const n = Number(readLine());\nlet s = Math.floor(Math.sqrt(n));\nwhile (s * s > n) s--;\nwhile ((s + 1) * (s + 1) <= n) s++;\nlet t = 0;\nfor (let i = 1; i <= s; i++) t += Math.floor(n / i);\nconsole.log(String(2 * t - s * s));\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    long long n;\n    cin >> n;\n    long long s = (long long)sqrtl((long double)n);\n    while (s * s > n) s--;\n    while ((s + 1) * (s + 1) <= n) s++;\n    long long t = 0;\n    for (long long i = 1; i <= s; i++) t += n / i;\n    cout << 2 * t - s * s << endl;\n}\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StringTokenizer st = new StringTokenizer(new String(System.in.readAllBytes()));\n        long n = Long.parseLong(st.nextToken());\n        long s = (long) Math.sqrt((double) n);\n        while (s * s > n) s--;\n        while ((s + 1) * (s + 1) <= n) s++;\n        long t = 0;\n        for (long i = 1; i <= s; i++) t += n / i;\n        System.out.println(2 * t - s * s);\n    }\n}\n"
+  },
+  "tests": [
+    {
+      "input": "1\n",
+      "output": "1\n",
+      "hidden": false
+    },
+    {
+      "input": "10\n",
+      "output": "27\n",
+      "hidden": false
+    },
+    {
+      "input": "2\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "100\n",
+      "output": "482\n",
+      "hidden": true
+    },
+    {
+      "input": "999\n",
+      "output": "7053\n",
+      "hidden": true
+    },
+    {
+      "input": "1000000\n",
+      "output": "13970034\n",
+      "hidden": true
+    },
+    {
+      "input": "1000000000000\n",
+      "output": "27785452449086\n",
+      "hidden": true
+    },
+    {
+      "input": "999999999999\n",
+      "output": "27785452448917\n",
+      "hidden": true
+    },
+    {
+      "input": "999999999989\n",
+      "output": "27785452448353\n",
+      "hidden": true
+    },
+    {
+      "input": "777777777777\n",
+      "output": "21415440680473\n",
+      "hidden": true
+    }
+  ]
+}

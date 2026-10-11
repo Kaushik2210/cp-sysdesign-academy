@@ -1,0 +1,167 @@
+---
+title: Recurrences and the Master Theorem
+track: cp
+module: complexity-analysis
+order: 4
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/complexity-analysis/big-o-notation, cp/complexity-analysis/amortized-analysis]
+tags: [complexity, recurrence, master-theorem, divide-and-conquer, recursion]
+type: lesson
+problems: [m04-inversion-count]
+furtherReading:
+  - title: CLRS, Introduction to Algorithms, chapter 4 (Divide-and-Conquer)
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: Wikipedia, Master theorem (analysis of algorithms)
+    url: https://en.wikipedia.org/wiki/Master_theorem_(analysis_of_algorithms)
+---
+
+## Intuition
+
+A recursive algorithm's running time is itself recursive: "to sort `n` items, sort two halves and then merge." Writing that as an equation,
+
+```text
+T(n) = 2 * T(n / 2) + n
+```
+
+is called a **recurrence**. To get a closed form, draw the recursion tree and add up the work level by level. Three things matter: how many subproblems (`a`), how much smaller they are (`b`), and how much work is done outside the recursive calls (`f(n)`).
+
+## The recursion tree
+
+For `T(n) = 2T(n/2) + n`:
+
+```text
+level 0:  1 problem of size n        work n
+level 1:  2 problems of size n/2     work 2 * n/2 = n
+level 2:  4 problems of size n/4     work 4 * n/4 = n
+...
+level k:  2^k problems of size n/2^k work n
+```
+
+There are `log2 n` levels, each costing `n`, so `T(n) = Theta(n log n)`. Every level costs the same; this is the signature of merge sort.
+
+<Diagram kind="mermaid" code={`flowchart TD
+  A["T(n): cost n"] --> B["T(n/2): cost n/2"]
+  A --> C["T(n/2): cost n/2"]
+  B --> D["T(n/4): n/4"]
+  B --> E["T(n/4): n/4"]
+  C --> F["T(n/4): n/4"]
+  C --> G["T(n/4): n/4"]`} caption="Each level of the recursion tree costs n in total; there are log2 n levels." />
+
+## The Master Theorem
+
+For `T(n) = a * T(n / b) + f(n)` with constants `a >= 1`, `b > 1`, let `c* = log_b(a)`; the quantity `n^c*` is the cost of the leaves. Compare it with `f(n)`:
+
+| Case | Condition | Result | Intuition |
+| --- | --- | --- | --- |
+| 1 | `f(n) = O(n^(c* - e))` for some `e > 0` | `T(n) = Theta(n^c*)` | leaves dominate |
+| 2 | `f(n) = Theta(n^c* * log^k n)`, `k >= 0` | `T(n) = Theta(n^c* * log^(k+1) n)` | all levels comparable |
+| 3 | `f(n) = Omega(n^(c* + e))` and `a * f(n/b) <= d * f(n)` for some `d < 1` | `T(n) = Theta(f(n))` | root dominates |
+
+(The extra condition in case 3 is the *regularity* condition; it holds for ordinary polynomials.)
+
+### Examples
+
+| Algorithm | Recurrence | `a, b, c*` | `f(n)` vs `n^c*` | Result |
+| --- | --- | --- | --- | --- |
+| Binary search | `T(n) = T(n/2) + 1` | `1, 2, 0` | `1 = n^0` (case 2, `k = 0`) | `Theta(log n)` |
+| Merge sort | `T(n) = 2T(n/2) + n` | `2, 2, 1` | `n = n^1` (case 2) | `Theta(n log n)` |
+| Tree traversal / max of array by halves | `T(n) = 2T(n/2) + 1` | `2, 2, 1` | `1 < n^1` (case 1) | `Theta(n)` |
+| Quickselect with perfect halving | `T(n) = T(n/2) + n` | `1, 2, 0` | `n > n^0` (case 3) | `Theta(n)` |
+| Karatsuba multiplication | `T(n) = 3T(n/2) + n` | `3, 2, 1.585` | `n < n^1.585` (case 1) | `Theta(n^1.585)` |
+| Strassen matrix multiplication | `T(n) = 7T(n/2) + n^2` | `7, 2, 2.807` | case 1 | `Theta(n^2.807)` |
+| Naive 8-way matrix multiplication | `T(n) = 8T(n/2) + n^2` | `8, 2, 3` | case 1 | `Theta(n^3)` |
+| Segment tree build | `T(n) = 2T(n/2) + 1` | same as tree traversal | case 1 | `Theta(n)` |
+
+Quick check of the numbers by evaluating the recurrence directly:
+
+<CodeRunner snippets={{ python: `import math
+
+def merge_sort_cost(n):          # T(n) = 2T(n/2) + n,  T(1) = 1
+    return 1 if n <= 1 else merge_sort_cost(n // 2) * 2 + n
+
+def binary_search_cost(n):       # T(n) = T(n/2) + 1
+    return 1 if n <= 1 else binary_search_cost(n // 2) + 1
+
+for k in (10, 15, 20):
+    n = 2 ** k
+    print(n, merge_sort_cost(n), round(merge_sort_cost(n) / (n * k), 3), binary_search_cost(n))
+# ratio -> 1 + 1/k: Theta(n log n); binary search -> k + 1
+`, javascript: `const mergeSortCost = n => n <= 1 ? 1 : 2 * mergeSortCost(Math.floor(n / 2)) + n;
+const binSearchCost = n => n <= 1 ? 1 : binSearchCost(Math.floor(n / 2)) + 1;
+for (const k of [10, 15, 20]) {
+  const n = 2 ** k;
+  console.log(n, mergeSortCost(n), (mergeSortCost(n) / (n * k)).toFixed(3), binSearchCost(n));
+}
+` }} />
+
+## Recurrences the master theorem does not cover
+
+Subtracting a constant instead of dividing by one:
+
+| Recurrence | Closed form | Reason |
+| --- | --- | --- |
+| `T(n) = T(n-1) + 1` | `Theta(n)` | unroll: `n` terms of 1 |
+| `T(n) = T(n-1) + n` | `Theta(n^2)` | `1 + 2 + ... + n` (insertion sort worst case) |
+| `T(n) = 2T(n-1) + 1` | `Theta(2^n)` | every call makes two; Towers of Hanoi |
+| `T(n) = T(n-1) + T(n-2) + 1` | `Theta(phi^n)`, `phi ~ 1.618` | naive Fibonacci |
+| `T(n) = T(sqrt n) + 1` | `Theta(log log n)` | repeated square roots |
+
+For naive Fibonacci the number of calls is `2F(n+1) - 1`; measure it:
+
+<CodeRunner snippets={{ python: `calls = 0
+def fib(n):
+    global calls
+    calls += 1
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+
+for n in (10, 20, 25):
+    calls = 0
+    fib(n)
+    print(n, calls)       # 177, 21891, 242785
+`, javascript: `let calls = 0;
+function fib(n) { calls++; return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+for (const n of [10, 20, 25]) { calls = 0; fib(n); console.log(n, calls); }
+` }} />
+
+## Uneven splits and the average case
+
+Quicksort with a random pivot splits `n` into pieces of sizes `k` and `n - 1 - k`. If the pivot is always the minimum, `T(n) = T(n-1) + n = Theta(n^2)`. With an expected balanced split `T(n) = 2T(n/2) + n` giving `Theta(n log n)`. Even a constant-ratio split, such as `T(n) = T(n/10) + T(9n/10) + n`, gives `Theta(n log n)`: the tree is lopsided but its depth is still logarithmic and each level costs at most `n`. The master theorem does not apply directly, but the recursion tree does (the general tool is the Akra-Bazzi theorem).
+
+## Using it in practice
+
+1. Write the recurrence for time (and separately for memory: recursion depth plus extra arrays).
+2. Identify `a`, `b`, `f(n)`.
+3. Compute `n^(log_b a)` and compare with `f(n)`.
+4. If the recurrence does not fit, draw the tree or unroll.
+
+**Merge-sort-style counting** (the practice problem): inversions count uses the same split, count, merge pattern, so it inherits `Theta(n log n)` time and `Theta(n)` extra memory.
+
+## Pitfalls
+
+1. **Master theorem needs equal-size subproblems.** `T(n) = T(n/3) + T(2n/3) + n` is not in the standard form.
+2. **Gaps between cases.** `f(n) = n / log n` with `a = b = 2` sits between cases 1 and 2; the theorem gives no answer (the real answer is `Theta(n log log n)`).
+3. **Forgetting `f(n)`.** Cost outside recursion (copying slices, building lists) belongs in `f(n)`. Python's `arr[:mid]` makes each call `Theta(n)` even if the algorithm "just splits".
+4. **Mixing up `log` bases.** Base changes only a constant, but exponent `log_b a` is a real exponent: `n^(log_2 3)` is not `n^(log_3 2)`.
+5. **Recursion depth.** An `O(n)` deep recursion overflows the stack in Python at about 1000 frames by default and in other languages at around `10^5` to `10^6`.
+
+## Practice
+
+<Problem id="m04-inversion-count" />
+
+### Problem ladder
+
+- [CSES, Tower of Hanoi](https://cses.fi/problemset/task/2165), about 1100 (`T(n) = 2T(n-1) + 1`)
+- [LeetCode 912, Sort an Array](https://leetcode.com/problems/sort-an-array/), medium (implement merge sort)
+- [LeetCode 215, Kth Largest Element in an Array](https://leetcode.com/problems/kth-largest-element-in-an-array/), medium (quickselect, expected `O(n)`)
+- [LeetCode 315, Count of Smaller Numbers After Self](https://leetcode.com/problems/count-of-smaller-numbers-after-self/), hard (merge sort counting)
+- [LeetCode 493, Reverse Pairs](https://leetcode.com/problems/reverse-pairs/), hard (merge-sort counting variant)
+
+## Quiz
+
+<Quiz id="cp-complexity-recurrence-1" tags={["recurrence", "master-theorem"]} questions={[
+  { type: "mcq", q: "Solve T(n) = 2T(n/2) + n.", options: ["Theta(n)", "Theta(n log n)", "Theta(n^2)", "Theta(log n)"], answer: 1, explain: "a = b = 2, n^(log_2 2) = n = f(n), case 2 gives Theta(n log n)." },
+  { type: "mcq", q: "Solve T(n) = 4T(n/2) + n.", options: ["Theta(n log n)", "Theta(n^2)", "Theta(n^3)", "Theta(n)"], answer: 1, explain: "n^(log_2 4) = n^2 dominates f(n) = n, so case 1: Theta(n^2)." },
+  { type: "multi", q: "Which recurrences solve to Theta(n)?", options: ["T(n) = T(n/2) + n", "T(n) = 2T(n/2) + 1", "T(n) = T(n-1) + 1", "T(n) = 2T(n/2) + n"], answer: [0, 1, 2], explain: "The last one is n log n. The first is case 3 (root dominates: n + n/2 + n/4 + ... = 2n), the second is case 1, the third unrolls to n." },
+  { type: "predict", q: "What does this print?", code: "def f(n):\n    if n < 2:\n        return 1\n    return f(n - 1) + f(n - 2)\nprint(f(5))", options: ["5", "8", "15", "25"], answer: 1, explain: "f(0) = f(1) = 1, f(2) = 2, f(3) = 3, f(4) = 5, f(5) = 8. (The number of calls is 15, which is the point: it grows like the result itself.)" }
+]} />

@@ -1,0 +1,229 @@
+---
+title: Combinatorics Basics
+track: cp
+module: math-basics
+order: 5
+difficulty: easy
+estMinutes: 30
+prerequisites: [cp/math-basics/fast-exponentiation]
+tags: [math, combinatorics, binomial, modular-inverse]
+type: lesson
+problems: [m03-binomial-queries]
+furtherReading:
+  - title: cp-algorithms, Binomial coefficients
+    url: https://cp-algorithms.com/combinatorics/binomial-coefficients.html
+  - title: cp-algorithms, Stars and bars
+    url: https://cp-algorithms.com/combinatorics/stars_and_bars.html
+---
+
+## Intuition
+
+Counting problems ask "in how many ways?". Almost all of them reduce to two moves: **choose** (an unordered group of items) and **arrange** (an ordered line of items). The binomial coefficient `C(n, r)`, read "n choose r", counts how many ways to pick `r` items out of `n` when order does not matter.
+
+The answers explode: `C(100, 50)` has 30 digits. So these problems are nearly always posed modulo a prime, and the real lesson is *how to compute `C(n, r)` mod `p` fast*.
+
+## Counting rules
+
+- **Sum rule.** If task A can be done in `x` ways and task B in `y` ways, and they are mutually exclusive, there are `x + y` ways to do "A or B".
+- **Product rule.** If a choice has `x` options and, for each, another has `y` options, there are `x * y` combined ways.
+- **Permutations.** Lines of `n` distinct items: `n! = n * (n-1) * ... * 1`. Lines of `r` items picked from `n`: `n! / (n - r)!`.
+- **Combinations.** Dividing the ordered count by the `r!` orderings of the chosen group:
+
+```text
+C(n, r) = n! / (r! * (n - r)!)
+```
+
+Useful identities:
+
+```text
+C(n, r) = C(n, n - r)                    symmetry
+C(n, r) = C(n-1, r-1) + C(n-1, r)        Pascal: item n is in the group or not
+sum over r of C(n, r) = 2^n              every subset
+```
+
+**Stars and bars.** The number of non-negative integer solutions of `x_1 + ... + x_k = n` is `C(n + k - 1, k - 1)`. The number of monotone lattice paths from `(0, 0)` to `(a, b)` is `C(a + b, a)`.
+
+## Method 1: Pascal's triangle, O(n^2)
+
+Build rows with the identity above. No division needed, so it works for **any** modulus, but time and memory are `O(n * r)`: fine for `n <= ~5000`.
+
+<CodeRunner snippets={{ python: `MOD = 10**9 + 7
+N = 10
+C = [[0] * (N + 1) for _ in range(N + 1)]
+for i in range(N + 1):
+    C[i][0] = 1
+    for j in range(1, i + 1):
+        C[i][j] = (C[i - 1][j - 1] + C[i - 1][j]) % MOD
+print(C[5][2], C[10][5])        # 10 252
+print(sum(C[10]))               # 1024 = 2**10
+`, javascript: `const MOD = 1000000007;
+const N = 10;
+const C = Array.from({ length: N + 1 }, () => new Array(N + 1).fill(0));
+for (let i = 0; i <= N; i++) {
+  C[i][0] = 1;
+  for (let j = 1; j <= i; j++) C[i][j] = (C[i - 1][j - 1] + C[i - 1][j]) % MOD;
+}
+console.log(C[5][2], C[10][5], C[10].reduce((a, b) => a + b, 0));
+` }} />
+
+## Method 2: factorials and inverses, O(n + log p)
+
+For huge `n` (up to `10^6` or `10^7`), precompute `fact[i] = i! mod p` once. Then
+
+```text
+C(n, r) = fact[n] * inv(fact[r]) * inv(fact[n - r])  (mod p)
+```
+
+where `inv(x)` is the modular inverse. Because `p` is prime, `inv(x) = x^(p-2) mod p` by Fermat (see [fast exponentiation](/cp/math-basics/fast-exponentiation/)). Computing three inverses per query costs about 90 multiplications each; better is to compute `inv_fact[N]` once and derive the rest downwards:
+
+```text
+inv_fact[i - 1] = inv_fact[i] * i
+```
+
+because `1/(i-1)! = i / i!`.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+const long long MOD = 1000000007;
+vector<long long> fact(N + 1), inv_fact(N + 1);
+
+long long power(long long a, long long b) {
+    long long r = 1; a %= MOD;
+    while (b) { if (b & 1) r = r * a % MOD; a = a * a % MOD; b >>= 1; }
+    return r;
+}
+
+void init() {
+    fact[0] = 1;
+    for (int i = 1; i <= N; i++) fact[i] = fact[i - 1] * i % MOD;
+    inv_fact[N] = power(fact[N], MOD - 2);
+    for (int i = N; i >= 1; i--) inv_fact[i - 1] = inv_fact[i] * i % MOD;
+}
+
+long long C(int n, int r) {
+    if (r < 0 || r > n) return 0;
+    return fact[n] * inv_fact[r] % MOD * inv_fact[n - r] % MOD;
+}
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+MOD = 10**9 + 7
+fact = [1] * (N + 1)
+for i in range(1, N + 1):
+    fact[i] = fact[i - 1] * i % MOD
+inv_fact = [1] * (N + 1)
+inv_fact[N] = pow(fact[N], MOD - 2, MOD)
+for i in range(N, 0, -1):
+    inv_fact[i - 1] = inv_fact[i] * i % MOD
+
+def C(n, r):
+    if r < 0 or r > n:
+        return 0
+    return fact[n] * inv_fact[r] % MOD * inv_fact[n - r] % MOD
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static final long MOD = 1_000_000_007L;
+static long[] fact, invFact;
+
+static long power(long a, long b) {
+    long r = 1; a %= MOD;
+    while (b > 0) { if ((b & 1) == 1) r = r * a % MOD; a = a * a % MOD; b >>= 1; }
+    return r;
+}
+
+static void init(int n) {
+    fact = new long[n + 1]; invFact = new long[n + 1];
+    fact[0] = 1;
+    for (int i = 1; i <= n; i++) fact[i] = fact[i - 1] * i % MOD;
+    invFact[n] = power(fact[n], MOD - 2);
+    for (int i = n; i >= 1; i--) invFact[i - 1] = invFact[i] * i % MOD;
+}
+
+static long C(int n, int r) {
+    if (r < 0 || r > n) return 0;
+    return fact[n] * invFact[r] % MOD * invFact[n - r] % MOD;
+}
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(n) precompute, O(1) per query" space="O(n)" note="n = largest first argument" />
+
+Use it on two classic counts: the number of paths through a `10 x 7` grid and the number of ways to distribute 20 identical candies to 5 children.
+
+<CodeRunner snippets={{ python: `MOD = 10**9 + 7
+N = 100
+fact = [1] * (N + 1)
+for i in range(1, N + 1):
+    fact[i] = fact[i - 1] * i % MOD
+inv_fact = [1] * (N + 1)
+inv_fact[N] = pow(fact[N], MOD - 2, MOD)
+for i in range(N, 0, -1):
+    inv_fact[i - 1] = inv_fact[i] * i % MOD
+
+def C(n, r):
+    if r < 0 or r > n:
+        return 0
+    return fact[n] * inv_fact[r] % MOD * inv_fact[n - r] % MOD
+
+print(C(10 + 7, 7))        # lattice paths: 19448
+print(C(20 + 5 - 1, 5 - 1))  # stars and bars: 10626
+print(C(100, 50))          # C(100, 50) = 100891344545564193334812497256, printed mod p
+`, javascript: `const MOD = 1000000007n;
+const N = 100;
+const power = (a, b) => { let r = 1n; a %= MOD; while (b > 0n) { if (b & 1n) r = r * a % MOD; a = a * a % MOD; b >>= 1n; } return r; };
+const fact = [1n];
+for (let i = 1; i <= N; i++) fact.push(fact[i - 1] * BigInt(i) % MOD);
+const inv = new Array(N + 1);
+inv[N] = power(fact[N], MOD - 2n);
+for (let i = N; i >= 1; i--) inv[i - 1] = inv[i] * BigInt(i) % MOD;
+const C = (n, r) => (r < 0 || r > n) ? 0n : fact[n] * inv[r] % MOD * inv[n - r] % MOD;
+console.log(String(C(17, 7)), String(C(24, 4)), String(C(100, 50)));
+` }} />
+
+## Which method?
+
+<TradeOffs caption="Computing C(n, r) modulo a number" rows={[
+  { option: "Pascal's triangle", pros: "No division, works for any modulus, trivial to code", cons: "O(n^2) time and memory", chooseWhen: "n up to a few thousand or the modulus is composite" },
+  { option: "Factorials + Fermat inverses", pros: "O(n) precompute, O(1) per query", cons: "Needs a prime modulus larger than n", chooseWhen: "n up to 10^6 or 10^7 and prime modulus such as 10^9+7" },
+  { option: "Multiplicative formula", pros: "O(r) with no tables: prod (n-i+1)/i", cons: "Needs inverses per step or exact big integers", chooseWhen: "A single small-r query, or exact answers in Python" }
+]} />
+
+## Pitfalls
+
+1. **`r > n` or `r < 0`** must give `0`, not an out-of-range index.
+2. **Modulus not prime, or `n >= p`.** Then `n!` is divisible by `p`, the inverse does not exist and the factorial method silently returns garbage. Use Pascal's triangle, Lucas' theorem (prime `p`, small), or prime-power factorisation.
+3. **Integer overflow.** `fact[n] * inv_fact[r]` must be computed in 64 bits and reduced before the next multiplication.
+4. **Ordered vs unordered.** Re-read the statement: do two selections that differ only by order count once or many times? Dividing by the wrong factorial is the most common bug.
+5. **Computing `C` without modulus in 64-bit.** `C(67, 33)` already exceeds a signed 64-bit integer.
+
+## Practice
+
+<Problem id="m03-binomial-queries" />
+
+### Problem ladder
+
+- [CSES, Binomial Coefficients](https://cses.fi/problemset/task/1079), about 1300 (exactly this lesson)
+- [CSES, Creating Strings II](https://cses.fi/problemset/task/1715), about 1500 (multinomial coefficient)
+- [CSES, Distributing Apples](https://cses.fi/problemset/task/1716), about 1300 (stars and bars)
+- [CSES, Bracket Sequences I](https://cses.fi/problemset/task/2064), about 1600 (Catalan numbers)
+- [CSES, Christmas Party](https://cses.fi/problemset/task/1717), about 1700 (derangements, a recurrence over counting)
+
+## Quiz
+
+<Quiz id="cp-math-comb-1" tags={["combinatorics", "binomial"]} questions={[
+  { type: "mcq", q: "How many ways are there to choose a committee of 3 from 8 people (order irrelevant)?", options: ["24", "56", "336", "512"], answer: 1, explain: "C(8, 3) = 8*7*6/(3*2*1) = 56. 336 would count ordered selections." },
+  { type: "multi", q: "Which statements are true?", options: ["C(n, r) = C(n, n - r)", "C(n, r) = C(n-1, r-1) + C(n-1, r)", "Factorial + Fermat inverse works for any modulus", "The number of subsets of an n-element set is 2^n"], answer: [0, 1, 3], explain: "Fermat's inverse requires a prime modulus (and n below it)." },
+  { type: "mcq", q: "Number of non-negative integer solutions to x1 + x2 + x3 = 7:", options: ["C(7, 3)", "C(9, 2)", "C(10, 3)", "7^3"], answer: 1, explain: "Stars and bars: C(n + k - 1, k - 1) = C(7 + 3 - 1, 2) = C(9, 2) = 36." },
+  { type: "predict", q: "What does this print?", code: "MOD = 7\nfrom math import comb\nprint(comb(7, 3) % MOD, comb(6, 3) % MOD)", options: ["0 6", "35 20", "0 0", "5 6"], answer: 0, explain: "C(7,3) = 35 = 5*7, so it is 0 mod 7 (the prime divides n!). C(6,3) = 20 = 2*7 + 6, so 6. This is why the factorial method fails when n >= p." }
+]} />

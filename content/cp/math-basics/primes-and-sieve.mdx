@@ -1,0 +1,224 @@
+---
+title: Primes and the Sieve of Eratosthenes
+track: cp
+module: math-basics
+order: 3
+difficulty: easy
+estMinutes: 30
+prerequisites: [cp/math-basics/gcd-and-lcm]
+tags: [math, primes, sieve, factorization]
+type: lesson
+problems: [m03-prime-count-queries]
+furtherReading:
+  - title: cp-algorithms, Sieve of Eratosthenes
+    url: https://cp-algorithms.com/algebra/sieve-of-eratosthenes.html
+  - title: cp-algorithms, Integer factorization
+    url: https://cp-algorithms.com/algebra/factorization.html
+---
+
+## Intuition
+
+A prime is a number greater than 1 whose only divisors are 1 and itself. Primes are the atoms of the integers: every number greater than 1 is a product of primes in exactly one way (up to order). Contest problems lean on this to count divisors, simplify fractions, find gcds of huge products and more.
+
+There are two basic questions: *is this one number prime?* and *give me all primes up to N*. The first is answered by trial division; the second by a beautiful trick that crosses off multiples.
+
+## Primality by trial division
+
+If `n = a * b` with `1 < a <= b`, then `a * a <= a * b = n`, so the smaller factor is at most `sqrt(n)`. It is therefore enough to try divisors up to `sqrt(n)`:
+
+```python
+def is_prime(n):
+    if n < 2:
+        return False
+    i = 2
+    while i * i <= n:        # i <= sqrt(n), without floating point
+        if n % i == 0:
+            return False
+        i += 1
+    return True
+```
+
+Cost: `O(sqrt n)`. For `n = 10^12` that is `10^6` divisions: fine for one number, too slow for `10^5` queries. Use `i * i <= n` rather than `i <= sqrt(n)` to dodge floating-point rounding, but note that `i * i` overflows a 32-bit `int` once `n` is near `2^31`; use `long long`.
+
+The same loop factorises a number: whenever `i` divides `n`, divide it out repeatedly and record the exponent; at the end, whatever `> 1` remains is a prime factor.
+
+<CodeRunner snippets={{ python: `def factorize(n):
+    res = []
+    i = 2
+    while i * i <= n:
+        if n % i == 0:
+            e = 0
+            while n % i == 0:
+                n //= i
+                e += 1
+            res.append((i, e))
+        i += 1
+    if n > 1:
+        res.append((n, 1))
+    return res
+
+print(factorize(360))             # [(2, 3), (3, 2), (5, 1)]
+print(factorize(10**12 + 39))     # a prime near 10^12: one factor
+print(factorize(999999999989 * 1))
+`, javascript: `function factorize(n) {
+  const res = [];
+  for (let i = 2; i * i <= n; i++) {
+    if (n % i === 0) {
+      let e = 0;
+      while (n % i === 0) { n /= i; e++; }
+      res.push([i, e]);
+    }
+  }
+  if (n > 1) res.push([n, 1]);
+  return res;
+}
+console.log(JSON.stringify(factorize(360)));
+console.log(JSON.stringify(factorize(1000000000039)));
+` }} />
+
+## The sieve of Eratosthenes
+
+To list every prime up to `N`, do not test numbers one by one. Instead: write `2..N`; take the first unmarked number `p` (it must be prime), cross off its multiples, and repeat.
+
+Two observations make it fast:
+
+1. **Start at `p * p`.** A smaller multiple `p * k` with `k < p` has a smaller prime factor and was already crossed off.
+2. **Stop at `sqrt(N)`.** Any composite `<= N` has a prime factor `<= sqrt(N)`.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+vector<bool> is_comp(N + 1, false);
+is_comp[0] = is_comp[1] = true;
+for (long long i = 2; i * i <= N; i++)
+    if (!is_comp[i])
+        for (long long j = i * i; j <= N; j += i)
+            is_comp[j] = true;
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+sieve = bytearray([1]) * (N + 1)
+sieve[0] = sieve[1] = 0
+for i in range(2, int(N ** 0.5) + 1):
+    if sieve[i]:
+        sieve[i * i::i] = bytearray(len(range(i * i, N + 1, i)))
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+boolean[] comp = new boolean[N + 1];
+comp[0] = comp[1] = true;
+for (long i = 2; i * i <= N; i++)
+    if (!comp[(int) i])
+        for (long j = i * i; j <= N; j += i) comp[(int) j] = true;
+```
+
+</Tab>
+</Tabs>
+
+### Complexity
+
+Prime `p` crosses off about `N / p` numbers, so the total is `N * (1/2 + 1/3 + 1/5 + ...)` over primes up to `sqrt N`, which is `N * ln ln N` up to constants (Mertens). In practice `ln ln 10^7` is about 2.8, so the sieve is essentially linear. Memory is `O(N)`, one byte (or bit) per number.
+
+<Complexity time="O(n log log n)" space="O(n)" note="n = sieve limit; N = 10^7 runs in well under a second in C++" />
+
+Try it and compare with known values: there are 25 primes up to 100, 168 up to 1000, 78 498 up to `10^6`.
+
+<CodeRunner snippets={{ python: `N = 1000000
+sieve = bytearray([1]) * (N + 1)
+sieve[0] = sieve[1] = 0
+for i in range(2, int(N ** 0.5) + 1):
+    if sieve[i]:
+        sieve[i * i::i] = bytearray(len(range(i * i, N + 1, i)))
+print(sum(sieve[:101]), sum(sieve[:1001]), sum(sieve))
+`, javascript: `const N = 1000000;
+const comp = new Uint8Array(N + 1);
+comp[0] = comp[1] = 1;
+for (let i = 2; i * i <= N; i++)
+  if (!comp[i]) for (let j = i * i; j <= N; j += i) comp[j] = 1;
+let c100 = 0, c1000 = 0, c = 0;
+for (let i = 0; i <= N; i++) {
+  if (!comp[i]) { c++; if (i <= 100) c100++; if (i <= 1000) c1000++; }
+}
+console.log(c100, c1000, c);
+` }} />
+
+### Smallest prime factor sieve
+
+Store, for each `x`, its smallest prime factor `spf[x]`. Then factorising any `x <= N` takes `O(log x)` steps by repeatedly dividing by `spf[x]`:
+
+<CodeRunner snippets={{ python: `N = 100
+spf = list(range(N + 1))
+for i in range(2, int(N ** 0.5) + 1):
+    if spf[i] == i:
+        for j in range(i * i, N + 1, i):
+            if spf[j] == j:
+                spf[j] = i
+
+def factor(x):
+    out = []
+    while x > 1:
+        out.append(spf[x])
+        x //= spf[x]
+    return out
+
+print(factor(84), factor(97), factor(96))
+`, javascript: `const N = 100;
+const spf = Array.from({ length: N + 1 }, (_, i) => i);
+for (let i = 2; i * i <= N; i++)
+  if (spf[i] === i)
+    for (let j = i * i; j <= N; j += i) if (spf[j] === j) spf[j] = i;
+function factor(x) {
+  const out = [];
+  while (x > 1) { out.push(spf[x]); x = x / spf[x]; }
+  return out;
+}
+console.log(factor(84), factor(97), factor(96));
+` }} />
+
+## Which tool when?
+
+| Need | Tool | Cost |
+| --- | --- | --- |
+| Is one `n` prime, `n <= 10^12` | trial division | `O(sqrt n)` |
+| All primes `<= N`, `N <= ~10^7` | sieve of Eratosthenes | `O(N log log N)` |
+| Factorise many numbers `<= N` | smallest-prime-factor sieve | `O(N)` preprocess, `O(log x)` each |
+| Primes in `[L, R]` with `R` huge but `R - L` small | segmented sieve (sieve with primes up to `sqrt R`) | `O((R-L) log log R + sqrt R)` |
+| Is a 64-bit number prime, many queries | Miller-Rabin (later in the course) | `O(log n)` multiplications |
+
+Counts worth knowing: there are 78 498 primes below `10^6`, 664 579 below `10^7`, and roughly `N / ln N` below `N` in general (prime number theorem).
+
+## Pitfalls
+
+1. **`1` is not prime**, and `0` and negatives are not either. Seed the table accordingly.
+2. **Inner loop start.** Starting at `2 * p` is correct but wasteful; starting at `p * p` with an `int` index overflows when `p` is near `46341` and `int` is 32 bits. Use `long long` for `i * i`.
+3. **Sieve limit.** The sieve must include the largest query, not just `sqrt`. Off-by-one: array size `N + 1`.
+4. **Memory.** `vector<bool>`/bitset for `N = 10^8`; a plain `int` array at that size is 400 MB.
+5. **Trial division loop bound.** Re-evaluate `i * i <= n` after dividing `n` when factorising, so the loop stops as early as possible.
+
+## Practice
+
+<Problem id="m03-prime-count-queries" />
+
+### Problem ladder
+
+- [CSES, Counting Divisors](https://cses.fi/problemset/task/1713), about 1300 (divisor counts via sieve or factorisation)
+- [CSES, Sum of Divisors](https://cses.fi/problemset/task/1082), about 1700 (harmonic-sum thinking)
+- [AtCoder ABC 084 D, 2017-like Number](https://atcoder.jp/contests/abc084/tasks/abc084_d), beginner (sieve plus prefix sums)
+- [Codeforces 271B, Prime Matrix](https://codeforces.com/problemset/problem/271/B), rating 1300 (nearest prime, sieve)
+- [Codeforces 26A, Almost Prime](https://codeforces.com/problemset/problem/26/A), rating 900 (count prime factors)
+
+## Quiz
+
+<Quiz id="cp-math-primes-1" tags={["primes", "sieve"]} questions={[
+  { type: "mcq", q: "To decide whether n is prime by trial division, up to which divisor do you need to test?", options: ["n / 2", "sqrt(n)", "log n", "n - 1"], answer: 1, explain: "If n = a*b with a <= b, then a <= sqrt(n). Any composite has a divisor in [2, sqrt(n)]." },
+  { type: "mcq", q: "In the sieve of Eratosthenes, why can the inner loop for prime p start at p*p?", options: ["Because p*p is the next prime", "Smaller multiples p*k (k < p) have a smaller prime factor and are already marked", "To save memory", "Because p*p is always composite"], answer: 1, explain: "p*k with k < p contains a prime factor below p, so it was crossed off in an earlier round." },
+  { type: "multi", q: "Which statements are correct?", options: ["The sieve runs in O(N log log N)", "1 is a prime number", "A smallest-prime-factor table lets you factorise any x <= N in O(log x)", "Trial division handles 10^5 queries with n near 10^12 comfortably"], answer: [0, 2], explain: "Sieve and SPF facts hold. 1 is not prime, and 10^5 queries * 10^6 steps is 10^11, far too slow." },
+  { type: "predict", q: "What does this print?", code: "N = 30\ns = [True] * (N + 1)\ns[0] = s[1] = False\nfor i in range(2, 6):\n    if s[i]:\n        for j in range(i * i, N + 1, i):\n            s[j] = False\nprint(sum(s))", options: ["8", "9", "10", "11"], answer: 2, explain: "Primes up to 30 are 2,3,5,7,11,13,17,19,23,29: ten of them. Looping i to 5 is enough since 6*6 > 30." }
+]} />

@@ -1,0 +1,152 @@
+---
+title: Modular Arithmetic
+track: cp
+module: math-basics
+order: 1
+difficulty: easy
+estMinutes: 25
+prerequisites: []
+tags: [math, modular-arithmetic, overflow]
+type: lesson
+problems: [m03-signed-mod-ops]
+furtherReading:
+  - title: cp-algorithms, Modular arithmetic and inverses
+    url: https://cp-algorithms.com/algebra/module-inverse.html
+  - title: CSES Problem Set, Introductory Problems
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+A clock has 12 positions. Seven hours after 9 o'clock it is 4 o'clock, not 16, because you only care about where the hand points, not how many full laps it made. Modular arithmetic is arithmetic on a clock with `m` positions: you keep only the **remainder** after dividing by `m`.
+
+Contest problems use this constantly for one reason: counting questions have answers like "the number of ways to tile a board", which can have thousands of digits. Instead of asking for the whole number, the statement says **"print the answer modulo 1 000 000 007"**. You must produce the remainder without ever building the huge number.
+
+## Formal idea
+
+Write `a mod m` for the remainder of `a` when divided by `m`, always in the range `0 ... m - 1`. Two integers are *congruent* modulo `m` when they leave the same remainder: `a ≡ b (mod m)`.
+
+The key fact is that remainders survive `+`, `-` and `*`:
+
+```text
+(a + b) mod m = ((a mod m) + (b mod m)) mod m
+(a - b) mod m = ((a mod m) - (b mod m) + m) mod m
+(a * b) mod m = ((a mod m) * (b mod m)) mod m
+```
+
+So you may reduce **after every operation**, and the intermediate values never grow past `m`. Division is the exception: `(a / b) mod m` is not `(a mod m) / (b mod m)`. We come back to this below and again in the lesson on [combinatorics](/cp/math-basics/combinatorics-basics/).
+
+<Callout type="note" title="Why it works">
+Write `a = qm + r` and `b = sm + t`. Then `a * b = (qs m + q t + r s) m + r t`, so the remainder of `a * b` equals the remainder of `r * t`. Addition and subtraction are the same argument with fewer terms.
+</Callout>
+
+## Negative numbers: the language trap
+
+Mathematically `-7 mod 5 = 3`, because `-7 = (-2) * 5 + 3`. But programming languages disagree:
+
+| Language | `-7 % 5` | Rule |
+| --- | --- | --- |
+| Python | `3` | result takes the sign of the divisor |
+| C++ / Java / JavaScript | `-2` | result takes the sign of the dividend |
+
+So in C++, Java and JavaScript always normalise: `((a % m) + m) % m` (Java also has `Math.floorMod(a, m)`). In subtraction, add `m` before the final `%`.
+
+Run both operators side by side:
+
+<CodeRunner snippets={{ python: `print(-7 % 5)          # 3 in Python
+m = 10**9 + 7
+a, b = 3, 10
+print((a - b) % m)     # 1000000000, already non-negative
+`, javascript: `console.log(-7 % 5);                 // -2
+const m = 1000000007;
+const a = 3, b = 10;
+console.log(((a - b) % m + m) % m); // 1000000000
+` }} />
+
+## Why 1 000 000 007?
+
+Almost every "answer modulo" problem uses `10^9 + 7` (or `998 244 353`). The reasons are practical:
+
+1. **It is prime.** Every non-zero residue then has a multiplicative inverse, which makes division possible.
+2. **Products fit in 64 bits.** Two residues are below `10^9 + 7`, so their product is below about `1.000000014 * 10^18`, which fits a signed 64-bit integer (limit about `9.22 * 10^18`). You can multiply, then reduce.
+3. **Sums fit in 32 bits.** `10^9 + 7 < 2^30`, so the sum of two residues stays below `2^31`.
+4. **It is large**, so the answer carries lots of information, yet it is not a round number that tests could accidentally align with.
+
+<Callout type="pitfall" title="int * int overflows before you reduce">
+In C++ and Java, `a * b % m` with both `a` and `b` declared `int` overflows 32 bits during the multiplication, so the `% m` never gets a chance. Declare them `long long` / `long`, or cast: `(long long)a * b % m`.
+</Callout>
+
+## Worked example 1: sum of 1..n for huge n
+
+Find `1 + 2 + ... + n` modulo `p = 10^9 + 7` for `n` up to `10^18`.
+
+The formula `n(n + 1) / 2` seems to need a product near `10^36`. Reduce first, but be careful: you cannot reduce *before* dividing by 2. One of `n` and `n + 1` is even, so divide that one first:
+
+<CodeRunner snippets={{ python: `n = int(input())
+p = 10**9 + 7
+a, b = n, n + 1
+if a % 2 == 0:
+    a //= 2
+else:
+    b //= 2
+print((a % p) * (b % p) % p)
+`, javascript: `const n = BigInt(readLine());
+const p = 1000000007n;
+let a = n, b = n + 1n;
+if (a % 2n === 0n) a /= 2n; else b /= 2n;
+console.log(String((a % p) * (b % p) % p));
+` }} stdin={"1000000000000000000\n"} />
+
+Check against a small case: `n = 4` gives `a = 2`, `b = 5`, product `10 = 1 + 2 + 3 + 4`. Correct.
+
+## Worked example 2: repeated reduction
+
+Compute `25! mod 1000`. The true value is about `1.55 * 10^25`, far beyond 64 bits (`20!` is the largest factorial that fits a signed 64-bit integer). Folding the modulus in as you go works for any `n`:
+
+<CodeRunner snippets={{ python: `m = 1000
+r = 1
+for i in range(1, 26):
+    r = r * i % m
+print(r)   # 25! mod 1000
+`, javascript: `const m = 1000;
+let r = 1;
+for (let i = 1; i <= 25; i++) r = r * i % m;
+console.log(r);
+` }} />
+
+It prints `0`, which makes sense: `25!` contains the factors `5, 10, 15, 20, 25` (six factors of 5) and many factors of 2, so it is divisible by `10^3`.
+
+## What you cannot do: division and comparison
+
+- **Division.** `(a / b) mod m` is *not* `(a mod m) / (b mod m)`. Example: `6 / 3 = 2`, but modulo `5` we get `(6 mod 5) / (3 mod 5) = 1 / 3`, which is not an integer. The correct tool is the **modular inverse**: `b^(-1)` is the number `x` with `b * x ≡ 1 (mod m)`. When `m` is prime, `x = b^(m - 2) mod m` by Fermat's little theorem, computed with [fast exponentiation](/cp/math-basics/fast-exponentiation/).
+- **Comparison.** A residue says nothing about size. If `a mod p < b mod p`, you cannot conclude `a < b`. Keep "is the true answer bigger than X?" questions out of modular code (or compute them separately with floating point or capped integers).
+- **Dividing a non-prime modulus.** If `m` is not prime, some numbers have no inverse at all. Check what the problem's modulus is.
+
+## Pitfalls checklist
+
+1. A negative remainder in C++/Java/JavaScript. Normalise with `((x % m) + m) % m`.
+2. `int` overflow in the product. Widen to 64 bits before multiplying.
+3. Forgetting the final `% m` on an accumulated sum.
+4. Reducing inside a formula that contains a division (see the `n(n + 1) / 2` trick).
+5. In JavaScript, numbers above `2^53` lose precision. Use `BigInt` for `10^18`-sized inputs.
+
+## Practice
+
+<Problem id="m03-signed-mod-ops" />
+
+### Problem ladder
+
+- [CSES, Exponentiation](https://cses.fi/problemset/task/1095), rating roughly 1000 (uses a modulus in every step)
+- [CSES, Two Sets](https://cses.fi/problemset/task/1092), introductory (sum formulas, no modulus, warm-up)
+- [CSES, Trailing Zeros](https://cses.fi/problemset/task/1618), introductory (divisibility thinking)
+- [Codeforces 1473B, String LCM](https://codeforces.com/problemset/problem/1473/B), rating about 1000 (divisibility and repetition)
+- [CSES, Dice Combinations](https://cses.fi/problemset/task/1633), rating about 1000 (counting modulo 10^9+7)
+
+## Quiz
+
+<Quiz id="cp-math-modular-1" tags={["modular-arithmetic"]} questions={[
+  { type: "mcq", q: "In Java, what does -7 % 5 evaluate to?", options: ["3", "-2", "2", "-3"], answer: 1, explain: "Java's % takes the sign of the dividend, so the result is -2. Use Math.floorMod(-7, 5) to get 3." },
+  { type: "multi", q: "Which identities are valid for any modulus m (assume you reduce at the end)?", options: ["(a + b) mod m = ((a mod m) + (b mod m)) mod m", "(a * b) mod m = ((a mod m) * (b mod m)) mod m", "(a / b) mod m = ((a mod m) / (b mod m)) mod m", "(a - b) mod m = ((a mod m) - (b mod m) + m) mod m"], answer: [0, 1, 3], explain: "Addition, subtraction and multiplication respect remainders. Division does not: you need a modular inverse." },
+  { type: "mcq", q: "Why is it safe to compute (a * b) % 1000000007 in a signed 64-bit integer when 0 <= a, b < 1000000007?", options: ["The product is below about 1.0e18, under the 64-bit limit of about 9.2e18", "Because 1000000007 is prime", "Because % never overflows", "It is not safe; you need 128 bits"], answer: 0, explain: "Each residue is under 1e9+7, so the product is under (1e9+7)^2, roughly 1.0e18, which fits." },
+  { type: "predict", q: "What does this Python code print?", code: "m = 10**9 + 7\nprint((5 - 12) % m)", options: ["-7", "7", "1000000000", "0"], answer: 2, explain: "(-7) mod (10^9+7) = 10^9+7-7 = 1000000000. Python's % returns a non-negative result for a positive modulus." }
+]} />

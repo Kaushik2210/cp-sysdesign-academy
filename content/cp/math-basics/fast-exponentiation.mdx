@@ -1,0 +1,223 @@
+---
+title: Fast (Binary) Exponentiation
+track: cp
+module: math-basics
+order: 4
+difficulty: easy
+estMinutes: 25
+prerequisites: [cp/math-basics/modular-arithmetic]
+tags: [math, binary-exponentiation, modular-arithmetic, matrix]
+type: lesson
+problems: [m03-power-mod-queries]
+furtherReading:
+  - title: cp-algorithms, Binary exponentiation
+    url: https://cp-algorithms.com/algebra/binary-exp.html
+  - title: CSES, Exponentiation
+    url: https://cses.fi/problemset/task/1095
+---
+
+## Intuition
+
+To compute `3^16` you do not need 15 multiplications. Square repeatedly:
+
+```text
+3^2 = 9,  3^4 = 81,  3^8 = 6561,  3^16 = 43046721
+```
+
+Four squarings instead of fifteen products. Exponent `10^18` would need about 60 squarings instead of `10^18` multiplications: the difference between instant and never.
+
+## Formal idea
+
+Write the exponent in binary. For example `13 = 1101_2 = 8 + 4 + 1`, so `a^13 = a^8 * a^4 * a^1`. The powers `a, a^2, a^4, a^8, ...` come from squaring, and you multiply into the result exactly those for which the bit of `b` is set.
+
+Recursively: 
+
+```text
+a^0 = 1
+a^b = (a^(b/2))^2           if b is even
+a^b = (a^(b/2))^2 * a       if b is odd   (integer division)
+```
+
+The exponent halves each call, so there are `floor(log2 b) + 1` levels, each with at most two multiplications.
+
+<Complexity time="O(log b)" space="O(1)" note="iterative version; the recursive one uses O(log b) stack" />
+
+## Iterative template (modular)
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+long long power(long long a, long long b, long long m) {
+    a %= m;
+    long long r = 1 % m;          // 1 % m so that m = 1 gives 0
+    while (b > 0) {
+        if (b & 1) r = r * a % m;
+        a = a * a % m;
+        b >>= 1;
+    }
+    return r;
+}
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+def power(a, b, m):
+    a %= m
+    r = 1 % m
+    while b:
+        if b & 1:
+            r = r * a % m
+        a = a * a % m
+        b >>= 1
+    return r
+# built in: pow(a, b, m)
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long power(long a, long b, long m) {
+    a %= m;
+    long r = 1 % m;
+    while (b > 0) {
+        if ((b & 1) == 1) r = r * a % m;
+        a = a * a % m;
+        b >>= 1;
+    }
+    return r;
+}
+// BigInteger.modPow exists, but is slower and heavier
+```
+
+</Tab>
+</Tabs>
+
+Check the number of loop iterations and a known value:
+
+<CodeRunner snippets={{ python: `def power(a, b, m):
+    a %= m
+    r = 1 % m
+    steps = 0
+    while b:
+        if b & 1:
+            r = r * a % m
+        a = a * a % m
+        b >>= 1
+        steps += 1
+    return r, steps
+
+print(power(2, 10, 10**9 + 7))           # (1024, 4)
+print(power(3, 10**18, 10**9 + 7))       # steps = 60
+print(pow(3, 10**18, 10**9 + 7))         # built-in agrees
+`, javascript: `function power(a, b, m) {
+  a %= m;
+  let r = 1n % m, steps = 0;
+  while (b > 0n) {
+    if (b & 1n) r = r * a % m;
+    a = a * a % m;
+    b >>= 1n;
+    steps++;
+  }
+  return [r, steps];
+}
+console.log(power(2n, 10n, 1000000007n).map(String).join(' '));
+console.log(power(3n, 10n ** 18n, 1000000007n).map(String).join(' '));
+` }} />
+
+## Worked example 1: modular inverse via Fermat
+
+If `p` is prime and `a` is not a multiple of `p`, Fermat's little theorem gives `a^(p-1) ≡ 1 (mod p)`. Multiplying both sides by `a^(-1)` shows `a^(-1) ≡ a^(p-2) (mod p)`. So dividing by `a` modulo `p` is multiplying by `power(a, p - 2, p)`:
+
+<CodeRunner snippets={{ python: `p = 10**9 + 7
+a = 3
+inv = pow(a, p - 2, p)
+print(inv)                  # 333333336
+print(a * inv % p)          # 1
+print(10 * inv % p)         # 10 / 3 modulo p = 333333340
+`, javascript: `const p = 1000000007n;
+function power(a, b, m) {
+  let r = 1n; a %= m;
+  while (b > 0n) { if (b & 1n) r = r * a % m; a = a * a % m; b >>= 1n; }
+  return r;
+}
+const inv = power(3n, p - 2n, p);
+console.log(String(inv), String(3n * inv % p), String(10n * inv % p));
+` }} />
+
+## Worked example 2: Fibonacci in O(log n)
+
+Fibonacci satisfies `[F(n+1), F(n)]^T = M^n [1, 0]^T` with `M = [[1, 1], [1, 0]]`. Matrix multiplication is associative, so the exact same squaring trick applies, with the identity matrix as the starting "1". Cost: `O(2^3 * log n)` multiplications, enough for `n = 10^18`:
+
+<CodeRunner snippets={{ python: `MOD = 10**9 + 7
+
+def mat_mul(A, B):
+    return [[(A[0][0]*B[0][0] + A[0][1]*B[1][0]) % MOD,
+             (A[0][0]*B[0][1] + A[0][1]*B[1][1]) % MOD],
+            [(A[1][0]*B[0][0] + A[1][1]*B[1][0]) % MOD,
+             (A[1][0]*B[0][1] + A[1][1]*B[1][1]) % MOD]]
+
+def fib(n):
+    result = [[1, 0], [0, 1]]       # identity
+    base = [[1, 1], [1, 0]]
+    while n:
+        if n & 1:
+            result = mat_mul(result, base)
+        base = mat_mul(base, base)
+        n >>= 1
+    return result[0][1]             # F(n)
+
+print([fib(i) for i in range(11)])  # 0 1 1 2 3 5 8 13 21 34 55
+print(fib(90))                      # 2880067194370816120 mod p
+print(fib(10**18))
+`, javascript: `const MOD = 1000000007n;
+const mul = (A, B) => [
+  [(A[0][0]*B[0][0] + A[0][1]*B[1][0]) % MOD, (A[0][0]*B[0][1] + A[0][1]*B[1][1]) % MOD],
+  [(A[1][0]*B[0][0] + A[1][1]*B[1][0]) % MOD, (A[1][0]*B[0][1] + A[1][1]*B[1][1]) % MOD],
+];
+function fib(n) {
+  let r = [[1n, 0n], [0n, 1n]], b = [[1n, 1n], [1n, 0n]];
+  while (n > 0n) {
+    if (n & 1n) r = mul(r, b);
+    b = mul(b, b);
+    n >>= 1n;
+  }
+  return r[0][1];
+}
+console.log(String(fib(10n)), String(fib(90n)), String(fib(10n ** 18n)));
+` }} />
+
+The same idea evaluates any linear recurrence with a fixed number of terms.
+
+## Pitfalls
+
+1. **Modulus up to `10^18`.** `a * a` overflows 64 bits. Use `__int128` in C++ or a double-and-add multiplication (itself a binary exponentiation of addition). With `m <= ~3 * 10^9` plain `long long` is safe because `m^2 < 9.2 * 10^18`.
+2. **Zero exponent.** `a^0 = 1`, even for `a = 0` (the convention used by most judges). Start `r` at `1 % m`, not `1`, so `m = 1` returns `0`.
+3. **Reducing the exponent.** For prime `p` and `a` not divisible by `p`, `a^b mod p = a^(b mod (p - 1)) mod p`. The exponent lives modulo `p - 1`, **not** modulo `p`. So `a^(b^c) mod p` needs `b^c mod (p - 1)`.
+4. **Negative base.** Normalise `a` into `[0, m)` first.
+5. **Using floating-point `pow`.** `pow(2, 60)` is exact in doubles but `pow(3, 40)` is not. Never use it for integer powers.
+6. **Fermat inverse only for prime modulus.** For composite `m` use extended Euclid.
+
+## Practice
+
+<Problem id="m03-power-mod-queries" />
+
+### Problem ladder
+
+- [CSES, Exponentiation](https://cses.fi/problemset/task/1095), warm-up (exactly this technique)
+- [CSES, Exponentiation II](https://cses.fi/problemset/task/1712), about 1600 (exponent reduces modulo p - 1)
+- [CSES, Fibonacci Numbers](https://cses.fi/problemset/task/1722), about 1500 (matrix power or fast doubling)
+- [CSES, Counting Necklaces](https://cses.fi/problemset/task/2209), harder (Burnside's lemma plus powers and inverses)
+- [CSES, Dice Combinations](https://cses.fi/problemset/task/1633), about 1000 (linear recurrence, matrix power is an alternative)
+
+## Quiz
+
+<Quiz id="cp-math-fastexp-1" tags={["binary-exponentiation"]} questions={[
+  { type: "mcq", q: "About how many multiplications does binary exponentiation use for exponent 10^18?", options: ["About 60 to 120", "About 10^9", "About 10^18", "About 1000"], answer: 0, explain: "log2(10^18) is about 60, with at most two multiplications (square and multiply) per bit." },
+  { type: "mcq", q: "For prime p and a not divisible by p, the modular inverse of a is:", options: ["a^p mod p", "a^(p-2) mod p", "a^(p+1) mod p", "p - a"], answer: 1, explain: "Fermat's little theorem: a^(p-1) = 1, so a^(p-2) is the inverse." },
+  { type: "multi", q: "Which are common bugs in a modular power routine?", options: ["Starting the result at 1 instead of 1 % m when m can be 1", "Forgetting to reduce the base modulo m before the loop", "Using int for a * a when m is near 10^9", "Squaring the base inside the loop"], answer: [0, 1, 2], explain: "Squaring the base is the algorithm itself; the other three are real bugs." },
+  { type: "predict", q: "What does this print?", code: "def p(a, b, m):\n    r = 1\n    while b:\n        if b & 1:\n            r = r * a % m\n        a = a * a % m\n        b >>= 1\n    return r\nprint(p(2, 13, 1000))", options: ["192", "8192", "3", "96"], answer: 0, explain: "2^13 = 8192, and 8192 mod 1000 = 192." }
+]} />

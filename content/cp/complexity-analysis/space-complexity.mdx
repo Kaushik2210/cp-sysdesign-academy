@@ -1,0 +1,174 @@
+---
+title: Space Complexity and Memory Limits
+track: cp
+module: complexity-analysis
+order: 5
+difficulty: easy
+estMinutes: 25
+prerequisites: [cp/complexity-analysis/big-o-notation, cp/complexity-analysis/estimating-from-constraints]
+tags: [complexity, memory, space, dp, rolling-array]
+type: lesson
+problems: [m04-grid-paths-mod]
+furtherReading:
+  - title: Competitive Programmer's Handbook (Laaksonen), chapter 7 Dynamic programming
+    url: https://cses.fi/book/book.pdf
+  - title: CSES Problem Set, Dynamic Programming
+    url: https://cses.fi/problemset/list/
+---
+
+## Intuition
+
+Time is not the only budget. Every judge also gives a **memory limit**, usually 256 MB (sometimes 512 MB or 1 GB; CSES uses 512 MB). Exceed it and the verdict is Memory Limit Exceeded or Runtime Error, no matter how fast the code is.
+
+**Space complexity** counts how much memory the algorithm needs as a function of the input size. As with time, ignore constants in analysis, but when you check a limit you must turn the formula back into bytes.
+
+## What counts
+
+- **Auxiliary space** is the memory beyond the input: tables, queues, hash maps.
+- **Recursion stack.** Every active call holds a frame. A recursion of depth `d` uses `O(d)` space, even if it allocates nothing else. DFS on a path graph with `n = 10^6` vertices has depth `10^6`.
+- **Output** may or may not be counted, but if the answer is `n^2` items you need `n^2` somewhere.
+- **Input storage**: reading `10^7` numbers into an array already costs `40 MB` in C++ with 32-bit ints.
+
+## From formula to megabytes
+
+| Type (C++/Java) | Bytes |
+| --- | --- |
+| `bool`, `char`, `byte` | 1 |
+| `int`, `float` | 4 |
+| `long long`, `double`, pointer | 8 |
+| `vector<bool>`, `bitset<N>` | 1/8 per element |
+| `std::map` / `set` node (typical) | 40 to 48 plus the payload |
+| `std::unordered_map` entry (typical) | 30 to 60 |
+
+Rule of thumb: **`10^6` bytes is about 1 MB** (and `10^8` bytes is 100 MB).
+
+| Structure | Size |
+| --- | --- |
+| `int a[10^7]` | 40 MB |
+| `int a[10^8]` | 400 MB (too big for 256 MB) |
+| `long long dp[5000][5000]` | 200 MB |
+| `int dp[5000][5000]` | 100 MB |
+| `bool vis[10^8]` | 100 MB; as a bitset 12.5 MB |
+| `vector<vector<int>>` with `10^6` tiny rows | much more than the payload: each row has about 24 bytes header plus allocator overhead |
+
+In Python the numbers are larger: a list holds 8-byte pointers, and each distinct int object is about 28 bytes. A list of `10^7` ints needs roughly 80 MB for pointers plus up to 280 MB for objects (small ints from -5 to 256 are shared). Prefer `bytearray`, `array('i')`, or NumPy for big tables.
+
+Compute memory estimates mechanically:
+
+<CodeRunner snippets={{ python: `def mb(elements, bytes_per):
+    return elements * bytes_per / 1e6
+
+cases = [
+    ("int a[10^7]", 10**7, 4),
+    ("int dp[5000][5000]", 5000 * 5000, 4),
+    ("long long dp[5000][5000]", 5000 * 5000, 8),
+    ("rolling 2 rows of int, w=5000", 2 * 5000, 4),
+    ("bitset 10^9", 10**9, 1 / 8),
+]
+for name, n, b in cases:
+    print(f"{name:34s} {mb(n, b):10.3f} MB")
+`, javascript: `const mb = (n, b) => n * b / 1e6;
+const cases = [
+  ["int a[10^7]", 1e7, 4],
+  ["int dp[5000][5000]", 5000 * 5000, 4],
+  ["long long dp[5000][5000]", 5000 * 5000, 8],
+  ["rolling 2 rows of int, w=5000", 2 * 5000, 4],
+  ["bitset 10^9", 1e9, 1 / 8],
+];
+for (const [name, n, b] of cases) console.log(name.padEnd(34), mb(n, b).toFixed(3), "MB");
+` }} />
+
+## Worked example: DP that only looks one row back
+
+Longest common subsequence of strings of length `n` and `m`: `dp[i][j]` depends on `dp[i-1][j-1]`, `dp[i-1][j]` and `dp[i][j-1]`. The full table is `Theta(n * m)`. Because row `i` reads only row `i - 1`, keep two rows: `Theta(min(n, m))` memory, **same time**.
+
+<CodeRunner snippets={{ python: `def lcs_full(a, b):
+    n, m = len(a), len(b)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            if a[i - 1] == b[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+    return dp[n][m]
+
+def lcs_two_rows(a, b):
+    m = len(b)
+    prev = [0] * (m + 1)
+    for ch in a:
+        cur = [0] * (m + 1)
+        for j in range(1, m + 1):
+            if ch == b[j - 1]:
+                cur[j] = prev[j - 1] + 1
+            else:
+                cur[j] = max(prev[j], cur[j - 1])
+        prev = cur
+    return prev[m]
+
+a, b = "AGGTABQXRZ", "GXTXAYBRQZ"
+print(lcs_full(a, b), lcs_two_rows(a, b))
+`, javascript: `function lcsTwoRows(a, b) {
+  const m = b.length;
+  let prev = new Array(m + 1).fill(0);
+  for (const ch of a) {
+    const cur = new Array(m + 1).fill(0);
+    for (let j = 1; j <= m; j++)
+      cur[j] = ch === b[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
+    prev = cur;
+  }
+  return prev[m];
+}
+console.log(lcsTwoRows("AGGTABQXRZ", "GXTXAYBRQZ"));
+` }} />
+
+Even better, a single row can be updated in place when you process columns in the right order (the grid-path problem below does exactly that).
+
+<Complexity time="O(n * m)" space="O(min(n, m))" note="the same time as the full table but a factor of n smaller memory" />
+
+## Techniques for saving memory
+
+1. **Rolling arrays.** If layer `i` depends only on layer `i - 1`, keep two (or one) layers.
+2. **Smaller types.** Use `int` instead of `long long` when values fit; `char`/`bool` for flags; `short` for small counters.
+3. **Bitsets.** `std::bitset` or an `int` mask cuts `bool` arrays by 8x and speeds up set operations by 64x.
+4. **Compute on demand.** Do not store prefix sums if you can recompute them; do not store all permutations, generate and test one by one.
+5. **Offline / streaming.** Read, update the answer, forget. Sum, min, max and counts need `O(1)`.
+6. **Coordinate compression.** Map sparse values into `0..k-1` before indexing arrays.
+7. **Iterative instead of recursive** when the depth is large; a manual stack lives on the heap and can be bounded.
+8. **Trade time for space (and back).** Memoization hash maps cost more per entry than arrays; recomputation costs time. Know both limits before choosing.
+
+<TradeOffs caption="DP table strategies" rows={[
+  { option: "Full 2D table", pros: "Simple; allows path reconstruction", cons: "O(n * m) memory", chooseWhen: "n * m up to about 10^7 cells" },
+  { option: "Rolling rows", pros: "O(m) memory, same time", cons: "Cannot reconstruct the path directly", chooseWhen: "Only the final value is needed and the table would not fit" },
+  { option: "Recompute with divide and conquer (Hirschberg)", pros: "O(m) memory and still recovers the path", cons: "About twice the time, more code", chooseWhen: "Both a path and tight memory are required" }
+]} />
+
+## Pitfalls
+
+1. **Hidden recursion depth.** A Python recursion of depth `10^5` crashes by default (`sys.setrecursionlimit` plus a thread with a larger stack, or write it iteratively). In C++ the stack is typically 8 MB on Linux judges (often 256 MB on Codeforces), enough for about `10^5` to `10^6` frames depending on the frame size.
+2. **Global arrays sized for the worst case with many test cases.** Re-initialising `10^6` entries per test across `10^5` tests is a time problem, not a space problem: clear only what you used.
+3. **`vector<vector<int>>` overhead.** A million small vectors costs far more than a million ints. Prefer a flat array with an offset (CSR adjacency).
+4. **Python object overhead.** Tuples and dicts are heavy; encode `(i, j)` as `i * m + j`.
+5. **Forgetting the output buffer.** Building one giant string of `10^6` lines is fine, but building `10^8` characters costs 100+ MB.
+6. **Estimating without a unit.** `5000 * 5000` is 25 million cells: 100 MB at 4 bytes, but 25 MB as `char`. Always multiply by the element size.
+
+## Practice
+
+<Problem id="m04-grid-paths-mod" />
+
+### Problem ladder
+
+- [CSES, Grid Paths](https://cses.fi/problemset/task/1638), about 1100 (grid DP, `10^9+7`, rolling row works)
+- [CSES, Edit Distance](https://cses.fi/problemset/task/1639), about 1400 (two-row DP)
+- [CSES, Money Sums](https://cses.fi/problemset/task/1745), about 1500 (bitset or 1D DP)
+- [LeetCode 62, Unique Paths](https://leetcode.com/problems/unique-paths/), medium (no obstacles, a one-row DP or a binomial)
+- [LeetCode 1143, Longest Common Subsequence](https://leetcode.com/problems/longest-common-subsequence/), medium (two-row optimisation)
+
+## Quiz
+
+<Quiz id="cp-complexity-space-1" tags={["space", "memory"]} questions={[
+  { type: "mcq", q: "How much memory does a C++ int dp[5000][5000] array take?", options: ["About 25 MB", "About 100 MB", "About 200 MB", "About 1 GB"], answer: 1, explain: "25 million cells times 4 bytes is 100 MB." },
+  { type: "mcq", q: "A DP over a grid where row i depends only on row i - 1 can use how much extra memory (for a w-wide grid)?", options: ["O(h * w)", "O(h)", "O(w)", "O(1)"], answer: 2, explain: "Keep one or two rows of width w." },
+  { type: "multi", q: "Which of these reduce memory?", options: ["Using bitset instead of bool array", "Replacing long long by int when values fit", "Memoising with a hash map instead of an array", "Rolling arrays in DP"], answer: [0, 1, 3], explain: "A hash map usually uses more memory per entry than a flat array." },
+  { type: "predict", q: "How deep does the recursion go for n = 100000?", code: "def f(n):\n    if n == 0:\n        return 0\n    return 1 + f(n - 1)\n# call f(100000) in default CPython", options: ["It returns 100000", "It raises RecursionError (default limit about 1000)", "It returns 0", "It runs out of time but not memory"], answer: 1, explain: "Depth is n, and CPython's default recursion limit is about 1000. Raise the limit and stack size, or make the function iterative." }
+]} />
