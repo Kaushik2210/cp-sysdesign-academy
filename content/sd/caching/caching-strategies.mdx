@@ -1,0 +1,183 @@
+---
+title: Caching Strategies
+track: sd
+module: caching
+order: 2
+difficulty: easy
+estMinutes: 30
+prerequisites: ["sd/caching/why-cache"]
+tags: [cache-aside, read-through, write-through, write-back, refresh-ahead]
+type: lesson
+furtherReading:
+  - title: AWS Whitepaper, Database Caching Strategies Using Redis
+    url: https://docs.aws.amazon.com/whitepapers/latest/database-caching-strategies-using-redis/welcome.html
+  - title: Microsoft Azure Architecture Center, Cache-Aside pattern
+    url: https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside
+  - title: Nishtala et al., Scaling Memcache at Facebook (NSDI 2013)
+    url: https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala
+  - title: Designing Data-Intensive Applications (Kleppmann), chapters 5 and 11
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Having a cache is one decision; deciding **who talks to it and in what order** is another. The strategies below differ in *who loads the cache on a miss* and *when writes reach the database versus the cache*. Each one picks a point on the triangle of **freshness, write latency and durability**.
+
+## Read strategies
+
+### Cache-aside (lazy loading)
+
+The application owns the logic: read the cache; on a miss, read the database, then populate the cache.
+
+<Diagram kind="mermaid" caption="Cache-aside read and write" code={`sequenceDiagram
+  participant A as Application
+  participant C as Cache
+  participant D as Database
+  A->>C: GET user:42
+  alt hit
+    C-->>A: value
+  else miss
+    C-->>A: null
+    A->>D: SELECT user 42
+    D-->>A: row
+    A->>C: SET user:42 (TTL)
+  end
+  Note over A,D: On write: update DB, then DELETE the cache key`} />
+
+- Only requested data is cached; a cache failure degrades to database reads.
+- First read of each key is slow, and data can be stale until TTL or explicit delete.
+- Most common pattern with Redis and Memcached because the cache needs no knowledge of the database.
+
+### Read-through
+
+The *cache layer* loads from the database itself on a miss; the application only talks to the cache. Same observable behaviour as cache-aside but the loading logic lives inside the cache library or service, which centralises the code and makes things like request coalescing easier to build in.
+
+### Refresh-ahead
+
+The cache proactively reloads entries that are about to expire (for example when an entry is read in the last 20 percent of its TTL, trigger an asynchronous refresh). Readers of hot keys never see a miss latency. Costs: wasted refreshes of keys that are never read again, and complexity. It also pairs naturally with stampede protection (see the invalidation lesson).
+
+## Write strategies
+
+### Write-through
+
+Every write goes to the cache and the database synchronously, in the same operation, before acknowledging.
+
+<Diagram kind="mermaid" caption="Write-through" code={`sequenceDiagram
+  participant A as Application
+  participant C as Cache
+  participant D as Database
+  A->>C: write user:42
+  C->>D: write user:42
+  D-->>C: ok
+  C-->>A: ok (both updated)`} />
+
+- Cache is always consistent with the database for written keys; reads after writes are hits.
+- Write latency is the sum of both; data nobody reads again still occupies the cache.
+
+### Write-back (write-behind)
+
+The write is acknowledged once it hits the cache; the cache flushes to the database *later*, asynchronously and often batched.
+
+<Diagram kind="mermaid" caption="Write-back" code={`sequenceDiagram
+  participant A as Application
+  participant C as Cache
+  participant Q as Flush queue
+  participant D as Database
+  A->>C: write counter:7
+  C-->>A: ok (fast)
+  C->>Q: mark dirty
+  Q->>D: batched write (later)
+  Note over C,D: If the cache dies before the flush, the write is lost`} />
+
+- Lowest write latency, and repeated writes to one key coalesce into one database write (good for counters and metrics).
+- **Durability risk**: acknowledged data lives only in cache memory until flushed. Needs replication of the cache or a durable log for anything important.
+
+### Write-around
+
+Write only to the database and let reads populate the cache. Avoids filling the cache with write-once data. The first read after a write is a miss (or stale unless the key was invalidated).
+
+### Cache-aside writes: delete, do not update
+
+With cache-aside, the usual write path is *update the database, then delete the cache key*. Updating the cache with the new value invites a race: two concurrent writers can update the database in one order and the cache in the other, leaving a permanently wrong value until the TTL. Deleting is idempotent and lets the next read reload the truth. A race remains where a slow reader that started before the write repopulates the cache with the old value after your delete; a TTL bounds that, and tighter guarantees need versioning or leases (see the invalidation lesson).
+
+## Choosing
+
+<TradeOffs caption="Caching strategies" rows={[
+  { option: "Cache-aside", pros: "Simple, resilient to cache loss, caches only what is used, works with any store", cons: "Miss penalty on first read, app code owns consistency, stale window", chooseWhen: "Default for read-heavy services with Redis or Memcached" },
+  { option: "Read-through", pros: "Loading logic centralised, easy to add coalescing and metrics", cons: "Cache layer must know how to load; tighter coupling", chooseWhen: "Many services share the same loaders or you use a caching library or product that supports it" },
+  { option: "Write-through", pros: "Cache fresh after writes, simple mental model, durable", cons: "Slower writes, caches data that may never be read", chooseWhen: "Read-after-write correctness matters and write rate is moderate" },
+  { option: "Write-back", pros: "Fastest writes, batching and coalescing, absorbs spikes", cons: "Data loss on cache failure, complex ordering and failure handling", chooseWhen: "High write rates of loss-tolerant or reconstructible data such as counters and analytics" },
+  { option: "Refresh-ahead", pros: "Hot keys never miss; smooth latency", cons: "Wasted refreshes, more moving parts", chooseWhen: "Predictably hot, expensive-to-compute entries with stable access patterns" },
+  { option: "Write-around", pros: "Keeps write-once data out of the cache", cons: "Reads right after writes miss", chooseWhen: "Large write-heavy data that is rarely re-read, such as logs or uploads" }
+]} />
+
+## A runnable sketch
+
+<CodeRunner language="python" code={`import time
+
+class Cache:
+    def __init__(self):
+        self.d = {}
+    def get(self, k):
+        v = self.d.get(k)
+        if v and v[1] > time.time():
+            return v[0]
+        return None
+    def set(self, k, val, ttl):
+        self.d[k] = (val, time.time() + ttl)
+    def delete(self, k):
+        self.d.pop(k, None)
+
+db = {"user:1": "Ada"}
+db_reads = 0
+cache = Cache()
+
+def read(k):
+    global db_reads
+    v = cache.get(k)
+    if v is not None:
+        return v
+    db_reads += 1                 # miss: go to the source
+    v = db.get(k)
+    if v is not None:
+        cache.set(k, v, ttl=60)
+    return v
+
+def write(k, v):
+    db[k] = v                     # 1. source of truth first
+    cache.delete(k)               # 2. then invalidate
+
+for _ in range(5):
+    read("user:1")
+print("reads after 5 gets, db_reads =", db_reads)   # 1
+write("user:1", "Grace")
+print(read("user:1"), "db_reads =", db_reads)        # Grace, 2
+`} />
+
+## Failure modes
+
+- **Cache and DB diverge** after a crash between the DB write and the cache delete. Mitigate with TTLs as a backstop, or publish invalidations from the database change log (change data capture).
+- **Write-back loss**: node dies with dirty entries. Replicate dirty data or persist an append-only log.
+- **Write-through partial failure**: cache write succeeds and database fails (or the reverse). Order the operations and make failure leave the safer state, usually database first.
+- **Stale read race** in cache-aside, described above.
+
+## Pitfalls
+
+- Updating the cache value instead of deleting it on writes.
+- Using write-back for money or inventory.
+- Caching values derived from several tables with no plan for which writes invalidate them.
+- Putting unbounded keys (per-request IDs) in the cache and evicting useful data.
+
+## What would you choose and why?
+
+You are designing an e-commerce inventory counter shown on product pages (read 50,000 per second, updated at 200 per second) and a separate user-profile service (reads 500 per second, rare writes). Choose a read and write strategy for each, and state what consistency users can observe.
+
+## Quiz
+
+<Quiz id="sd-m06-strategies" tags={["caching", "strategies"]} questions={[
+  { type: "mcq", q: "In cache-aside, who loads the cache on a miss?", options: ["The cache itself", "The application", "The database", "The CDN"], answer: 1, explain: "The application reads the database and then populates the cache; in read-through the cache layer does it." },
+  { type: "mcq", q: "What is the main risk of write-back caching?", options: ["Slow reads", "Acknowledged writes can be lost if the cache fails before flushing", "Cache never fills", "TTL cannot be used"], answer: 1, explain: "Data lives only in cache memory until flushed to the database." },
+  { type: "mcq", q: "With cache-aside, why do most designs delete the key on write rather than set the new value?", options: ["Deleting is faster on the network", "Concurrent writers can leave the cache with an older value if updates arrive out of order; delete lets the next read reload truth", "Redis cannot set values", "It saves memory only"], answer: 1, explain: "Set-after-write races can leave a permanently wrong cache entry; delete is idempotent and order-insensitive." },
+  { type: "multi", q: "Which strategies reduce write latency seen by the client compared with write-through?", options: ["Write-back", "Write-around (DB only, skipping cache work)", "Refresh-ahead", "Write-through itself"], answer: [0, 1], explain: "Write-back acknowledges after the cache; write-around skips the cache update. Refresh-ahead concerns reads and write-through is the baseline being compared." },
+  { type: "mcq", q: "Which workload suits write-back best?", options: ["Bank transfers", "Page-view counters that can tolerate losing a few seconds", "Password changes", "Order payments"], answer: 1, explain: "High-rate, coalescible, loss-tolerant updates benefit from batching and fast acknowledgement." }
+]} />

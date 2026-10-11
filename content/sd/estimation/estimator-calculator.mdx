@@ -1,0 +1,131 @@
+---
+title: A Runnable Capacity Estimator
+track: sd
+module: estimation
+order: 3
+difficulty: beginner
+estMinutes: 20
+prerequisites: [sd/estimation/qps-storage-bandwidth]
+tags: [estimation, calculator, python, capacity]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 1
+    url: https://dataintensive.net/
+  - title: Python documentation, f-string format specification mini-language
+    url: https://docs.python.org/3/library/string.html#formatspec
+---
+
+## Intuition
+
+Doing the same five multiplications for every design is mechanical. Writing it as code does two things: it removes arithmetic slips, and it lets you ask "what if" quickly by changing one input. The estimator below reads seven numbers from standard input and prints average and peak QPS, storage, peak egress and a server count.
+
+## The estimator
+
+Edit the `stdin` block to change the inputs, one number per line, in this order:
+
+1. daily active users
+2. actions per user per day
+3. reads per write (the read:write ratio)
+4. bytes per write (and per read, for simplicity)
+5. retention in years
+6. peak factor (peak QPS divided by average QPS)
+7. QPS one server can handle
+
+<CodeRunner language="python" stdin={"10000000\n10\n9\n1000\n5\n3\n1000\n"} code={`dau = int(input())
+actions = float(input())
+read_ratio = float(input())
+bytes_per_write = float(input())
+years = float(input())
+peak = float(input())
+per_server = float(input())
+
+SECONDS = 86_400
+total = dau * actions
+writes = total / (read_ratio + 1)
+reads = total - writes
+avg_qps = total / SECONDS
+peak_qps = avg_qps * peak
+storage = writes * bytes_per_write * 365 * years
+egress = reads / SECONDS * bytes_per_write * peak
+servers = -(-peak_qps // per_server)
+
+def human(n):
+    for unit in ["B", "KB", "MB", "GB", "TB", "PB"]:
+        if n < 1000:
+            return f"{n:.1f} {unit}"
+        n /= 1000
+    return f"{n:.1f} EB"
+
+print(f"avg QPS      : {avg_qps:,.0f}")
+print(f"peak QPS     : {peak_qps:,.0f}")
+print(f"writes/day   : {writes:,.0f}")
+print(f"storage      : {human(storage)} over {years:g} years")
+print(f"peak egress  : {human(egress)}/s")
+print(f"servers (>=) : {int(servers)} (before redundancy)")
+`} />
+
+With the default inputs (10 million users, 10 actions each, 9 reads per write, 1 KB records, 5 years, 3x peak, 1,000 QPS per server) it prints roughly 1,157 average QPS, 3,472 peak QPS, 18 TB of storage and 4 servers.
+
+<Callout type="warning" title="What the tool does not model">
+It ignores replication, indexes and metadata overhead, caching (which reduces what reaches the database), traffic skew, and redundancy. The server count is a lower bound: add at least N+1 for failures and headroom of 30 to 50%. Multiply the storage by your replication factor yourself.
+</Callout>
+
+## A second example: how many memory reads equal one network hop?
+
+A different kind of estimate is the ratio between two operation costs. This snippet compares how many sequential record reads from memory fit into one round trip, given a record size and a memory bandwidth you assume.
+
+<CodeRunner language="python" stdin={"64\n10\n0.5\n"} code={`record_bytes = float(input())      # bytes per record
+mem_gbps = float(input())          # assumed memory bandwidth, GB/s
+rtt_ms = float(input())            # datacenter round trip, ms
+
+records_per_second = mem_gbps * 1e9 / record_bytes
+per_rtt = records_per_second * (rtt_ms / 1000)
+print(f"records/s from memory : {records_per_second:,.0f}")
+print(f"records per round trip: {per_rtt:,.0f}")
+`} />
+
+The result (about 78,000 records per 0.5 ms round trip) says: scanning a lot of data in memory next to the CPU is cheap compared with making a single remote call. This is why moving computation to the data, and batching, often win.
+
+## Using it in an interview
+
+1. Write the assumptions on the board.
+2. Run the numbers mentally and, in a design doc, paste the calculator inputs.
+3. Sensitivity: change one input by 10x and say which output moves. If the design survives a 10x on the riskiest assumption, you are in good shape.
+
+## Diagram: the estimator as a function
+
+<Diagram kind="flow" caption="Inputs flow through the estimator to design drivers" nodes={[
+  { id: "inputs", label: "Inputs", x: 0, y: 80, role: "The assumptions: users, actions, ratio, record size, retention, peak factor, per-server capacity.", failureModes: ["Wrong or unstated assumptions make every output wrong", "Using averages where the peak matters"], tradeoffs: ["More inputs give a richer model but slower, harder-to-defend estimates"] },
+  { id: "qps", label: "QPS model", x: 200, y: 20, role: "Turns daily totals into average and peak requests per second.", failureModes: ["Peak factor too low underestimates burst load"], tradeoffs: ["A single peak factor is simple; real traffic has daily and event spikes"] },
+  { id: "store", label: "Storage model", x: 200, y: 140, role: "Multiplies writes by record size and retention.", failureModes: ["Forgets replication and index overhead"], tradeoffs: ["Raw payload is easy to compute; overhead factors are guesses"] },
+  { id: "out", label: "Design drivers", x: 400, y: 80, role: "Which dimension (QPS, storage, bandwidth, servers) dominates and so shapes the architecture.", failureModes: ["Treating output as exact rather than an order of magnitude"], tradeoffs: ["Rounded numbers are quick to communicate but hide detail"] }
+]} edges={[
+  { from: "inputs", to: "qps" }, { from: "inputs", to: "store" }, { from: "qps", to: "out" }, { from: "store", to: "out" }
+]} />
+
+## Trade-offs: how precise should the estimate be?
+
+<TradeOffs caption="Levels of estimation effort" rows={[
+  { option: "Mental, rounded to powers of ten", pros: "Seconds to do; shows judgement", cons: "Easy to be off by 2 to 3x", chooseWhen: "Interviews, early scoping" },
+  { option: "Spreadsheet or script like this one", pros: "Repeatable, easy sensitivity checks", cons: "False precision if inputs are guesses", chooseWhen: "Design docs, capacity reviews" },
+  { option: "Load testing and production metrics", pros: "Real numbers for real hardware", cons: "Needs a running system and time", chooseWhen: "Before launch and for ongoing capacity planning" }
+]} />
+
+## What would you choose and why?
+
+Run the estimator with a peak factor of 10 instead of 3 for a flash-sale shop. The server count jumps. Would you provision for 10x all day, or autoscale, or queue the burst? State which latency and cost requirements push you to each choice.
+
+## Pitfalls
+
+- Trusting the printed digits. Report "about 1,200 average QPS".
+- Feeding in total registered users instead of daily active users.
+- Treating the lower-bound server count as the final fleet size.
+
+## Quiz
+
+<Quiz id="sd-m03-calc-1" tags={["estimation", "python"]} questions={[
+  { type: "predict", q: "What does this print?", code: "x = 5_000_000 / 86_400\nprint(round(x))", options: ["12", "58", "116", "579"], answer: 1, explain: "5,000,000 / 86,400 is about 57.9, which rounds to 58." },
+  { type: "mcq", q: "Why is the server count printed by the estimator only a lower bound?", options: ["It ignores redundancy, headroom and failures", "It overestimates peak traffic", "It counts reads twice", "It assumes zero cache"], answer: 0, explain: "You need spare capacity for failures and growth on top of the raw peak/per-server division." },
+  { type: "mcq", q: "Doubling the retention period from 5 to 10 years does what to total storage in the model?", options: ["Leaves it unchanged", "Roughly doubles it", "Quadruples it", "Halves it"], answer: 1, explain: "Storage is linear in retention years in this model." },
+  { type: "multi", q: "Which are limitations of the simple estimator?", options: ["No replication factor", "No modelling of cache hit rate", "Cannot compute average QPS", "Assumes a single peak factor"], answer: [0, 1, 3], explain: "It does compute average QPS; the other three are real simplifications." }
+]} />

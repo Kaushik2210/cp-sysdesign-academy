@@ -1,0 +1,1 @@
+{ "title": "Databases II: Scaling Data", "level": "Level 1: Core Building Blocks", "order": 7, "summary": "Replication, failover, sharding, consistent hashing and hot partitions: how data stores grow past one machine." }

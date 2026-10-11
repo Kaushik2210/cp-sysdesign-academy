@@ -1,0 +1,138 @@
+---
+title: "API Styles: REST, GraphQL and gRPC"
+track: sd
+module: networking-and-apis
+order: 2
+difficulty: beginner
+estMinutes: 30
+prerequisites: [sd/networking-and-apis/client-server-and-http]
+tags: [rest, graphql, grpc, api-design]
+type: lesson
+furtherReading:
+  - title: Fielding, Architectural Styles and the Design of Network-based Software Architectures (REST), chapter 5
+    url: https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm
+  - title: GraphQL specification and learning guide
+    url: https://graphql.org/learn/
+  - title: gRPC documentation, core concepts
+    url: https://grpc.io/docs/what-is-grpc/core-concepts/
+  - title: Protocol Buffers documentation
+    url: https://protobuf.dev/overview/
+---
+
+## Intuition
+
+An API is a contract: *what can I ask for, in what shape, and what comes back*. The three styles you will meet most often answer that differently. **REST** models your domain as resources with URLs and uses HTTP verbs. **GraphQL** exposes a typed schema and lets the client ask for exactly the fields it needs. **gRPC** exposes remote procedures with a strict binary schema, optimised for service-to-service calls. None is "best"; each moves cost to a different place.
+
+## One feature, three styles
+
+Feature: show an order with its customer name and the titles of its items.
+
+### REST
+
+```http
+GET /orders/4412
+```
+
+```json
+{
+  "id": 4412,
+  "status": "shipped",
+  "customerId": 77,
+  "items": [{ "productId": 9, "qty": 2 }]
+}
+```
+
+To render the page the client may also call `GET /customers/77` and `GET /products/9`, so three round trips. A server may offer `?expand=customer,items.product` to reduce this, but each such option is something the API author must design and maintain.
+
+Strengths: cacheable by URL with standard HTTP caching, simple tooling, easy to explore. Weakness: **over-fetching** (fields you do not need) and **under-fetching** (needing more calls).
+
+### GraphQL
+
+```graphql
+query {
+  order(id: 4412) {
+    status
+    customer { name }
+    items { qty product { title } }
+  }
+}
+```
+
+```json
+{
+  "data": {
+    "order": {
+      "status": "shipped",
+      "customer": { "name": "Asha" },
+      "items": [{ "qty": 2, "product": { "title": "Desk lamp" } }]
+    }
+  }
+}
+```
+
+One round trip, only the requested fields. Typically all queries go to a single `POST /graphql`, so URL-based HTTP caching does not apply directly; caching moves to the client library or to persisted queries. A server resolving nested fields naively makes one database call per item (the **N+1 problem**), usually fixed with batching (for example a DataLoader pattern). Because clients can write arbitrary queries, servers need depth limits, cost analysis and timeouts to avoid expensive queries.
+
+### gRPC
+
+```protobuf
+service OrderService {
+  rpc GetOrder (GetOrderRequest) returns (Order);
+  rpc WatchOrders (WatchRequest) returns (stream OrderEvent);
+}
+
+message GetOrderRequest { int64 id = 1; }
+message Order {
+  int64 id = 1;
+  string status = 2;
+  int64 customer_id = 3;
+}
+```
+
+The schema compiles to client and server stubs in many languages. Messages are Protocol Buffers, a compact binary format, sent over HTTP/2. gRPC supports four call shapes: unary, server streaming, client streaming and bidirectional streaming. Browsers cannot call gRPC directly without a proxy layer (gRPC-Web), so it is mostly used between services.
+
+## Comparing them
+
+<TradeOffs caption="REST vs GraphQL vs gRPC" rows={[
+  { option: "REST (JSON over HTTP)", pros: "Ubiquitous, human-readable, uses HTTP caching, CDNs and status codes naturally", cons: "Over/under-fetching; many round trips for rich screens; weak formal schema unless OpenAPI is added", chooseWhen: "Public APIs, CRUD-style resources, anything that benefits from HTTP caching" },
+  { option: "GraphQL", pros: "Client picks fields, one round trip, strongly typed schema, great for many different clients (web, mobile)", cons: "Harder caching, N+1 and query-cost risks, more complex server and security model", chooseWhen: "Product UIs with varied data needs and several client teams" },
+  { option: "gRPC (protobuf over HTTP/2)", pros: "Compact and fast, strict contracts, code generation, built-in streaming and deadlines", cons: "Binary and harder to debug by hand, limited browser support, tighter coupling to schema evolution rules", chooseWhen: "Internal microservice calls, low-latency or streaming between backends" }
+]} />
+
+Rough payload intuition (approximate, depends on data): the same record is often several times smaller in protobuf than in JSON because field names are replaced by small numeric tags and numbers are packed, but compressing JSON with gzip narrows the gap.
+
+## Where each style sits in an architecture
+
+<Diagram kind="flow" caption="A common mix: GraphQL or REST at the edge, gRPC between services" nodes={[
+  { id: "web", label: "Web / mobile client", x: 0, y: 80, role: "Calls one public-facing API tailored to UI needs.", failureModes: ["Over-fetching wastes mobile data", "Breaking API change crashes old app versions"], tradeoffs: ["Flexible queries versus less predictable load"] },
+  { id: "gateway", label: "API gateway / BFF", x: 200, y: 80, role: "Authenticates, rate-limits and aggregates calls to internal services (a backend-for-frontend).", failureModes: ["Single point of failure", "Becomes a bottleneck or a place where business logic piles up"], tradeoffs: ["Hides internals from clients but adds a hop and a team dependency"] },
+  { id: "orders", label: "Order service", x: 420, y: 20, role: "Owns orders; exposes gRPC methods to other services.", failureModes: ["Slow service causes cascading timeouts upstream"], tradeoffs: ["Strict schema catches errors early but needs coordinated evolution"] },
+  { id: "customers", label: "Customer service", x: 420, y: 140, role: "Owns customer profiles; exposes gRPC methods.", failureModes: ["Unavailable service degrades every screen that needs names"], tradeoffs: ["Separate ownership lets teams move independently, at the cost of network calls"] }
+]} edges={[
+  { from: "web", to: "gateway", label: "GraphQL/REST" }, { from: "gateway", to: "orders", label: "gRPC" }, { from: "gateway", to: "customers", label: "gRPC" }
+]} />
+
+## Evolving an API without breaking clients
+
+- **REST/GraphQL (JSON)**: add fields freely; clients must ignore unknown fields. Never change meaning or remove fields without versioning or deprecation.
+- **GraphQL**: mark fields `@deprecated` and track usage before removal; often no version number is used.
+- **gRPC/protobuf**: never reuse or renumber a field tag; add new fields with new numbers; reserve removed ones. Old clients ignore unknown fields.
+
+## Pitfalls
+
+- Choosing GraphQL to avoid designing an API. The schema still needs careful design, and the server needs performance guardrails.
+- Exposing gRPC directly to browsers without an adapter.
+- Calling "REST" any JSON-over-HTTP API. Real REST uses resources, standard verbs and caching semantics, not verbs in URLs like `/doGetOrder`.
+- Letting an internal service graph grow into long synchronous chains; every extra hop multiplies latency and failure probability.
+
+## What would you choose and why?
+
+You run a marketplace with a web app, two mobile apps and 30 internal microservices. Which style do you use between the clients and your edge, and which between internal services? What is the cost you accept with each choice?
+
+## Quiz
+
+<Quiz id="sd-m02-api-styles" tags={["rest", "graphql", "grpc"]} questions={[
+  { type: "mcq", q: "Which problem does GraphQL mainly address compared with plain REST?", options: ["Over-fetching and under-fetching of fields", "Encrypting traffic", "DNS resolution", "Cross-region replication"], answer: 0, explain: "Clients specify exactly the fields they need in one query." },
+  { type: "mcq", q: "Which statement about gRPC is correct?", options: ["It uses plain text XML over HTTP/1.0", "It uses Protocol Buffers over HTTP/2 and supports streaming", "It cannot be used between services", "It requires a browser"], answer: 1, explain: "gRPC is built on HTTP/2 with protobuf messages and four call types including streaming." },
+  { type: "multi", q: "Which are common risks of GraphQL servers that need mitigation?", options: ["N+1 database queries", "Arbitrarily expensive client-written queries", "HTTP method idempotency violations in every request", "Harder URL-level HTTP caching"], answer: [0, 1, 3], explain: "Batching, query cost limits and persisted queries are standard mitigations." },
+  { type: "mcq", q: "In protobuf, which change breaks old clients?", options: ["Adding a new field with a new tag number", "Reusing an existing field number for a different meaning", "Adding a new RPC method", "Marking a field reserved after removal"], answer: 1, explain: "Reusing a tag makes old and new binaries interpret the same bytes differently." }
+]} />

@@ -1,0 +1,129 @@
+---
+title: DNS and Name Resolution
+track: sd
+module: networking-and-apis
+order: 4
+difficulty: beginner
+estMinutes: 25
+prerequisites: [sd/networking-and-apis/client-server-and-http]
+tags: [dns, ttl, caching, geodns, failover]
+type: lesson
+furtherReading:
+  - title: Cloudflare Learning Center, What is DNS?
+    url: https://www.cloudflare.com/learning/dns/what-is-dns/
+  - title: RFC 1034, Domain Names - Concepts and Facilities
+    url: https://www.rfc-editor.org/rfc/rfc1034
+  - title: RFC 1035, Domain Names - Implementation and Specification
+    url: https://www.rfc-editor.org/rfc/rfc1035
+  - title: Amazon Route 53 routing policies
+    url: https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html
+---
+
+## Intuition
+
+Computers reach each other by IP address, people remember names. DNS (the Domain Name System) is the distributed, hierarchical, heavily cached database that maps names such as `www.example.com` to addresses. It sits in front of nearly every connection, so its speed, caching and failure behaviour are part of every system's latency and availability story. It is also a design tool: because the answer can differ per user, DNS can steer traffic between regions and data centres.
+
+## The hierarchy
+
+A name is read right to left: `www` . `example` . `com` . (the root).
+
+- **Root servers** know which servers handle each top-level domain.
+- **TLD servers** (for `com`, `org`, `in`) know which name servers are responsible for each registered domain.
+- **Authoritative name servers** hold the actual records for a domain and give the final answer.
+- **Recursive resolvers** (run by your ISP, company or a public provider) do the lookup work on behalf of clients and cache results.
+- The **stub resolver** in your operating system just asks the recursive resolver.
+
+## Resolution flow
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant B as Browser / OS stub
+  participant R as Recursive resolver
+  participant Root as Root server
+  participant T as TLD server (.com)
+  participant A as Authoritative (example.com)
+  B->>R: A record for www.example.com?
+  Note over R: Check cache first
+  R->>Root: www.example.com?
+  Root-->>R: Ask the .com servers
+  R->>T: www.example.com?
+  T-->>R: Ask example.com name servers
+  R->>A: www.example.com?
+  A-->>R: 203.0.113.10, TTL 300
+  Note over R: Cache for 300 s
+  R-->>B: 203.0.113.10`} caption="Iterative resolution with a cold cache. A warm cache answers in one hop." />
+
+A cold lookup can involve several round trips; a cached one answers in about a millisecond from a nearby resolver. In practice most lookups are cache hits because resolvers cache not only final answers but also the locations of TLD and authoritative servers.
+
+## Common record types
+
+| Type | Meaning | Example |
+| --- | --- | --- |
+| A | Name to IPv4 address | `www` to `203.0.113.10` |
+| AAAA | Name to IPv6 address | `www` to `2001:db8::10` |
+| CNAME | Alias to another name | `www` to `lb.example.net` |
+| NS | Which servers are authoritative | `example.com` to `ns1.dnsprovider.net` |
+| MX | Mail servers | `example.com` to `mail.example.com` |
+| TXT | Free text (verification, SPF) | `"v=spf1 ..."` |
+
+A name that has a CNAME cannot hold other record types at the same name, which is why the bare "apex" domain (`example.com`) cannot be a CNAME in standard DNS; many providers offer an ALIAS or flattening feature as a workaround.
+
+## TTL and caching
+
+Every record carries a **TTL** (time to live, in seconds). Resolvers, operating systems and browsers may cache the answer for that long.
+
+- **Long TTL** (hours): fewer queries, faster lookups, lower load on authoritative servers, but changes propagate slowly.
+- **Short TTL** (30 to 300 seconds): changes and failovers take effect quickly, but more queries and more latency on cache misses.
+
+<Callout type="warning" title="Changing DNS is not instant">
+If a record has a one-day TTL and you change it, some clients keep the old address for up to a day. Before a planned migration, lower the TTL well in advance (at least the old TTL ahead of time), switch, then raise it again. Some resolvers also ignore low TTLs or clamp them, so treat TTL as a request, not a guarantee.
+</Callout>
+
+Negative answers (name does not exist) are cached too, for a period set by the zone.
+
+## DNS as a traffic tool
+
+- **Round-robin**: return several A records; clients pick among them. Simple, but unaware of server health or load.
+- **GeoDNS / latency-based routing**: the authoritative server returns different answers depending on where the query comes from (usually inferred from the resolver's address, or from EDNS Client Subnet when supported), sending users to the nearest region.
+- **Weighted routing**: send 5% of traffic to a new deployment for a gradual rollout.
+- **Health-checked failover**: remove an unhealthy endpoint from answers; limited by TTL and client caching.
+- **Anycast**: many servers advertise the same IP and the network routes each client to a nearby one; commonly used by root servers, public resolvers and CDNs.
+
+<Diagram kind="flow" caption="GeoDNS steering users to regional load balancers" nodes={[
+  { id: "user", label: "User", x: 0, y: 80, role: "Resolves the service name before connecting.", failureModes: ["Stale cached answer keeps pointing to a failed region until TTL expires"], tradeoffs: ["Client caching reduces lookups but delays failover"] },
+  { id: "resolver", label: "Recursive resolver", x: 190, y: 80, role: "Looks up the name on the user's behalf and caches the answer.", failureModes: ["Resolver outage makes every name appear down", "May be far from the user, skewing geo decisions"], tradeoffs: ["Shared caching speeds lookups but hides the user's real location"] },
+  { id: "auth", label: "Authoritative DNS (geo)", x: 390, y: 80, role: "Returns a region-specific address based on the query origin and health checks.", failureModes: ["Provider outage takes the whole domain down", "Wrong geo mapping sends users to a distant region"], tradeoffs: ["Smart routing adds provider dependency; using two DNS providers improves resilience"] },
+  { id: "eu", label: "EU region", x: 600, y: 20, role: "Serves European users.", failureModes: ["Regional outage requires failover to another region"], tradeoffs: ["Lower latency versus data-residency and capacity planning per region"] },
+  { id: "us", label: "US region", x: 600, y: 140, role: "Serves North American users.", failureModes: ["Capacity exhaustion during failover from another region"], tradeoffs: ["Each region must be sized to absorb its failover partner or degrade gracefully"] }
+]} edges={[
+  { from: "user", to: "resolver", label: "query" }, { from: "resolver", to: "auth", label: "query" }, { from: "auth", to: "eu", label: "EU answer" }, { from: "auth", to: "us", label: "US answer" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="DNS routing choices" rows={[
+  { option: "Single A record, long TTL", pros: "Cheap, fast cached lookups", cons: "Slow to change, no failover", chooseWhen: "Stable internal or small-scale endpoints" },
+  { option: "Round-robin multiple records", pros: "Trivial load spreading", cons: "No health awareness; uneven due to caching", chooseWhen: "Basic spreading in front of a real load balancer layer" },
+  { option: "GeoDNS / latency routing", pros: "Lower latency, regional isolation", cons: "Depends on resolver location accuracy; more config; TTL limits failover speed", chooseWhen: "Multi-region deployments with global users" },
+  { option: "Short TTL with health checks", pros: "Fast failover and rollouts", cons: "More queries, higher dependency on DNS provider uptime", chooseWhen: "Availability-critical endpoints that can fail over" }
+]} />
+
+## Pitfalls
+
+- Treating DNS failover as instant. Clients, resolvers and libraries (for example runtimes that cache a lookup for the life of a process) can keep stale addresses.
+- Putting everything on one DNS provider. DNS is a single point of failure for the whole domain.
+- Forgetting that the lookup is part of latency on the first request to a new hostname; many separate hostnames (sharded domains) can add lookups.
+- Using DNS for load balancing when you need real load or health awareness; use a load balancer behind it.
+- Pointing the apex domain at a CNAME where the provider does not support flattening.
+
+## What would you choose and why?
+
+You are moving a service to a new data centre next week. Would you lower the TTL now, switch DNS and keep the old servers running as a safety net, or use a load balancer in front and move servers behind it? Explain the cost and the risk of each.
+
+## Quiz
+
+<Quiz id="sd-m02-dns" tags={["dns"]} questions={[
+  { type: "mcq", q: "Which server type gives the final, authoritative answer for example.com?", options: ["Root server", "The domain's authoritative name server", "The client's stub resolver", "The TLD server for .com"], answer: 1, explain: "Root and TLD servers only delegate; the authoritative server holds the actual records." },
+  { type: "mcq", q: "You lower a record's TTL from 86400 to 60 seconds and change the IP immediately. What can happen?", options: ["All clients switch instantly", "Resolvers that cached the old answer may still use it for up to the old TTL", "The domain stops resolving", "Only IPv6 users are affected"], answer: 1, explain: "Existing caches honour the TTL they received earlier, so lower the TTL ahead of the change." },
+  { type: "multi", q: "Which are valid uses of DNS in system design?", options: ["Geographic routing to the nearest region", "Weighted routing for gradual rollouts", "Guaranteeing instant failover", "Distributing traffic across multiple load balancer addresses"], answer: [0, 1, 3], explain: "DNS can steer traffic, but caching means failover is never guaranteed to be instant." },
+  { type: "mcq", q: "Why can't the bare domain example.com normally be a CNAME?", options: ["CNAMEs are only for IPv6", "A CNAME cannot coexist with other record types such as NS and MX at the same name", "Browsers reject CNAMEs", "TTL cannot be set on CNAMEs"], answer: 1, explain: "The apex must hold NS and SOA records, which conflicts with CNAME." }
+]} />

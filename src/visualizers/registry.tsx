@@ -6,7 +6,13 @@ import {
   BUBBLE_SORT_CODE,
   binarySearchSteps,
   bubbleSortSteps,
+  SLIDING_WINDOW_CODE,
+  TWO_POINTERS_CODE,
+  slidingWindowSteps,
+  twoPointersSteps,
   type BSState,
+  type TwoPtrState,
+  type WindowState,
   type SortState,
 } from "./algorithms";
 import type { VisualizerDef } from "./types";
@@ -39,6 +45,40 @@ function SortRender({ state: s }: { state: SortState }) {
   return <ArrayView values={s.arr} marks={marks} />;
 }
 
+
+function TwoPointersRender({ state: s }: { state: TwoPtrState }) {
+  const marks: Record<number, CellMark> = {};
+  if (s.l < s.arr.length) marks[s.l] = { label: "l", tone: "accent" };
+  if (s.r >= 0) marks[s.r] = { label: s.l === s.r ? "l,r" : "r", tone: "accent" };
+  if (s.found) {
+    marks[s.found[0]] = { label: "l", tone: "good" };
+    marks[s.found[1]] = { label: "r", tone: "good" };
+  }
+  return (
+    <div>
+      <ArrayView values={s.arr} marks={marks} />
+      <p className="text-sm">target sum = {s.target}</p>
+    </div>
+  );
+}
+
+function WindowRender({ state: s }: { state: WindowState }) {
+  const marks: Record<number, CellMark> = {};
+  s.arr.forEach((_, i) => {
+    if (i >= s.start && i < s.start + s.k) marks[i] = { tone: "accent" };
+  });
+  if (s.bestStart !== null && s.bestStart !== s.start) {
+    for (let i = s.bestStart; i < s.bestStart + s.k; i++) marks[i] = { tone: "good" };
+  }
+  return (
+    <div>
+      <ArrayView values={s.arr} marks={marks} />
+      <p className="text-sm">
+        window sum = {s.sum ?? "-"} · best = {s.best ?? "-"}
+      </p>
+    </div>
+  );
+}
 export const VISUALIZERS = {
   "binary-search": {
     title: "Binary search",
@@ -56,6 +96,22 @@ export const VISUALIZERS = {
     generate: bubbleSortSteps,
     Render: SortRender,
   } satisfies VisualizerDef<SortState>,
+  "two-pointers": {
+    title: "Two pointers: pair with a given sum",
+    pseudocode: TWO_POINTERS_CODE,
+    defaultInput: "1 2 4 7 11 15 19\n18",
+    inputHelp: "Line 1: numbers (sorted for you). Line 2: target sum.",
+    generate: twoPointersSteps,
+    Render: TwoPointersRender,
+  } satisfies VisualizerDef<TwoPtrState>,
+  "sliding-window": {
+    title: "Sliding window: maximum sum of k consecutive",
+    pseudocode: SLIDING_WINDOW_CODE,
+    defaultInput: "2 1 5 1 3 2 9 1\n3",
+    inputHelp: "Line 1: numbers. Line 2: window size k.",
+    generate: slidingWindowSteps,
+    Render: WindowRender,
+  } satisfies VisualizerDef<WindowState>,
 };
 
 export type VisualizerName = keyof typeof VISUALIZERS;

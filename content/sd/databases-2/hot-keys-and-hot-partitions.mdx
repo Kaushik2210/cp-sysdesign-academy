@@ -1,0 +1,109 @@
+---
+title: Hot Keys and Hot Partitions
+track: sd
+module: databases-2
+order: 5
+difficulty: hard
+estMinutes: 25
+prerequisites: ["sd/databases-2/sharding-and-partitioning"]
+tags: [hot-keys, hot-partitions, skew, caching]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 6 "Skewed Workloads and Relieving Hot Spots"
+    url: https://dataintensive.net/
+  - title: Amazon DynamoDB documentation, Best practices for designing and using partition keys
+    url: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html
+  - title: "Dynamo: Amazon's Highly Available Key-value Store (DeCandia et al., SOSP 2007)"
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+---
+
+## Intuition
+
+Sharding spreads *keys* evenly, but traffic is rarely spread evenly across keys. Real access patterns are heavily skewed: a celebrity profile, a viral post, a flash-sale product, today's date as a key. Whichever shard holds that key takes disproportionate load while the others idle. Adding shards does not help, because the hot key still lives on exactly one of them.
+
+Two related terms:
+
+- **Hot key**: a single key receiving a very large share of requests.
+- **Hot partition**: a shard whose load greatly exceeds the others, from one hot key, many warm keys that happen to co-locate, or a skewed key design (all new writes to the newest range).
+
+## Spotting them
+
+Look for imbalance, not averages: per-shard QPS, CPU, p99 latency, throttling counts and storage size. A cluster whose average CPU is 20% can still have one node at 100%. Many stores expose top-key or hot-range diagnostics; otherwise sample request keys at the proxy and count.
+
+## Mitigations
+
+### Read-heavy hot keys
+
+- **Cache in front**: a hot key served from an in-memory cache absorbs nearly all reads. Add request coalescing so a cache miss triggers one backend fetch rather than thousands.
+- **Local (in-process) cache** with a short TTL, so even the cache tier is not hit for the hottest keys.
+- **Replicate the hot key**: store copies under `key#0 .. key#k-1` (or more replicas of that partition) and have readers pick one at random.
+- **CDN or edge caching** for public, cacheable objects.
+
+### Write-heavy hot keys
+
+Caches do not help writes. Options:
+
+- **Key splitting (write sharding)**: append a random or round-robin suffix, so counter `likes:post42` becomes `likes:post42#0..#15`. Writes spread across 16 shards; reads sum the 16 values. This trades read cost and extra complexity for write throughput.
+- **Batching and aggregation**: buffer increments in memory or a queue and flush periodic aggregate updates, accepting a short delay.
+- **Move to a better data structure**: an approximate counter or a CRDT counter when exact instant totals are not needed.
+
+### Skewed key design
+
+- Avoid monotonically increasing keys on range-partitioned stores. Prefix with a hash or bucket (`hash(id) % 16 + timestamp`) so writes fan out across ranges, then query the buckets in parallel.
+- **Split the hot partition**: stores with dynamic splitting divide a hot range into two; some can isolate a single hot key into its own partition.
+- **Move hot tenants** in a directory-based scheme to dedicated shards.
+- **Admission control and rate limiting** for abusive or buggy clients that create the skew.
+
+## Worked example: a like counter
+
+A viral post receives 30,000 like events per second. Assume one shard sustains about 5,000 writes per second on a single counter row (illustrative). Splitting into 16 sub-counters gives each about `30000 / 16 = 1875` writes per second, comfortably under the limit even if it is not perfectly even. Reading the total means 16 reads, or a cached sum refreshed once per second. Everyone viewing sees the count up to a second stale, which is acceptable for likes but not for bank balances.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  W[30k likes per second] --> R{Pick suffix at random}
+  R --> C0[likes:42#0]
+  R --> C1[likes:42#1]
+  R --> C15[likes:42#15]
+  C0 --> S[Sum or cached total]
+  C1 --> S
+  C15 --> S`} caption="Write sharding a hot counter across sub-keys" />
+
+## Failure modes
+
+<Diagram kind="flow" caption="Hot key handling path" nodes={[
+  { id: "client", label: "Clients", x: 0, y: 80, role: "Generate skewed traffic; a few keys dominate.", failureModes: ["Retry storms amplify load on an already hot key"], tradeoffs: ["Client-side backoff protects the shard at the cost of slower user retries"] },
+  { id: "edge", label: "Edge / local cache", x: 200, y: 80, role: "Absorbs reads for popular keys with short TTLs and request coalescing.", failureModes: ["Mass expiry causes a stampede on the origin", "Stale data after updates"], tradeoffs: ["Short TTL means fresher data but less shielding"] },
+  { id: "router", label: "Router", x: 400, y: 80, role: "Chooses the sub-key or replica for hot keys.", failureModes: ["Wrong hot-key list sends hot traffic to one node", "Splitting rules out of date"], tradeoffs: ["Dynamic detection adds complexity; static lists are brittle"] },
+  { id: "hot", label: "Hot shard", x: 600, y: 20, role: "Holds the hot key and its neighbours.", failureModes: ["CPU or throttling saturates and hurts all keys on this shard", "Replication lag grows under write pressure"], tradeoffs: ["Isolating hot keys protects co-located tenants"] },
+  { id: "rest", label: "Other shards", x: 600, y: 140, role: "Hold sub-keys, replicas and ordinary data.", failureModes: ["Fan-out reads increase tail latency", "Uneven suffix distribution"], tradeoffs: ["More shards touched per read to gain write capacity"] }
+]} edges={[
+  { from: "client", to: "edge" }, { from: "edge", to: "router", label: "miss / write" }, { from: "router", to: "hot" }, { from: "router", to: "rest" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Relieving hot spots" rows={[
+  { option: "Cache with coalescing", pros: "Huge read relief; cheap", cons: "Staleness; no help for writes", chooseWhen: "Read-dominated hot keys" },
+  { option: "Key splitting with suffixes", pros: "Scales writes across shards", cons: "Reads must aggregate; operational complexity; weaker atomicity", chooseWhen: "Counters and append-heavy hot keys" },
+  { option: "Hash-prefixed keys", pros: "Removes sequential write hot spots", cons: "Range scans must fan out across buckets", chooseWhen: "Time-series on range-partitioned stores" },
+  { option: "Dedicated shard for hot tenant", pros: "Isolation; others unaffected", cons: "Manual or detection-driven; uneven cost", chooseWhen: "Multi-tenant systems with a few giant tenants" }
+]} />
+
+## Pitfalls
+
+- Assuming consistent hashing or more shards fixes a hot key.
+- Splitting keys for every counter by default; apply it only to measured hot keys.
+- Caching without stampede protection so that expiry of the hot key melts the origin.
+- Ignoring "hot by time": the key everyone hits at midnight or on a sale start.
+
+## What would you choose and why?
+
+A ticketing site sells a stadium concert: 500,000 users hit one `event:123` inventory row in the first minute. Reads can be cached, but each purchase must decrement inventory exactly. What would you do, and where can you accept approximation and where not? Consider queueing purchases, splitting inventory into per-section sub-counters, and a waiting room.
+
+## Quiz
+
+<Quiz id="sd-m07-hot-keys" tags={["hot-keys", "skew"]} questions={[
+  { type: "mcq", q: "Why does adding more shards often fail to fix a hot key?", options: ["Shards cannot be added online", "The hot key still maps to exactly one shard", "Hot keys only exist in caches", "More shards reduce CPU on every node"], answer: 1, explain: "Sharding distributes keys; one key cannot be split across shards unless you change the key design." },
+  { type: "mcq", q: "Which technique best helps a write-heavy counter on a single hot key?", options: ["Add a read-through cache", "Write sharding the counter across sub-keys and summing on read", "Increase replica count", "Use a longer TTL"], answer: 1, explain: "Caches and replicas help reads; splitting the key spreads the writes." },
+  { type: "multi", q: "Which are valid mitigations for sequential-key write hot spots on a range-partitioned store?", options: ["Prefix keys with a hash bucket", "Pre-split ranges", "Use a single increasing counter as key", "Spread writes across several buckets and query them in parallel"], answer: [0, 1, 3], explain: "A single increasing key is the problem, not the fix." },
+  { type: "mcq", q: "A cluster shows 20% average CPU but one node is throttling. This is best described as:", options: ["A hot partition", "Replication lag", "A split brain", "Cache poisoning"], answer: 0, explain: "Skewed load concentrates on one partition even when the average looks healthy." }
+]} />

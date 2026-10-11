@@ -1,0 +1,128 @@
+---
+title: Scaling Out, Stateless Services and Autoscaling
+track: sd
+module: scalability
+order: 1
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/what-is-system-design/requirements-and-framework"]
+tags: [scalability, horizontal-scaling, stateless, autoscaling, amdahl, usl]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 1 (Scalability)
+    url: https://dataintensive.net/
+  - title: The Twelve-Factor App - VI. Processes (stateless processes)
+    url: https://12factor.net/processes
+  - title: Kubernetes documentation - Horizontal Pod Autoscaling
+    url: https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/
+  - title: Neil Gunther - Universal Scalability Law
+    url: http://www.perfdynamics.com/Manifesto/USLscalability.html
+---
+
+## Intuition
+
+A system is scalable if adding resources lets it handle proportionally more load while keeping latency acceptable. There are two ways to add resources:
+
+- **Vertical scaling (scale up)**: a bigger machine. Simple, no code change, but bounded by the largest machine, gets steeply more expensive, and leaves one failure domain.
+- **Horizontal scaling (scale out)**: more machines behind a load balancer. Nearly unbounded and fault tolerant, but requires that work can be split and that machines do not depend on local state.
+
+Most real systems do both: scale a database vertically first because it is simplest, and scale the stateless tier horizontally from the start.
+
+## Stateless services
+
+A service is **stateless** when any instance can handle any request, because everything it needs arrives with the request or lives in a shared external store. Then instances are interchangeable: add one, kill one, replace one, and no user notices.
+
+What counts as state to move out of the process:
+
+- **Sessions**: login state, shopping carts.
+- **Uploaded files** in a local disk: move to a blob store.
+- **In-memory caches that must be coherent**: move to a shared cache, or accept per-instance caches as an optimisation only.
+- **Background timers or leader roles**: use a coordination service or database lock.
+
+### Session handling options
+
+| Approach | How | Pros | Cons |
+| --- | --- | --- | --- |
+| Sticky sessions | Load balancer pins a user to an instance (cookie or IP hash) | No code change | Uneven load, session lost when instance dies, hinders autoscaling in |
+| Central session store | Session id in a cookie, data in Redis or a database | Any instance serves anyone, survives instance loss | Extra network hop, the store must be highly available |
+| Signed token (for example JWT) | Client holds the state, server verifies signature | No server-side lookup, scales trivially | Cannot easily revoke before expiry, token size, sensitive data must not be put in it |
+
+## Why scaling is not linear: Amdahl and USL intuition
+
+**Amdahl's law**: if a fraction `p` of the work can be parallelised and `1-p` is serial, the speedup with `N` workers is at most `1 / ((1-p) + p/N)`.
+
+With `p = 0.95` (5% serial):
+
+| N | Speedup |
+| --- | --- |
+| 2 | 1.9 |
+| 8 | 5.9 |
+| 32 | 12.6 |
+| 100 | 16.8 |
+| 1000 | 19.6 |
+
+The ceiling is `1/(1-p) = 20` no matter how many machines you add. The serial part might be a global lock, a single database primary, or one coordinator.
+
+**Universal Scalability Law (USL)** adds a second penalty: coordination cost between workers, growing roughly with `N^2`. Capacity is `C(N) = N / (1 + a(N-1) + b N(N-1))`, with `a` the contention (serial) coefficient and `b` the coherency (crosstalk) coefficient. With `a = 0.05, b = 0.001`:
+
+| N | Relative capacity |
+| --- | --- |
+| 1 | 1.0 |
+| 8 | 5.7 |
+| 16 | 8.0 |
+| 32 | 9.0 |
+| 64 | 7.8 |
+
+Throughput peaks near `N = sqrt((1-a)/b)`, about 31 here, and then *falls*: more machines made it worse. The practical lesson is not to trust the formulas' parameters but to **measure scaling**, find which of contention (queues, locks, single primary) or coherency (all-to-all chatter, cache invalidation storms) dominates, and fix that.
+
+<Callout type="note">
+These are models, not laws of physics for your system. Fit a and b from load tests at several sizes before using them for planning.
+</Callout>
+
+## Autoscaling: signals and cooldowns
+
+Autoscaling adds or removes instances automatically. Choices:
+
+- **Signal**: CPU utilisation is common but poor for IO-bound services. Better signals map to user pain or saturation: requests in flight per instance, queue depth or message age for workers, p95 latency (with care), and for GPU or memory-bound services the relevant resource.
+- **Target tracking**: keep a metric near a target (say 60% CPU). Simple and stable.
+- **Scheduled scaling**: scale up before known peaks (a 9 am login surge, a sale) because instances take time to start.
+- **Cooldown / stabilisation window**: wait after a scaling action before another, and use asymmetric rules (scale out fast, scale in slowly) to avoid **flapping** where capacity oscillates.
+- **Warm-up**: new instances need time to boot and warm caches; do not count them as full capacity immediately.
+- **Bounds**: minimum for availability, maximum for cost and for protecting downstream systems.
+
+<Diagram kind="flow" caption="Autoscaling feedback loop" nodes={[
+  { id: "users", label: "Traffic", x: 0, y: 80, role: "Incoming requests that vary through the day and spike on events.", failureModes: ["Spike faster than instances can boot overwhelms the fleet"], tradeoffs: ["Unpredictable load needs headroom or fast provisioning"] },
+  { id: "lb", label: "Load balancer", x: 200, y: 80, role: "Spreads requests across healthy instances and reports request counts.", failureModes: ["Sends traffic to instances still warming up", "Single point of failure unless redundant"], tradeoffs: ["Slow-start and health checks protect new instances but delay capacity"] },
+  { id: "fleet", label: "Stateless instances", x: 400, y: 80, role: "Interchangeable workers that serve requests; state lives elsewhere.", failureModes: ["Hidden local state breaks on scale-in", "All instances share a downstream bottleneck"], tradeoffs: ["More instances help only until the shared dependency saturates"] },
+  { id: "metrics", label: "Metrics", x: 400, y: 0, role: "Aggregates utilisation, queue depth and latency into the signal used for scaling.", failureModes: ["Delayed or noisy metric causes late or flapping decisions"], tradeoffs: ["Smoothing reduces noise but adds reaction delay"] },
+  { id: "scaler", label: "Autoscaler", x: 200, y: 0, role: "Compares the signal to a target and adds or removes instances within bounds, honouring cooldowns.", failureModes: ["Mis-tuned cooldown oscillates", "Max bound too low or too high"], tradeoffs: ["Aggressive scale-in saves cost but risks capacity shortfall on the next spike"] }
+]} edges={[
+  { from: "users", to: "lb" }, { from: "lb", to: "fleet" }, { from: "fleet", to: "metrics", label: "reports" }, { from: "metrics", to: "scaler" }, { from: "scaler", to: "fleet", label: "add/remove" }
+]} />
+
+<TradeOffs caption="Choosing how to add capacity" rows={[
+  { option: "Vertical scaling", pros: "No code change, simple operations, strong consistency stays easy", cons: "Hard ceiling, price rises steeply, single failure domain, downtime to resize", chooseWhen: "Databases early on, quick relief, stateful single-writer components" },
+  { option: "Horizontal, manual", pros: "Predictable cost, controlled changes", cons: "Slow to react, over-provisioned for peaks", chooseWhen: "Stable, predictable load" },
+  { option: "Horizontal, autoscaled", pros: "Matches cost to load, absorbs spikes within boot time", cons: "Needs statelessness, tuning, metrics, and limits on downstream", chooseWhen: "Variable traffic and stateless tiers" }
+]} />
+
+## Pitfalls
+
+- **Scaling the stateless tier and melting the database.** Doubling app servers doubles connections and queries to the shared store. Use connection pooling and caching and size downstream capacity first.
+- **Scaling on CPU for an IO-bound service**, so it never scales while requests queue.
+- **Scale-in kills in-flight work.** Drain connections and finish jobs before termination.
+- **No maximum.** A retry storm or attack can scale your bill without bound.
+- **Cold start surprises.** Autoscaling takes minutes; keep headroom for spikes shorter than that.
+
+## What would you choose and why?
+
+A checkout service is CPU-light but waits on a payment provider for about 400 ms per request. Traffic triples within 90 seconds during flash sales, and instances take 3 minutes to become ready. Which scaling signal would you use, would you add scheduled scaling, and what protects the payment provider and your database from the extra instances?
+
+## Quiz
+
+<Quiz id="sd-m10-scaling-autoscaling" tags={["scalability", "autoscaling"]} questions={[
+  { type: "mcq", q: "If 10% of a workload is strictly serial, what is the maximum speedup Amdahl's law allows regardless of worker count?", options: ["5x", "10x", "90x", "Unbounded"], answer: 1, explain: "The limit is 1/(1-p) = 1/0.10 = 10." },
+  { type: "mcq", q: "Which session approach lets any instance serve any user AND allows an instance to be killed without losing the session?", options: ["Sticky sessions with in-memory sessions", "A central session store such as Redis", "Storing sessions on the local disk", "Using one big instance"], answer: 1, explain: "Externalised session data decouples sessions from the instance." },
+  { type: "multi", q: "Which measures reduce autoscaling flapping?", options: ["Cooldown or stabilisation windows", "Scale out quickly and scale in slowly", "Scaling on a very noisy one-second metric with no smoothing", "Setting sensible minimum and maximum bounds"], answer: [0, 1, 3], explain: "Smoothing and asymmetry prevent oscillation; raw noisy signals cause it." },
+  { type: "mcq", q: "In the USL, why can adding machines reduce total throughput?", options: ["The coherency term (coordination between nodes) grows roughly with N squared", "Machines wear out", "Load balancers refuse more than 32 nodes", "CPU speed drops with count"], answer: 0, explain: "Crosstalk costs eventually exceed the capacity each new node adds." }
+]} />

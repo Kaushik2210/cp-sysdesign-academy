@@ -1,0 +1,171 @@
+---
+title: Rate Limiting Algorithms
+track: sd
+module: scalability
+order: 2
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/scalability/scaling-stateless-autoscaling"]
+tags: [rate-limiting, token-bucket, leaky-bucket, sliding-window, algorithms]
+type: lesson
+furtherReading:
+  - title: Stripe Engineering - Scaling your API with rate limiters
+    url: https://stripe.com/blog/rate-limiters
+  - title: Cloudflare - How we built rate limiting capable of scaling to millions of domains
+    url: https://blog.cloudflare.com/counting-things-a-lot-of-different-things/
+  - title: Envoy documentation - Global rate limiting
+    url: https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/other_features/global_rate_limiting
+  - title: IETF RFC 6585 - Additional HTTP Status Codes (429 Too Many Requests)
+    url: https://www.rfc-editor.org/rfc/rfc6585
+---
+
+## Intuition
+
+A rate limiter answers one question quickly: *should this request be allowed right now?* It protects shared resources from a single abusive or buggy client, enforces fair usage and pricing tiers, and prevents cascading overload.
+
+Algorithms differ in three properties: how much **burst** they allow, how **accurate** the limit is at window edges, and how much **memory** per client they cost.
+
+## The five classic algorithms
+
+Assume a limit of `L` requests per window of length `W`.
+
+### 1. Fixed window counter
+
+Keep a counter per client per window (`floor(now / W)`). Increment; reject if above `L`; the counter resets at the boundary.
+
+*Flaw:* **boundary burst**. A client sends `L` requests at the end of one window and `L` at the start of the next, so `2L` in a span of almost zero time.
+
+### 2. Sliding window log
+
+Store the timestamp of every accepted request. On a new request, drop timestamps older than `now - W`, count the rest, accept if below `L`.
+
+*Exact*, but memory is `O(L)` per client and each request does cleanup work.
+
+### 3. Sliding window counter
+
+Keep only two counters: current window and previous window. Estimate the rolling count as `prev * (1 - elapsed/W) + cur`, where `elapsed` is how far into the current window you are. It assumes requests in the previous window were evenly spread, so it is an approximation, but a very good one (Cloudflare reported it to be very accurate on real traffic) with `O(1)` memory.
+
+### 4. Token bucket
+
+A bucket holds up to `B` tokens (the burst size) and refills at rate `r` tokens per second. Each request consumes a token (or `cost` tokens); if none, reject. Allows bursts up to `B`, then a steady `r`. Store only `(tokens, last_refill_time)` and refill lazily on each request.
+
+### 5. Leaky bucket
+
+Requests enter a queue (the bucket) of size `B` that drains at a constant rate. Overflow is dropped. As a *shaper* it outputs a perfectly smooth stream, which protects fragile downstreams but adds queueing delay. As a *meter* (a counter that leaks) it behaves very similarly to a token bucket.
+
+<TradeOffs caption="Rate limiting algorithms compared" rows={[
+  { option: "Fixed window", pros: "Tiny memory, trivial, easy with an atomic increment and TTL", cons: "Up to 2L in a short span at window boundaries", chooseWhen: "Coarse quotas where edge bursts are acceptable" },
+  { option: "Sliding window log", pros: "Exact rolling limit", cons: "O(L) memory per client, more work per request", chooseWhen: "Small limits, high accuracy needs" },
+  { option: "Sliding window counter", pros: "O(1) memory, smooth edges, close to exact", cons: "Approximation assuming even spread in the previous window", chooseWhen: "General-purpose API limits at scale" },
+  { option: "Token bucket", pros: "Controlled bursts plus steady rate, cheap state, supports weighted costs", cons: "Burst can still hit downstream at full speed; two parameters to tune", chooseWhen: "Public APIs that should tolerate short bursts" },
+  { option: "Leaky bucket", pros: "Perfectly smooth output rate, protects fragile backends", cons: "Adds latency (queue), bursts are delayed or dropped, stale requests may be processed", chooseWhen: "Traffic shaping to a fixed-capacity downstream" }
+]} />
+
+## Runnable implementations
+
+Time is passed in explicitly so the behaviour is deterministic and testable.
+
+```python
+class TokenBucket:
+    def __init__(self, rate, capacity):
+        self.rate = rate            # tokens added per second
+        self.capacity = capacity    # maximum burst size
+        self.tokens = capacity
+        self.last = 0.0
+
+    def allow(self, now, cost=1):
+        # refill lazily from elapsed time, never above capacity
+        self.tokens = min(self.capacity, self.tokens + (now - self.last) * self.rate)
+        self.last = now
+        if self.tokens >= cost:
+            self.tokens -= cost
+            return True
+        return False
+
+
+class SlidingWindowCounter:
+    def __init__(self, limit, window):
+        self.limit, self.window = limit, window
+        self.cur_start, self.cur, self.prev = 0.0, 0, 0
+
+    def allow(self, now):
+        start = now - (now % self.window)
+        if start != self.cur_start:
+            # exactly one window later: current becomes previous; a longer gap forgets it
+            self.prev = self.cur if start - self.cur_start == self.window else 0
+            self.cur, self.cur_start = 0, start
+        frac = (now - start) / self.window
+        estimate = self.prev * (1 - frac) + self.cur
+        if estimate + 1 <= self.limit:
+            self.cur += 1
+            return True
+        return False
+
+
+tb = TokenBucket(rate=2, capacity=5)
+times = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 3]
+print("token bucket, 2 tokens/s, burst 5")
+print(" ".join(f"t={t}:{'Y' if tb.allow(t) else 'N'}" for t in times))
+
+sw = SlidingWindowCounter(limit=10, window=60)
+first = sum(sw.allow(50) for _ in range(8))
+second = sum(sw.allow(70) for _ in range(10))
+print("sliding window counter, 10 per 60 s")
+print("8 requests at t=50 ->", first, "allowed")
+print("10 requests at t=70 ->", second, "allowed")
+```
+
+Real output when run with Python 3.13:
+
+```text
+token bucket, 2 tokens/s, burst 5
+t=0:Y t=0:Y t=0:Y t=0:Y t=0:Y t=0:N t=0:N t=1:Y t=1:Y t=1:N t=3:Y
+sliding window counter, 10 per 60 s
+8 requests at t=50 -> 8 allowed
+10 requests at t=70 -> 3 allowed
+```
+
+Reading the output:
+
+- **Token bucket**: five instant requests drain the burst of 5; the sixth and seventh are denied. One second later 2 tokens have refilled, so two pass and the third is denied. After a 2-second pause the bucket holds 4 tokens (capped at 5), so the next one passes.
+- **Sliding window counter**: at `t=70` we are 10 s into the window that began at 60, so the previous window (8 requests) still counts for `1 - 10/60`, about 83%, which is 6.67. The estimate starts at 6.67, so only 3 more requests fit under the limit of 10. A *fixed window* would have allowed all 10 at `t=70` and let 18 requests through in 20 seconds.
+
+You can also run this on your own machine: it has no dependencies.
+
+## What happens to rejected requests?
+
+Return **HTTP 429 Too Many Requests** and tell the client when to come back with `Retry-After` (seconds or an HTTP date). Many APIs also return headers such as remaining quota and reset time (names vary; an IETF draft standardises `RateLimit` headers). Clients should respond with exponential backoff and jitter, not tight retry loops.
+
+## Choosing the keying dimension
+
+Limits can be per user id, API key, IP address, tenant, endpoint, or a combination. IP is weak behind NATs and easy to rotate; API keys and authenticated users are better. Costly endpoints (search, export) should have their own, lower limits, or use weighted token cost.
+
+<Diagram kind="mermaid" caption="Token bucket decision flow" code={`flowchart TD
+  A[Request arrives for key K] --> B[Load tokens and last_refill for K]
+  B --> C[tokens = min capacity, tokens + elapsed * rate]
+  C --> D{tokens >= cost?}
+  D -- yes --> E[tokens -= cost; allow]
+  D -- no --> F[reject 429 with Retry-After]
+  E --> G[Save tokens and last_refill]
+  F --> G`} />
+
+## Pitfalls
+
+- **Trusting client clocks** or using server clocks that drift between nodes in a distributed limiter; use one time source.
+- **Only fixed windows**, then wondering about double bursts at boundaries.
+- **Retry amplification**: limiter rejects, clients retry immediately, load increases. Return `Retry-After` and require jittered backoff.
+- **Unbounded key space**: an attacker rotating keys or IPs can create millions of limiter entries; expire state with TTLs.
+- **Same limit everywhere**: a cheap health check and an expensive report should not cost the same.
+
+## What would you choose and why?
+
+Your public API serves mobile apps that wake up and sync in short bursts of 20 requests, then go quiet for minutes. Average allowed rate should be 5 requests per second per key. Which algorithm and parameters would you choose, and what would you tell customers in the 429 response?
+
+## Quiz
+
+<Quiz id="sd-m10-rate-limit-algorithms" tags={["rate-limiting"]} questions={[
+  { type: "mcq", q: "Which algorithm can allow roughly twice the limit in a short span at a window boundary?", options: ["Token bucket", "Fixed window counter", "Sliding window log", "Leaky bucket"], answer: 1, explain: "A burst at the end of one window followed by one at the start of the next both count against different counters." },
+  { type: "predict", q: "A token bucket has rate 1 token/s and capacity 3, starting full. Requests arrive at t = 0, 0, 0, 0, 1. What are the results in order?", code: "# each request costs 1 token\n# t:   0    0    0    0    1\n", options: ["Y Y Y N Y", "Y Y Y Y Y", "Y Y N N Y", "Y N N N N"], answer: 0, explain: "Three tokens cover the first three; the fourth finds none; by t=1 one token has refilled so the fifth passes." },
+  { type: "multi", q: "Which are properties of the sliding window counter?", options: ["O(1) memory per key", "Exact count over the rolling window", "Smoother than fixed window at boundaries", "Assumes the previous window's requests were evenly distributed"], answer: [0, 2, 3], explain: "It approximates the rolling count using two counters; only the sliding log is exact." },
+  { type: "mcq", q: "What should a well-behaved limiter return for a rejected request?", options: ["200 with an empty body", "500 Internal Server Error", "429 Too Many Requests with a Retry-After header", "404 Not Found"], answer: 2, explain: "429 is the standard status, and Retry-After tells clients when to retry." }
+]} />

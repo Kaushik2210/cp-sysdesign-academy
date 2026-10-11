@@ -1,0 +1,113 @@
+---
+title: Sharding and Partitioning
+track: sd
+module: databases-2
+order: 3
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/databases-2/replication"]
+tags: [sharding, partitioning, shard-key, resharding]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 6 "Partitioning"
+    url: https://dataintensive.net/
+  - title: "Dynamo: Amazon's Highly Available Key-value Store (DeCandia et al., SOSP 2007)"
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: MongoDB documentation, Sharding
+    url: https://www.mongodb.com/docs/manual/sharding/
+---
+
+## Intuition
+
+Replication copies the whole dataset to every node, so it cannot help when the data or the write rate no longer fits on one machine. **Sharding** (also called partitioning) splits the dataset so that each node holds only a slice. Each row lives on one shard (and each shard is usually replicated for availability). Writes and storage then scale by adding shards.
+
+Sharding is a one-way door in practice: it complicates queries, transactions and operations. Exhaust simpler options first (indexes, caching, read replicas, vertical scaling, archiving old data).
+
+## Partitioning schemes
+
+| Scheme | How a key maps to a shard | Strength | Weakness |
+| --- | --- | --- | --- |
+| Range | Contiguous key ranges (A-F, G-M, ...) | Efficient range scans; ordered data | Hot spots when keys are sequential (timestamps, auto-increment IDs) |
+| Hash | `hash(key) mod N` or hash ranges | Even spread of keys | Range queries scatter across all shards; `mod N` reshuffles almost everything when N changes |
+| Directory (lookup) | A table says which shard owns each key or tenant | Maximum flexibility; move one tenant at a time | Lookup service is a dependency and a possible bottleneck |
+
+A refinement: hash the key into a large number of fixed **logical partitions** (for example 1024) and assign partitions to nodes. Adding a node moves whole partitions, and the key-to-partition mapping never changes. Many systems (Elasticsearch, Kafka partitions, Couchbase vBuckets, Redis Cluster's 16384 hash slots) work this way.
+
+## Choosing a shard key
+
+The shard key decides everything. Good keys have:
+
+1. **High cardinality**: far more distinct values than shards.
+2. **Even distribution** of both data and traffic.
+3. **Alignment with queries**: the common queries include the shard key, so they hit one shard.
+4. **Stability**: values that rarely change, because changing the key means moving the row.
+
+### Worked example: orders
+
+An orders table gets 5,000 writes per second. Options:
+
+- `order_id` hashed: even spread, but "all orders for user X" scatters to every shard.
+- `created_at` range: all current writes land on the newest shard, a classic hot spot, but time-range reports are cheap.
+- `user_id` hashed: "my orders" is one shard, and writes spread evenly across users. A single very heavy user (a business account doing 1,000 orders a second) can still make one shard hot.
+
+For a consumer app, `user_id` hashed is the usual answer. Lookups by `order_id` alone now need either the user ID embedded in the order ID, or a secondary index.
+
+## Cross-shard queries and transactions
+
+- **Scatter-gather**: a query without the shard key goes to every shard and the results are merged. Latency becomes that of the slowest shard, so tail latency and failure probability grow with shard count.
+- **Secondary indexes**: a *local* index lives with each shard's data and needs scatter-gather to query; a *global* index is itself partitioned by the indexed value, so reads are targeted but writes touch multiple shards and are often updated asynchronously.
+- **Joins** across shards are expensive; denormalize or co-locate related data under the same shard key.
+- **Transactions** across shards need two-phase commit or a saga (compensating actions). Both are slow or complex, so model the data so most transactions stay within one shard.
+
+<Callout type="pitfall" title="Auto-increment IDs">
+A single-table auto-increment counter does not work across shards. Use per-shard ranges, UUIDs, or a time-ordered ID scheme such as Snowflake-style IDs.
+</Callout>
+
+## Resharding
+
+Eventually shards fill up. Resharding strategies:
+
+- **Fixed logical partitions**: pre-create many more partitions than nodes, and move whole partitions between nodes. Moving data is a bulk copy, not a rehash.
+- **Dynamic splitting**: when a range grows beyond a size threshold, split it in two (HBase, MongoDB chunks, Bigtable tablets).
+- **Consistent hashing**: see the next lesson.
+
+Online resharding follows a pattern: copy the shard in the background while new writes are double-written or logged, verify, switch routing atomically, then delete the old copy. Always rate-limit the copy so it does not starve live traffic.
+
+<Diagram kind="flow" caption="Sharded store with a routing layer" nodes={[
+  { id: "client", label: "Client", x: 0, y: 80, role: "Issues queries that normally carry the shard key (for example user_id).", failureModes: ["Queries without the key fan out to every shard"], tradeoffs: ["Query design must be shard-aware"] },
+  { id: "router", label: "Router / shard map", x: 200, y: 80, role: "Maps the shard key to the owning shard using hash ranges or a directory; also used during resharding.", failureModes: ["Stale shard map sends traffic to the old owner mid-move", "Directory service becomes a bottleneck or SPOF"], tradeoffs: ["Central map is flexible; client-side maps are faster but harder to update"] },
+  { id: "s1", label: "Shard 1", x: 420, y: 0, role: "Owns a slice of keys; replicated for availability.", failureModes: ["Shard loss without replicas loses a slice of data", "Becomes hot if the key distribution is skewed"], tradeoffs: ["More shards raise capacity and operational cost"] },
+  { id: "s2", label: "Shard 2", x: 420, y: 80, role: "Owns another slice of keys.", failureModes: ["Slow shard drags scatter-gather latency", "Rebalance copy can saturate disk and network"], tradeoffs: ["Even sizing needs monitoring and rebalancing"] },
+  { id: "s3", label: "Shard 3", x: 420, y: 160, role: "Owns another slice of keys.", failureModes: ["Cross-shard transaction partially applied after a crash"], tradeoffs: ["Keeping related data on one shard avoids distributed transactions"] }
+]} edges={[
+  { from: "client", to: "router" }, { from: "router", to: "s1" }, { from: "router", to: "s2" }, { from: "router", to: "s3" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Partitioning scheme" rows={[
+  { option: "Range partitioning", pros: "Fast range scans and ordered iteration", cons: "Hot spots on monotonically increasing keys; needs splits", chooseWhen: "Access is by ranges (time series with care, sorted scans)" },
+  { option: "Hash partitioning", pros: "Even distribution of keys and load", cons: "No efficient range queries; naive mod N reshuffles data", chooseWhen: "Point lookups by key at large scale" },
+  { option: "Directory-based", pros: "Move any tenant or key on demand; handles skew", cons: "Extra lookup hop and an extra critical service", chooseWhen: "Multi-tenant SaaS with very uneven tenant sizes" },
+  { option: "No sharding (scale up, replicas, cache)", pros: "Simplest; full SQL and transactions", cons: "Hard ceiling on storage and write throughput", chooseWhen: "Data fits one big node and writes are manageable" }
+]} />
+
+## Pitfalls
+
+- Choosing a shard key from the table you are sketching rather than from the queries you must serve.
+- Sharding by timestamp and sending all current traffic to one shard.
+- Forgetting that unique constraints are only enforced within a shard.
+- Planning for exactly the number of shards you need today; leave room with logical partitions.
+
+## What would you choose and why?
+
+A messaging app stores messages per conversation, reads the latest 50 messages of a conversation, and has some group chats with millions of members. Compare sharding by `conversation_id` hashed against sharding by `(conversation_id, time bucket)`. Which queries get cheap, and which shard becomes hot first?
+
+## Quiz
+
+<Quiz id="sd-m07-sharding" tags={["sharding", "shard-key"]} questions={[
+  { type: "mcq", q: "Which shard key is most likely to create a write hot spot for an append-only events table?", options: ["Hash of event_id", "Event timestamp used for range partitioning", "Hash of user_id", "UUID v4"], answer: 1, explain: "With range partitioning on a monotonically increasing key, all new writes go to the last range." },
+  { type: "mcq", q: "Why is hash(key) mod N a poor scheme when N changes?", options: ["It cannot be computed", "Most keys map to a different shard after N changes", "It makes all keys collide", "It requires range queries"], answer: 1, explain: "Changing the modulus remaps the large majority of keys, forcing a near-full data reshuffle." },
+  { type: "multi", q: "Which are properties of a good shard key?", options: ["High cardinality", "Matches the common query filters", "Changes frequently so data rebalances itself", "Spreads traffic evenly"], answer: [0, 1, 3], explain: "A key that changes means moving rows between shards, so stability matters." },
+  { type: "mcq", q: "A query that does not include the shard key is typically executed as:", options: ["A single-shard lookup", "A scatter-gather across all shards", "An error", "A cached read only"], answer: 1, explain: "Without the key the router cannot target one shard, so every shard is queried and results merged." }
+]} />

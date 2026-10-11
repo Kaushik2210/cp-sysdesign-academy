@@ -1,0 +1,158 @@
+---
+title: Backpressure, Retries and Dead-Letter Queues
+track: sd
+module: queues-and-streaming
+order: 4
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/queues-and-streaming/delivery-semantics-and-idempotency"]
+tags: [backpressure, retries, dead-letter-queue, poison-messages]
+type: lesson
+furtherReading:
+  - title: "Timeouts, retries and backoff with jitter (Amazon Builders' Library)"
+    url: https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/
+  - title: Amazon SQS Developer Guide, Dead-letter queues
+    url: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 11
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+A queue hides a mismatch between how fast work arrives and how fast it is done. If arrivals outpace processing for long enough, the backlog grows without bound, latency becomes hours, and storage fills. Meanwhile some messages will simply never succeed: they are malformed, or reference something that no longer exists. A good consumer needs three defences: **backpressure** so overload is bounded, **retries** that help rather than hurt, and a **dead-letter queue** so one bad message cannot block the rest.
+
+## Backpressure
+
+Backpressure is the system pushing back on producers or admitting less work when consumers cannot keep up. Options, from gentlest to harshest:
+
+- **Autoscale consumers** on queue depth or age of the oldest message (not CPU alone).
+- **Bound the consumer's in-flight work**: fetch only N messages at a time (prefetch limits, `max.poll.records`) so a slow downstream is not flooded.
+- **Bound the queue**: reject or block producers when full (blocking is true backpressure; rejection surfaces errors to callers).
+- **Rate limit or shed load** at the edge: drop low-priority messages, return 429, or degrade features.
+- **Make producers slow down**: pull-based systems like Kafka get this naturally because consumers fetch at their own pace and the log absorbs the difference up to retention.
+
+The key metric is **consumer lag** or **oldest message age**. A deep queue that drains quickly is fine; a shallow queue with old messages signals a stuck consumer.
+
+## Retries
+
+Failures fall into two classes:
+
+- **Transient** (timeouts, throttling, a dependency restarting): retrying later usually works.
+- **Permanent** (invalid payload, missing foreign key, bug): retrying can never succeed.
+
+Rules for retrying well:
+
+1. **Exponential backoff**: wait `base * 2^attempt`, capped at a maximum, so a struggling dependency gets breathing room.
+2. **Jitter**: randomise the delay so thousands of consumers do not retry in lockstep (a retry storm or thundering herd).
+3. **Bounded attempts**: cap retries (3 to 5 is common) and then route elsewhere.
+4. **Idempotent handlers**: every retry is a potential duplicate (see the previous lesson).
+5. **Retry budgets**: limit the fraction of traffic that may be retries so retries cannot double the load on a failing dependency.
+6. **Separate retry queues** with delays (or delayed-delivery features) instead of blocking the main consumer in `sleep`, so one bad message does not stall the partition.
+
+## Dead-letter queues and poison messages
+
+A **poison message** is one that fails every time. If the consumer retries it in place and blocks, it halts everything behind it (head-of-line blocking). After the maximum attempts the message is moved to a **dead-letter queue (DLQ)** with its error context, so main traffic continues.
+
+A DLQ is an operational tool, not a trash can:
+
+- **Alert** on DLQ depth; a growing DLQ means a bug or an outage.
+- **Keep context**: original payload, error, attempt count, timestamps, source topic.
+- **Redrive**: after fixing the bug, replay DLQ messages back to the main queue (SQS offers redrive; Kafka needs your own tooling).
+- **Retention** long enough for people to investigate.
+- Transient failures that exhaust retries also land in the DLQ, so a downstream outage can fill it with perfectly good messages; they just need redriving later.
+
+<Diagram kind="mermaid" code={`flowchart TD
+  Q[Main queue] --> C[Consumer]
+  C -->|success| ACK[Ack, done]
+  C -->|failure| R{Attempts left?}
+  R -->|yes| W[Wait with backoff and jitter] --> Q
+  R -->|no| D[(Dead-letter queue)]
+  D --> A[Alert and inspect]
+  A --> X[Fix then redrive]`} caption="Retry with backoff, then dead-letter after the final attempt" />
+
+## Run it: a retrying consumer with a DLQ
+
+This simulation processes 100 messages. Every 25th message is poison (always fails with a parse error); every other attempt has a 30% chance of a transient timeout. Each message gets up to 4 attempts with exponential backoff and jitter; after that it goes to the DLQ. The backoff wait is simulated (summed, not slept).
+
+<CodeRunner language="python" code={`import random
+
+random.seed(7)
+MAX_ATTEMPTS = 4
+BASE = 0.1
+
+def handle(msg):
+    if msg["poison"]:
+        raise ValueError("cannot parse")
+    if random.random() < 0.3:
+        raise TimeoutError("downstream timeout")
+
+def backoff(attempt):
+    return min(BASE * 2 ** (attempt - 1), 5) * random.uniform(0.5, 1.0)
+
+msgs = [{"id": i, "poison": i % 25 == 0} for i in range(1, 101)]
+done, dlq, attempts_total, waited = [], [], 0, 0.0
+for m in msgs:
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        attempts_total += 1
+        try:
+            handle(m)
+            done.append(m["id"])
+            break
+        except Exception as e:
+            if attempt == MAX_ATTEMPTS:
+                dlq.append((m["id"], type(e).__name__))
+            else:
+                waited += backoff(attempt)
+
+print("processed:", len(done))
+print("dead-lettered:", len(dlq), dlq)
+print("total attempts:", attempts_total)
+print("simulated backoff wait: %.1fs" % waited)
+`} />
+
+### What a real run printed
+
+With Python 3.13 and seed 7 the run gave: 95 processed, 5 dead-lettered, 164 total attempts and about 7.8 seconds of simulated backoff. Four of the five dead letters were poison messages (ids 25, 50, 75 and 100) that failed with `ValueError`. The fifth, id 37, was a perfectly valid message that hit the 30% timeout four times in a row (probability about 0.8% per message), and so was dead-lettered with `TimeoutError`.
+
+That fifth entry is the instructive one. Retrying a poison message four times is wasted work: classify it as permanent and send it to the DLQ on the first failure. And bad luck against a flaky dependency also reaches the DLQ, which is why DLQs need redrive tooling, not just deletion. Exact numbers vary with the seed; the shape does not.
+
+## Failure modes
+
+<Diagram kind="flow" caption="Consumer with retry and dead-letter path" nodes={[
+  { id: "main", label: "Main queue", x: 0, y: 80, role: "Holds work to do; ordered per partition or group.", failureModes: ["Poison message at the head blocks following messages", "Unbounded growth during an outage"], tradeoffs: ["Bounded queues push back sooner but reject work"] },
+  { id: "consumer", label: "Consumer", x: 220, y: 80, role: "Processes messages with timeouts, classifies errors, and decides to retry or dead-letter.", failureModes: ["Retries amplify load on a failing dependency", "Treats permanent errors as transient and wastes attempts"], tradeoffs: ["More attempts raise success odds and latency"] },
+  { id: "retry", label: "Delay / retry queue", x: 440, y: 20, role: "Holds failed messages until their backoff elapses, then returns them.", failureModes: ["Reordering relative to newer messages", "Retry storms if jitter is missing"], tradeoffs: ["Tiered delays (seconds, minutes) cost more queues"] },
+  { id: "dlq", label: "Dead-letter queue", x: 440, y: 140, role: "Stores messages that exhausted retries along with error context for inspection and redrive.", failureModes: ["Nobody watches it, so data is silently stuck", "Retention expires before a fix ships"], tradeoffs: ["Keeping everything costs storage; discarding loses evidence"] }
+]} edges={[
+  { from: "main", to: "consumer" }, { from: "consumer", to: "retry", label: "transient failure" }, { from: "retry", to: "main", label: "after delay" }, { from: "consumer", to: "dlq", label: "exhausted / permanent" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Handling failing messages" rows={[
+  { option: "Immediate retry in place", pros: "Fast recovery from blips", cons: "Blocks the partition; hammers a failing dependency", chooseWhen: "One or two quick attempts only" },
+  { option: "Backoff with jitter via retry queues", pros: "Gentle on dependencies; keeps main flow moving", cons: "More queues, loses strict ordering", chooseWhen: "Transient downstream errors" },
+  { option: "Dead-letter after N attempts", pros: "Isolates poison messages; preserves data for later", cons: "Needs monitoring and redrive process", chooseWhen: "Always, for any production consumer" },
+  { option: "Drop on failure", pros: "No backlog or DLQ to manage", cons: "Silent data loss", chooseWhen: "Non-critical telemetry" }
+]} />
+
+## Pitfalls
+
+- Retrying permanent errors; validate and classify errors first.
+- Infinite retry loops without a cap or DLQ.
+- Retrying without jitter after an outage, so everything slams the dependency at the same instant.
+- A DLQ with no alarm, owner or redrive runbook.
+- Autoscaling consumers on a dependency that is itself the bottleneck, which only moves the overload.
+
+## What would you choose and why?
+
+Your consumer calls a payment-provider API with a rate limit of 100 requests per second. Messages arrive at 400 per second during sales. Describe the backpressure strategy: how many consumers, what prefetch, what happens to the backlog, and which messages (if any) you would shed. How long will it take to drain a 1-hour sale burst at 400 per second?
+
+## Quiz
+
+<Quiz id="sd-m08-backpressure-dlq" tags={["backpressure", "dlq", "retries"]} questions={[
+  { type: "mcq", q: "Why add jitter to exponential backoff?", options: ["To make retries slower", "To avoid many clients retrying at the same instant", "To guarantee exactly-once", "To reduce message size"], answer: 1, explain: "Jitter spreads retries in time and prevents synchronised retry storms." },
+  { type: "mcq", q: "A message that always fails parsing is at the head of a partition and is retried in place forever. This is called:", options: ["Load leveling", "Head-of-line blocking by a poison message", "Rebalancing", "Log compaction"], answer: 1, explain: "The poison message prevents progress on later messages until it is moved aside." },
+  { type: "multi", q: "Which belong in a healthy DLQ practice?", options: ["Alerting on DLQ depth", "Storing error context with each message", "Silently deleting DLQ messages after an hour", "A redrive process after fixing the cause"], answer: [0, 1, 3], explain: "A DLQ is a holding area for investigation and replay, not a trash can." },
+  { type: "mcq", q: "Which metric best indicates a stuck consumer?", options: ["CPU of the producer", "Age of the oldest message or consumer lag growing", "Number of topics", "Message size"], answer: 1, explain: "Growing lag or old messages at the head of the queue show consumption has stalled." }
+]} />

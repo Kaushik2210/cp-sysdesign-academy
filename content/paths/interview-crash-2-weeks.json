@@ -1,0 +1,1 @@
+{ "title": "Interview crash course (2 weeks)", "description": "The highest-leverage modules for system design interviews: framework, estimation, caching, data scaling and messaging.", "track": "sd", "days": 14, "modules": ["what-is-system-design","estimation","load-balancing","caching","databases-2","queues-and-streaming","scalability","distributed-theory"] }

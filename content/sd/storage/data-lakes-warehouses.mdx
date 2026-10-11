@@ -1,0 +1,105 @@
+---
+title: Data Lakes, Warehouses and Columnar Formats
+track: sd
+module: storage
+order: 3
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/storage/object-block-file"]
+tags: [storage, data-lake, data-warehouse, olap, oltp, parquet, etl]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 3 (Column-Oriented Storage, OLTP vs OLAP)
+    url: https://dataintensive.net/
+  - title: Apache Parquet documentation - Overview
+    url: https://parquet.apache.org/docs/overview/
+  - title: Dremel - Interactive Analysis of Web-Scale Datasets (Google, VLDB 2010)
+    url: https://research.google/pubs/dremel-interactive-analysis-of-web-scale-datasets/
+  - title: The Data Warehouse Toolkit (Kimball and Ross)
+    url: https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/books/data-warehouse-dw-toolkit/
+---
+
+## Intuition
+
+Two very different jobs hit your data:
+
+- **OLTP** (online transaction processing): "update this order's status", "fetch user 42". Many small reads and writes touching a few rows each, low latency, strong correctness.
+- **OLAP** (online analytical processing): "revenue per country per week for the past two years". Few queries, each scanning millions or billions of rows but only a few columns, tolerating seconds or minutes.
+
+A system tuned for the first is usually poor at the second, so analytics gets its own storage and engine. The data flows from operational systems into an analytical store, usually through a pipeline.
+
+## Row vs column layout
+
+Take a table `events(user_id, country, device, amount, ts)` with a billion rows.
+
+- **Row-oriented**: bytes of one row sit together. Fetching or updating a whole row is one seek. Ideal for OLTP.
+- **Column-oriented**: all values of one column sit together. A query `SELECT SUM(amount) WHERE country = 'IN'` reads only `amount` and `country`, a fraction of the file. Similar values adjacent compress very well (run-length, dictionary and delta encoding), and engines can process vectors of values with CPU-friendly loops.
+
+Writing a single new row to a column layout means touching every column's storage, so columnar stores batch writes and are bad at row-at-a-time updates.
+
+**Parquet** (and ORC) are open columnar file formats. The idea: split the file into *row groups*; inside each, store each column as a *column chunk*; keep per-chunk statistics (min, max, null count) in the footer. A query engine reads the footer, skips row groups whose min/max cannot match the filter (predicate pushdown), and reads only the needed columns (projection pushdown).
+
+| | Row store (OLTP) | Column store (OLAP) |
+| --- | --- | --- |
+| Access pattern | Few rows, all columns | Many rows, few columns |
+| Writes | Single-row inserts and updates | Batch loads, append-mostly |
+| Compression | Moderate | Strong (similar values adjacent) |
+| Typical engines | PostgreSQL, MySQL | BigQuery, Snowflake, Redshift, ClickHouse, Parquet with Spark or Trino |
+
+## Warehouse vs lake vs lakehouse
+
+- **Data warehouse**: curated, schema-on-write, SQL-first, managed storage and compute tuned for BI. High quality and fast, less flexible for raw or unstructured data.
+- **Data lake**: raw files (JSON, CSV, Parquet, images, logs) dumped cheaply in object storage, schema applied on read by whatever engine you point at it. Flexible and cheap, but can become a "data swamp" without cataloguing and quality checks.
+- **Lakehouse**: open table formats (Apache Iceberg, Delta Lake, Apache Hudi) put transactions, schema evolution and snapshots on top of files in object storage, so one copy of data serves both styles.
+
+## ETL vs ELT
+
+- **ETL**: Extract, Transform, then Load. Clean and shape data in a separate processing tier before it reaches the warehouse. Good when the target is expensive or must hold only curated data, or for privacy filtering before landing.
+- **ELT**: Extract, Load raw data, then Transform inside the warehouse or lake engine using SQL. Fits cheap storage and elastic compute; raw data is kept so transformations can be re-run when logic changes.
+
+<Diagram kind="flow" caption="A typical analytics pipeline" nodes={[
+  { id: "oltp", label: "Operational DBs", x: 0, y: 80, role: "Serve the live product: orders, users, payments.", failureModes: ["Heavy analytics queries hurt production latency if run directly here"], tradeoffs: ["Row-oriented and consistent, but not built for large scans"] },
+  { id: "cdc", label: "CDC / ingestion", x: 200, y: 80, role: "Captures changes from databases and event streams and lands them in the lake.", failureModes: ["Duplicates or gaps on replay", "Schema change upstream breaks the pipeline"], tradeoffs: ["Streaming gives freshness; batch is simpler and cheaper"] },
+  { id: "lake", label: "Data lake (object store)", x: 400, y: 0, role: "Holds raw and cleaned files, often Parquet, partitioned by date.", failureModes: ["Small-file explosion slows queries", "No catalogue leads to unusable data"], tradeoffs: ["Cheap and flexible, but quality and governance are your job"] },
+  { id: "wh", label: "Warehouse / query engine", x: 400, y: 160, role: "Runs SQL over columnar data for dashboards and analysts.", failureModes: ["Runaway queries consume budget", "Stale tables if jobs fail silently"], tradeoffs: ["Fast and managed, but cost scales with data scanned or compute time"] },
+  { id: "bi", label: "BI and ML", x: 600, y: 80, role: "Dashboards, reports, feature pipelines and model training read from the lake or warehouse.", failureModes: ["Different dashboards define metrics differently"], tradeoffs: ["Self-service speed versus metric consistency"] }
+]} edges={[
+  { from: "oltp", to: "cdc" }, { from: "cdc", to: "lake", label: "raw" }, { from: "lake", to: "wh", label: "transform/load" }, { from: "wh", to: "bi" }, { from: "lake", to: "bi", label: "direct" }
+]} />
+
+## Worked example: why columnar wins
+
+A table has 1 billion rows and 20 columns, about 100 bytes per row uncompressed, so 100 GB. A query sums one 8-byte column filtered by one other 4-byte column.
+
+- Row store: must read the whole 100 GB (ignoring indexes).
+- Column store: reads about 12 bytes per row, so about 12 GB, and with 3x to 5x compression on those columns, roughly 2.4 to 4 GB. Add partition pruning by date and it may be a small fraction of that.
+
+The exact ratios are workload dependent, but one to two orders of magnitude less IO is typical for narrow analytical queries.
+
+<TradeOffs caption="Where should analytics data live?" rows={[
+  { option: "Query the OLTP replica", pros: "No pipeline, always fresh", cons: "Row layout scans slowly, interferes with production, schema mismatch for analysis", chooseWhen: "Tiny datasets and rare reports" },
+  { option: "Data warehouse", pros: "Fast SQL, managed, strong governance", cons: "Cost scales with usage, less suited to unstructured data, vendor lock-in", chooseWhen: "BI-centred organisations with structured data" },
+  { option: "Data lake (files in object storage)", pros: "Cheapest storage, any format, open engines", cons: "Needs catalogue and quality discipline, weaker transactions", chooseWhen: "Large raw data, ML workloads, many engines" },
+  { option: "Lakehouse table format", pros: "One copy of data with ACID-like tables and time travel", cons: "More moving parts, compaction and maintenance jobs", chooseWhen: "You want lake economics with warehouse-style reliability" }
+]} />
+
+## Pitfalls
+
+- **Many tiny files.** Thousands of KB-sized Parquet files hurt listing and scan performance; compact into files of hundreds of MB.
+- **Bad partitioning.** Partitioning by a high-cardinality column creates millions of directories; partitioning by something never filtered gives no pruning. Date is the common choice.
+- **Running analytics on the production primary.** A single big scan can evict hot pages and spike latency.
+- **Mixing definitions.** Two "revenue" numbers on two dashboards destroy trust; define metrics once.
+- **Forgetting privacy.** Raw lakes copy personal data; plan deletion (GDPR-style erasure) and access control.
+
+## What would you choose and why?
+
+An e-commerce company wants (a) a daily executive dashboard, (b) a data science team training recommendation models on click logs, and (c) the finance team's audited revenue reports. Would you use a warehouse, a lake, a lakehouse, or a mix? Which datasets would you transform before loading (ETL) and which after (ELT)?
+
+## Quiz
+
+<Quiz id="sd-m09-lakes-warehouses" tags={["storage", "olap"]} questions={[
+  { type: "mcq", q: "Why is a columnar layout efficient for 'SUM(amount) grouped by country' over billions of rows?", options: ["It reads only the needed columns and compresses similar values well", "It stores each row in a separate file", "It avoids using disks", "It builds a B-tree on every column"], answer: 0, explain: "Projection of just two columns plus strong compression cuts IO dramatically." },
+  { type: "mcq", q: "What is the main difference between ETL and ELT?", options: ["ETL uses SQL and ELT does not", "ETL transforms before loading into the target; ELT loads raw data first and transforms inside the target engine", "ELT cannot be scheduled", "They are the same thing"], answer: 1, explain: "Order of the transform step is the difference; ELT keeps raw data and re-runs transformations." },
+  { type: "multi", q: "Which are typical Parquet-style optimisations?", options: ["Reading only requested columns", "Skipping row groups using min/max statistics", "In-place row updates at low latency", "Dictionary and run-length encoding of column values"], answer: [0, 1, 3], explain: "Columnar files are append-oriented; cheap single-row updates are not their strength." },
+  { type: "mcq", q: "A lake with no catalogue and unknown data quality is often called what?", options: ["A data mart", "A data swamp", "A lakehouse", "A cache"], answer: 1, explain: "Without metadata and governance the raw files become unusable." }
+]} />

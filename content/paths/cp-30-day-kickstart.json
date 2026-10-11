@@ -1,0 +1,1 @@
+{ "title": "30-day CP kickstart", "description": "Foundations and core techniques at a gentle daily pace: your first month of competitive programming.", "track": "cp", "days": 30, "modules": ["how-cp-works","language-setup-fast-io","math-basics","complexity-analysis","arrays-and-windows","sorting-and-searching"] }

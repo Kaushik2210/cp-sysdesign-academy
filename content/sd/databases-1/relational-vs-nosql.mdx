@@ -1,0 +1,119 @@
+---
+title: Relational vs NoSQL Families
+track: sd
+module: databases-1
+order: 1
+difficulty: beginner
+estMinutes: 25
+prerequisites: []
+tags: [databases, relational, nosql, key-value, document, wide-column, graph]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 2 (data models and query languages)
+    url: https://dataintensive.net/
+  - title: "Dynamo: Amazon's Highly Available Key-value Store (DeCandia et al., SOSP 2007)"
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: "Bigtable: A Distributed Storage System for Structured Data (Chang et al., OSDI 2006)"
+    url: https://research.google/pubs/bigtable-a-distributed-storage-system-for-structured-data/
+  - title: PostgreSQL documentation, Data Definition
+    url: https://www.postgresql.org/docs/current/ddl.html
+---
+
+## Intuition
+
+A database is a promise about *what questions you can ask cheaply*. A relational database promises flexible questions over normalised tables ("join orders to customers, filter, aggregate"). Most NoSQL stores promise something narrower but faster or easier to distribute ("give me the value for this key", "give me everything for this partition key in order"). Choosing a store is choosing which questions you want to be cheap and which you accept as expensive or impossible.
+
+"NoSQL" is a label for a loose group of different data models, not one technology. Treat each family on its own terms.
+
+## Relational databases
+
+Data lives in **tables** of rows and typed columns. Relationships are expressed with keys and joined at query time with SQL. The engine provides declarative queries, constraints (primary key, foreign key, unique, check), secondary indexes, and ACID transactions (next lesson).
+
+- **Strengths:** ad-hoc queries, strong consistency inside one node, mature tooling, schema enforcement, transactions across rows and tables.
+- **Limits:** scaling writes past a single primary needs sharding that the database does not do for you in the classic engines; schema changes on huge tables need care.
+
+Examples: PostgreSQL, MySQL, SQLite, and managed offerings built on them.
+
+## The NoSQL families
+
+### Key-value stores
+
+Data model: a map from key to opaque value. Operations: `get`, `put`, `delete` and sometimes scans. It is the simplest model and the easiest to partition by hashing the key.
+
+Good for sessions, caches, counters, user profiles read by id. You cannot query by anything but the key unless you build your own index. Examples: Redis, Amazon DynamoDB (key-value and document modes), Riak.
+
+### Document stores
+
+Data model: self-contained documents (often JSON) stored under an id, with the engine able to see inside them and index fields. A document typically holds data you read together, such as an order with its line items.
+
+Good when entities are naturally hierarchical, read as a unit, and have varying shape. Weak at many-to-many relationships and cross-document joins and transactions (support varies by product). Examples: MongoDB, Couchbase, Firestore.
+
+### Wide-column stores
+
+Data model: rows addressed by a partition key, with columns grouped into families and, inside a partition, rows kept sorted by a clustering key. Writes are typically appended and merged later (log-structured storage).
+
+Good for very high write volume, time-series and event data, and queries like "all events for sensor 7 between two times". You must design tables around the queries; there are no general joins. Examples: Apache Cassandra, HBase, Google Bigtable.
+
+### Graph databases
+
+Data model: nodes and edges (relationships), each with properties. Queries traverse relationships ("friends of friends who like X").
+
+Good when relationships are the main subject: social graphs, recommendations, fraud rings, dependency graphs. Multi-hop traversals that would need repeated self-joins in SQL become natural. Examples: Neo4j, Amazon Neptune.
+
+<Diagram kind="mermaid" caption="One entity, three shapes: a user's order in different families" code={`flowchart TB
+  subgraph Relational
+    U["users(id, name)"] --- O["orders(id, user_id, total)"]
+    O --- L["order_items(order_id, sku, qty)"]
+  end
+  subgraph Document
+    D["order: {id, user, items: [{sku, qty}]}"]
+  end
+  subgraph KeyValue
+    K["order:991 -> serialized blob"]
+  end`} />
+
+## Choosing: a decision flow
+
+<Diagram kind="flow" caption="Pick a store by access pattern first, not by fashion" nodes={[
+  { id: "pattern", label: "Access patterns", x: 0, y: 90, role: "The concrete queries and updates the application needs, with their frequency and latency targets.", failureModes: ["Unknown or changing patterns make a narrow store painful"], tradeoffs: ["Knowing the patterns lets you pick a specialised store; not knowing them favours relational"] },
+  { id: "rel", label: "Relational", x: 220, y: 0, role: "General-purpose store with joins, constraints and transactions.", failureModes: ["Single primary becomes write bottleneck", "Hot rows and lock contention under high concurrency"], tradeoffs: ["Flexible queries and integrity vs harder horizontal scaling"] },
+  { id: "kv", label: "Key-value / document", x: 220, y: 90, role: "Fast lookups by id with easy partitioning.", failureModes: ["Hot keys", "Application-maintained secondary indexes drift"], tradeoffs: ["Scale and simplicity vs no ad-hoc queries"] },
+  { id: "wide", label: "Wide-column", x: 220, y: 180, role: "Huge write throughput and partition-ordered reads.", failureModes: ["Wide partitions get slow", "Queries not planned in the table design are unsupported"], tradeoffs: ["Write scalability vs query flexibility and weaker transactions"] },
+  { id: "graph", label: "Graph", x: 440, y: 90, role: "Efficient multi-hop relationship traversal.", failureModes: ["Hard to shard a densely connected graph", "Super-nodes with millions of edges"], tradeoffs: ["Traversal power vs scale-out difficulty"] }
+]} edges={[
+  { from: "pattern", to: "rel", label: "joins, integrity" }, { from: "pattern", to: "kv", label: "lookup by id" }, { from: "pattern", to: "wide", label: "write-heavy, time-ordered" }, { from: "pattern", to: "graph", label: "relationships" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Database families compared (generalisations; individual products differ)" rows={[
+  { option: "Relational", pros: "Ad-hoc queries, joins, constraints, mature ACID transactions", cons: "Scaling writes horizontally needs sharding effort; rigid schema changes", chooseWhen: "Data is structured and related, correctness matters, access patterns evolve" },
+  { option: "Key-value", pros: "Simple, very fast, easy to partition", cons: "Only lookup by key; no relationships or rich queries", chooseWhen: "Cache, session store, id-to-blob lookups" },
+  { option: "Document", pros: "Flexible schema, entity read in one fetch", cons: "Joins and many-to-many are awkward; data duplication", chooseWhen: "Self-contained aggregates read and written as a unit" },
+  { option: "Wide-column", pros: "Massive write throughput, tunable consistency, linear scaling", cons: "Query-driven table design, limited joins and transactions", chooseWhen: "Time series, logs, event feeds at very large scale" },
+  { option: "Graph", pros: "Natural, fast relationship traversal", cons: "Specialised; sharding is difficult", chooseWhen: "Social graphs, recommendations, fraud detection" }
+]} />
+
+<Callout type="tip" title="A good default">
+Start with a relational database unless you can name the specific access pattern or scale that it cannot serve. A single well-indexed PostgreSQL or MySQL node goes a long way, and you can add specialised stores later for the parts that need them.
+</Callout>
+
+## What would you choose and why?
+
+You are building (a) a shopping cart, (b) a social feed of followers' posts, (c) a store for 5 million sensor readings per second. Pick a family for each, write the primary access pattern, and name what you give up. Compare with the later lessons on partitioning and replication.
+
+## Pitfalls
+
+- Choosing a store by popularity instead of by access pattern.
+- "NoSQL is faster": speed comes from giving up features such as joins and transactions, not from a magic ingredient.
+- Using a document store for heavily relational data, then re-implementing joins in application code.
+- Polyglot persistence without an owner for keeping the copies consistent.
+
+## Quiz
+
+<Quiz id="sd-m04-families-1" tags={["databases", "nosql"]} questions={[
+  { type: "mcq", q: "Which family is the most natural fit for 'find friends of friends who like this band' repeated over many hops?", options: ["Key-value", "Graph", "Wide-column", "Document"], answer: 1, explain: "Multi-hop relationship traversal is the graph model's main strength." },
+  { type: "mcq", q: "What do wide-column stores usually force you to do?", options: ["Avoid any partition key", "Design tables around the queries you will run", "Use only foreign keys", "Store all data in one row"], answer: 1, explain: "With no general joins and partition-based access, tables are modelled per query pattern." },
+  { type: "multi", q: "Which of these are typical strengths of relational databases?", options: ["Ad-hoc queries with joins", "Constraints such as foreign keys", "Effortless horizontal write scaling", "Transactions across several rows"], answer: [0, 1, 3], explain: "Horizontal write scaling is not effortless in classic relational engines; it requires sharding." },
+  { type: "mcq", q: "A session store needs to look up a blob by token in under a millisecond, with no other queries. The best fit is:", options: ["Graph database", "Key-value store", "Relational with many joins", "Wide-column with clustering keys"], answer: 1, explain: "A single-key lookup is exactly the key-value model." }
+]} />

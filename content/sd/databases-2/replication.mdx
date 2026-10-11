@@ -1,0 +1,124 @@
+---
+title: Replication
+track: sd
+module: databases-2
+order: 1
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/what-is-system-design/requirements-and-framework"]
+tags: [replication, consistency, availability, databases]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 5 "Replication"
+    url: https://dataintensive.net/
+  - title: "Dynamo: Amazon's Highly Available Key-value Store (DeCandia et al., SOSP 2007)"
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: PostgreSQL documentation, High Availability, Load Balancing, and Replication
+    url: https://www.postgresql.org/docs/current/high-availability.html
+---
+
+## Intuition
+
+One database machine has three limits: it can die, it can only serve so many reads, and it may sit far from some of your users. **Replication** keeps copies of the same data on several machines to address all three. Copies give you durability (a disk dies, the data survives), availability (another copy takes over) and read capacity (spread reads across copies).
+
+The price is that copies can disagree for a while. Almost every design decision in this lesson is a decision about how much disagreement you tolerate and who is allowed to accept writes.
+
+## Three replication topologies
+
+| Topology | Who accepts writes | Typical systems |
+| --- | --- | --- |
+| Leader-follower (primary-replica) | Exactly one leader; followers apply its change log | PostgreSQL, MySQL, MongoDB replica sets |
+| Multi-leader | Several leaders, usually one per region; they replicate to each other | Multi-region MySQL setups, CouchDB-style sync, collaborative editors |
+| Leaderless | Any replica; clients write to and read from several replicas and use quorums | Dynamo, Cassandra, Riak |
+
+### Leader-follower
+
+All writes go to the leader, which appends them to a replication log (WAL, binlog, oplog). Followers replay that log in order. Because there is a single writer, there are no write conflicts and ordering is trivial. This is the default choice and the one to reach for first.
+
+### Multi-leader
+
+Each region has its own leader, so a user writes to a nearby node and the write is fast even if other regions are unreachable. The cost is **write conflicts**: two leaders can accept different updates to the same row concurrently. You then need a resolution policy (last-write-wins by timestamp, which can silently drop a write; merge functions; CRDTs; or surfacing conflicts to the application). Conflict handling is hard enough that many teams avoid multi-leader unless they truly need multi-region writes or offline operation.
+
+### Leaderless and quorums
+
+With `n` replicas per key, a write is sent to all and counts as successful after `w` acknowledgements; a read asks `r` replicas and takes the freshest answer. If `w + r > n`, the read set and write set must overlap in at least one replica, so a read normally sees the latest successful write. A common setting is `n = 3, w = 2, r = 2`. Caveats worth knowing: sloppy quorums, concurrent writes and clock-based conflict resolution can still return stale or lost data, so "quorum" is not the same as linearizable.
+
+## Synchronous vs asynchronous replication
+
+- **Synchronous**: the leader waits for the follower to confirm before acknowledging the client. No acknowledged write can be lost if the leader dies, but every write is as slow as the slowest synchronous follower, and one stuck follower can block writes.
+- **Asynchronous**: the leader acknowledges immediately and ships changes in the background. Writes are fast and survive follower outages, but an acknowledged write may exist only on the leader. If the leader crashes before shipping it, that write is lost on failover.
+- **Semi-synchronous**: one follower is synchronous and the rest asynchronous, so at least two nodes hold every acknowledged write while one slow node cannot stall everything.
+
+<Callout type="note" title="Durability vs latency">
+Choosing synchronous vs asynchronous is choosing between "no acknowledged write is ever lost" and "writes stay fast and available when a replica is slow". There is no free option.
+</Callout>
+
+## Replication lag and the anomalies it causes
+
+With asynchronous replication, a follower is always some amount behind the leader: the **replication lag**. Under normal load it is often milliseconds, but it can stretch to seconds or minutes under heavy writes, network trouble or a long-running query on the replica. If reads go to followers, users can observe three classic anomalies.
+
+1. **Read-your-writes violation**: you post a comment, the page reloads from a lagging follower, and your comment is missing.
+2. **Monotonic-read violation**: you read from a fresh follower, then from a staler one, and see data move backwards in time.
+3. **Consistent-prefix violation**: you see an answer before the question it responds to, because causally related writes landed on different partitions and replicated at different speeds.
+
+### Worked example: read-your-writes
+
+Suppose the leader is at log position 1000 and follower B is at 940. Alice updates her profile; the write lands at position 1001. If her next page load goes to B, B has not applied 1001, so she sees the old profile and thinks the save failed.
+
+Common fixes, from simplest to most precise:
+
+- Route a user's reads to the leader for a short window (say a few seconds, longer than typical lag) after they write.
+- Always read the user's own data from the leader, and other people's data from followers.
+- Track the log position of the user's last write (a token in the session or cookie) and only read from a replica that has applied at least that position.
+- If users act from multiple devices, the token or routing rule must be shared across them.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant A as Alice
+  participant L as Leader
+  participant F as Follower
+  A->>L: update profile
+  L-->>A: ok (log pos 1001)
+  L-)F: replicate pos 1001 (async, delayed)
+  A->>F: read profile
+  F-->>A: old profile (stale)
+  Note over F: applies pos 1001 a moment later`} caption="Read-your-writes anomaly: the read hits a follower that has not yet applied the write" />
+
+## Failure modes
+
+<Diagram kind="flow" caption="Leader-follower with async replication" nodes={[
+  { id: "app", label: "Application", x: 0, y: 80, role: "Sends writes to the leader and (optionally) reads to followers.", failureModes: ["Reads from a lagging follower show stale data", "Retried writes after a failover may duplicate unless idempotent"], tradeoffs: ["Routing reads to followers adds capacity but exposes lag"] },
+  { id: "leader", label: "Leader", x: 220, y: 80, role: "Single node that accepts writes and appends them to the replication log.", failureModes: ["Crash before shipping the log loses acknowledged async writes", "Becomes the write bottleneck: replicas do not scale writes"], tradeoffs: ["One writer means no conflicts but a hard ceiling on write throughput"] },
+  { id: "f1", label: "Follower A", x: 440, y: 20, role: "Replays the leader's log; serves reads; candidate for promotion.", failureModes: ["Lag grows under heavy writes", "Long queries on the replica can delay log apply"], tradeoffs: ["Adds read capacity and durability; costs another machine"] },
+  { id: "f2", label: "Follower B", x: 440, y: 140, role: "Second copy, often in another zone or region, for durability and read scaling.", failureModes: ["Cross-region lag can be seconds", "Stale replica promoted after failover loses recent writes"], tradeoffs: ["Further away means better disaster tolerance and worse lag"] }
+]} edges={[
+  { from: "app", to: "leader", label: "writes" }, { from: "leader", to: "f1", label: "log" }, { from: "leader", to: "f2", label: "log" }, { from: "app", to: "f1", label: "reads" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Choosing a replication topology" rows={[
+  { option: "Leader-follower, async", pros: "Simple, no write conflicts, fast writes, easy read scaling", cons: "Replica lag; acknowledged writes can be lost on leader crash; writes do not scale", chooseWhen: "Default for most OLTP workloads, read-heavy apps" },
+  { option: "Leader-follower, sync or semi-sync", pros: "No acknowledged-write loss (with at least one sync follower)", cons: "Higher write latency; a sync follower outage can stall writes", chooseWhen: "Financial or other data you cannot lose" },
+  { option: "Multi-leader", pros: "Local low-latency writes in each region; tolerates region partitions", cons: "Write conflicts and complex resolution; surprising anomalies", chooseWhen: "Multi-region active-active, offline-capable clients" },
+  { option: "Leaderless with quorums", pros: "No failover step; tolerates node loss and slow nodes; tunable r and w", cons: "Weaker guarantees, conflict resolution, read repair and anti-entropy needed", chooseWhen: "High-availability key-value workloads with huge write volume" }
+]} />
+
+## Pitfalls
+
+- Treating a replica as a free backup: replication copies mistakes too. A bad `DELETE` replicates instantly. You still need point-in-time backups.
+- Sending latency-sensitive "read after write" traffic to replicas without any consistency strategy.
+- Using wall-clock last-write-wins across leaders: clock skew can make an older write win.
+- Assuming `w + r > n` means linearizable. It does not by itself.
+
+## What would you choose and why?
+
+A product-comments service has one region, 95% reads, and users expect their own new comment to show immediately. Others seeing it a second late is fine. Which topology and which read-routing policy do you choose, and what happens if the leader dies between a write acknowledgement and replication? Write down your answer, including the maximum replication lag you would alert on.
+
+## Quiz
+
+<Quiz id="sd-m07-replication" tags={["replication"]} questions={[
+  { type: "mcq", q: "In a leaderless system with n = 3, which choice guarantees that a read quorum overlaps the last successful write quorum?", options: ["w = 1, r = 1", "w = 2, r = 2", "w = 1, r = 2", "w = 3, r = 0"], answer: 1, explain: "The overlap condition is w + r > n. With n = 3, w = 2 and r = 2 gives 4 > 3. w = 1, r = 2 gives 3, which is not greater than 3." },
+  { type: "mcq", q: "A leader replicates asynchronously and crashes right after acknowledging a write, before shipping it. What happens if a follower is promoted?", options: ["The write is safe because followers are always current", "The acknowledged write can be lost", "The write is automatically replayed from the client", "The new leader blocks until the old leader returns"], answer: 1, explain: "Asynchronous replication gives up the guarantee that an acknowledged write exists on another node." },
+  { type: "multi", q: "Which are valid ways to provide read-your-writes consistency with follower reads?", options: ["Read a user's own recent data from the leader", "Track the user's last-write log position and read only from replicas that reached it", "Add more followers", "Route reads to the leader for a short window after the user writes"], answer: [0, 1, 3], explain: "All three ensure the read sees the user's own write. Adding followers does nothing for lag." },
+  { type: "predict", q: "Leader is at position 500. Follower A is at 498, follower B at 490. A user wrote at position 500 and then reads from a random follower. What is the outcome?", code: "# both followers are async and behind\nread_from(random.choice([A, B]))", options: ["Always sees the write", "Never sees the write, from either follower, until it catches up", "Sees a partial write", "Gets an error"], answer: 1, explain: "Neither follower has applied position 500 yet, so the write is invisible until replication catches up." }
+]} />

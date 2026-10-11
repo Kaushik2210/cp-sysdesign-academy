@@ -1,0 +1,115 @@
+---
+title: Load Shedding, Graceful Degradation and Bulkheads
+track: sd
+module: scalability
+order: 4
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/scalability/rate-limiting-algorithms"]
+tags: [load-shedding, graceful-degradation, bulkhead, backpressure, resilience, circuit-breaker]
+type: lesson
+furtherReading:
+  - title: Amazon Builders' Library - Using load shedding to avoid overload
+    url: https://aws.amazon.com/builders-library/using-load-shedding-to-avoid-overload/
+  - title: Amazon Builders' Library - Timeouts, retries and backoff with jitter
+    url: https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/
+  - title: Release It! (Michael Nygard) - stability patterns (bulkheads, circuit breakers)
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+  - title: Google SRE Book - Handling Overload
+    url: https://sre.google/sre-book/handling-overload/
+---
+
+## Intuition
+
+When demand exceeds capacity, something has to give. Without a plan, *everything* gives: queues grow, latency climbs, timeouts trigger retries, retries add load, and the system collapses and serves nobody. This is **congestion collapse**, and a service that is merely overloaded can look dead for far longer than the spike that started it.
+
+The strategy is to choose in advance what to sacrifice:
+
+1. **Shed load**: refuse some requests quickly so the rest are served well.
+2. **Degrade gracefully**: serve a cheaper, lesser answer instead of failing.
+3. **Isolate**: make sure one failing or greedy part cannot drain resources the others need (bulkheads).
+
+## Why queues alone make it worse
+
+A server doing work at rate `mu` with arrivals above `mu` builds a queue that grows without bound. Latency is queue length divided by `mu`. Past the client timeout, the server is working on requests whose callers already gave up, so *useful throughput falls toward zero* (goodput collapse). Bounded queues, deadlines and early rejection fix this.
+
+## Load shedding techniques
+
+- **Concurrency limit**: allow at most `C` requests in flight (Little's law: `C = throughput x latency`). Reject extras immediately with 503 or 429. Adaptive versions raise and lower `C` based on observed latency.
+- **Bounded queue with drop policy**: small queue; drop the *oldest* (LIFO under overload) because the oldest request's client has probably timed out.
+- **Priority-based shedding**: drop low-value traffic first (analytics, prefetch, background sync), keep checkout and login.
+- **Deadline propagation**: pass the remaining time budget downstream; drop work whose deadline has passed.
+- **Cheap rejection**: the reject path must cost far less than the work, or shedding itself overloads you.
+
+<Callout type="tip">
+Shedding by priority needs the priority to be known *early* (a header or the route), because the point is to decide before spending resources.
+</Callout>
+
+## Graceful degradation
+
+Return something useful with fewer resources:
+
+- Serve cached or stale data when the database is slow ("stale-while-revalidate").
+- Drop non-essential features: personalised recommendations replaced by a generic popular list, search with fewer filters, no real-time counts.
+- Reduce quality: lower image resolution, skip enrichment calls.
+- Read-only mode when the write path is unhealthy.
+
+Feature flags and kill switches let operators trigger these modes. Degrade paths must be *tested regularly*; an untested fallback often fails when first needed.
+
+## Bulkheads
+
+Named after ship compartments: a leak floods one compartment, not the hull. In software:
+
+- **Separate thread pools or connection pools per dependency** so a slow payment provider cannot consume all threads the product catalogue needs.
+- **Separate fleets per tenant tier or per endpoint class**, so a flood of bulk-export requests cannot starve interactive ones.
+- **Cell-based architecture**: users are partitioned into independent cells, each a full copy of the stack; a failure affects one cell only.
+
+Combine with **timeouts** (every remote call bounded), **retries with exponential backoff and jitter and a retry budget** (so retries are at most a small percentage of traffic), and **circuit breakers** (stop calling a failing dependency for a cooling-off period, then probe).
+
+<Diagram kind="flow" caption="Layers of overload protection on a request path" nodes={[
+  { id: "edge", label: "Edge rate limit", x: 0, y: 80, role: "Per-client limits reject abusive or buggy callers before they use shared capacity.", failureModes: ["Limits set above real capacity do not protect anything"], tradeoffs: ["Fair per client, but cannot see overall system health"] },
+  { id: "shed", label: "Load shedder", x: 200, y: 80, role: "Enforces a global concurrency limit and drops lowest-priority requests first when saturated.", failureModes: ["Wrong priorities shed valuable traffic", "Shedder itself too expensive"], tradeoffs: ["Keeps latency good for admitted work at the cost of rejecting some users"] },
+  { id: "svc", label: "Service with bulkheads", x: 400, y: 80, role: "Runs requests using separate pools per dependency and per request class.", failureModes: ["Pool sizes mis-tuned: starvation or waste", "Shared resource outside the bulkheads (DB) still saturates"], tradeoffs: ["Isolation costs idle capacity because pools cannot borrow from each other"] },
+  { id: "dep", label: "Dependencies", x: 600, y: 80, role: "Databases and third-party services called with timeouts and circuit breakers.", failureModes: ["Slow responses tie up callers", "Retry storms deepen the outage"], tradeoffs: ["Fast failing protects callers but exposes errors sooner"] },
+  { id: "fb", label: "Degraded fallback", x: 400, y: 170, role: "Cached, static or reduced response served when a dependency or capacity is unavailable.", failureModes: ["Fallback never exercised, fails when needed", "Serves stale data longer than acceptable"], tradeoffs: ["Availability versus freshness and completeness"] }
+]} edges={[
+  { from: "edge", to: "shed" }, { from: "shed", to: "svc", label: "admitted" }, { from: "svc", to: "dep" }, { from: "svc", to: "fb", label: "on failure" }
+]} />
+
+<TradeOffs caption="Overload responses" rows={[
+  { option: "Rate limiting per client", pros: "Fairness, stops single abusers", cons: "Does not react to real capacity; legitimate traffic can still overload", chooseWhen: "Always, as the first layer" },
+  { option: "Load shedding (concurrency limit)", pros: "Protects goodput and latency under any overload", cons: "Some users get errors; requires priority policy", chooseWhen: "Overload from any source, including dependency slowness" },
+  { option: "Graceful degradation", pros: "Users still get something useful", cons: "Extra code paths that need testing, risk of stale data", chooseWhen: "Features with a cheap approximation" },
+  { option: "Bulkheads", pros: "Contain blast radius of a slow or greedy component", cons: "Wasted idle capacity, more pools to size", chooseWhen: "Multiple dependencies or tenants of differing criticality" },
+  { option: "Autoscale only", pros: "No user-visible rejection if fast enough", cons: "Minutes to react; downstream limits; cost", chooseWhen: "As a complement, never as the only defence" }
+]} />
+
+## Worked example: a product page under a dependency slowdown
+
+A product page calls inventory, pricing, reviews and recommendations. Normal latency is 80 ms total; thread pool of 200 threads shared by all calls. Recommendations start taking 10 s per call.
+
+- *Without bulkheads*: at 500 requests per second, each waiting thread is held 10 s, so about 5,000 concurrent calls are needed; all 200 threads are stuck within half a second and the whole page, including inventory, times out.
+- *With a separate 20-thread pool and 300 ms timeout for recommendations*: at most 20 calls wait, the rest fail instantly and fall back to a cached "popular items" list. Inventory and pricing keep their own pools and the page still renders in about 400 ms.
+
+This is Little's law at work: in-flight requests equal arrival rate times latency, so latency growth silently multiplies resource use.
+
+## Pitfalls
+
+- **Retries without budgets**, tripling load on a failing service.
+- **Timeouts longer than the caller's own timeout**, so work continues for nobody.
+- **Shedding on CPU only** when the real limit is a downstream pool; measure the actual bottleneck.
+- **Health checks that fail under load**, causing the load balancer to remove healthy-but-busy instances and push even more load onto the rest.
+- **Fallbacks that call the same failing dependency.**
+
+## What would you choose and why?
+
+A ticketing site gets ten times normal traffic when sales open. Rank these by value: browsing event pages, searching, seat selection, payment, order history, recommendations. Which would you shed first, which would you degrade to a cached version, and which must be protected by their own bulkhead?
+
+## Quiz
+
+<Quiz id="sd-m10-load-shedding-bulkheads" tags={["resilience", "load-shedding"]} questions={[
+  { type: "mcq", q: "Why does an overloaded server with an unbounded queue often serve almost nothing useful?", options: ["Queued requests wait longer than clients' timeouts, so work is done for callers who already gave up", "Queues compress data", "Queues disable retries", "Servers refuse queued work"], answer: 0, explain: "Goodput collapses when processed requests are already abandoned." },
+  { type: "mcq", q: "A dependency now takes 5 s instead of 50 ms at 200 requests per second. Roughly how many concurrent calls are now in flight (Little's law)?", options: ["10", "100", "1,000", "10,000"], answer: 2, explain: "200 per second times 5 s is about 1,000 in flight, versus 10 normally." },
+  { type: "multi", q: "Which are bulkhead techniques?", options: ["A separate thread pool per downstream dependency", "Splitting users into independent cells", "A single shared pool for all calls", "Dedicated capacity for interactive versus bulk traffic"], answer: [0, 1, 3], explain: "A single shared pool is the opposite of isolation." },
+  { type: "mcq", q: "Which fallback is best for a recommendations call that times out on a product page?", options: ["Return a 500 for the whole page", "Retry immediately in a loop", "Show a cached or generic popular-items list", "Block until the service recovers"], answer: 2, explain: "A cheap degraded answer keeps the page useful and removes load from the failing dependency." }
+]} />

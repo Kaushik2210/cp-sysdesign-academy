@@ -1,0 +1,116 @@
+---
+title: Durability, Backups, Tiering and Cost
+track: sd
+module: storage
+order: 4
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/storage/blob-stores"]
+tags: [durability, backup, tiered-storage, cost, rpo, rto]
+type: lesson
+furtherReading:
+  - title: Amazon S3 User Guide - Storage classes
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html
+  - title: Amazon S3 User Guide - Managing your storage lifecycle
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lifecycle-mgmt.html
+  - title: AWS Well-Architected Framework - Reliability Pillar (backup and DR)
+    url: https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/welcome.html
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 8 (Faults and Partial Failures)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+"Don't lose data" sounds like one requirement but is really four:
+
+1. **Durability**: stored data survives hardware failure.
+2. **Availability**: data can be read right now.
+3. **Recoverability**: if someone (or a bug) destroys or corrupts data, you can get it back.
+4. **Cost**: all of the above at a price the business accepts.
+
+Durability is solved by replication and erasure coding. It does *not* solve human error: replication faithfully copies a `DELETE` or a corrupt write to every replica in milliseconds. That is what backups, versioning and immutability are for.
+
+## Formal definitions
+
+- **Durability**: probability data is not lost over a period. Quoted in nines: 11 nines per object per year means the expected loss is about one object in 100 billion per year (a design target).
+- **RPO** (recovery point objective): how much recent data you can afford to lose, measured in time. Hourly backups mean RPO is up to one hour.
+- **RTO** (recovery time objective): how long recovery may take before the business is unacceptably hurt.
+- **Replication vs backup**: replication protects against *failure*; backup protects against *change* (deletion, corruption, ransomware, bad deploy).
+
+| Mechanism | Protects against | Does not protect against |
+| --- | --- | --- |
+| Replication within a region | Disk, node, rack, zone failure | Accidental delete, corruption, malicious change |
+| Cross-region replication | Regional outage | Delete or corruption (it replicates too) |
+| Snapshots / versioning | Accidental overwrite or delete | Loss of the storage account itself |
+| Offline or immutable backup (object lock, separate account) | Ransomware, insider threat, account compromise | Slow recovery if not rehearsed |
+
+A practical baseline is the **3-2-1 rule**: three copies, on two different media or systems, one off-site or in a separate administrative domain.
+
+## Tiered storage and lifecycle
+
+Most data is hot briefly and cold forever: photos are viewed a lot in week one and almost never after a year. Providers therefore offer tiers that trade retrieval speed and fees for cheaper storage:
+
+| Tier (S3 names as an example) | Storage price | Retrieval | Typical use |
+| --- | --- | --- | --- |
+| Standard | Highest | Milliseconds, no retrieval fee | Active data |
+| Infrequent access | Lower | Milliseconds, per-GB retrieval fee, minimum storage duration | Monthly access, backups |
+| Archive (Glacier-style) | Much lower | Minutes to hours, retrieval fee | Compliance, old backups |
+| Deep archive | Lowest | Hours (around half a day) | Rarely read, long retention |
+
+Prices vary by region and change over time; as a rough shape, archive tiers can be an order of magnitude cheaper per GB-month than standard, with retrieval fees, minimum retention periods and per-request charges as the catch. Intelligent-tiering features move objects automatically based on access, for a small monitoring fee per object.
+
+A **lifecycle rule** automates it, for example: after 30 days move to infrequent access, after 180 days to archive, after 7 years delete, and abort incomplete multipart uploads after 7 days.
+
+<Diagram kind="flow" caption="Lifecycle of a stored object" nodes={[
+  { id: "hot", label: "Hot tier", x: 0, y: 80, role: "Freshly written, frequently read data on the fastest and most expensive tier.", failureModes: ["Left hot forever: cost grows with data volume"], tradeoffs: ["No retrieval delay or fee, highest per-GB price"] },
+  { id: "warm", label: "Infrequent tier", x: 200, y: 80, role: "Older data read occasionally; cheaper to store, charged on retrieval.", failureModes: ["Premature move causes retrieval-fee spikes", "Minimum duration charges when deleted early"], tradeoffs: ["Cheaper storage versus per-read fee"] },
+  { id: "cold", label: "Archive tier", x: 400, y: 80, role: "Retained for compliance or rare restore, retrieved in minutes to hours.", failureModes: ["Restore takes too long for an incident (RTO missed)", "Small objects cost more in per-object overhead"], tradeoffs: ["Lowest storage price for slow, fee-bearing access"] },
+  { id: "del", label: "Expire / delete", x: 600, y: 80, role: "Data past retention is removed to cut cost and risk.", failureModes: ["Deleting too early violates retention rules", "Deleting too late breaches privacy commitments"], tradeoffs: ["Less liability and cost versus losing history"] }
+]} edges={[
+  { from: "hot", to: "warm", label: "30 days" }, { from: "warm", to: "cold", label: "180 days" }, { from: "cold", to: "del", label: "retention ends" }
+]} />
+
+## Worked example: monthly cost of 500 TB of logs
+
+Assume (approximate, illustrative prices) standard storage at about $0.023 per GB-month, infrequent access at about $0.0125, and archive at about $0.004. For 500 TB = 500,000 GB:
+
+- All standard: 500,000 x 0.023 = $11,500 per month.
+- 10% hot, 30% infrequent, 60% archive: 50,000 x 0.023 + 150,000 x 0.0125 + 300,000 x 0.004 = 1,150 + 1,875 + 1,200 = $4,225 per month.
+
+Savings are about 63%, before retrieval and request charges. The decision hinges on how often the cold data is actually read: if archive data is restored every week the retrieval fees can erase the saving.
+
+Also remember **egress**: moving data out of a cloud region or to the internet is typically billed per GB (on the order of several cents), which is why architectures keep compute near the data.
+
+<TradeOffs caption="Protecting and economising on stored data" rows={[
+  { option: "Replication only", pros: "Simple, fast failover", cons: "Copies mistakes and malicious deletes", chooseWhen: "Never alone for important data" },
+  { option: "Versioning and object lock", pros: "Undo overwrite and delete, immutability for ransomware", cons: "Storage grows with versions; needs lifecycle expiry of old versions", chooseWhen: "User content and critical records" },
+  { option: "Periodic backups to separate account/region", pros: "Independent failure and permission domain", cons: "RPO equals backup interval, restore must be rehearsed", chooseWhen: "Databases and anything with compliance needs" },
+  { option: "Aggressive tiering to archive", pros: "Large cost reduction for cold data", cons: "Slow, fee-bearing retrieval, minimum retention", chooseWhen: "Data with predictable low access and relaxed RTO" }
+]} />
+
+## Failure modes to discuss
+
+- **Untested restore.** A backup you have never restored is a hope, not a backup. Schedule restore drills and measure real RTO.
+- **Silent corruption.** Use checksums end to end and periodic scrubbing; replicas can silently diverge.
+- **Backups in the same blast radius.** If the same credentials can delete production and backups, one compromise removes both.
+- **Retention conflicts.** Legal hold or compliance requires keeping; privacy law requires deleting. Design per-data-class retention.
+
+## Pitfalls
+
+- Equating "11 nines durability" with "never lose data" or with availability.
+- Tiering tiny objects: per-object overhead and minimum billable sizes can make archive more expensive.
+- Forgetting to expire old object versions, so storage silently doubles.
+- Ignoring request and retrieval costs in the model.
+
+## What would you choose and why?
+
+A healthcare startup stores 200 TB of scan images. Regulations require seven-year retention, doctors need images from the last 90 days instantly, and older scans are fetched a few times a day with a tolerable delay of minutes. Define RPO and RTO, a tiering plan, and the protection against ransomware. Which of your choices would you revisit if retrieval fees turned out to dominate the bill?
+
+## Quiz
+
+<Quiz id="sd-m09-durability-backups" tags={["durability", "backup"]} questions={[
+  { type: "mcq", q: "An engineer runs a bad script that deletes production objects. The bucket has cross-region replication on. What happens?", options: ["The replica keeps the objects safely", "The deletes are replicated too, so replication did not protect the data", "The replica restores them automatically", "The deletes are blocked"], answer: 1, explain: "Replication copies changes, including deletions. Versioning, backups or object lock are needed." },
+  { type: "mcq", q: "Backups run every 6 hours. What is the worst-case RPO?", options: ["Zero", "About 6 hours", "About 24 hours", "It depends only on RTO"], answer: 1, explain: "Data written just after a backup can be lost until the next one, so up to the backup interval." },
+  { type: "multi", q: "Which help protect against ransomware or a compromised admin account?", options: ["Immutable object lock on backups", "Backups stored under a separate account with separate credentials", "Three-way replication inside one account", "Tested restore procedures"], answer: [0, 1, 3], explain: "Replication in the same account does not stop an attacker who can delete everything." },
+  { type: "mcq", q: "Why can moving data to an archive tier increase cost?", options: ["Archive storage is always more expensive per GB", "Frequent retrievals, minimum retention periods and per-object overhead can exceed the storage saving", "Archive tiers cannot be deleted", "They require more replicas"], answer: 1, explain: "Archive pricing is cheap only when access is truly rare and objects are large enough." }
+]} />

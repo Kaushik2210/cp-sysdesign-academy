@@ -1,0 +1,134 @@
+---
+title: The Design Framework in Depth
+track: sd
+module: what-is-system-design
+order: 2
+difficulty: beginner
+estMinutes: 30
+prerequisites: [sd/what-is-system-design/requirements-and-framework]
+tags: [framework, estimation, notifications, interview]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapters 1 and 2
+    url: https://dataintensive.net/
+  - title: Google SRE Book, Service Level Objectives
+    url: https://sre.google/sre-book/service-level-objectives/
+  - title: Latency numbers every programmer should know (interactive list)
+    url: https://colin-scott.github.io/personal_website/research/interactive_latency.html
+---
+
+## Intuition
+
+The framework from the previous lesson is a checklist. This lesson walks it end to end on one problem so you can see how each step *constrains* the next: requirements decide the estimates, estimates decide the data store, and the store and the traffic shape decide where the bottlenecks are. We will design a **notification service** that other teams in a company call to send push, email and SMS messages to users.
+
+## Step 1: Clarify
+
+Good clarifying questions turn a vague prompt into a testable spec. Ask, then write the answers down.
+
+| Question | Assumed answer |
+| --- | --- |
+| Who calls the service? | Internal product services via an API, not end users directly |
+| Which channels? | Push, email, SMS |
+| Delivery guarantee? | At least once; duplicates are tolerable but should be rare |
+| Latency? | Transactional messages (one-time codes) within seconds; marketing within minutes |
+| Scale? | 10 million users, about 5 notifications per user per day on average |
+| User preferences? | Users can opt out per channel; opt-outs must be honoured |
+| Out of scope | Building the email or SMS carrier, a rich-text template editor |
+
+<Callout type="note" title="Scope is a feature">
+Writing the out-of-scope list is not wasted time. It protects the design from growing without bound and gives you something to point at when a new requirement appears.
+</Callout>
+
+## Step 2: Estimate
+
+Back-of-envelope numbers only need to be right within a factor of two or three.
+
+- Volume: 10M users times 5 per day is 50M notifications per day.
+- Average rate: 50M divided by 86,400 seconds is about 580 per second.
+- Peak: traffic is bursty (a sale starts, a match ends). Assume a peak of 10 times the average, so roughly 6,000 per second.
+- Storage: a record of about 500 bytes (ids, channel, status, timestamps, a payload reference) gives about 25 GB per day. Keeping 30 days for debugging and audit is about 750 GB.
+- Fan-out: a single "flash sale" request may target 5M users. That one API call becomes 5M delivery tasks, which at 6,000 per second takes about 14 minutes to drain. This is the number that drives the design.
+
+<Callout type="tip">
+Always estimate the *worst realistic burst*, not only the average. Averages hide the moment the system falls over.
+</Callout>
+
+## Step 3: API
+
+Keep the contract small and explicit. Callers supply an idempotency key so retries do not send duplicates.
+
+```http
+POST /v1/notifications
+Idempotency-Key: 7c1d-order-4412-shipped
+Content-Type: application/json
+
+{
+  "userId": "u_981",
+  "channel": "push",
+  "template": "order_shipped",
+  "params": { "orderId": "4412" },
+  "priority": "high"
+}
+```
+
+The response is `202 Accepted` with `{ "id": "n_5521", "status": "queued" }`. Returning `202` rather than `200` is deliberate: the service has *accepted* the work, not completed it. A `GET /v1/notifications/n_5521` returns the status (`queued`, `sent`, `failed`). A bulk endpoint accepts an audience description instead of a single user.
+
+## Step 4: Data model
+
+Access patterns decide the store:
+
+- Look up one notification by id (status checks): key-value access.
+- List recent notifications for a user (inbox, debugging): partition by `userId`, sort by time.
+- Preferences: read on every send, tiny, rarely written: a relational table plus a cache.
+
+A wide-column or key-value store partitioned by `userId` handles the first two at 6,000 writes per second comfortably; preferences stay in a relational database. Using two stores is fine when access patterns genuinely differ, but each extra store is another thing to operate.
+
+## Step 5: High-level design
+
+The central idea is to **decouple accepting a request from delivering it** with a queue. The API validates and stores the request, then returns quickly. Workers pull tasks and call external providers (a push gateway, an email provider, an SMS provider). Separate queues per channel and priority stop a slow SMS provider from delaying one-time codes.
+
+<Diagram kind="flow" caption="Notification service: accept fast, deliver asynchronously" nodes={[
+  { id: "caller", label: "Calling service", x: 0, y: 90, role: "Internal service that asks for a notification to be sent.", failureModes: ["Retries after a timeout can duplicate sends without an idempotency key"], tradeoffs: ["A synchronous call is simple; the async 202 contract needs status polling or callbacks"] },
+  { id: "api", label: "Notification API", x: 180, y: 90, role: "Validates the request, checks the idempotency key and preferences, persists it, enqueues a task.", failureModes: ["Crash after persist but before enqueue leaves an orphan record; fix with an outbox table or a sweeper job"], tradeoffs: ["Checking preferences here keeps queues small but adds a read on the hot path"] },
+  { id: "queue", label: "Priority queues", x: 360, y: 90, role: "Buffers delivery tasks, one queue per channel and priority, absorbing bursts.", failureModes: ["Backlog grows during a provider outage", "A poison message retried forever without a dead-letter queue"], tradeoffs: ["Buffering smooths spikes but adds delivery latency and at-least-once duplicates"] },
+  { id: "workers", label: "Delivery workers", x: 540, y: 90, role: "Pull tasks, render templates, call providers, record the outcome, retry with backoff.", failureModes: ["Worker dies after sending but before acking, causing a duplicate", "Provider rate limit hit"], tradeoffs: ["More workers drain faster but can overwhelm provider rate limits"] },
+  { id: "db", label: "Notification store", x: 360, y: 190, role: "Durable record of every request and its status, partitioned by user id.", failureModes: ["Hot partition if one user id receives huge volume", "Unbounded growth without a TTL"], tradeoffs: ["A key-value layout is fast to write but supports few ad-hoc queries"] },
+  { id: "provider", label: "Providers (push, email, SMS)", x: 720, y: 90, role: "Third-party gateways that actually deliver the message.", failureModes: ["Outage or throttling", "Slow responses tie up worker threads"], tradeoffs: ["Multiple providers add resilience at the cost of integration work"] }
+]} edges={[
+  { from: "caller", to: "api", label: "POST" }, { from: "api", to: "queue", label: "enqueue" }, { from: "api", to: "db", label: "persist" }, { from: "queue", to: "workers", label: "pull" }, { from: "workers", to: "provider", label: "send" }, { from: "workers", to: "db", label: "status" }
+]} />
+
+## Step 6: Deep dive on the hardest part
+
+Pick the part where the design can go wrong. Here it is *reliable delivery without duplicates*. The queue gives at-least-once delivery: if a worker crashes before acknowledging, the task is redelivered. To make duplicates harmless, the worker records a per-notification attempt key (for example notification id plus channel) before sending and passes it to providers that support idempotency. Exactly-once delivery across a network to a third party is not achievable in general; the practical target is *at-least-once plus idempotent handling*.
+
+Retries use exponential backoff with jitter (wait about 1s, 2s, 4s and so on, each randomised) so a recovering provider is not hit by a synchronised retry wave. After a fixed number of attempts the task moves to a **dead-letter queue** for inspection.
+
+## Step 7: Bottlenecks and failure modes
+
+<TradeOffs caption="Bottlenecks found in the notification design" rows={[
+  { option: "Flash-sale fan-out (5M tasks)", pros: "Queue absorbs the burst, API stays responsive", cons: "About 14 min drain at 6k/s; low-priority sends are delayed", chooseWhen: "Marketing traffic; keep it apart from transactional queues so one-time codes are never starved" },
+  { option: "Provider outage", pros: "Retries with backoff and a circuit breaker protect workers", cons: "Backlog grows; may need a second provider", chooseWhen: "Critical channels (SMS codes) justify a failover provider" },
+  { option: "Duplicate sends", pros: "Idempotency keys and attempt records make duplicates rare", cons: "Extra write per send; cannot be fully eliminated", chooseWhen: "Always; a duplicate one-time code is annoying, a duplicate charge is not" },
+  { option: "Store hot partition", pros: "Partitioning by user spreads load", cons: "A noisy user concentrates writes on one partition", chooseWhen: "Rate-limit per user and per caller" }
+]} />
+
+## Pitfalls
+
+- Skipping estimation and then discovering the fan-out problem in the final minutes.
+- Treating the queue as a magic fix. A queue moves the problem to "how big can the backlog get and how fast can we drain it".
+- Promising exactly-once delivery. Say at-least-once with idempotent consumers.
+- Forgetting user preferences and rate limits, which are real product requirements.
+
+## What would you choose and why?
+
+Product asks that one-time login codes must arrive within 5 seconds even during a marketing blast. Do you add more workers to the shared queue, split queues by priority, or move codes to a separate service entirely? Write your answer, then name the failure mode of your choice.
+
+## Quiz
+
+<Quiz id="sd-m01-framework-depth" tags={["framework", "estimation"]} questions={[
+  { type: "mcq", q: "50 million notifications per day is roughly how many per second on average?", options: ["About 58", "About 580", "About 5,800", "About 58,000"], answer: 1, explain: "50,000,000 / 86,400 is about 579 per second." },
+  { type: "mcq", q: "Why does the API return 202 Accepted rather than 200 OK?", options: ["The request was invalid", "The caller is not authenticated", "The notification was already delivered", "The work was accepted but is not yet completed"], answer: 3, explain: "202 signals asynchronous processing: delivery happens later via the queue." },
+  { type: "multi", q: "Which techniques reduce harm from at-least-once delivery?", options: ["Idempotency keys", "Recording attempts before sending", "Deleting the queue", "Provider-side idempotent requests"], answer: [0, 1, 3], explain: "Duplicates cannot be eliminated, so consumers must tolerate them." },
+  { type: "mcq", q: "A flash sale creates 5 million tasks and workers send 6,000 per second. About how long to drain?", options: ["About 14 seconds", "About 14 minutes", "About 14 hours", "About 14 days"], answer: 1, explain: "5,000,000 / 6,000 is about 833 seconds, roughly 14 minutes." }
+]} />

@@ -1,0 +1,158 @@
+---
+title: Powers of Two, Units and Latency Numbers
+track: sd
+module: estimation
+order: 1
+difficulty: beginner
+estMinutes: 25
+prerequisites: []
+tags: [estimation, latency, units, powers-of-two]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 1 (reliability, scalability, percentiles)
+    url: https://dataintensive.net/
+  - title: Latency Numbers Every Programmer Should Know (interactive, by year)
+    url: https://colin-scott.github.io/personal_website/research/interactive_latency.html
+  - title: "Jeff Dean, Software Engineering Advice from Building Large-Scale Distributed Systems (Stanford talk slides)"
+    url: https://static.googleusercontent.com/media/research.google.com/en//people/jeff/stanford-295-talk.pdf
+  - title: "Peter Norvig, Teach Yourself Programming in Ten Years (original latency table)"
+    url: https://norvig.com/21-days.html
+---
+
+## Intuition
+
+A back-of-envelope estimate answers one question: *which order of magnitude are we in?* Is this 100 requests per second or 100,000? 50 GB or 50 PB? The answer decides whether one machine is enough, whether you need a cache, and whether the data fits in memory. Nobody needs the third significant digit; a factor of 10 changes the architecture, a factor of 1.3 does not.
+
+To estimate quickly you need three tools in your head: powers of two (sizes), a few unit conversions (time and bytes), and a feel for how slow each kind of operation is.
+
+## Powers of two
+
+Computers count in powers of two, but humans round to powers of ten. The two are close enough that you can swap them when estimating:
+
+| Power | Exact value | Round name | Handy reading |
+| --- | --- | --- | --- |
+| 2^10 | 1,024 | thousand | 1 KB |
+| 2^20 | 1,048,576 | million | 1 MB |
+| 2^30 | 1,073,741,824 | billion | 1 GB |
+| 2^40 | about 1.1 x 10^12 | trillion | 1 TB |
+| 2^50 | about 1.1 x 10^15 | quadrillion | 1 PB |
+
+The error grows about 2.4% per step (1.024 per ten bits), so by 2^50 it is roughly 12.6%. For estimation that is noise; just say "1 GB is about 10^9 bytes".
+
+Two useful corollaries:
+
+- **n bits can name 2^n things.** A 32-bit ID covers about 4.3 billion items. If you expect 100 billion items over the system's lifetime, you need at least 37 bits (2^37 is about 137 billion), so a 64-bit ID is the natural choice.
+- **Encoding length.** A 7-character code from the 62 characters `a-z A-Z 0-9` gives 62^7, about 3.5 x 10^12 distinct values. That is why URL shorteners can get away with 7 characters.
+
+You can check these in the runner below.
+
+<CodeRunner language="python" code={`for k in (10, 20, 30, 40, 50):
+    print(f"2^{k} = {2**k:,}")
+print("bits needed to name 100 billion items:", (100 * 10**9).bit_length())
+print("7-char base62 space:", f"{62**7:,}")
+`} />
+
+## Units you must not mix up
+
+| Quantity | Rule of thumb |
+| --- | --- |
+| Seconds per day | 86,400, which is about 10^5 (round to 100,000 for speed) |
+| Seconds per month | about 2.5 million (30 days) |
+| Seconds per year | about 31.5 million, roughly 3 x 10^7 |
+| Per day to per second | divide by 86,400, so 1 million per day is about 12 per second |
+| Bits vs bytes | Network speeds are quoted in **bits** per second; storage in **bytes**. 1 Gbps is about 125 MB/s |
+| Availability | 99.9% allows about 8.8 hours of downtime per year; 99.99% about 53 minutes |
+
+<Callout type="pitfall" title="Bits versus bytes">
+A "10 Gbps" network card moves at most about 1.25 GB per second, before protocol overhead. Confusing Gbps with GB/s is a factor-of-eight error, and it is one of the most common in interviews.
+</Callout>
+
+Memorise one conversion: **1 million events per day is about 12 per second.** From it you can scale: 100 million per day is about 1,200 per second, and 1 billion per day is about 12,000 per second.
+
+## Latency numbers
+
+The table below is a descendant of the figures Jeff Dean popularised in talks and Peter Norvig published. Hardware keeps improving, and numbers vary by machine and workload, so treat every row as an **order of magnitude**, not a measurement. What matters is the *ratios*.
+
+| Operation | Approximate time |
+| --- | --- |
+| L1 cache reference | about 1 ns |
+| Branch misprediction | a few ns |
+| L2 cache reference | a few ns (roughly 4 to 15 ns) |
+| Mutex lock/unlock (uncontended) | tens of ns |
+| Main memory reference | about 100 ns |
+| Compress 1 KB with a fast compressor | a few microseconds |
+| Send 1 KB over a 1 Gbps network | about 10 microseconds |
+| Random read from an SSD | tens to a few hundred microseconds (use about 100 us) |
+| Round trip within one datacenter | about 0.5 ms |
+| Read 1 MB sequentially from SSD | roughly 0.2 to 1 ms |
+| Spinning-disk seek | about 5 to 10 ms |
+| Read 1 MB sequentially from spinning disk | roughly 5 to 20 ms |
+| Round trip across continents | about 100 to 150 ms |
+
+<Callout type="warning" title="Orders of magnitude only">
+Do not quote these as facts about your hardware. Cloud network latency, SSD class (SATA vs NVMe) and disk caches move individual rows by factors of several. Use them to compare *kinds* of operations, never to promise a latency.
+</Callout>
+
+### Reading the table: the big takeaways
+
+1. **Memory is fast, the network is slow.** One same-datacenter round trip costs about as much as several thousand memory references.
+2. **Sequential beats random.** Disks, and to a lesser degree SSDs, are far better at reading a big contiguous block than at many small scattered reads.
+3. **Avoid crossing the ocean on the hot path.** A cross-continent round trip is about 100 to 150 ms, and no engineering can beat the speed of light. This is why CDNs and regional replicas exist.
+4. **Compress before you send** when the CPU time (microseconds) is far smaller than the network time saved.
+
+Run a small ladder to feel the ratios:
+
+<CodeRunner language="python" code={`ns = {
+    "main memory read": 100,
+    "SSD random read": 100_000,
+    "same-datacenter round trip": 500_000,
+    "HDD seek": 10_000_000,
+    "cross-continent round trip": 150_000_000,
+}
+base = ns["main memory read"]
+for name, t in ns.items():
+    print(f"{name:28s} {t/1e6:10.4f} ms = {t//base:>10,} memory reads")
+`} />
+
+## Worked example: why batching round trips matters
+
+A page needs 20 values. If each is fetched with its own call over the datacenter network, that is 20 round trips of about 0.5 ms, so roughly 10 ms of pure waiting even before any query work. If you batch all 20 into one request to an in-memory cache in the same datacenter, you pay about one round trip, so roughly 0.5 to 1 ms. The lesson is not only "memory is fast"; it is **count the round trips**, then batch them.
+
+## Diagram: the latency ladder
+
+<Diagram kind="mermaid" caption="Each step to the right is roughly 10x to 1000x slower (orders of magnitude)" code={`flowchart LR
+  A["CPU cache<br/>~1-10 ns"] --> B["Main memory<br/>~100 ns"]
+  B --> C["SSD read<br/>~100 us"]
+  C --> D["Datacenter RTT<br/>~0.5 ms"]
+  D --> E["Disk seek<br/>~10 ms"]
+  E --> F["Cross-continent RTT<br/>~150 ms"]`} />
+
+## Trade-offs: where should data live?
+
+<TradeOffs caption="Storage tiers by speed, size and cost (relative, approximate)" rows={[
+  { option: "In-process memory", pros: "Fastest access (nanoseconds); no network hop", cons: "Lost on restart; limited by one machine's RAM; not shared between servers", chooseWhen: "Tiny, hot, easily rebuilt data such as config or small lookup tables" },
+  { option: "Remote cache (in-memory service)", pros: "Sub-millisecond reads shared by all servers", cons: "Costly per GB; needs invalidation; extra moving part", chooseWhen: "Read-heavy data that is expensive to compute or fetch" },
+  { option: "SSD-backed database", pros: "Durable, large, good random reads", cons: "Hundreds of microseconds per random read; network hop on top", chooseWhen: "The source of truth for most online data" },
+  { option: "Disk / object storage", pros: "Very cheap per GB; effectively unlimited", cons: "Slow seeks, high latency per request", chooseWhen: "Large blobs, logs, archives, backups" }
+]} />
+
+## What would you choose and why?
+
+Your service must answer in under 100 ms at the 99th percentile for users on three continents, and the data is 2 TB that changes slowly. Which latency rows in the table drive the decision? Sketch where you would place the data and what you would do for users far from it. Write it down before reading the caching and CDN material later in the course.
+
+## Pitfalls
+
+- Treating the table as exact: quoting "SSD read is 16 us" as a fact about production.
+- Forgetting that latency adds up along a request path while throughput is limited by the slowest stage.
+- Mixing bits and bytes, or powers of two and ten, without noticing the factor of eight or the few percent.
+- Estimating averages only: tail latency (p99) is usually what users and SLAs care about.
+
+## Quiz
+
+<Quiz id="sd-m03-numbers-1" tags={["estimation", "latency"]} questions={[
+  { type: "mcq", q: "Roughly how many requests per second is 1 million requests per day (on average)?", options: ["About 1", "About 12", "About 120", "About 1,200"], answer: 1, explain: "1,000,000 / 86,400 is about 11.6, so about 12 per second." },
+  { type: "mcq", q: "A network link is advertised as 1 Gbps. About how many megabytes per second is that, at best?", options: ["About 1 MB/s", "About 8 MB/s", "About 125 MB/s", "About 1,000 MB/s"], answer: 2, explain: "1 Gbps is 10^9 bits per second; divide by 8 for bytes, giving about 125 MB/s before overhead." },
+  { type: "mcq", q: "Which statement about the commonly published latency table is most accurate?", options: ["Each figure is an exact guarantee for modern hardware", "It gives orders of magnitude, useful mainly for comparing ratios", "Network and memory access cost about the same", "Disk seeks are faster than SSD reads"], answer: 1, explain: "The numbers drift with hardware; the stable lesson is how many orders of magnitude separate memory, SSD, network and disk." },
+  { type: "multi", q: "Which of these are generally true?", options: ["A datacenter round trip costs far more than a main-memory reference", "Sequential disk reads are usually much cheaper per byte than random reads", "A cross-continent round trip is typically a few microseconds", "Batching several lookups into one round trip can cut latency"], answer: [0, 1, 3], explain: "Cross-continent round trips are around 100 to 150 ms, not microseconds. The other three statements hold." },
+  { type: "mcq", q: "How many bits do you need at minimum to give a unique ID to 100 billion items?", options: ["27", "37", "47", "64"], answer: 1, explain: "2^36 is about 68.7 billion (too few); 2^37 is about 137 billion, so 37 bits suffice. In practice you would use 64." }
+]} />

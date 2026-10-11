@@ -1,0 +1,127 @@
+---
+title: QPS, Storage and Bandwidth Step by Step
+track: sd
+module: estimation
+order: 2
+difficulty: beginner
+estMinutes: 30
+prerequisites: [sd/estimation/numbers-every-engineer-should-know]
+tags: [estimation, qps, storage, bandwidth, memory]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 1 (describing load)
+    url: https://dataintensive.net/
+  - title: Latency Numbers Every Programmer Should Know (interactive, by year)
+    url: https://colin-scott.github.io/personal_website/research/interactive_latency.html
+  - title: "The Site Reliability Workbook: capacity and load (Google SRE)"
+    url: https://sre.google/workbook/table-of-contents/
+---
+
+## Intuition
+
+Estimation is a pipeline of small multiplications. You start from something you can state (users, actions per user, bytes per action) and derive four numbers that drive design:
+
+1. **QPS** (queries or requests per second), split into reads and writes, average and peak.
+2. **Storage** needed per day, per year, and over the retention window.
+3. **Bandwidth** in and out, in bytes per second.
+4. **Memory** for caches or in-memory state.
+
+Each step is one line of arithmetic. The skill is choosing sensible inputs, writing down every assumption, and rounding aggressively.
+
+## The recipe
+
+| Quantity | Formula |
+| --- | --- |
+| Total actions per day | daily active users x actions per user per day |
+| Average QPS | actions per day / 86,400 (round to 10^5 for speed) |
+| Peak QPS | average QPS x peak factor (commonly 2 to 5; use 3 unless told otherwise) |
+| Writes vs reads | split by the read:write ratio |
+| Storage per day | writes per day x bytes per record |
+| Total storage | storage per day x 365 x retention years x replication factor |
+| Bandwidth | QPS x average payload size (use peak QPS for sizing) |
+| Cache memory | working-set size, often 20% of daily hot data (the 80/20 rule is a heuristic, not a law) |
+| Server count | peak QPS / QPS one server handles, then add headroom and redundancy |
+
+<Callout type="note" title="Peak vs average">
+Traffic is not flat. Users sleep, events spike, and a retry storm can multiply load. Capacity is sized for the **peak**, cost is driven by the **average**. Always compute both, and say which one you used.
+</Callout>
+
+## Worked example 1: URL shortener
+
+**Assumptions (state them out loud):** 100 million new short URLs per month; reads outnumber writes 100 to 1; each record is about 500 bytes (long URL, short code, timestamps, user id); keep records 5 years; peak is 3x average.
+
+- **Write QPS:** 100M / (30 x 86,400 = 2.6M seconds) is about 40 writes per second.
+- **Read QPS:** 100 x 40 = 4,000 reads per second on average; peak about 12,000.
+- **Records over 5 years:** 100M x 12 x 5 = 6 billion. A 7-character base62 code (about 3.5 x 10^12 values) comfortably covers that.
+- **Storage:** 6 billion x 500 B = 3 TB. With 3 replicas, about 9 TB. This fits comfortably on a handful of machines; storage is not the hard part.
+- **Bandwidth:** a redirect response is small, say 500 B, so 12,000 x 500 B = 6 MB/s at peak. Trivial.
+- **Cache:** 20% of a day's reads concentrated on hot URLs. 4,000 x 86,400 = 350M reads per day; if 20% of distinct URLs make most of that traffic, a few tens of GB of cache is plenty.
+
+**Conclusion:** a read-heavy key-value problem. The design focus is low-latency lookups, a cache and code generation, not heavy storage or bandwidth.
+
+## Worked example 2: photo sharing
+
+**Assumptions:** 10 million daily active users; 20% upload one photo per day (2M uploads per day); average stored photo 2 MB (original, plus we ignore thumbnails for now); each user views 50 photos per day, served at about 200 KB (resized); retention forever; peak 3x.
+
+- **Upload QPS:** 2M / 86,400 is about 23 per second; peak about 70.
+- **Upload ingress:** 23 x 2 MB is about 46 MB/s average.
+- **Storage per day:** 2M x 2 MB = 4 TB per day; per year about 1.5 PB; with 3x replication (or about 1.5x with erasure coding) tens of PB over a few years. **Storage and cost dominate.**
+- **View QPS:** 10M x 50 = 500M per day, about 5,800 per second; peak about 17,000.
+- **Egress:** 5,800 x 200 KB is about 1.2 GB/s average, about 9 Gbps; peak about 3.5 GB/s, about 28 Gbps.
+
+**Conclusion:** object storage for blobs, a CDN to carry the egress, and metadata in a separate database. The write path is light; the read bandwidth and storage cost are the problem.
+
+## Worked example 3: chat
+
+**Assumptions:** 50 million daily active users; each sends 40 messages per day; message about 100 bytes of payload plus about 100 bytes of metadata; 20% of DAU connected at peak; one persistent connection per online user; keep history 5 years; peak 3x.
+
+- **Messages per day:** 50M x 40 = 2 billion.
+- **Average QPS:** 2B / 86,400 is about 23,000 messages per second; peak about 70,000. Each message is delivered to a recipient as well as stored, so delivery roughly doubles the work (more in group chats).
+- **Storage:** 2B x 200 B = 400 GB per day; per year about 146 TB; 5 years about 730 TB before replication.
+- **Concurrent connections:** 20% of 50M = 10 million. If one well-tuned gateway holds on the order of 100,000 connections (a planning figure, not a guarantee), that is about 100 gateway servers. At roughly 10 KB of state per connection, 10M connections need about 100 GB of RAM across the fleet.
+- **Bandwidth:** 70,000 x 200 B = 14 MB/s. Tiny. Connection count, not bytes, is the constraint.
+
+**Conclusion:** the hard parts are persistent connections, fan-out and message ordering, not raw throughput or storage.
+
+<Diagram kind="mermaid" caption="Estimation pipeline: from assumptions to design drivers" code={`flowchart LR
+  A["Assumptions<br/>DAU, actions, sizes"] --> B["Actions per day"]
+  B --> C["Average QPS"]
+  C --> D["Peak QPS"]
+  B --> E["Storage per day"]
+  E --> F["Storage over retention"]
+  D --> G["Bandwidth"]
+  D --> H["Server count"]
+  F --> I["Design drivers"]
+  G --> I
+  H --> I`} />
+
+## Trade-offs: what does each dimension push you toward?
+
+<TradeOffs caption="Which estimate dominates, and what it suggests" rows={[
+  { option: "QPS dominates", pros: "Easy to scale stateless tiers horizontally", cons: "Hot keys and database write limits appear first", chooseWhen: "Many small requests (URL shortener, chat)" },
+  { option: "Storage dominates", pros: "Cheap per GB with object storage; clear cost model", cons: "Replication, tiering and lifecycle policies become essential", chooseWhen: "Large blobs retained for long periods (photos, video)" },
+  { option: "Bandwidth dominates", pros: "CDNs and caching shift cost off the origin", cons: "Egress is billed; peak events cost a lot", chooseWhen: "Media delivery, large downloads" },
+  { option: "Connections dominate", pros: "Bytes per message are small", cons: "Memory per connection and fan-out need special gateway design", chooseWhen: "Chat, presence, live notifications" }
+]} />
+
+## What would you choose and why?
+
+In the photo-sharing example, product decides to keep a 1 MB version and a 50 KB thumbnail of every upload in addition to the 2 MB original. Recompute daily storage and the view egress if the feed shows thumbnails 90% of the time. Which number changed most, and which component does that affect?
+
+## Pitfalls
+
+- Using average QPS to size capacity.
+- Forgetting replication: three copies turn 3 TB into 9 TB.
+- Ignoring metadata and index overhead, which can be 10 to 50% on top of raw payloads.
+- Mixing units (Gbps vs GB/s) or per-day vs per-second.
+- Over-precision. "About 23 per second" is better than "23.148".
+
+## Quiz
+
+<Quiz id="sd-m03-qps-1" tags={["estimation", "qps", "storage"]} questions={[
+  { type: "mcq", q: "100 million writes per month is about how many writes per second on average?", options: ["About 4", "About 40", "About 400", "About 4,000"], answer: 1, explain: "100M / (30 x 86,400 about 2.6M) is about 38, so roughly 40." },
+  { type: "mcq", q: "You store 1 TB of new data per day, retain for 2 years, with 3 replicas. About how much total storage?", options: ["About 730 TB", "About 1.5 PB", "About 2.2 PB", "About 6 PB"], answer: 2, explain: "1 TB x 730 days = 730 TB; times 3 replicas is about 2.2 PB." },
+  { type: "mcq", q: "Which number should capacity planning for servers be based on?", options: ["Average QPS", "Peak QPS", "Minimum QPS", "Median daily total"], answer: 1, explain: "You must survive the peak; the average only sets the cost." },
+  { type: "multi", q: "In the chat example, which resources are primary design drivers?", options: ["Number of concurrent connections", "Total bytes per second of bandwidth", "Message fan-out and ordering", "Petabytes of media storage"], answer: [0, 2], explain: "Message bytes are small; connection count and delivery logic dominate. There is no media in this estimate." },
+  { type: "mcq", q: "A service sends 20,000 responses per second of 50 KB each. About how much bandwidth is that?", options: ["About 1 MB/s", "About 100 MB/s", "About 1 GB/s", "About 10 GB/s"], answer: 2, explain: "20,000 x 50 KB = 1,000,000 KB per second, which is about 1 GB/s." }
+]} />

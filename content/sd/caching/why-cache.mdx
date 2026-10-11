@@ -1,0 +1,140 @@
+---
+title: Why Cache, Hit Ratio and Where Caches Live
+track: sd
+module: caching
+order: 1
+difficulty: beginner
+estMinutes: 25
+prerequisites: ["sd/what-is-system-design/requirements-and-framework"]
+tags: [caching, hit-ratio, latency, cdn, locality]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapters 1 and 3
+    url: https://dataintensive.net/
+  - title: Latency Numbers Every Programmer Should Know (Jeff Dean's figures, maintained list)
+    url: https://colin-scott.github.io/personal_website/research/interactive_latency.html
+  - title: Caching Best Practices (MDN HTTP caching guide)
+    url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching
+  - title: AWS Whitepaper, Database Caching Strategies Using Redis
+    url: https://docs.aws.amazon.com/whitepapers/latest/database-caching-strategies-using-redis/welcome.html
+---
+
+## Intuition
+
+A cache is a smaller, faster copy of data kept close to whoever needs it. It works for two reasons that are properties of the *workload*, not of the cache:
+
+- **Temporal locality**: data used recently is likely to be used again soon.
+- **Skew** (popularity concentration): a small fraction of keys gets a large fraction of requests. Many real workloads are roughly Zipf-like, so the top few percent of items can account for most reads.
+
+If every request touched a different item exactly once, no cache could help. Caching converts *repeated work* (a disk read, a network hop, a computation) into a memory lookup.
+
+## Why bother: latency, load and cost
+
+Approximate orders of magnitude (they vary by hardware, so treat them as ballparks): a main-memory reference is about 100 nanoseconds, a round trip inside a datacenter about 0.5 ms, an SSD random read about 100 microseconds, a database query that hits disk or does real work anywhere from a few milliseconds to hundreds, and a cross-continent round trip around 100 to 150 ms.
+
+Caching therefore helps three things:
+
+1. **Latency**: a cache lookup of about 1 ms replaces a 20 ms query.
+2. **Throughput**: the backing store handles only the misses. If 90 percent of reads hit, the database sees a tenth of the read load.
+3. **Cost and resilience**: fewer database replicas, and some reads survive a short backend outage.
+
+## Hit ratio math
+
+Let `h` be the hit ratio, `t_c` the cache lookup time and `t_s` the cost of going to the source on a miss. Expected latency (assuming a miss also pays the cache lookup, then the source):
+
+`T = t_c + (1 - h) * t_s`
+
+With `t_c = 1 ms` and `t_s = 20 ms`:
+
+| Hit ratio | Expected latency | Database load vs no cache |
+| --- | --- | --- |
+| 0% | 21.0 ms | 100% |
+| 50% | 11.0 ms | 50% |
+| 90% | 3.0 ms | 10% |
+| 99% | 1.2 ms | 1% |
+
+Two lessons hide in this table. First, going from 90 to 99 percent hit ratio *divides the database load by 10 again* even though average latency improves only from 3.0 to 1.2 ms: for capacity planning, the **miss rate** is the number that matters, and small hit ratio changes at the high end are huge. Second, the average hides the tail: the 1 percent of misses still see 21 ms or worse, and if misses are slow enough to dominate p99, a 99 percent hit ratio does not make p99 fast.
+
+### Worked example
+
+A product page service receives 10,000 reads per second. The database can serve 2,000 reads per second. Required hit ratio: misses must be at most 2,000 per second, so `1 - h <= 0.2` and `h >= 0.8`. For safety margin and for cold-start periods, aim for 95 percent: misses are 500 per second, a quarter of the database capacity.
+
+<CodeRunner language="python" code={`def expected_latency(h, t_cache=1.0, t_source=20.0):
+    return t_cache + (1 - h) * t_source
+
+def db_load(rps, h):
+    return rps * (1 - h)
+
+for h in (0.0, 0.5, 0.8, 0.9, 0.95, 0.99):
+    print(f"h={h:4.0%}  latency={expected_latency(h):5.1f} ms  db_rps={db_load(10000, h):7.0f}")
+`} />
+
+## Where caches live
+
+Layers from the user inward, each with a different owner, size and invalidation story:
+
+| Layer | What it caches | Typical size and speed | Who controls it |
+| --- | --- | --- | --- |
+| Browser / client | Static assets, API responses via HTTP headers | Per user, MBs, zero network cost | `Cache-Control`, ETag (see the CDN lesson) |
+| CDN / edge | Static files, sometimes whole pages and API responses | Many PoPs, TBs, tens of ms away | Origin headers plus CDN rules |
+| Reverse proxy / gateway | Hot responses | Per node, GBs | Proxy configuration |
+| Application, in-process | Parsed config, computed objects, hot rows | Per instance, MBs to GBs, nanoseconds | Your code |
+| Distributed cache | Query results, sessions, objects (Redis, Memcached) | Shared cluster, GBs to TBs, sub-millisecond to a few ms | Your code and cache cluster |
+| Database | Buffer pool of pages, query cache in some engines | Per node, as much RAM as available | DB engine |
+| OS / hardware | Page cache, CPU caches | Automatic | Kernel |
+
+Rule of thumb: cache **as close to the consumer as correctness allows**, and put the most expensive-to-recompute, most-shared data in the shared layers. Each additional layer multiplies the places a stale value can hide.
+
+<Diagram kind="flow" caption="A read passes through several caches before reaching the database" nodes={[
+  { id: "browser", label: "Browser cache", x: 0, y: 80, role: "Serves repeat requests with zero network cost using HTTP caching headers.", failureModes: ["Stale assets after deploy if filenames are not versioned", "Cannot be purged by the server"], tradeoffs: ["Fastest possible but you lose control of invalidation"] },
+  { id: "cdn", label: "CDN edge", x: 160, y: 80, role: "Serves cacheable responses from a PoP near the user.", failureModes: ["Serving stale content after origin change until purge or expiry", "Cache poisoning via unkeyed headers"], tradeoffs: ["Huge latency and origin offload vs invalidation lag"] },
+  { id: "app", label: "App + local cache", x: 320, y: 80, role: "Business logic with a small in-process cache for very hot data.", failureModes: ["Per-instance copies drift out of sync", "Memory pressure causes GC pauses"], tradeoffs: ["Nanosecond reads vs inconsistency across instances"] },
+  { id: "dist", label: "Distributed cache", x: 480, y: 80, role: "Shared in-memory store for query results and objects.", failureModes: ["Node loss drops a slice of keys and floods the DB", "Hot key saturates one node"], tradeoffs: ["Shared and large vs an extra network hop and operational cost"] },
+  { id: "db", label: "Database", x: 640, y: 80, role: "Source of truth; serves only cache misses.", failureModes: ["Overload when hit ratio collapses (cold start or cache outage)", "Slow queries on misses dominate tail latency"], tradeoffs: ["Durable and consistent but the slowest and most expensive layer to scale"] }
+]} edges={[
+  { from: "browser", to: "cdn", label: "miss" }, { from: "cdn", to: "app", label: "miss" }, { from: "app", to: "dist", label: "miss" }, { from: "dist", to: "db", label: "miss" }
+]} />
+
+## What not to cache
+
+- Data that is unique per request (low or zero hit ratio).
+- Data where staleness is unacceptable and you cannot invalidate reliably (account balances during a transfer).
+- Cheap-to-compute values where the cache lookup costs as much as recomputation.
+- Highly personalised responses on shared caches (risk of leaking one user's data to another, a real class of CDN incident).
+
+## Trade-offs
+
+<TradeOffs caption="Adding a cache layer" rows={[
+  { option: "No cache", pros: "Always fresh, one source of truth, simplest", cons: "Every read pays full latency and load", chooseWhen: "Low traffic, or data changes on nearly every read" },
+  { option: "In-process cache", pros: "Fastest, no network, no extra service", cons: "Per-instance copies, inconsistency, duplicated memory, cold on every restart", chooseWhen: "Small, hot, slowly changing data where brief staleness is fine" },
+  { option: "Shared distributed cache", pros: "One copy, large capacity, survives app restarts", cons: "Network hop, another system to run and fail, invalidation to design", chooseWhen: "Read-heavy, skewed, expensive-to-compute data shared by many instances" },
+  { option: "CDN / HTTP caching", pros: "Offloads origin and cuts latency globally", cons: "Weak purge guarantees, stale windows, hard to personalise", chooseWhen: "Public, static or semi-static content" }
+]} />
+
+## Failure modes
+
+- **Cold start**: after a deploy or cache restart, hit ratio is near zero and the database sees full load. Warm caches before shifting traffic, or limit traffic ramp.
+- **Cache outage**: if the system *requires* the cache for capacity, the cache is a hard dependency. Know what happens at 0 percent hit ratio.
+- **Stale reads**: users see old data. Decide an acceptable staleness bound per data type.
+- **Memory growth**: no eviction or TTL means the cache fills and falls over.
+
+## Pitfalls
+
+- Reporting a high hit ratio computed over trivially cacheable traffic while the expensive requests miss; measure per endpoint.
+- Caching before measuring: first check that the bottleneck is repeated reads of skewed keys.
+- Forgetting negative caching (non-existent keys hammering the database) and its cost: cache the "not found" result with a short TTL.
+- Letting the cache become the source of truth.
+
+## What would you choose and why?
+
+A news site's home page is read 5,000 times per second and changes every 30 seconds. The article pages change rarely. Each home-page render runs 40 database queries. Where would you cache the home page, for how long, and who may see it stale?
+
+## Quiz
+
+<Quiz id="sd-m06-why-cache" tags={["caching", "hit-ratio"]} questions={[
+  { type: "mcq", q: "Cache lookup 1 ms, source 20 ms, hit ratio 90%. What is the expected latency per read?", options: ["2.0 ms", "3.0 ms", "10.0 ms", "19.0 ms"], answer: 1, explain: "1 + 0.1 * 20 = 3.0 ms (every request pays the lookup; misses also pay the source)." },
+  { type: "mcq", q: "Increasing hit ratio from 90% to 99% most directly does what to backend load?", options: ["Halves it", "Reduces it by about 10x", "Leaves it unchanged", "Doubles it"], answer: 1, explain: "Backend load is proportional to the miss rate: 10% falls to 1%." },
+  { type: "multi", q: "Which workload properties make caching effective?", options: ["Skewed key popularity", "Temporal locality", "Every key requested exactly once", "Expensive computation per miss"], answer: [0, 1, 3], explain: "Repeated access to a hot subset of costly-to-produce data is what a cache exploits." },
+  { type: "mcq", q: "The database can do 2,000 reads/s and the service receives 10,000 reads/s. What is the minimum hit ratio?", options: ["20%", "50%", "80%", "99%"], answer: 2, explain: "Misses must be at most 2,000/s, which is 20% of 10,000, so the hit ratio must be at least 80%." },
+  { type: "mcq", q: "What is negative caching?", options: ["Caching only errors forever", "Caching the fact that a key does not exist, usually with a short TTL", "Evicting hot keys", "Disabling the cache for large values"], answer: 1, explain: "It prevents repeated lookups of absent keys from hitting the database." }
+]} />

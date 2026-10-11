@@ -1,0 +1,202 @@
+---
+title: "Eviction Policies: LRU, LFU, FIFO and TTL"
+track: sd
+module: caching
+order: 3
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/caching/why-cache"]
+tags: [eviction, lru, lfu, fifo, ttl, data-structures]
+type: lesson
+furtherReading:
+  - title: Redis documentation, Key eviction
+    url: https://redis.io/docs/latest/develop/reference/eviction/
+  - title: Einziger, Friedman, Manes, TinyLFU - A Highly Efficient Cache Admission Policy
+    url: https://arxiv.org/abs/1512.00727
+  - title: Megiddo and Modha, ARC - A Self-Tuning, Low Overhead Replacement Cache (FAST 2003)
+    url: https://www.usenix.org/conference/fast-03/arc-self-tuning-low-overhead-replacement-cache
+  - title: Python documentation, functools.lru_cache
+    url: https://docs.python.org/3/library/functools.html#functools.lru_cache
+---
+
+## Intuition
+
+A cache is smaller than the data behind it, so when it is full, inserting a new item means *choosing a victim*. The best possible policy (Belady's) evicts the item whose next use is farthest in the future, which needs knowledge of the future. Real policies approximate it using the past: recency, frequency, age, or just a clock.
+
+## The policies
+
+**FIFO**: evict the oldest *inserted* entry. Trivial queue, no bookkeeping on hits. Ignores usage: a hot key inserted early is evicted first.
+
+**LRU (least recently used)**: evict the entry not accessed for the longest time. Assumes recent use predicts near-future use (temporal locality). Needs an update on every hit. Weakness: a **scan** (one pass over a big table) pushes out the genuinely hot set.
+
+**LFU (least frequently used)**: evict the entry with the fewest accesses. Great for stable popularity (the head of a Zipf distribution stays). Weaknesses: old popular items linger forever ("cache pollution") unless counts decay, and a brand-new item starts with a low count and is evicted too eagerly. Practical LFUs use approximate, decaying counters (Redis uses a probabilistic logarithmic counter) and admission filters such as TinyLFU.
+
+**TTL (time to live)**: every entry expires after a fixed time. Not a space policy but a *freshness* policy; it bounds staleness. Almost every production cache uses TTL *plus* a space-based policy such as LRU.
+
+**Random**: surprisingly competitive and nearly free; Redis offers it and also approximated LRU that samples a few keys and evicts the oldest of the sample instead of maintaining a perfect ordering.
+
+**Advanced**: ARC, 2Q, SLRU and W-TinyLFU combine recency and frequency to resist scans and adapt to changing workloads; modern libraries (for example Caffeine in Java) use them.
+
+## Implementing LRU in O(1)
+
+A hash map gives O(1) lookup; a doubly linked list keeps entries ordered by recency (front is most recent). `get` moves the node to the front; `put` inserts at the front and, when over capacity, removes the tail. Every operation touches a constant number of pointers: O(1) time, O(capacity) space.
+
+<CodeRunner language="python" code={`class Node:
+    __slots__ = ("key", "val", "prev", "next")
+    def __init__(self, key=None, val=None):
+        self.key, self.val, self.prev, self.next = key, val, None, None
+
+class LRUCache:
+    """Hash map + doubly linked list: get and put are O(1)."""
+    def __init__(self, capacity):
+        assert capacity > 0
+        self.cap, self.map = capacity, {}
+        self.head, self.tail = Node(), Node()      # sentinels
+        self.head.next, self.tail.prev = self.tail, self.head
+
+    def _unlink(self, n):
+        n.prev.next, n.next.prev = n.next, n.prev
+
+    def _push_front(self, n):                      # front = most recently used
+        n.next, n.prev = self.head.next, self.head
+        self.head.next.prev = n
+        self.head.next = n
+
+    def get(self, key):
+        n = self.map.get(key)
+        if n is None:
+            return None
+        self._unlink(n); self._push_front(n)
+        return n.val
+
+    def put(self, key, val):
+        n = self.map.get(key)
+        if n:
+            n.val = val
+            self._unlink(n); self._push_front(n)
+            return
+        if len(self.map) == self.cap:
+            lru = self.tail.prev                   # least recently used
+            self._unlink(lru)
+            del self.map[lru.key]
+        n = Node(key, val)
+        self.map[key] = n
+        self._push_front(n)
+
+c = LRUCache(2)
+c.put("a", 1); c.put("b", 2)
+assert c.get("a") == 1          # a becomes most recent
+c.put("c", 3)                   # evicts b
+assert c.get("b") is None
+assert c.get("a") == 1 and c.get("c") == 3
+c.put("a", 10)                  # update, not insert
+c.put("d", 4)                   # evicts c (a was touched more recently)
+assert c.get("c") is None and c.get("a") == 10 and c.get("d") == 4
+print("LRU tests passed")
+`} />
+
+<Callout type="note">
+In Python you would normally use `collections.OrderedDict` (`move_to_end`, `popitem(last=False)`) or `functools.lru_cache`; the explicit list shows why the operations are O(1). In a concurrent server this structure needs a lock or sharding, since even a read mutates the list.
+</Callout>
+
+## Comparing policies on a skewed workload
+
+The experiment below replays 100,000 requests over 10,000 keys with Zipf popularity (exponent 1) and compares FIFO, LRU and a simple LFU whose counts persist after eviction (an idealised variant).
+
+<CodeRunner language="python" code={`import random
+from collections import OrderedDict, Counter
+
+def zipf_trace(n_keys, n_req, s=1.0, seed=3):
+    rng = random.Random(seed)
+    w = [1 / (i + 1) ** s for i in range(n_keys)]
+    return rng.choices(range(n_keys), weights=w, k=n_req)
+
+def hit_ratio(trace, cap, policy):
+    cache, hits, freq = OrderedDict(), 0, Counter()
+    for k in trace:
+        if k in cache:
+            hits += 1
+            if policy == "lru":
+                cache.move_to_end(k)
+            freq[k] += 1
+            continue
+        if len(cache) >= cap:
+            if policy in ("lru", "fifo"):
+                cache.popitem(last=False)
+            else:
+                victim = min(cache, key=lambda x: freq[x])
+                del cache[victim]
+        cache[k] = True
+        freq[k] += 1
+    return hits / len(trace)
+
+trace = zipf_trace(10000, 100000)
+for cap in (100, 500, 2000):
+    print(cap, {p: round(hit_ratio(trace, cap, p), 3) for p in ("fifo", "lru", "lfu")})
+`} />
+
+Local run results (hit ratio):
+
+| Cache size (keys) | FIFO | LRU | LFU |
+| --- | --- | --- | --- |
+| 100 | 0.344 | 0.392 | 0.528 |
+| 500 | 0.540 | 0.587 | 0.683 |
+| 2000 | 0.726 | 0.764 | 0.804 |
+
+On a *static* skewed distribution frequency wins clearly, and LRU beats FIFO by a few points. If popularity drifts (today's news), LRU adapts faster and LFU can stay stuck on yesterday's hits. Real traces are a mix, which is why hybrid policies exist. Also notice that even a cache holding only 1 percent of the keys (size 100) reaches a 39 to 53 percent hit ratio here: the skew does the work.
+
+## Choosing and configuring
+
+- Start with LRU (or the library default) plus a TTL; change only after measuring hit ratio on a replayed production trace.
+- Scan-heavy or batch workloads: use an admission or scan-resistant policy, or bypass the cache for scans.
+- Memory limit rather than item count: evict by bytes, and watch large values crowding out many small ones.
+- Redis `maxmemory-policy` options include `allkeys-lru`, `allkeys-lfu`, `volatile-lru` (only keys with a TTL), `volatile-ttl` and `noeviction`. With `noeviction`, writes fail when memory is full, which is right for a primary store and wrong for a cache.
+
+<Diagram kind="mermaid" caption="Picking an eviction policy" code={`flowchart TD
+  A[Cache full: choose victim] --> B{Access pattern}
+  B -->|Recency matters, drifting popularity| C[LRU]
+  B -->|Stable heavy hitters| D[LFU with decay]
+  B -->|Mix of scans and hot set| E[Scan-resistant: SLRU, ARC, W-TinyLFU]
+  B -->|Cheap and simple needed| F[FIFO or random]
+  C --> G[Add TTL for freshness]
+  D --> G
+  E --> G
+  F --> G`} />
+
+## Trade-offs
+
+<TradeOffs caption="Eviction policies" rows={[
+  { option: "FIFO", pros: "Simplest, no work on hits", cons: "Evicts hot items just because they are old", chooseWhen: "Tiny caches or when metadata cost must be minimal" },
+  { option: "LRU", pros: "Good general-purpose, adapts to changing hot sets, O(1)", cons: "Vulnerable to scans, a bookkeeping write on every read, lock contention", chooseWhen: "Default choice with temporal locality" },
+  { option: "LFU", pros: "Keeps heavy hitters; best on stable skew", cons: "Slow to adapt, needs count decay, penalises new items", chooseWhen: "Stable popularity such as static catalog or popular assets" },
+  { option: "TTL", pros: "Bounds staleness, easy to reason about, self-cleaning", cons: "Not a space policy; synchronised expiry causes stampedes", chooseWhen: "Always, alongside a space policy, for freshness guarantees" },
+  { option: "Adaptive (ARC, W-TinyLFU)", pros: "Scan resistant, strong across workloads", cons: "More complex and memory for metadata", chooseWhen: "Large caches and mixed, unpredictable workloads" }
+]} />
+
+## Failure modes
+
+- **Scan pollution**: a nightly report reads every row and flushes the hot set; hit ratio crashes until it re-warms.
+- **Eviction storms** under memory pressure: constant evict-and-refill (thrashing) when the working set exceeds capacity.
+- **Large value starvation**: a few multi-megabyte values evict thousands of small hot ones.
+- **Evicting the wrong thing**: volatile-only policies evict nothing when no key has a TTL, then writes fail.
+
+## Pitfalls
+
+- Sizing the cache by item count while values vary in size by 1000x.
+- Confusing TTL expiry with eviction; they have different failure effects.
+- Thinking a bigger cache always helps: past the working set, the marginal gain falls off sharply (see the table above).
+- Not exporting evictions and hit-ratio metrics; you cannot tune what you cannot see.
+
+## What would you choose and why?
+
+A photo service caches thumbnails (about 5 KB each). A viral post makes 200 photos 100 times more popular for an hour, then nobody cares. A nightly job also scans the whole photo table. Which policy or policies would you choose, and what would you do about the nightly scan?
+
+## Quiz
+
+<Quiz id="sd-m06-eviction" tags={["eviction", "lru"]} questions={[
+  { type: "mcq", q: "What is the time complexity of get and put in a standard hash map plus doubly linked list LRU?", options: ["O(log n) both", "O(1) both", "O(n) for put", "O(n) for get"], answer: 1, explain: "The map finds the node in O(1) and the list moves or removes it in O(1)." },
+  { type: "predict", q: "Capacity 2, LRU. What is printed?", code: "c = LRUCache(2)\nc.put('a', 1); c.put('b', 2)\nc.get('a')\nc.put('c', 3)\nprint(c.get('b'), c.get('a'))", options: ["None 1", "2 1", "None None", "1 3"], answer: 0, explain: "get('a') makes b the least recent; put('c') evicts b, so get('b') is None and get('a') is 1." },
+  { type: "mcq", q: "Which workload most hurts plain LRU?", options: ["Repeated reads of a small hot set", "A one-time full scan of a large dataset", "Writes only", "Very small values"], answer: 1, explain: "A scan inserts many never-reused items and pushes out the hot set." },
+  { type: "multi", q: "Which statements about TTL are true?", options: ["It bounds how stale a cached value can be", "It replaces the need for any capacity-based eviction", "Many keys with identical TTL can expire together", "It is a freshness mechanism, not a space-management policy"], answer: [0, 2, 3], explain: "TTL limits staleness, but memory can still fill before entries expire, and uniform TTLs create synchronised expiry." },
+  { type: "mcq", q: "Why is `noeviction` a poor choice for a pure cache?", options: ["It evicts too aggressively", "When memory is full, writes fail instead of making room", "It disables TTL", "It requires LFU"], answer: 1, explain: "A cache should drop old entries to make room; noeviction returns errors on writes instead." }
+]} />

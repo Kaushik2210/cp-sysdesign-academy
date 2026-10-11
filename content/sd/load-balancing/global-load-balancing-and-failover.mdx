@@ -1,0 +1,133 @@
+---
+title: Global Load Balancing, Anycast and Failover
+track: sd
+module: load-balancing
+order: 4
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/load-balancing/load-balancer-basics", "sd/load-balancing/reverse-proxies-and-api-gateways"]
+tags: [gslb, dns, anycast, failover, multi-region, latency]
+type: lesson
+furtherReading:
+  - title: Amazon Route 53 routing policies
+    url: https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html
+  - title: RFC 4786, Operation of Anycast Services
+    url: https://www.rfc-editor.org/rfc/rfc4786
+  - title: Google SRE Book, Load Balancing in the Datacenter
+    url: https://sre.google/sre-book/load-balancing-datacenter/
+  - title: Google SRE Book, Load Balancing at the Frontend
+    url: https://sre.google/sre-book/load-balancing-frontend/
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 5 (multi-leader and geo replication)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+One region, however redundant, has two limits: **physics** (a user in Mumbai talking to a server in Virginia pays roughly 200 ms round trips; light in fibre covers about 200 km per millisecond, so distance alone sets a floor) and **blast radius** (a regional outage, a bad deploy or a fibre cut takes everyone down). Running in several regions fixes both, but then something must decide *which region* each user reaches and *move traffic away* when a region fails. That is **global server load balancing (GSLB)**.
+
+## Mechanisms for steering users to a region
+
+### DNS-based steering
+
+The authoritative DNS answers a lookup for `api.example.com` with the address of a chosen region. Policies commonly offered by managed DNS:
+
+- **Geolocation**: answer by the resolver's (or client subnet's) location.
+- **Latency-based**: answer with the region that has lowest measured latency from the resolver's network.
+- **Weighted**: send X percent to each region (canary, gradual migrations).
+- **Failover**: primary address while health checks pass, else secondary.
+
+Strengths: works with any client, cheap, simple. Weaknesses: the DNS answer is **cached** by resolvers and clients for the TTL (and some ignore low TTLs), so failover takes at least on the order of the TTL, often longer in the tail. DNS sees the *resolver*, not the user, so a user on a public resolver may be steered poorly unless EDNS Client Subnet is used. Granularity is per lookup, not per request.
+
+### Anycast
+
+The same IP prefix is announced via BGP from many locations. Internet routing delivers each packet to the *topologically nearest* announcer. Properties:
+
+- Automatic nearest-site selection, fast failover: if a site stops announcing (withdraws the route), traffic converges to the next nearest in seconds to minutes depending on BGP convergence.
+- Natural DDoS dilution, since attack traffic spreads over many sites.
+- Caveat: routing changes mid-connection can send later packets of a TCP flow to a different site, so anycast fits UDP services (DNS), short-lived HTTP, or designs where the edge terminates the connection and each site is self-sufficient. "Nearest" in BGP terms is not always lowest latency.
+
+CDNs and public DNS providers commonly use anycast for their edge. A typical large design combines the two: anycast to reach a nearby edge, then the edge proxies over a private backbone to the right origin region.
+
+### Client-side or application-level steering
+
+Mobile apps and SDKs may carry a list of regional endpoints and measure or fail over themselves. This gives per-request control and fast failover (no DNS TTL), at the cost of client complexity and the slow rollout of client updates.
+
+## Failover design
+
+Questions to answer before drawing arrows:
+
+1. **Active-passive or active-active?** Passive regions are simple but idle and untested; failovers into a never-used region frequently fail. Active-active exercises every region constantly but requires data that can be written in more than one place.
+2. **What is the data story?** Traffic can move in seconds; data cannot. Asynchronous replication means a failover may lose the most recent writes (the replication lag, your RPO). Synchronous cross-region replication avoids loss but adds a cross-region round trip to every write. Multi-leader or per-user home-region schemes need conflict handling.
+3. **Capacity**: if you run N regions and one fails, the others must absorb its load. With three equal regions, each should run below about 66 percent of its capacity so that two can carry the total.
+4. **Health signal**: a region-level health check must reflect real user success (synthetic transactions from several vantage points), not just "the LB answers".
+5. **Failback**: moving traffic back is also risky; ramp gradually and watch for overload as caches refill.
+
+### Worked example
+
+Three regions, 30,000 requests per second total, 10,000 each. Each region is provisioned for 16,000. Losing one region shifts 5,000 to each survivor, giving 15,000 each: 94 percent of the provisioned capacity, which is too tight, since a cold cache and retries will push it over. Target at most about 75 to 80 percent after failover, so provision about 19,000 to 20,000 per region (in effect 1.5x headroom over steady state). The cost of multi-region resilience is largely this idle headroom.
+
+<Diagram kind="flow" caption="GSLB: anycast edge, health-checked DNS steering, and regional stacks" nodes={[
+  { id: "user", label: "Users worldwide", x: 0, y: 90, role: "Resolve the service name and connect to the nearest edge.", failureModes: ["Cached DNS answer keeps pointing at a failed region until TTL expiry"], tradeoffs: ["Short TTLs speed failover but raise DNS load and cost"] },
+  { id: "dns", label: "Geo / latency DNS", x: 180, y: 20, role: "Authoritative DNS choosing a region per resolver location, weight or health.", failureModes: ["Mis-geolocation of public resolvers", "DNS provider outage (use multiple providers)"], tradeoffs: ["Simple and universal but coarse and cached"] },
+  { id: "any", label: "Anycast edge PoPs", x: 180, y: 160, role: "Same IP announced from many sites; terminates TLS near the user and forwards inward.", failureModes: ["Route flaps or BGP leaks send traffic to the wrong site", "Mid-flow reroute breaks long TCP connections"], tradeoffs: ["Fast automatic nearest-site routing vs less control over exact placement"] },
+  { id: "rA", label: "Region A stack", x: 400, y: 20, role: "LB, gateway, services and a data replica serving local users.", failureModes: ["Regional outage", "Replication lag means stale or lost recent writes on failover"], tradeoffs: ["Local latency vs cost of full duplicate stack"] },
+  { id: "rB", label: "Region B stack", x: 400, y: 160, role: "Second full stack that also takes the failed region's load.", failureModes: ["Overloaded when it absorbs a failed region", "Cold caches after sudden traffic shift"], tradeoffs: ["Headroom for failover is idle money in steady state"] },
+  { id: "hc", label: "Global health checks", x: 600, y: 90, role: "Synthetic probes from several vantage points that mark a region healthy or failed.", failureModes: ["False positives flap traffic between regions", "Probes pass while real user flows fail"], tradeoffs: ["Fast detection vs risk of flapping; use damping and quorum"] }
+]} edges={[
+  { from: "user", to: "dns", label: "lookup" }, { from: "user", to: "any", label: "connect" }, { from: "dns", to: "rA" }, { from: "any", to: "rA" }, { from: "any", to: "rB" }, { from: "dns", to: "rB" }, { from: "hc", to: "dns" }, { from: "hc", to: "rA" }, { from: "hc", to: "rB" }
+]} />
+
+<Diagram kind="mermaid" caption="Regional failover timeline with DNS failover" code={`sequenceDiagram
+  participant H as Health checks
+  participant D as DNS
+  participant U as User resolver
+  participant A as Region A
+  participant B as Region B
+  Note over A: Region A fails
+  H->>H: 3 consecutive probe failures
+  H->>D: mark A unhealthy
+  D->>D: answer with B for new lookups
+  U->>U: cached answer for A valid until TTL
+  U->>A: requests keep failing until TTL expires
+  U->>D: new lookup after TTL
+  D-->>U: address of B
+  U->>B: requests succeed`} />
+
+## Trade-offs
+
+<TradeOffs caption="Global steering options" rows={[
+  { option: "Geo / latency DNS", pros: "Universal, cheap, easy to operate; weights for gradual rollout", cons: "TTL-bound failover, resolver-based accuracy, per-lookup granularity", chooseWhen: "Typical web or API services accepting failover in minutes" },
+  { option: "Anycast", pros: "Nearest site automatically, quick failover, absorbs floods", cons: "BGP expertise, awkward for long TCP flows, limited traffic engineering", chooseWhen: "Edge networks, DNS, CDNs, DDoS-sensitive entry points" },
+  { option: "Client-side regional endpoints", pros: "Per-request control, fastest failover, no DNS TTL wait", cons: "Client complexity and slow client upgrades", chooseWhen: "First-party mobile or SDK clients with strict availability goals" },
+  { option: "Active-passive region", pros: "Simpler data model, cheaper", cons: "Untested standby, longer failover, idle capacity", chooseWhen: "Moderate availability targets with strong consistency needs" },
+  { option: "Active-active regions", pros: "Lowest latency everywhere, continuously exercised failover", cons: "Multi-writer data problems and highest cost", chooseWhen: "Global users and strict availability or latency goals" }
+]} />
+
+## Failure modes
+
+- **Slow failover**: DNS TTLs and resolver stickiness leave some users on a dead region far longer than the nominal TTL.
+- **Failover overload**: the surviving region collapses under redirected load plus retries; pair failover with load shedding and rate limits.
+- **Flapping**: aggressive health checks bounce traffic between regions; use hysteresis.
+- **Split-brain data**: both regions accept writes during a partition and diverge.
+- **Correlated failure**: a bad config or software release rolled out to all regions at once defeats regional redundancy; stage rollouts region by region.
+
+## Pitfalls
+
+- Never testing failover. Run game days that actually drain a region.
+- Assuming 99.99 percent from multi-region without accounting for the data tier and shared global dependencies (DNS, auth, config).
+- Setting TTL to 30 seconds and assuming failover happens in 30 seconds.
+- Using geo routing for compliance (data residency) without the data layer enforcing it.
+
+## What would you choose and why?
+
+A video-conferencing signalling API serves users in North America, Europe and Asia. Sessions are WebSocket connections lasting an hour. The business target is recovery from a regional outage within one minute and users are tolerant of reconnecting. Which steering mechanism would you pick, and how would you size capacity across the three regions?
+
+## Quiz
+
+<Quiz id="sd-m05-global" tags={["gslb", "anycast", "dns"]} questions={[
+  { type: "mcq", q: "Why does DNS-based failover usually take longer than the health check detection time?", options: ["DNS cannot detect failures", "Resolvers and clients cache the previous answer until its TTL expires", "BGP must reconverge", "TLS handshakes are slow"], answer: 1, explain: "Cached answers continue to point to the failed region until they expire, and some resolvers hold them longer." },
+  { type: "mcq", q: "How does anycast route a client to a nearby site?", options: ["The client measures latency to every site", "The same prefix is announced from many sites and BGP routing picks the topologically nearest", "A central controller assigns clients", "DNS returns different TTLs"], answer: 1, explain: "Anycast relies on normal internet routing to deliver packets to the closest announcement of the shared prefix." },
+  { type: "multi", q: "Which are real concerns when failing traffic over from region A to region B?", options: ["Region B must have enough spare capacity", "Asynchronously replicated writes may be missing", "TCP no longer exists", "Caches in B may be cold"], answer: [0, 1, 3], explain: "Capacity, replication lag (RPO) and cold caches are classic failover problems." },
+  { type: "mcq", q: "Three equal regions each run at 80% of capacity. One fails and its load splits evenly across the other two. Roughly what utilisation do the survivors face?", options: ["80%", "100%", "120%", "160%"], answer: 2, explain: "Total load is 2.4 region-capacities spread over 2 regions, so each runs at 120%: overloaded. Utilisation must stay below about 66% to survive a single regional loss." },
+  { type: "mcq", q: "Why does anycast sit awkwardly with long-lived TCP connections?", options: ["BGP drops TCP", "A route change can deliver later packets of a flow to a different site that has no state for it", "IPv6 is required", "Anycast only supports UDP by definition"], answer: 1, explain: "Mid-flow rerouting is rare but possible, and a different site has no knowledge of the connection." }
+]} />

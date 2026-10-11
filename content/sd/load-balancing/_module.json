@@ -1,0 +1,1 @@
+{ "title": "Load Balancing and Gateways", "level": "Level 1: Core Building Blocks", "order": 5, "summary": "Spreading traffic across servers: L4 vs L7, balancing algorithms, reverse proxies, API gateways and global traffic steering." }

@@ -1,0 +1,197 @@
+---
+title: Load Balancing Algorithms
+track: sd
+module: load-balancing
+order: 2
+difficulty: easy
+estMinutes: 30
+prerequisites: ["sd/load-balancing/load-balancer-basics"]
+tags: [load-balancer, algorithms, round-robin, least-connections, consistent-hashing, simulation]
+type: lesson
+furtherReading:
+  - title: NGINX documentation, HTTP load balancing methods
+    url: https://nginx.org/en/docs/http/load_balancing.html
+  - title: Karger et al., Consistent Hashing and Random Trees (STOC 1997)
+    url: https://dl.acm.org/doi/10.1145/258533.258660
+  - title: Mitzenmacher, The Power of Two Choices in Randomized Load Balancing
+    url: https://www.eecs.harvard.edu/~michaelm/postscripts/tpds2001.pdf
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 6 (partitioning, skew and hot spots)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Once a load balancer has a pool of healthy servers it must answer one question per request: *which one?* The answer sounds trivial ("take turns") but request costs are rarely equal. A cheap lookup and a 2-second report share the same URL space. If the algorithm ignores cost, a server that happens to collect several heavy requests builds a queue while its peers sit idle, and your p99 latency suffers even though *average* utilization looks fine.
+
+## The algorithms
+
+**Round robin.** Cycle through servers in order. Stateless, O(1), perfectly even in *request count*. Blind to request cost and to server capacity.
+
+**Weighted round robin.** Each server gets a weight proportional to capacity (a 16-core box gets weight 2 next to an 8-core box). A smooth variant interleaves picks so a heavy server does not receive a long burst. Fixes heterogeneous hardware, not heterogeneous requests.
+
+**Random (and power of two choices).** Pick uniformly at random. Simple and needs no shared state across multiple LB nodes. A well-known refinement, *power of two choices*, samples two servers and sends to the one with fewer in-flight requests; theory and practice show it removes most of the imbalance of pure random with almost no coordination.
+
+**Least connections.** Send to the server with the fewest in-flight requests. Because slow requests keep a connection open longer, the policy naturally steers away from servers that are busy with heavy work. Needs per-server counters at the LB. A weighted form divides connections by weight.
+
+**Least response time.** Combine observed latency (often an exponentially weighted moving average) with in-flight count. Adapts to a server that is degraded or in a slow zone. Risks: noisy measurements, and a fast-looking new server can be flooded ("herd effect") before its latency rises.
+
+**IP hash / header hash.** `server = hash(client_ip) mod N`. Gives affinity with no cookie and no shared state, but spreads load only as evenly as your clients are distributed (NAT concentrates users) and changing N remaps most keys.
+
+**Consistent hashing (preview).** Place servers (many virtual nodes each) on a hash ring; a key goes to the next server clockwise. Adding or removing a server moves only about 1/N of the keys instead of nearly all of them. This is the right tool when the choice must be *sticky by key*, such as routing to cache nodes, and it is covered again in the Caching and partitioning modules.
+
+## A simulation you can run
+
+The model: 5 servers, each a FIFO queue that works at one cost unit per time unit. Requests arrive every 0.725 time units; 90 percent cost 1 and 10 percent cost 20 (a heavy-tailed mix). Mean work is 2.9 units per request, so utilization is 2.9 / (5 x 0.725), about 80 percent. We compare latency (queue wait plus service) over 20,000 requests with the same request stream for every policy.
+
+<CodeRunner language="python" code={`import random, hashlib
+
+def make_requests(n, seed=7):
+    rng = random.Random(seed)
+    reqs, t = [], 0.0
+    for i in range(n):
+        t += 0.725
+        cost = 20.0 if rng.random() < 0.10 else 1.0
+        reqs.append((t, cost, rng.randrange(10_000)))  # arrival, cost, client id
+    return reqs
+
+class Sim:
+    def __init__(self, k):
+        self.free_at = [0.0] * k
+        self.finishes = [[] for _ in range(k)]
+        self.ewma = [1.0] * k
+    def active(self, s, now):
+        return sum(1 for f in self.finishes[s] if f > now)
+    def assign(self, s, now, cost):
+        start = max(now, self.free_at[s])
+        end = start + cost
+        self.free_at[s] = end
+        self.finishes[s].append(end)
+        self.finishes[s] = [f for f in self.finishes[s] if f > now]
+        lat = end - now
+        self.ewma[s] = 0.8 * self.ewma[s] + 0.2 * lat
+        return lat
+
+def run(policy, reqs, k=5):
+    sim, lats, rr = Sim(k), [], 0
+    rng = random.Random(1)
+    busy = [0.0] * k
+    for now, cost, client in reqs:
+        if policy == "round_robin":
+            s = rr % k; rr += 1
+        elif policy == "random":
+            s = rng.randrange(k)
+        elif policy == "least_connections":
+            s = min(range(k), key=lambda i: (sim.active(i, now), i))
+        elif policy == "least_response_time":
+            s = min(range(k), key=lambda i: (sim.ewma[i] * (sim.active(i, now) + 1), i))
+        elif policy == "ip_hash":
+            s = int(hashlib.md5(str(client).encode()).hexdigest(), 16) % k
+        lats.append(sim.assign(s, now, cost))
+        busy[s] += cost
+    lats.sort()
+    pct = lambda p: lats[int(p * (len(lats) - 1))]
+    return sum(lats) / len(lats), pct(0.50), pct(0.99), max(busy) / (sum(busy) / k)
+
+reqs = make_requests(20000)
+print(f"{'policy':20s} {'mean':>8s} {'p50':>8s} {'p99':>8s} {'max/avg load':>13s}")
+for p in ["round_robin", "random", "ip_hash", "least_connections", "least_response_time"]:
+    m, p50, p99, imb = run(p, reqs)
+    print(f"{p:20s} {m:8.2f} {p50:8.2f} {p99:8.2f} {imb:13.3f}")
+`} />
+
+Output from a local run of exactly this code (Python 3, deterministic seeds):
+
+| Policy | Mean latency | p50 | p99 | Max/avg work per server |
+| --- | --- | --- | --- | --- |
+| round robin | 24.43 | 17.37 | 126.37 | 1.029 |
+| random | 25.76 | 19.90 | 107.70 | 1.040 |
+| ip hash | 30.65 | 20.00 | 141.65 | 1.082 |
+| least connections | 6.56 | 1.00 | 44.37 | 1.150 |
+| least response time | 6.99 | 2.20 | 42.22 | 1.022 |
+
+How to read it:
+
+- **Total work is nearly balanced for every policy** (the last column is close to 1). Round robin even looks the *best* by that measure. Yet its mean latency is almost four times worse than least connections. Balancing *counts of requests* or *total work over time* is not the same as avoiding *queues at the moment a heavy request arrives*.
+- Least connections and least response time react to instantaneous load, so a short request is rarely stuck behind a 20-unit one: p50 drops from about 17 to 1 to 2.
+- IP hash is worst: no feedback at all, and a skewed client-to-server mapping on top.
+- These are figures from one synthetic workload. Different mixes, utilization or service disciplines change the numbers; the *direction* (load-aware beats blind under heavy-tailed costs) is the transferable result.
+
+<Callout type="pitfall" title="Stale information">
+Least-connections only works if the LB sees all traffic. With several independent LB nodes, each sees only its own share and can all pile onto the same apparently idle server. Power of two choices or a shared load signal limits that herd.
+</Callout>
+
+## Consistent hashing versus mod N
+
+When the same key must reach the same server (cache nodes, sharded stateful services), plain `hash(key) mod N` is fragile: changing N from 4 to 5 remaps most keys. Measured on 20,000 keys with MD5 and 100 virtual nodes per server:
+
+<CodeRunner language="python" code={`import bisect, hashlib
+
+def h(s):
+    return int(hashlib.md5(s.encode()).hexdigest(), 16)
+
+class Ring:
+    def __init__(self, nodes, vnodes=100):
+        self.ring = sorted((h(f"{n}#{v}"), n) for n in nodes for v in range(vnodes))
+        self.points = [p for p, _ in self.ring]
+    def get(self, key):
+        i = bisect.bisect(self.points, h(key)) % len(self.ring)
+        return self.ring[i][1]
+
+keys = [f"user{i}" for i in range(20000)]
+moved_mod = sum(h(k) % 4 != h(k) % 5 for k in keys)
+r4 = Ring(["s0", "s1", "s2", "s3"])
+r5 = Ring(["s0", "s1", "s2", "s3", "s4"])
+moved_ring = sum(r4.get(k) != r5.get(k) for k in keys)
+print(f"mod N: {moved_mod/len(keys):.1%} of keys moved going 4 -> 5 servers")
+print(f"ring : {moved_ring/len(keys):.1%} of keys moved (ideal 1/5 = 20.0%)")
+`} />
+
+A local run printed about 80.1 percent moved for mod N and about 19.7 percent for the ring. The ring is near the theoretical minimum of one fifth because the new server takes over only the arcs it now owns.
+
+<Diagram kind="mermaid" caption="Deciding which algorithm to use" code={`flowchart TD
+  A[Need same client to reach same backend?] -->|yes, by key, backends change often| B[Consistent hashing]
+  A -->|yes, simple, stable pool| C[IP or header hash]
+  A -->|no| D[Are request costs uneven?]
+  D -->|no, similar cost| E[Round robin or weighted round robin]
+  D -->|yes| F[Does one LB see all traffic?]
+  F -->|yes| G[Least connections or least response time]
+  F -->|no, many LB nodes| H[Power of two choices]`} />
+
+## Trade-offs
+
+<TradeOffs caption="Balancing algorithms compared" rows={[
+  { option: "Round robin / weighted", pros: "Stateless, trivial, predictable; weights handle unequal hardware", cons: "Ignores request cost and current load; queues form behind heavy requests", chooseWhen: "Uniform, short, stateless requests" },
+  { option: "Least connections", pros: "Adapts to uneven request cost with a simple signal", cons: "Needs shared counters; herds with several LB nodes; long idle keep-alives distort counts", chooseWhen: "Mixed or long-lived requests through a single LB tier" },
+  { option: "Least response time", pros: "Detects slow or degraded servers", cons: "Noisy; can oscillate or flood a new fast server", chooseWhen: "Heterogeneous or flaky backends; combine with in-flight counts" },
+  { option: "Power of two choices", pros: "Near least-connections quality with tiny state; works across many LB nodes", cons: "Still needs a load signal per server", chooseWhen: "Large pools, distributed LBs, client-side balancing" },
+  { option: "IP / key hash", pros: "Affinity without cookies or shared state", cons: "Skew from NAT and popular keys; mod N remaps nearly everything when N changes", chooseWhen: "Stable pool and light affinity needs" },
+  { option: "Consistent hashing", pros: "Minimal key movement on membership change; natural fit for caches", cons: "Needs virtual nodes for evenness; hot keys still land on one node", chooseWhen: "Sharded caches and stateful backends that scale in and out" }
+]} />
+
+## Failure modes
+
+- **Hot server from hashing**: one popular key or a NAT gateway concentrates load; hashing cannot fix key skew.
+- **Slow-start herd**: a freshly added or recovered server looks empty and instantly receives a flood. Many LBs have a slow-start ramp that gradually increases its share.
+- **Weight misconfiguration**: weights not updated after a hardware change leave a big machine idle.
+- **Measurement lag**: with least response time, latency data is old by the time you act on it.
+
+## Pitfalls
+
+- Choosing by the textbook name instead of measuring p99 on your own traffic mix.
+- Using IP hash and then discovering that 40 percent of users share three egress IPs.
+- Believing average CPU is a good balance metric; tail latency is what users feel.
+- Forgetting that long-lived connections (WebSockets, gRPC streams) are balanced once, at connect time.
+
+## What would you choose and why?
+
+A search service has 40 backends. Most queries take 5 ms but a few take 800 ms. You run eight LB nodes. Round robin gives a bad p99. Which algorithm would you try first and why, and what could go wrong with plain least connections here?
+
+## Quiz
+
+<Quiz id="sd-m05-algorithms" tags={["load-balancer", "algorithms"]} questions={[
+  { type: "mcq", q: "Requests have a heavy-tailed cost distribution and one LB sees all traffic. Which policy typically gives the best tail latency?", options: ["Round robin", "IP hash", "Least connections", "Weighted round robin with equal weights"], answer: 2, explain: "Least connections reacts to in-flight work so short requests avoid queues behind heavy ones; the blind policies do not." },
+  { type: "mcq", q: "Going from 4 to 5 servers, roughly what fraction of keys remap under hash(key) mod N versus a consistent-hash ring?", options: ["About 20% for both", "About 80% for mod N, about 20% for the ring", "About 20% for mod N, about 80% for the ring", "About 100% for both"], answer: 1, explain: "With mod N a key stays only if hash mod 4 equals hash mod 5, which is rare (about 1 in 5). The ring moves only the keys the new server takes over, about 1/5." },
+  { type: "multi", q: "Which statements about power of two choices are correct?", options: ["It samples two servers and picks the less loaded one", "It needs no global ordering of all servers", "It guarantees the single least loaded server is chosen", "It reduces imbalance greatly compared with pure random"], answer: [0, 1, 3], explain: "It is a cheap approximation: two random samples, take the better. It does not guarantee the global minimum, but the improvement over random is large." },
+  { type: "mcq", q: "In the simulation, round robin had max/avg work of 1.03 yet a much worse mean latency than least connections. Why?", options: ["Round robin loses requests", "Equal total work does not prevent short requests queuing behind heavy ones at a given moment", "Least connections uses faster servers", "The arrival process differed"], answer: 1, explain: "Long-run work balance hides transient queues. Latency depends on instantaneous queue state." },
+  { type: "mcq", q: "What problem does a slow-start ramp address?", options: ["A new or recovered backend receiving a flood of traffic immediately", "TLS handshake cost", "Cookie size", "DNS caching"], answer: 0, explain: "Load-aware algorithms see an empty server and send it everything; ramping its weight avoids overwhelming a cold cache or JIT." }
+]} />

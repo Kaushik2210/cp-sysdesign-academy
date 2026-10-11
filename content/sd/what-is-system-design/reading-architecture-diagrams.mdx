@@ -1,0 +1,133 @@
+---
+title: Reading Architecture Diagrams and Building Blocks
+track: sd
+module: what-is-system-design
+order: 3
+difficulty: beginner
+estMinutes: 25
+prerequisites: [sd/what-is-system-design/requirements-and-framework]
+tags: [building-blocks, diagrams, vocabulary]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 1
+    url: https://dataintensive.net/
+  - title: AWS Well-Architected Framework
+    url: https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html
+  - title: The C4 model for visualising software architecture
+    url: https://c4model.com/
+---
+
+## Intuition
+
+Almost every web system is assembled from the same handful of parts. Once you know what each part is *for*, an architecture diagram stops being a wall of rectangles and becomes a story: a request enters on the left, hits some components, and either returns an answer or leaves a side effect on the right. This lesson gives you that vocabulary and a method for reading any diagram.
+
+## How to read a diagram
+
+Ask four questions of every diagram, in order:
+
+1. **Where does a request enter?** Find the client and the first server it touches.
+2. **What is on the hot path?** Follow the arrows for the most common request. Anything on it adds latency.
+3. **What is synchronous and what is asynchronous?** A solid call waits for an answer; a queue means "do it later".
+4. **Where does state live?** State (data that must survive) is the hard part. Stateless boxes are easy to replicate; stateful ones need care.
+
+Arrows should mean one thing. In this course an arrow points from caller to callee, and its label names the operation or protocol. If an arrow has no label, it is a hint the author has not decided what it means.
+
+## The building blocks
+
+| Block | What it does | Typical problem it solves |
+| --- | --- | --- |
+| Client | Browser, mobile app or another service that starts requests | Presents the product; cannot be trusted |
+| DNS | Turns a name like `example.com` into an IP address | Finding the server |
+| CDN | Caches static content at edge locations near users | Latency and origin load for images, scripts, video |
+| Load balancer | Spreads requests across servers and drops unhealthy ones | Scaling out, removing a single server as a failure point |
+| Application server | Runs business logic; ideally stateless | Handling requests; scales horizontally |
+| Cache | In-memory store for hot data (for example Redis or Memcached) | Slow or expensive reads |
+| Database | Durable, queryable storage of the source of truth | Persistence, consistency, queries |
+| Message queue | Buffers work between producer and consumer | Bursts, slow downstream systems, decoupling |
+| Object storage | Cheap, durable storage for large blobs (images, backups) | Files too big for a database |
+
+<Callout type="note" title="Stateless is a superpower">
+If an app server keeps no per-user data in its own memory or disk, any server can handle any request. That is what lets a load balancer add and remove servers freely. Put session data in a shared store or in a signed token instead.
+</Callout>
+
+## A request through the blocks
+
+Consider a user opening a product page. Click each node below to see its role, how it fails and what it costs.
+
+<Diagram kind="flow" caption="A typical web request path with the common building blocks" nodes={[
+  { id: "client", label: "Client", x: 0, y: 100, role: "Browser that requests the page and its assets.", failureModes: ["Slow or offline network", "Stale local cache shows old data"], tradeoffs: ["Client-side caching is free speed but hard to invalidate"] },
+  { id: "cdn", label: "CDN", x: 170, y: 20, role: "Serves cached static assets (images, JS, CSS) from an edge location near the user.", failureModes: ["Stale asset after a deploy if not versioned or purged", "Edge outage falls back to origin load spike"], tradeoffs: ["Large latency win for static content, extra cost and cache-invalidation work"] },
+  { id: "lb", label: "Load balancer", x: 170, y: 100, role: "Receives dynamic requests and forwards them to a healthy app server.", failureModes: ["Becomes a single point of failure if not redundant", "Bad health checks route traffic to broken servers"], tradeoffs: ["Layer 7 balancing allows smart routing but costs more CPU than layer 4"] },
+  { id: "app", label: "App servers", x: 340, y: 100, role: "Stateless processes running business logic; fetch data, build the response.", failureModes: ["Crash mid-request", "Slow dependency exhausts the thread pool"], tradeoffs: ["More servers add capacity but also coordination and cost"] },
+  { id: "cache", label: "Cache", x: 510, y: 40, role: "Returns hot product data from memory in well under a millisecond to a few milliseconds.", failureModes: ["Cache stampede when a hot key expires", "Stale data if invalidation is missed"], tradeoffs: ["Fast reads versus extra complexity and possible staleness"] },
+  { id: "db", label: "Database", x: 510, y: 160, role: "Source of truth for products and orders.", failureModes: ["Primary failure needs failover", "Slow queries under load"], tradeoffs: ["Strong consistency and queries versus harder horizontal scaling"] },
+  { id: "queue", label: "Queue", x: 680, y: 160, role: "Receives side-effect work such as emails or analytics events, processed later by workers.", failureModes: ["Backlog growth", "Duplicate delivery with at-least-once semantics"], tradeoffs: ["Smooths bursts and decouples, but the result is not immediate"] }
+]} edges={[
+  { from: "client", to: "cdn", label: "static" }, { from: "client", to: "lb", label: "dynamic" }, { from: "lb", to: "app" }, { from: "app", to: "cache", label: "read" }, { from: "app", to: "db", label: "miss / write" }, { from: "app", to: "queue", label: "async" }
+]} />
+
+The same page load as a sequence makes the order and the sync/async split obvious:
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant D as CDN
+  participant L as Load balancer
+  participant A as App server
+  participant K as Cache
+  participant B as Database
+  participant Q as Queue
+  C->>D: GET /static/app.js
+  D-->>C: 200 (cached)
+  C->>L: GET /products/42
+  L->>A: forward
+  A->>K: get product:42
+  alt cache hit
+    K-->>A: product
+  else cache miss
+    A->>B: SELECT product 42
+    B-->>A: row
+    A->>K: set product:42
+  end
+  A-)Q: enqueue page_view event
+  A-->>L: 200 HTML/JSON
+  L-->>C: 200`} caption="Solid arrows wait for a reply; the open-headed arrow to the queue does not." />
+
+## Reading numbers off the diagram
+
+Order-of-magnitude costs help you judge a diagram quickly. These are approximations that vary with hardware and distance:
+
+- Memory read: around 100 nanoseconds.
+- Cache hit over the network in the same data centre: well under 1 to a few milliseconds including the network hop.
+- Database query served from disk or its buffer cache: from a few milliseconds up to hundreds under load.
+- Round trip within one data centre: around 0.5 ms; across continents: roughly 100 to 200 ms.
+
+If a request path makes ten sequential database calls, you can read "tens of milliseconds at least" straight from the picture.
+
+## Trade-offs between blocks
+
+<TradeOffs caption="Choosing how to absorb extra read traffic or work" rows={[
+  { option: "Add a cache", pros: "Very fast reads, protects the database", cons: "Staleness, invalidation, warm-up, one more thing to run", chooseWhen: "Reads dominate and data tolerates being slightly stale" },
+  { option: "Add a CDN", pros: "Removes static traffic from your servers, lowers user latency globally", cons: "Not useful for per-user dynamic data; purge complexity", chooseWhen: "Users are geographically spread and content is cacheable" },
+  { option: "Add a queue", pros: "Absorbs bursts, isolates slow or flaky dependencies", cons: "Eventual completion; ordering and duplicates to handle", chooseWhen: "Work does not need to finish before the response" },
+  { option: "Add more app servers", pros: "Simple if stateless", cons: "Moves the bottleneck to the database", chooseWhen: "CPU on app servers is the actual bottleneck" }
+]} />
+
+## Pitfalls
+
+- Drawing every possible component. Each box needs a stated reason to exist; if you cannot say what breaks without it, remove it.
+- Mixing levels of detail: "Redis" next to "backend" next to "the internet" in one picture.
+- Ignoring the data stores. Diagrams that show ten services and one unnamed "DB" hide the hardest decisions.
+- Treating arrows as free. Each network hop adds latency and a new way to fail.
+
+## What would you choose and why?
+
+Your product page is slow only for users far from your data centre, and the slow part is downloading images and scripts. Which block do you add first: a cache, a CDN, or more app servers? Explain what evidence in a diagram or a trace would confirm your choice.
+
+## Quiz
+
+<Quiz id="sd-m01-reading-diagrams" tags={["building-blocks"]} questions={[
+  { type: "mcq", q: "Why is it valuable for application servers to be stateless?", options: ["They use less memory", "Any server can handle any request, so a load balancer can add or remove servers freely", "They never need a database", "They cannot fail"], answer: 1, explain: "Statelessness makes horizontal scaling and failure replacement simple." },
+  { type: "mcq", q: "Which block most directly reduces latency for images and scripts for users far away?", options: ["Message queue", "Database replica in the same rack", "CDN", "Application server"], answer: 2, explain: "A CDN serves cached static content from an edge location near the user." },
+  { type: "multi", q: "Which statements about a message queue are correct?", options: ["It lets the producer respond before the work is done", "It can absorb traffic bursts", "It guarantees the work finishes instantly", "It decouples producers from slow consumers"], answer: [0, 1, 3], explain: "Queues trade immediacy for decoupling and burst absorption." },
+  { type: "mcq", q: "You see a diagram with ten services but a single unlabelled 'DB' box. What is the best critique?", options: ["It is perfect", "State and its access patterns, the hardest part, are hidden", "Too few arrows", "Services should be removed"], answer: 1, explain: "Data stores drive consistency, scaling and failure behaviour, so they must be specified." }
+]} />

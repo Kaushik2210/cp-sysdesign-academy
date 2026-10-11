@@ -1,0 +1,124 @@
+---
+title: Distributed Rate Limiting
+track: sd
+module: scalability
+order: 3
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/scalability/rate-limiting-algorithms"]
+tags: [rate-limiting, redis, lua, atomicity, distributed, api-gateway]
+type: lesson
+furtherReading:
+  - title: Redis documentation - Rate limiting with INCR (pattern)
+    url: https://redis.io/commands/incr/
+  - title: Redis documentation - Scripting with Lua (EVAL, atomic execution)
+    url: https://redis.io/docs/latest/develop/interact/programmability/eval-intro/
+  - title: Stripe Engineering - Scaling your API with rate limiters
+    url: https://stripe.com/blog/rate-limiters
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 8 (Unreliable clocks)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+On one server, a rate limiter is a dictionary in memory. With ten API gateways behind a load balancer, a client's requests are spread over all of them. If each keeps its own local counter with limit `L`, the client effectively gets `10L`. Limits must be enforced against **shared state**, and shared state brings latency, races and failure handling.
+
+## Where to enforce
+
+- **Edge / API gateway**: one chokepoint, protects everything behind it, coarse identity (API key, IP).
+- **In-service middleware**: knows the user and the cost of operations; needs a shared store.
+- **Per-dependency client-side**: each caller limits its own calls to a downstream so it stays polite.
+
+## Design options for shared counters
+
+| Approach | How | Pros | Cons |
+| --- | --- | --- | --- |
+| Centralised store (Redis) | Every check is one round trip to Redis | Accurate, simple mental model | Extra latency (about a millisecond within a datacenter), Redis becomes critical dependency |
+| Sticky routing | Hash the key to one gateway node so counters are local | No network hop | Node loss resets state, hot keys overload a node, rebalancing |
+| Local plus periodic sync | Each node counts locally and syncs deltas every few hundred ms | Very fast, resilient | Limit is approximate; can overshoot by about nodes times sync-interval traffic |
+| Quota leasing | Central service hands each node a slice of the quota | Few central calls, bounded error | More complex, slice waste when traffic is uneven |
+
+## The race condition and why Lua
+
+A naive Redis token bucket does `GET`, compute, then `SET`. Two gateways can both `GET` 1 remaining token, both decide to allow, both write: the limit is exceeded. This is a **read-modify-write race**.
+
+Solutions:
+
+- **Single atomic command**: fixed window works with `INCR key` (atomic), then set an expiry on first increment.
+- **Lua script**: Redis executes a script atomically; no other command interleaves. Put the whole refill-and-consume logic of the token bucket in the script.
+- **Optimistic locking** (`WATCH/MULTI`): retries under contention; usually worse than Lua.
+
+A fixed-window limiter as a Lua script (atomic increment plus expiry, avoiding the "key exists with no TTL" bug where a crash between `INCR` and `EXPIRE` leaves a permanent key):
+
+```lua
+-- KEYS[1] = counter key, ARGV[1] = limit, ARGV[2] = window seconds
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+if n > tonumber(ARGV[1]) then
+  return {0, redis.call('TTL', KEYS[1])}   -- denied, seconds until reset
+end
+return {1, tonumber(ARGV[1]) - n}          -- allowed, remaining
+```
+
+The token-bucket version stores `tokens` and `ts` in a hash, computes refill from the time passed in `ARGV` (or Redis `TIME`, to avoid clock skew between gateways), updates, and returns allow or deny with the whole read-modify-write inside one script. Its logic mirrors the Python `TokenBucket` class from the previous lesson, just executed inside Redis.
+
+<Callout type="warning" title="Clocks">
+If each gateway supplies its own timestamp, skew between machines distorts refill. Use the store's clock (for Redis, `TIME` inside the script, mindful of script-determinism rules on older versions and replication) or keep windows coarse enough that skew is negligible.
+</Callout>
+
+## Failure behaviour: fail open or fail closed?
+
+What if Redis is unreachable?
+
+- **Fail open**: allow traffic. Availability preserved, but a limiter outage also removes protection exactly when you may be under attack.
+- **Fail closed**: reject. Safe for expensive or abuse-prone resources, but a limiter outage becomes a full outage.
+- **Degraded local mode**: fall back to a conservative per-node local limit (for example `L / number_of_nodes`). Usually the best default.
+
+Always set a tight timeout (a few milliseconds) on the limiter call so it cannot add its own latency tail.
+
+<Diagram kind="flow" caption="Distributed rate limiting at an API gateway" nodes={[
+  { id: "client", label: "Clients", x: 0, y: 80, role: "Callers identified by API key, user id or IP.", failureModes: ["Retry loops after 429 amplify load without backoff"], tradeoffs: ["Client-side backoff is cooperative; enforcement must be server-side"] },
+  { id: "gw", label: "Gateway nodes", x: 220, y: 80, role: "Extract the limiter key, call the shared store, and either forward or return 429 with Retry-After.", failureModes: ["Limiter call timeout adds latency", "Misconfigured key lets one tenant exhaust shared capacity"], tradeoffs: ["Checking at the edge protects all services at the cost of a per-request network hop"] },
+  { id: "redis", label: "Redis (counters)", x: 440, y: 0, role: "Holds counters or token buckets with TTLs; Lua scripts make check-and-update atomic.", failureModes: ["Node failure loses recent counts or blocks checks", "Hot key (one huge tenant) overloads a shard", "Replica lag after failover allows over-limit traffic"], tradeoffs: ["Accurate and shared but a critical dependency; cluster mode shards by key"] },
+  { id: "svc", label: "Backend services", x: 440, y: 160, role: "Do the real work for allowed requests.", failureModes: ["Overload if limits are set above actual capacity"], tradeoffs: ["Limits should come from measured capacity, not guesses"] }
+]} edges={[
+  { from: "client", to: "gw" }, { from: "gw", to: "redis", label: "check+update (Lua)" }, { from: "gw", to: "svc", label: "allowed" }
+]} />
+
+<TradeOffs caption="Where the counters live" rows={[
+  { option: "Central Redis per check", pros: "Accurate, simple, easy to reason about", cons: "Latency and a critical dependency; cost scales with request rate", chooseWhen: "Moderate QPS, strict limits (billing, abuse)" },
+  { option: "Local with periodic sync", pros: "Negligible latency, survives store outage", cons: "Approximate; overshoot proportional to node count and interval", chooseWhen: "Very high QPS where small overshoot is fine" },
+  { option: "Quota leasing", pros: "Few central calls, bounded error", cons: "Complex, wasted slices, rebalancing logic", chooseWhen: "Large fleets with steady traffic per key" }
+]} />
+
+## Worked example
+
+An API has 5,000 customers. Free tier: 60 requests per minute per API key; Pro: 600 per minute, plus 20 per second burst. Peak gateway traffic is 30,000 requests per second.
+
+- One Redis check per request means 30,000 Lua calls per second. A single Redis instance can often handle on the order of 100,000 simple operations per second, so it fits, but a cluster sharded by key gives headroom and avoids one hot node.
+- Keys: `rl:{api_key}:{endpoint_group}`. Hash tags (`{api_key}`) keep related keys on one shard if a script needs several of them.
+- Pro tier uses a token bucket with `rate = 10/s`, `capacity = 20`, plus a minute-level fixed window of 600 to cap sustained use.
+- On deny: `429`, `Retry-After: <seconds>`, and a body naming the limit hit.
+
+## Pitfalls
+
+- **Check-then-set** without atomicity (the classic race).
+- **Keys without TTL**, filling memory with dead clients.
+- **Counting rejected requests** against the limit, so a client in a retry loop never recovers.
+- **Blocking on the limiter** with no timeout.
+- **One global limit** that lets a noisy tenant starve others; add per-tenant limits below the global one.
+
+## What would you choose and why?
+
+Your gateway fleet is 40 nodes in three zones, traffic is 200,000 requests per second, and your Redis cluster goes down for two minutes during an incident. Would you fail open, fail closed or degrade to local limits? Which endpoints would you treat differently (login, search, payment) and why?
+
+## Quiz
+
+<Quiz id="sd-m10-distributed-rate-limiting" tags={["rate-limiting", "redis"]} questions={[
+  { type: "mcq", q: "Why does GET then SET on a Redis counter fail as a limiter under concurrency?", options: ["Redis is single-threaded so it cannot do GET", "Two gateways can read the same value and both allow the request before either writes", "SET is slower than INCR by design", "Keys expire immediately"], answer: 1, explain: "It is a read-modify-write race; the check and update must be atomic, via INCR or a Lua script." },
+  { type: "mcq", q: "Each of 10 gateways keeps its own in-memory counter with limit 100 per minute and requests are spread evenly. What can a client roughly achieve?", options: ["100 per minute", "About 1000 per minute", "10 per minute", "0"], answer: 1, explain: "Each node enforces 100 independently, so the effective limit is about the sum." },
+  { type: "multi", q: "Which are reasonable behaviours when the central limiter store is down?", options: ["Fall back to a conservative local per-node limit", "Fail open for low-risk read endpoints", "Fail open for everything including password login attempts", "Apply a tight timeout so the limiter does not add latency"], answer: [0, 1, 3], explain: "Failing open for credential-guessing endpoints removes protection exactly when it matters." },
+  { type: "mcq", q: "What is the purpose of Retry-After on a 429 response?", options: ["It tells clients how long to wait before retrying, reducing retry storms", "It extends the cache TTL", "It selects the server region", "It encrypts the response"], answer: 0, explain: "It gives a deterministic hint so clients back off instead of hammering the limiter." }
+]} />

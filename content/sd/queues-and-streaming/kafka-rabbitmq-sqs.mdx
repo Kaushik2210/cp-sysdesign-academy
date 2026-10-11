@@ -1,0 +1,104 @@
+---
+title: Kafka vs RabbitMQ vs SQS
+track: sd
+module: queues-and-streaming
+order: 2
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/queues-and-streaming/why-queues"]
+tags: [kafka, rabbitmq, sqs, partitions, consumer-groups]
+type: lesson
+furtherReading:
+  - title: Apache Kafka documentation, Design
+    url: https://kafka.apache.org/documentation/#design
+  - title: RabbitMQ documentation, AMQP 0-9-1 concepts and Reliability Guide
+    url: https://www.rabbitmq.com/docs/reliability
+  - title: Amazon SQS Developer Guide, standard and FIFO queues
+    url: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html
+  - title: "The Log: What every software engineer should know about real-time data's unifying abstraction (Jay Kreps)"
+    url: https://engineering.linkedin.com/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying
+---
+
+## Intuition
+
+Two designs sit behind most messaging products.
+
+- A **broker with queues** (RabbitMQ, SQS) routes a message to a queue, hands it to a consumer, and *deletes it once acknowledged*. The queue is a to-do list: items disappear when done.
+- A **distributed log** (Kafka) appends messages to a partitioned, ordered, retained file. Consumers track their own *position (offset)* and read; reading does not delete anything. The log is a ledger: entries stay until retention expires, and many readers can read the same entries at different positions.
+
+That difference drives replay, ordering, fan-out and throughput characteristics.
+
+## Core concepts side by side
+
+### Kafka
+
+- A **topic** is split into **partitions**. Each partition is an append-only ordered log, replicated across brokers (a leader plus follower replicas).
+- Ordering is guaranteed **within a partition**, not across a topic. Producers choose the partition, usually by hashing a message key, so all events for one key stay in order.
+- A **consumer group** shares a topic's partitions: each partition is read by at most one consumer in the group at a time. So maximum parallelism within a group equals the partition count. Different groups read independently, giving pub/sub.
+- Consumers commit **offsets**. Retention is by time or size (for example 7 days), or by log compaction (keep the latest value per key), independent of whether messages were consumed. Replay means resetting an offset.
+
+### RabbitMQ
+
+- Producers publish to an **exchange**, which routes to **queues** by bindings and routing keys (direct, topic, fanout, headers). Consumers read from queues.
+- Messages are acknowledged and removed. Rich routing, per-message TTL, priorities and dead-letter exchanges are built in.
+- Typically a good fit for task distribution and complex routing at moderate throughput. Newer features (streams, quorum queues) add replicated and log-like options.
+
+### Amazon SQS
+
+- A fully managed queue. **Standard** queues offer very high throughput with at-least-once delivery and best-effort ordering; **FIFO** queues provide ordering per message group and deduplication within a window, at lower throughput limits (check current quotas).
+- A received message becomes invisible for a **visibility timeout**; if not deleted in time, it reappears and is delivered again. Built-in dead-letter queue support via redrive policy. Retention up to 14 days.
+- No broker to run; scales automatically; no replay of consumed messages.
+
+## Comparison
+
+<TradeOffs caption="Kafka vs RabbitMQ vs SQS" rows={[
+  { option: "Kafka", pros: "Very high throughput; ordered partitions; replay; many independent consumer groups; durable retention", cons: "More to operate (brokers, partitions, rebalances); no per-message routing or priorities; parallelism capped by partitions", chooseWhen: "Event streams, data pipelines, CDC, multiple consumers needing replay" },
+  { option: "RabbitMQ", pros: "Flexible routing, priorities, TTLs, per-message acks; low latency", cons: "Messages removed after ack so no replay (classic queues); throughput and scaling more limited than a log", chooseWhen: "Task queues and complex routing between services" },
+  { option: "SQS", pros: "Fully managed, scales without capacity planning, simple, built-in DLQ", cons: "No replay; FIFO throughput limits; limited routing; AWS lock-in", chooseWhen: "Simple decoupling and background jobs on AWS with minimal ops" }
+]} />
+
+## Worked example: choosing partitions
+
+An order-events topic must sustain 30,000 messages per second, and a consumer instance can process about 2,000 messages per second. You need at least `30000 / 2000 = 15` consumers in the group, so at least 15 partitions. Add headroom for growth and for rebalancing (Kafka cannot easily reduce partitions, and increasing them changes the key-to-partition mapping), so choose a number like 24 or 32. Key by `order_id` so each order's events stay ordered. Partition counts are an approximation exercise; measure real consumer throughput first.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  P[Producer key=order_id] --> T0[Partition 0]
+  P --> T1[Partition 1]
+  P --> T2[Partition 2]
+  T0 --> A1[Group A consumer 1]
+  T1 --> A2[Group A consumer 2]
+  T2 --> A2
+  T0 --> B1[Group B consumer 1]
+  T1 --> B1
+  T2 --> B1`} caption="Two consumer groups read the same partitions independently; within a group each partition has one reader" />
+
+## Failure modes
+
+<Diagram kind="flow" caption="Kafka cluster with consumer groups" nodes={[
+  { id: "prod", label: "Producer", x: 0, y: 80, role: "Sends keyed messages; picks the partition from the key.", failureModes: ["Skewed keys overload one partition", "Retry without idempotence can duplicate messages"], tradeoffs: ["acks=all is durable but slower than acks=1"] },
+  { id: "broker", label: "Partition leader", x: 220, y: 80, role: "Appends to the partition log and serves reads; replicates to followers.", failureModes: ["Leader failure triggers election and brief unavailability for that partition", "Under-replicated partitions risk data loss"], tradeoffs: ["Higher replication factor and min in-sync replicas improve durability and cost availability"] },
+  { id: "follower", label: "Follower replicas", x: 440, y: 20, role: "Copy the leader's log; join the in-sync replica set.", failureModes: ["Falling out of sync shrinks the safety margin"], tradeoffs: ["More replicas mean more disk and network"] },
+  { id: "group", label: "Consumer group", x: 440, y: 140, role: "Members split partitions; each commits offsets.", failureModes: ["Rebalance pauses consumption", "Slow consumer causes lag and may be kicked out of the group", "Committing offsets before processing loses messages on crash"], tradeoffs: ["Commit after processing gives at-least-once"] }
+]} edges={[
+  { from: "prod", to: "broker", label: "append" }, { from: "broker", to: "follower", label: "replicate" }, { from: "broker", to: "group", label: "fetch" }
+]} />
+
+## Pitfalls
+
+- Picking Kafka for a few hundred tasks a day because it is fashionable; a managed queue is far cheaper to operate.
+- Picking SQS or a classic queue and later needing replay, multiple readers and ordering by key.
+- Choosing a partition count by guess and a poorly distributed key.
+- Assuming a topic is globally ordered; only partitions are.
+
+## What would you choose and why?
+
+You need (a) to send transactional emails, (b) to stream clickstream events to analytics, a fraud model and a search indexer, and (c) to run a nightly report job. Which system would you assign to each need and why? Would you use one broker for all three?
+
+## Quiz
+
+<Quiz id="sd-m08-kafka-rabbit-sqs" tags={["kafka", "rabbitmq", "sqs"]} questions={[
+  { type: "mcq", q: "In Kafka, what limits the parallelism of a single consumer group on a topic?", options: ["The number of brokers", "The number of partitions", "The message size", "The retention period"], answer: 1, explain: "Each partition is consumed by at most one member of a group, so extra consumers beyond the partition count sit idle." },
+  { type: "mcq", q: "Which system makes it natural to replay last week's events for a new consumer?", options: ["SQS standard queue", "RabbitMQ classic queue", "Kafka with retention covering the period", "A cache"], answer: 2, explain: "Kafka retains the log regardless of consumption, and a new group can start from an old offset." },
+  { type: "multi", q: "Which statements about SQS are correct?", options: ["Messages become invisible during the visibility timeout after receipt", "Standard queues guarantee strict global ordering", "A message not deleted in time can be delivered again", "A dead-letter queue can be configured"], answer: [0, 2, 3], explain: "Standard queues offer best-effort ordering; FIFO queues provide ordering per message group." },
+  { type: "mcq", q: "Ordering in Kafka is guaranteed:", options: ["Across an entire topic", "Within a partition", "Across all topics", "Only with one consumer"], answer: 1, explain: "Messages in a single partition are totally ordered; key-based partitioning keeps per-key order." }
+]} />

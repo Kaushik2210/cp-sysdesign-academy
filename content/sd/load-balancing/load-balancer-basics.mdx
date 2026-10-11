@@ -1,0 +1,162 @@
+---
+title: Load Balancer Basics
+track: sd
+module: load-balancing
+order: 1
+difficulty: beginner
+estMinutes: 25
+prerequisites: ["sd/what-is-system-design/requirements-and-framework"]
+tags: [load-balancer, l4, l7, health-checks, high-availability]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 1 (scalability and load)
+    url: https://dataintensive.net/
+  - title: NGINX documentation, HTTP load balancing
+    url: https://nginx.org/en/docs/http/load_balancing.html
+  - title: HAProxy documentation
+    url: https://docs.haproxy.org/
+  - title: AWS Elastic Load Balancing, how it works
+    url: https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/how-elastic-load-balancing-works.html
+---
+
+## Intuition
+
+One server has a ceiling: CPU, memory, network, file descriptors. Past it you either buy a bigger machine (vertical scaling, which has a hard limit and a single failure domain) or run many identical machines and put something in front that decides *which machine handles each request*. That something is a **load balancer (LB)**.
+
+A load balancer gives you three things at once:
+
+1. **Capacity**: N servers handle roughly N times the traffic of one, as long as the work is spread sensibly.
+2. **Availability**: if one server dies, the LB stops sending it traffic and users barely notice.
+3. **Operational freedom**: you can deploy, drain and replace servers behind a single stable address.
+
+The catch is that the LB itself becomes a component that must not fail and must not become the bottleneck. This lesson covers how LBs work, the L4 versus L7 distinction, health checks, sticky sessions and how to make the LB itself highly available.
+
+## Formal picture
+
+A load balancer exposes a **virtual address** (a VIP or a DNS name) and forwards each connection or request to one member of a **pool** (also called backend set or target group). It makes the choice with a **balancing algorithm** (next lesson) restricted to the **healthy** members.
+
+For stateless app servers the model is simple: any server can serve any request, so the LB is free to choose by load alone. If servers hold per-user state in memory, the LB must route the same user to the same server, which is the sticky-session problem below, and the better fix is usually to move that state out of the servers.
+
+## L4 versus L7
+
+The layers refer to the OSI model: layer 4 is transport (TCP/UDP), layer 7 is application (HTTP, gRPC).
+
+| | L4 load balancer | L7 load balancer |
+| --- | --- | --- |
+| Sees | IP addresses, ports, TCP/UDP flags | Full HTTP request: path, host, headers, cookies, method |
+| Decision basis | 5-tuple (src/dst IP and port, protocol) | Anything in the request |
+| Connection handling | Forwards packets or splices one TCP connection to one backend; often does not parse the payload | Terminates the client connection, parses the request, opens or reuses a separate backend connection |
+| Cost | Very cheap per packet, very high throughput | More CPU and memory (parsing, TLS, buffering) |
+| Typical features | Fast TCP/UDP balancing, absorbing floods at line rate | Path/host routing, header rewrite, TLS termination, retries, compression, WAF, per-request balancing |
+
+Two consequences matter in design discussions:
+
+- With an L4 LB and HTTP/1.1 keep-alive or HTTP/2, one client connection stays on one backend for its whole life. A few long-lived, chatty connections can pin a lot of work on one server, so balance is *per connection*, not per request.
+- An L7 LB can balance each request independently and can route `/api` and `/static` to different pools. That flexibility is why most web architectures put an L7 LB at the edge, sometimes with an L4 tier in front of it for raw scale.
+
+<Callout type="note" title="Naming">
+Cloud products blur the lines. For example AWS Network Load Balancer is an L4 product and Application Load Balancer is L7. Check each vendor's documentation rather than inferring behavior from the marketing name.
+</Callout>
+
+## Health checks
+
+An LB is only as good as its knowledge of which backends are alive. Two complementary mechanisms:
+
+- **Active checks**: the LB periodically probes each backend (a TCP connect, or an HTTP `GET /healthz` expecting a 2xx). It marks a backend down after K consecutive failures and up again after M consecutive successes. Typical numbers are an interval of a few seconds and thresholds of 2 to 3, so detection takes on the order of 5 to 10 seconds.
+- **Passive checks** (outlier detection): the LB watches real traffic and ejects a backend that returns errors or times out, with no extra probe traffic and often faster detection.
+
+Design points:
+
+- **Shallow vs deep health endpoints.** A shallow check (process is up) is cheap but misses a server that is up yet cannot reach its database. A deep check (it queries the DB) catches that, but if the shared database blips, *every* backend fails the check at once and the LB removes the entire pool, turning a partial outage into a full one. A common compromise is a check that verifies local readiness and treats downstream dependencies as degraded rather than fatal.
+- **Readiness vs liveness.** Liveness answers "restart me?", readiness answers "send me traffic?". A starting server should be live but not ready until caches are warm.
+- **Connection draining.** When removing a backend for a deploy, stop sending *new* requests but let in-flight ones finish (with a timeout), otherwise every deploy produces errors.
+- **Retry budgets.** If the LB retries failed requests on another backend, cap the retries (for example only idempotent requests, and a small percentage of total traffic), or a slow backend turns into a retry storm that overloads the rest.
+
+## Sticky sessions (session affinity)
+
+Sticky sessions pin a client to one backend, usually by an LB-issued cookie (L7) or by hashing the client IP (L4 or L7).
+
+When people reach for them: legacy apps that keep login state or shopping carts in server memory; WebSocket or long-poll connections that are naturally tied to one server; local caches that are much more effective when the same user returns to the same node.
+
+Costs:
+
+- **Uneven load**: a few heavy users can overload one server while others idle.
+- **Failure hurts users**: when the pinned server dies, the session state is gone and those users are logged out or lose carts.
+- **Harder deploys and scaling**: draining pinned sessions takes long; new servers receive no existing users.
+- **IP hashing breaks behind NAT**: thousands of users behind one corporate or carrier NAT share one source IP and all land on one backend.
+
+The robust alternative is **stateless app servers with state in a shared store** (a cache such as Redis, a database, or a signed token the client carries, like a JWT or an encrypted cookie). Then affinity becomes an optimization rather than a correctness requirement.
+
+## High availability of the load balancer itself
+
+An LB in front of ten redundant servers is a single point of failure unless it is redundant too. Common patterns:
+
+- **Active-passive pair with a floating IP.** Two LBs share a virtual IP using a protocol such as VRRP (implemented by keepalived). The standby takes over the IP when the primary stops sending heartbeats. Failover is typically seconds. The standby sits idle (wasted capacity), and a partition between the pair can cause both to claim the IP ("split brain").
+- **Active-active with DNS.** DNS returns several LB addresses. Clients spread across them; if one fails, health-checked DNS stops returning it. DNS caching means clients may keep using a dead address for up to the record's TTL plus resolver behavior.
+- **Active-active with ECMP.** Routers spread flows across many identical LB nodes using equal-cost multipath, so capacity scales horizontally. Large providers run L4 LBs this way, often with consistent hashing so that adding or removing a node disturbs few flows.
+- **Managed cloud LBs.** The provider runs the redundancy across zones, and you get one DNS name. You trade control for operational simplicity.
+
+Also remember **cross-zone placement**: LB nodes and backends should span at least two failure domains (zones or racks).
+
+## Worked example
+
+Peak 20,000 requests per second; each backend sustains about 1,500 requests per second at a healthy CPU of 60 to 70 percent. You need at least 20,000 / 1,500, about 14 backends. To survive the loss of one zone out of three, the remaining two zones must carry peak: 14 / (2/3) = 21 backends, 7 per zone. A single software L7 LB node typically handles tens of thousands of requests per second (an approximation that depends heavily on TLS and request size), so one node is rarely the bottleneck, but you still run at least two for availability.
+
+<Diagram kind="flow" caption="A redundant L7 load balancer tier in front of stateless app servers, with state in a shared store" nodes={[
+  { id: "client", label: "Clients", x: 0, y: 80, role: "Browsers and apps resolving one DNS name for the service.", failureModes: ["Stale DNS cache keeps pointing at a dead LB address until the TTL expires"], tradeoffs: ["Low DNS TTL gives faster failover but more DNS queries"] },
+  { id: "lb1", label: "LB node A", x: 200, y: 20, role: "Terminates TLS, picks a healthy backend per request, runs health checks.", failureModes: ["Node crash drops its in-flight connections", "Overload if one node must absorb all traffic after its peer fails"], tradeoffs: ["Active-active uses all capacity but each node must be sized to survive losing a peer"] },
+  { id: "lb2", label: "LB node B", x: 200, y: 150, role: "Identical peer to node A; shares only configuration.", failureModes: ["Config drift between A and B causes inconsistent routing"], tradeoffs: ["Redundancy costs extra machines; managed LBs hide this cost"] },
+  { id: "app", label: "Stateless app servers", x: 420, y: 80, role: "Serve requests; any server can handle any request because state is external.", failureModes: ["Failing health checks remove servers and overload the rest", "A bad deploy fails all servers together"], tradeoffs: ["Stateless design scales easily but pushes latency to the shared store"] },
+  { id: "state", label: "Session store / DB", x: 640, y: 80, role: "Holds sessions and data so servers stay interchangeable.", failureModes: ["Store outage breaks every server at once", "Deep health checks on it can empty the whole pool"], tradeoffs: ["Shared state enables any-server routing but is a dependency to replicate"] }
+]} edges={[
+  { from: "client", to: "lb1", label: "DNS / VIP" }, { from: "client", to: "lb2" }, { from: "lb1", to: "app", label: "health-checked" }, { from: "lb2", to: "app" }, { from: "app", to: "state" }
+]} />
+
+<Diagram kind="mermaid" caption="Health check lifecycle for one backend" code={`stateDiagram-v2
+  [*] --> Healthy
+  Healthy --> Suspect: probe fails
+  Suspect --> Healthy: probe succeeds
+  Suspect --> Down: K consecutive failures
+  Down --> Recovering: probe succeeds
+  Recovering --> Down: probe fails
+  Recovering --> Healthy: M consecutive successes
+  Healthy --> Draining: removed for deploy
+  Draining --> [*]: in-flight requests finished`} />
+
+## Trade-offs
+
+<TradeOffs caption="Choosing an LB tier" rows={[
+  { option: "L4 LB", pros: "Highest throughput and lowest latency; protocol agnostic (any TCP/UDP)", cons: "No request-level routing, retries or header logic; balance is per connection", chooseWhen: "Non-HTTP protocols, extreme throughput, or as a front tier feeding L7 LBs" },
+  { option: "L7 LB", pros: "Path/host routing, TLS termination, per-request balancing, retries, observability", cons: "More CPU and memory; parses traffic so it must be patched and scaled with care", chooseWhen: "HTTP/gRPC services, microservice routing, canary and blue-green releases" },
+  { option: "Sticky sessions", pros: "Makes in-memory state and local caches work with no code change", cons: "Uneven load, session loss on failure, awkward scaling and deploys", chooseWhen: "Legacy stateful apps or WebSockets as a stopgap; prefer externalized state" },
+  { option: "DNS round robin only", pros: "No extra hop, trivial to set up", cons: "No health awareness, slow failover due to caching, uneven spread", chooseWhen: "Coarse spreading across several LBs or regions, not across app servers" }
+]} />
+
+## Failure modes
+
+- **LB overload**: a traffic spike or slow backends fill connection tables; use autoscaling or multiple nodes and set connection and queue limits.
+- **Pool-wide health failure**: a deep check on a shared dependency removes every backend. Many LBs offer a "panic mode" or minimum healthy percentage that keeps routing to all backends when too few look healthy.
+- **Thundering reconnect**: after an LB restart, millions of clients reconnect at once. Use jittered client backoff.
+- **Slow backend**: not dead, just slow, so health checks pass while latency climbs. Use latency-aware algorithms, timeouts and outlier ejection.
+
+## Pitfalls
+
+- Treating the LB as a magic fix while the database stays a single machine; the bottleneck just moves.
+- Forgetting the LB's own redundancy.
+- Health endpoints that always return 200, or that check too much.
+- Using IP hash behind NAT or a proxy, or trusting `X-Forwarded-For` blindly (clients can forge it unless the edge overwrites it).
+- No connection draining on deploys.
+
+## What would you choose and why?
+
+You run an API with 30 stateless pods behind an L7 LB in one region. A recent outage happened when the shared database restarted: every pod failed its deep `/healthz` check and the LB returned 503 for all traffic even though cached reads could still have been served. How would you redesign the health check and LB settings, and what would you give up?
+
+## Quiz
+
+<Quiz id="sd-m05-lb-basics" tags={["load-balancer"]} questions={[
+  { type: "mcq", q: "Which statement best distinguishes an L7 from an L4 load balancer?", options: ["L7 can route on HTTP path, host and headers; L4 decides from addresses and ports", "L4 can terminate TLS but L7 cannot", "L7 only supports UDP", "L4 always parses cookies"], answer: 0, explain: "L7 parses the application protocol, enabling content-based routing; L4 works with transport-level information." },
+  { type: "mcq", q: "Why can a deep health check that queries the shared database be dangerous?", options: ["It makes the LB slower to start", "If the database blips, all backends fail the check and the whole pool is removed", "It prevents connection draining", "It breaks TLS"], answer: 1, explain: "A shared dependency failure fails every backend together, converting a partial degradation into a complete outage." },
+  { type: "multi", q: "Which are real downsides of sticky sessions?", options: ["Load can become uneven", "Session state is lost when the pinned server dies", "They make the LB stateless", "Scaling out does not move existing users to new servers"], answer: [0, 1, 3], explain: "Affinity concentrates load, ties state to one machine, and keeps existing users away from newly added servers." },
+  { type: "mcq", q: "Two LBs share a floating IP using VRRP. What is the main risk?", options: ["DNS caching", "Split brain if the pair is partitioned and both claim the IP", "TLS cannot be used", "Backends cannot be health checked"], answer: 1, explain: "Without a reliable way to agree on who is primary, both nodes may think they own the IP." },
+  { type: "predict", q: "18,000 req/s peak, each backend sustains 1,500 req/s. To also survive losing 1 of 3 equal zones at peak, how many backends in total?", code: "import math\nbase = 18000 / 1500\nprint(math.ceil(base * 3 / 2))", options: ["12", "18", "24", "6"], answer: 1, explain: "12 backends carry peak; the remaining 2 of 3 zones must carry it, so total = 12 * 3/2 = 18 (6 per zone)." }
+]} />

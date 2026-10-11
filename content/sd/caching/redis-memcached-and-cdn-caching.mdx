@@ -1,0 +1,168 @@
+---
+title: Redis vs Memcached, Distributed Topologies and CDN Caching
+track: sd
+module: caching
+order: 5
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/caching/caching-strategies", "sd/caching/invalidation-and-stampedes"]
+tags: [redis, memcached, cdn, cache-control, etag, sharding, consistent-hashing]
+type: lesson
+furtherReading:
+  - title: Redis documentation, data types and Redis Cluster specification
+    url: https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/
+  - title: Memcached wiki
+    url: https://github.com/memcached/memcached/wiki
+  - title: RFC 9111, HTTP Caching
+    url: https://www.rfc-editor.org/rfc/rfc9111
+  - title: MDN, Cache-Control header
+    url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control
+  - title: Nishtala et al., Scaling Memcache at Facebook (NSDI 2013)
+    url: https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala
+---
+
+## Intuition
+
+Up to now a cache was an abstract box. In practice you choose a product, decide how data is spread over many nodes, and, for web content, lean on HTTP's own caching machinery and a CDN. This lesson covers the two dominant in-memory stores, how to shard them, and how `Cache-Control` and `ETag` let browsers and CDNs cache for you.
+
+## Redis versus Memcached
+
+| | Memcached | Redis |
+| --- | --- | --- |
+| Data model | Opaque key to byte-string value | Rich types: strings, hashes, lists, sets, sorted sets, streams, bitmaps and more |
+| Operations | get, set, delete, increment, CAS | Hundreds of commands, atomic operations on structures, Lua scripts, transactions |
+| Threading | Multi-threaded; scales across cores in one process | Command execution mostly single-threaded per instance (I/O threads in newer versions); scale by running more instances or cluster shards |
+| Persistence | None; purely a cache | Optional: RDB snapshots, append-only file |
+| Replication / HA | None built in (clients handle it) | Primary-replica replication, Sentinel for failover, Cluster for sharding |
+| Eviction | LRU based, slab allocator | Configurable policies (LRU, LFU, TTL-based, none) |
+| Typical use | Simple, large, high-throughput object cache | Cache plus counters, leaderboards, queues, rate limiters, pub/sub, locks, sessions |
+
+Guidance:
+
+- Need *only* a volatile object cache with the simplest operation and multi-core efficiency: Memcached is a good fit.
+- Need data structures, persistence, replication, atomic counters, sorted sets or pub/sub: Redis.
+- Do not treat either as a durable primary database unless you have deliberately designed and tested persistence and failover for it. Redis persistence has windows of loss.
+
+## Distributed topologies
+
+A single node has limited memory and throughput, so keys are partitioned across nodes. Who decides which node holds a key?
+
+<Diagram kind="flow" caption="Three ways to partition a cache across nodes" nodes={[
+  { id: "app", label: "App instances", x: 0, y: 80, role: "Clients that read and write cache entries.", failureModes: ["Each client holds a membership view that can be stale"], tradeoffs: ["Smart clients are fast but each must implement routing correctly"] },
+  { id: "client", label: "Client-side sharding", x: 200, y: 10, role: "The client library hashes the key (ideally with consistent hashing) to pick a node.", failureModes: ["Inconsistent node lists across clients send one key to two nodes", "Adding a node under mod N remaps most keys"], tradeoffs: ["No extra hop and simple servers vs routing logic in every client"] },
+  { id: "proxy", label: "Proxy tier", x: 200, y: 160, role: "A proxy (for example twemproxy or mcrouter) routes, pools connections and can replicate.", failureModes: ["Proxy is an extra hop and a failure domain"], tradeoffs: ["Central routing and fewer connections vs added latency and component to run"] },
+  { id: "cluster", label: "Server-side cluster", x: 420, y: 80, role: "Nodes own hash slots (Redis Cluster uses 16384) and redirect clients; replicas provide failover.", failureModes: ["Slot migration during resharding affects latency", "Network partition can lose recent writes on minority side"], tradeoffs: ["Built-in resharding and failover vs multi-key operation limits across slots"] },
+  { id: "nodes", label: "Cache nodes + replicas", x: 640, y: 80, role: "Hold the data; replicas take over when a primary fails.", failureModes: ["Node loss drops its keys and shifts load to the database", "Asynchronous replication may lose last writes on failover"], tradeoffs: ["Replicas add memory cost and availability; asynchronous replication adds loss risk"] }
+]} edges={[
+  { from: "app", to: "client" }, { from: "app", to: "proxy" }, { from: "app", to: "cluster" }, { from: "client", to: "nodes" }, { from: "proxy", to: "nodes" }, { from: "cluster", to: "nodes" }
+]} />
+
+Key points:
+
+- **Mod N hashing** remaps almost every key when N changes (about 80 percent going from 4 to 5 nodes as measured in the load-balancing module's simulation), which at the cache layer is a miss storm. **Consistent hashing** with virtual nodes moves only about 1/N of keys, so the database sees a small additional load.
+- **Redis Cluster** assigns each key to one of 16,384 hash slots by CRC16 of the key; each primary owns a range of slots, and the cluster migrates slots between nodes when resharding. Keys involved in multi-key operations must share a slot, which you control with **hash tags**: `{user42}:profile` and `{user42}:cart` hash only the part in braces.
+- **Replication for availability**: a replica per shard promotes on failure. Replication is asynchronous, so a failover can lose the latest acknowledged writes, acceptable for a cache, a concern for anything else.
+- **Failure of a node** loses that node's slice. With consistent hashing and no replicas, the database absorbs the slice's misses; plan capacity so a one-node loss does not tip it over, and warm replacements.
+- **Capacity sizing example**: 200 million objects at an average 1 KB with roughly 50 bytes of per-key overhead is about 210 GB. At 32 GB usable per node that is 7 nodes before replicas; with one replica each, 14. Use real object sizes and overhead for your engine; these are planning estimates.
+
+## CDN and HTTP caching
+
+For web content, the first and cheapest cache is HTTP itself. Browsers and CDNs follow headers from the origin.
+
+### Cache-Control
+
+| Directive | Meaning |
+| --- | --- |
+| `max-age=N` | Fresh for N seconds in any cache; no revalidation needed during that time |
+| `s-maxage=N` | Same, but only for shared caches (CDN, proxies); overrides `max-age` there |
+| `public` / `private` | `private`: only the user's browser may store it (personalised data). `public`: shared caches may store it |
+| `no-cache` | May be stored, but **must revalidate** with the origin before each reuse (despite the name) |
+| `no-store` | Do not store at all (sensitive data) |
+| `immutable` | Will never change during its freshness lifetime, so skip revalidation on reload |
+| `stale-while-revalidate=N` | May serve a stale copy for N seconds while refreshing in the background |
+| `stale-if-error=N` | May serve stale if the origin errors |
+
+### Validators: ETag and Last-Modified
+
+When a cached response goes stale, the cache can *revalidate* instead of downloading again:
+
+1. The origin response carried `ETag: "v17"` (an opaque version) or `Last-Modified`.
+2. The cache sends a conditional request: `If-None-Match: "v17"` (or `If-Modified-Since`).
+3. If unchanged, the origin replies `304 Not Modified` with no body; the cache reuses its copy and resets freshness. Otherwise `200` with the new body and new validator.
+
+This saves bandwidth, though not the round trip to the origin.
+
+<Diagram kind="mermaid" caption="Conditional revalidation with ETag" code={`sequenceDiagram
+  participant B as Browser or CDN
+  participant O as Origin
+  B->>O: GET /report.json
+  O-->>B: 200 body, ETag v17, Cache-Control max-age=60
+  Note over B: fresh for 60 s, no request needed
+  Note over B: after 60 s the copy is stale
+  B->>O: GET /report.json, If-None-Match v17
+  alt unchanged
+    O-->>B: 304 Not Modified
+  else changed
+    O-->>B: 200 new body, ETag v18
+  end`} />
+
+### The `Vary` header and cache keys
+
+A cache keys responses by URL *plus* the request headers named in `Vary`. `Vary: Accept-Encoding` stores gzip and brotli copies separately. `Vary: Cookie` effectively disables shared caching (each user has a different cookie). Forgetting `Vary` on content that differs by language or device causes users to be served the wrong variant.
+
+### Practical recipe
+
+| Content | Headers | Why |
+| --- | --- | --- |
+| Fingerprinted assets (`app.3f9a2c.js`) | `Cache-Control: public, max-age=31536000, immutable` | Content change means a new URL, so cache forever |
+| HTML shell | `Cache-Control: no-cache` plus `ETag` | Always revalidate cheaply so new asset URLs are discovered |
+| Public API list, tolerates seconds | `public, max-age=30, stale-while-revalidate=60` | Smooths origin load; background refresh |
+| Per-user data | `private, no-store` or `private, max-age=0` | Prevent shared caches from leaking user data |
+
+CDN-specific concerns: **purge/invalidation** APIs are asynchronous and usually take seconds to minutes to propagate; prefer **versioned URLs** over purging; set `s-maxage` separately from `max-age` to let the CDN cache longer than browsers (so you can purge the CDN while browsers revalidate quickly); watch for cache poisoning through unkeyed inputs.
+
+<Callout type="pitfall" title="no-cache does not mean no caching">
+`no-cache` still stores the response and revalidates before reuse. To forbid storing, use `no-store`. Mixing these up is one of the most common HTTP caching mistakes.
+</Callout>
+
+## Trade-offs
+
+<TradeOffs caption="Where to cache and with what" rows={[
+  { option: "Memcached", pros: "Simple, fast, multi-threaded, trivially horizontal with client sharding", cons: "No persistence, replication or data structures; weak operational tooling for HA", chooseWhen: "Pure object cache with very high throughput and a stateless client library" },
+  { option: "Redis (single primary + replicas)", pros: "Rich operations, persistence option, failover via Sentinel", cons: "Vertical limit per primary; single-threaded command execution; failover can lose writes", chooseWhen: "Moderate data size needing structures, counters or atomic ops" },
+  { option: "Redis Cluster", pros: "Automatic sharding and failover, scales memory and throughput", cons: "Multi-key limits, operational complexity, resharding impact", chooseWhen: "Data larger than one node or throughput beyond one primary" },
+  { option: "Client-side consistent hashing", pros: "No proxy hop, simple servers", cons: "Every client must agree on membership", chooseWhen: "Memcached-style fleets with a well-managed client library" },
+  { option: "CDN with Cache-Control", pros: "Offloads origin globally, cheap, automatic", cons: "Weak purge guarantees, staleness windows, careful with personalised content", chooseWhen: "Public static or semi-static content, media, API responses safe to share" }
+]} />
+
+## Failure modes
+
+- **Cache node loss**: keys vanish, miss storm on the database; mitigated by replicas, consistent hashing and rebuild throttling.
+- **Failover data loss**: asynchronously replicated writes lost when a Redis primary dies.
+- **Big keys and slow commands**: a single huge value or an O(N) command blocks a single-threaded Redis instance, stalling every client.
+- **Memory exhaustion** with `noeviction` or no TTLs.
+- **CDN serves stale or wrong content**: missing `Vary`, or a purge that did not reach every PoP yet.
+- **Leaking private data** through a shared cache because `private` was missing.
+
+## Pitfalls
+
+- Choosing Redis because it is popular when plain `get/set` with Memcached would do; or the reverse, bolting on counters and queues with ad hoc code.
+- Using mod N sharding in clients and then adding a node during peak traffic.
+- Multi-key operations in a cluster without hash tags, producing cross-slot errors.
+- Long CDN TTLs on non-fingerprinted URLs, making rollbacks and fixes slow.
+- Setting `Cache-Control` only on the CDN and not the browser, or the other way around.
+
+## What would you choose and why?
+
+You run a social app: 30 million profile objects (about 2 KB each), a global leaderboard that updates hundreds of times a second, and static media. Which cache product and topology would you choose for each, which headers would the media and API use, and what would you do to ensure a single cache node failure does not take the database down?
+
+## Quiz
+
+<Quiz id="sd-m06-redis-cdn" tags={["redis", "memcached", "cdn", "http-caching"]} questions={[
+  { type: "mcq", q: "Which requirement most clearly points to Redis over Memcached?", options: ["Simple string get/set at high throughput", "A sorted set leaderboard with atomic updates", "Using many CPU cores in one process", "No persistence needed"], answer: 1, explain: "Redis provides sorted sets and atomic structure operations; Memcached stores opaque values." },
+  { type: "mcq", q: "What does Cache-Control: no-cache instruct a cache to do?", options: ["Never store the response", "Store it but revalidate with the origin before each reuse", "Cache it for one year", "Cache only in the browser"], answer: 1, explain: "no-store forbids storing; no-cache requires revalidation before reuse." },
+  { type: "multi", q: "Which are valid benefits of versioned or fingerprinted asset URLs?", options: ["They can be cached with a very long max-age", "A deploy changes the URL so clients fetch the new file without purging", "They make private data safe to share", "They reduce the need for CDN purges"], answer: [0, 1, 3], explain: "Immutable content addressed by fingerprint can be cached long term, and updates are naturally cache-busted." },
+  { type: "mcq", q: "A client conditionally requests a resource with If-None-Match and the origin replies 304. What does that mean?", options: ["The resource was deleted", "The cached copy is still valid; no body is sent", "The request was malformed", "The cache must purge its copy"], answer: 1, explain: "304 Not Modified lets the cache reuse its stored representation and refresh its freshness." },
+  { type: "mcq", q: "You add a 5th node to a client-sharded cache using hash(key) mod N. What is the consequence?", options: ["About 20% of keys move", "Most keys map to a different node, causing a large burst of misses", "No keys move", "Only hot keys move"], answer: 1, explain: "Mod N changes the owner of most keys when N changes; consistent hashing limits movement to about 1/N." },
+  { type: "mcq", q: "In Redis Cluster, how do you make two keys land in the same slot for a multi-key operation?", options: ["Give them identical TTLs", "Use a hash tag, the part of the key in braces", "Store them in one hash field", "Enable noeviction"], answer: 1, explain: "Only the substring inside braces is hashed, so keys sharing a tag share a slot." }
+]} />

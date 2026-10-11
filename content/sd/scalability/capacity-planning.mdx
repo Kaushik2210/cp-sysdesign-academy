@@ -1,0 +1,106 @@
+---
+title: Capacity Planning for Scalability
+track: sd
+module: scalability
+order: 5
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/scalability/scaling-stateless-autoscaling", "sd/scalability/load-shedding-and-bulkheads"]
+tags: [capacity-planning, estimation, headroom, load-testing, utilization]
+type: lesson
+furtherReading:
+  - title: Google SRE Book - Software Engineering in SRE (capacity planning)
+    url: https://sre.google/sre-book/software-engineering-in-sre/
+  - title: Google SRE Workbook - Managing Load
+    url: https://sre.google/workbook/managing-load/
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 1 (Describing Load, Describing Performance)
+    url: https://dataintensive.net/
+  - title: Systems Performance (Brendan Gregg), capacity planning chapter
+    url: https://www.brendangregg.com/systems-performance-2nd-edition-book.html
+---
+
+## Intuition
+
+Capacity planning answers: *how many of each resource do we need to meet demand with acceptable latency, even when part of the system fails?* It is back-of-envelope estimation plus three correction factors people forget: peak versus average, headroom, and failure.
+
+## The method
+
+1. **Estimate demand**: daily users, actions per user, therefore average requests per second (`daily_requests / 86,400`).
+2. **Apply a peak factor**: traffic is bursty. A common rule of thumb is 2x to 5x average; measure your own.
+3. **Measure per-unit capacity**: requests per second one instance sustains within the latency target, found by load testing, not by guessing.
+4. **Apply a utilisation target**: do not plan to run at 100%. Queueing delay rises sharply as utilisation approaches 1, so 50% to 70% of tested max is typical.
+5. **Add failure headroom**: survive the loss of a zone or a node (N+1, or N+1 zone).
+6. **Do it for every tier**: app, cache, database reads and writes, network, storage, and third-party quotas.
+7. **Add growth**: project 6 to 12 months and plan lead time for procurement or quota increases.
+
+<Callout type="note">
+Why not run at 90%? In a simple queue, mean waiting time scales like `utilisation / (1 - utilisation)`. Going from 50% to 90% utilisation multiplies queueing delay by 9. Tail latency is hit even harder.
+</Callout>
+
+## Worked example: a social feed API
+
+Assumptions: 20 million daily active users; each opens the app 5 times a day, and each open makes 2 feed API calls: 10 calls per user per day. 90% of calls are reads, 10% writes (likes, posts).
+
+**Demand**
+
+- Daily calls: 20M x 10 = 200M. Average: 200M / 86,400 = about 2,300 requests per second.
+- Peak factor 3x: about 7,000 requests per second. Reads 6,300, writes 700.
+
+**App tier**
+
+- Load test shows one instance sustains 250 requests per second at p99 under 200 ms.
+- Utilisation target 60%: plan 150 requests per second per instance.
+- 7,000 / 150 = about 47 instances.
+- Survive loss of one of three zones: the remaining two zones must carry the peak, so total capacity must be 47 x 3/2, about 70. Round to 72 instances, 24 per zone.
+
+**Cache and database**
+
+- Cache hit rate target 90% on reads: 6,300 x 10% = 630 reads per second reach the database, plus 700 writes: about 1,330 operations per second.
+- If a single database primary handles about 5,000 simple operations per second in your tests, this fits with headroom of about 3.8x. Add read replicas for availability, and plan cache capacity: if the hot working set is 50 GB with replication factor 2, you need at least 100 GB of cache memory plus overhead.
+
+**Storage**
+
+- Each write stores 1 KB of metadata. 20M x 10 x 10% = 20M writes per day, about 20 GB per day, 7.3 TB per year before replication and indexes. With 3 replicas and about 30% index overhead, plan roughly 28 TB for a year.
+
+**Third parties**
+
+- A push-notification provider caps at 2,000 requests per second. If peak events could produce 5,000, you need batching or a queue with a drain rate matching the quota.
+
+<Diagram kind="flow" caption="Capacity chain: each tier sized from the one above" nodes={[
+  { id: "users", label: "Demand (peak)", x: 0, y: 80, role: "About 7,000 requests per second at 3x average, from daily users times actions.", failureModes: ["Peak factor underestimated; events and promotions exceed it"], tradeoffs: ["Planning for extreme peaks wastes money; planning for averages causes outages"] },
+  { id: "app", label: "App tier (72 instances)", x: 220, y: 80, role: "Sized from per-instance throughput at 60% utilisation, with one zone of failure headroom.", failureModes: ["Per-instance figure measured on unrealistic data", "Zone loss removes more capacity than planned"], tradeoffs: ["Lower utilisation target gives latency safety at higher cost"] },
+  { id: "cache", label: "Cache (90% hit)", x: 440, y: 0, role: "Absorbs most reads so the database sees a fraction.", failureModes: ["Cold cache after restart sends 10x read load to the database", "Hit rate lower than assumed"], tradeoffs: ["Memory cost versus database cost and latency"] },
+  { id: "db", label: "Database (about 1,300 ops/s)", x: 440, y: 160, role: "Handles cache-miss reads and all writes; replicas add availability and read capacity.", failureModes: ["Write ceiling of a single primary", "Replica lag"], tradeoffs: ["Vertical headroom is easy until the largest instance; sharding later is costly"] },
+  { id: "ext", label: "Third-party quota", x: 660, y: 80, role: "External APIs with their own rate limits.", failureModes: ["Quota exhausted at peak", "Provider outage"], tradeoffs: ["Queue and batch to smooth demand versus delivery delay"] }
+]} edges={[
+  { from: "users", to: "app" }, { from: "app", to: "cache", label: "reads" }, { from: "cache", to: "db", label: "misses" }, { from: "app", to: "db", label: "writes" }, { from: "app", to: "ext" }
+]} />
+
+<TradeOffs caption="How much headroom to buy" rows={[
+  { option: "Run lean (about 80% utilisation)", pros: "Lowest cost", cons: "Latency tail grows, no room for spikes or failures", chooseWhen: "Batch or latency-insensitive workloads" },
+  { option: "Moderate (50% to 70%) with N+1 zone", pros: "Good latency and survives a zone loss", cons: "Pay for idle capacity", chooseWhen: "Most user-facing services" },
+  { option: "Heavy over-provisioning", pros: "Absorbs unknown spikes with no tuning", cons: "Expensive, hides inefficiency", chooseWhen: "Short, critical events with long provisioning lead time" },
+  { option: "Autoscale from a lean base", pros: "Cost follows demand", cons: "Reaction lag, depends on downstream capacity", chooseWhen: "Stateless tiers with gradual load changes" }
+]} />
+
+## Pitfalls
+
+- **Planning from averages** and being surprised by peaks, retries and cache-cold events.
+- **Using vendor "max" numbers** instead of your own load tests with realistic payloads.
+- **Sizing the app tier but not the database, cache, or quota**; the narrowest tier sets your limit.
+- **Forgetting retries**: during an incident, retries may double traffic.
+- **Ignoring failure headroom**: capacity that exactly matches peak fails on the first node loss.
+- **Not revisiting**: workloads change; review quarterly and after launches.
+
+## What would you choose and why?
+
+Using the numbers above, the product team announces a campaign expected to double daily active users in a month, concentrated in a single country that sits in one region. Which tier hits its limit first? What would you load test, what would you pre-scale, and what would you put behind rate limits or shedding rather than buying capacity for?
+
+## Quiz
+
+<Quiz id="sd-m10-capacity-planning" tags={["capacity-planning"]} questions={[
+  { type: "mcq", q: "50 million requests per day averages about how many requests per second?", options: ["58", "580", "5,800", "58,000"], answer: 1, explain: "50,000,000 / 86,400 is about 579." },
+  { type: "mcq", q: "One instance sustains 200 req/s in tests. You target 50% utilisation and need to serve 4,000 req/s at peak. How many instances (ignoring failure headroom)?", options: ["20", "40", "80", "200"], answer: 1, explain: "Planned capacity is 100 req/s per instance, and 4,000 / 100 is 40." },
+  { type: "multi", q: "Which should be part of a capacity plan for a read-heavy service?", options: ["Peak-to-average factor", "Cache hit rate and the miss load on the database", "Loss of one availability zone", "Only the application server count"], answer: [0, 1, 2], explain: "Every tier and failure scenario matters; the narrowest tier sets the limit." },
+  { type: "mcq", q: "Why plan below 100% utilisation?", options: ["Queueing delay grows sharply as utilisation approaches 100%, hurting tail latency", "Servers cannot exceed 70% for physical reasons", "It is required by cloud providers", "It lowers cost"], answer: 0, explain: "Waiting time scales with u/(1-u), so latency explodes near saturation." }
+]} />

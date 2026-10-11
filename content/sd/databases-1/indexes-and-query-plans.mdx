@@ -1,0 +1,162 @@
+---
+title: Indexes and Query Plans
+track: sd
+module: databases-1
+order: 3
+difficulty: beginner
+estMinutes: 30
+prerequisites: [sd/databases-1/relational-vs-nosql]
+tags: [databases, indexes, b-tree, explain, query-plan]
+type: lesson
+furtherReading:
+  - title: Use The Index, Luke (Markus Winand)
+    url: https://use-the-index-luke.com/
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 3 (storage and retrieval)
+    url: https://dataintensive.net/
+  - title: SQLite documentation, EXPLAIN QUERY PLAN
+    url: https://www.sqlite.org/eqp.html
+  - title: PostgreSQL documentation, Using EXPLAIN
+    url: https://www.postgresql.org/docs/current/using-explain.html
+---
+
+## Intuition
+
+Without an index, finding the orders of user 42 means reading every row: a **scan**. An index is a second, sorted structure that maps column values to row locations, like a book's index. Lookups go from "read everything" to "descend a small tree", at the cost of extra space and extra work on every write.
+
+## B-tree intuition
+
+Most relational indexes are B-trees (or the B+ tree variant). A node is sized to a disk page and holds many keys (hundreds is typical), so the tree is very shallow.
+
+- Each internal node routes: "keys below 500 go left, 500 to 900 middle, above right".
+- Leaves hold the keys in sorted order, with pointers to rows (or the rows themselves in a clustered index).
+- With a fan-out of a few hundred, three or four levels address hundreds of millions of rows. Lookup cost is therefore a handful of page reads, and the top levels are usually cached.
+- Because leaves are sorted, **range queries and ORDER BY** on the indexed column are cheap, not only equality.
+
+<Diagram kind="mermaid" caption="A tiny B-tree: internal nodes route, leaves hold sorted keys" code={`flowchart TB
+  R["root: 40 | 80"] --> A["10 | 25"]
+  R --> B["50 | 65"]
+  R --> C["90 | 95"]
+  A --> A1["leaf: 1 5 8"]
+  A --> A2["leaf: 10 15 20"]
+  A --> A3["leaf: 25 30 35"]
+  B --> B1["leaf: 40 45"]
+  B --> B2["leaf: 50 55 60"]
+  B --> B3["leaf: 65 70 75"]`} />
+
+## What indexes cost
+
+- **Space:** every index stores its keys again.
+- **Write amplification:** an INSERT updates the table and every index; an UPDATE of an indexed column moves entries; a DELETE touches all of them.
+- **Planner complexity:** more choices, and bad ones are possible.
+
+Rule of thumb: index for the queries you actually run, not for every column.
+
+## Composite indexes and the leftmost prefix
+
+An index on `(user_id, created_at)` is sorted by `user_id`, then by `created_at` within each user. It can serve:
+
+- `WHERE user_id = ?`
+- `WHERE user_id = ? AND created_at > ?`
+- `WHERE user_id = ? ORDER BY created_at DESC LIMIT 5` (no extra sort needed)
+
+It cannot efficiently serve `WHERE created_at > ?` alone, because the leading column is not constrained. Put equality columns first, then the range or sort column.
+
+## Covering indexes
+
+If an index contains every column the query needs, the engine answers from the index alone and never touches the table. It is called a *covering* index. Wider indexes cost more space and write work, so cover only your hottest queries.
+
+## Reading query plans: a real, verified example
+
+The following script was run locally with Python 3 and SQLite. It creates 20,000 orders and shows `EXPLAIN QUERY PLAN` output as indexes are added. (Plan wording and costs differ between SQLite, PostgreSQL and MySQL; the ideas carry over.)
+
+```python
+import sqlite3
+con = sqlite3.connect(":memory:")
+con.execute("CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, "
+            "status TEXT, created_at INTEGER, total INTEGER)")
+con.executemany("INSERT INTO orders (user_id,status,created_at,total) VALUES (?,?,?,?)",
+  [(i % 1000, 'paid' if i % 3 else 'new', i, i % 500) for i in range(20000)])
+
+def plan(sql):
+    for r in con.execute("EXPLAIN QUERY PLAN " + sql):
+        print("  ", r[3])
+
+q = "SELECT * FROM orders WHERE user_id = 42 ORDER BY created_at DESC LIMIT 5"
+print("no index");                plan(q)
+con.execute("CREATE INDEX idx_user ON orders(user_id)")
+print("single-column index");     plan(q)
+con.execute("CREATE INDEX idx_user_created ON orders(user_id, created_at)")
+print("composite index");         plan(q)
+print("covering");                plan("SELECT user_id, created_at FROM orders WHERE user_id = 42")
+print("leading column missing");  plan("SELECT total FROM orders WHERE created_at > 100")
+```
+
+Output:
+
+```text
+no index
+   SCAN orders
+   USE TEMP B-TREE FOR ORDER BY
+single-column index
+   SEARCH orders USING INDEX idx_user (user_id=?)
+   USE TEMP B-TREE FOR ORDER BY
+composite index
+   SEARCH orders USING INDEX idx_user_created (user_id=?)
+covering
+   SEARCH orders USING COVERING INDEX idx_user_created (user_id=?)
+leading column missing
+   SCAN orders
+```
+
+How to read it:
+
+| Plan line | Meaning |
+| --- | --- |
+| `SCAN orders` | Full table scan: every row read. Fine for tiny tables, a red flag for big ones |
+| `SEARCH ... USING INDEX idx (user_id=?)` | Index lookup on the equality column |
+| `USE TEMP B-TREE FOR ORDER BY` | An extra sort step was needed. It disappears with the composite index, which already yields rows in `created_at` order |
+| `COVERING INDEX` | The query was answered from the index alone |
+| `SCAN` despite an index existing | The query does not constrain the leading column, so the index cannot be used for seeking |
+
+In PostgreSQL the same ideas appear as `Seq Scan`, `Index Scan`, `Index Only Scan`, `Bitmap Heap Scan`, plus `Sort` nodes; `EXPLAIN ANALYZE` also runs the query and reports actual rows and times.
+
+<Callout type="tip" title="Habit">
+Whenever a query is slow, run the plan before changing anything. Look for scans on large tables, sorts you could avoid, and estimated vs actual row counts that are far apart (stale statistics).
+</Callout>
+
+## Why an index may be ignored
+
+- The predicate wraps the column in a function (`WHERE lower(email) = ...`) unless there is an expression index.
+- A low-selectivity column (a status with 3 values) where the engine decides a scan is cheaper.
+- Type mismatch or implicit conversion.
+- A leading wildcard (`LIKE '%abc'`).
+- Stale statistics: the planner believes the table is small.
+
+## Trade-offs
+
+<TradeOffs caption="Indexing choices" rows={[
+  { option: "No secondary index", pros: "Fastest writes, least space", cons: "Scans on any non-key query", chooseWhen: "Write-heavy, queried only by primary key, or tiny tables" },
+  { option: "Single-column index", pros: "Simple, helps one predicate", cons: "May need a sort step; many such indexes bloat writes", chooseWhen: "A single frequent filter column" },
+  { option: "Composite index", pros: "Serves filter plus sort in one structure", cons: "Order of columns matters; only the leftmost prefix helps", chooseWhen: "Known query shapes like equality then range or order" },
+  { option: "Covering index", pros: "No table lookups, very fast reads", cons: "Large, expensive to maintain", chooseWhen: "A hot read query that returns few columns" }
+]} />
+
+## What would you choose and why?
+
+A table of 500 million events is queried by `(tenant_id, event_time)` ranges 10,000 times per second and written 50,000 times per second. Which index would you create? What happens to write throughput if you add three more indexes "just in case"? Would you partition by time as well?
+
+## Pitfalls
+
+- Indexing every column. Writes slow down and the planner has more bad options.
+- Wrong column order in a composite index.
+- Forgetting the index when adding a new query pattern in production.
+- Testing plans on tiny local data; the planner chooses differently at scale.
+
+## Quiz
+
+<Quiz id="sd-m04-index-1" tags={["databases", "indexes", "explain"]} questions={[
+  { type: "mcq", q: "You have an index on (user_id, created_at). Which query can NOT use it to seek efficiently?", options: ["WHERE user_id = 5", "WHERE user_id = 5 AND created_at > 100", "WHERE created_at > 100", "WHERE user_id = 5 ORDER BY created_at"], answer: 2, explain: "The leading column is unconstrained, so the leftmost-prefix rule rules the index out for seeking." },
+  { type: "mcq", q: "What is the main write-side cost of adding a secondary index?", options: ["Reads become slower", "Every insert, delete and indexed-column update must also maintain the index", "The table must be locked forever", "Duplicate rows appear"], answer: 1, explain: "Each index is another structure to update on writes, plus extra storage." },
+  { type: "mcq", q: "In a query plan, 'COVERING INDEX' means:", options: ["The index spans several tables", "The query is answered from the index without visiting the table rows", "The index is encrypted", "The database used a hash join"], answer: 1, explain: "All needed columns are in the index." },
+  { type: "multi", q: "Which can cause the planner to ignore a usable-looking index?", options: ["Wrapping the column in a function", "A leading wildcard in LIKE", "A highly selective equality predicate", "Stale statistics"], answer: [0, 1, 3], explain: "A selective equality predicate is exactly what indexes are good at." }
+]} />

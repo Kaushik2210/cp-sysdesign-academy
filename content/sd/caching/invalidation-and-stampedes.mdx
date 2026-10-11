@@ -1,0 +1,173 @@
+---
+title: Invalidation, Consistency, Stampedes and Hot Keys
+track: sd
+module: caching
+order: 4
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/caching/caching-strategies", "sd/caching/eviction-policies"]
+tags: [invalidation, consistency, stampede, thundering-herd, hot-keys, ttl]
+type: lesson
+furtherReading:
+  - title: Nishtala et al., Scaling Memcache at Facebook (NSDI 2013), leases and thundering herds
+    url: https://www.usenix.org/conference/nsdi13/technical-sessions/presentation/nishtala
+  - title: Vattani, Chierichetti, Lowenstein, Optimal Probabilistic Cache Stampede Prevention (VLDB 2015)
+    url: https://www.vldb.org/pvldb/vol8/p886-vattani.pdf
+  - title: Go singleflight package documentation (request coalescing)
+    url: https://pkg.go.dev/golang.org/x/sync/singleflight
+  - title: Designing Data-Intensive Applications (Kleppmann), chapters 5 and 9
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+A well-known joke says there are two hard problems in computer science: naming things and cache invalidation. The second is hard because a cache is a *copy*, and a copy is correct only until the original changes. Invalidation is the work of making every copy notice. Doing it perfectly across independent systems is impossible without coordination, so the practical question becomes: **how stale may this data be, and how do we bound it?**
+
+## Invalidation techniques
+
+**1. TTL expiry.** Each entry carries a lifetime. Staleness is bounded by the TTL; no coordination needed. Simple and robust, but you choose between short TTLs (more misses and load) and long TTLs (staler reads).
+
+**2. Explicit invalidation.** The writer deletes (or updates) the affected keys after changing the source. Fresh quickly, but you must know *every* key derived from the changed data, and failures between the database write and the cache delete leave stale entries. Mitigation: keep a TTL as a backstop, retry deletes from a durable queue, or publish invalidations from the database change log (change data capture).
+
+**3. Versioned keys (cache busting).** Put a version or content hash in the key: `user:42:v17`, or `app.3f9a2c.js`. A change produces a *new* key, so nothing needs deleting and old entries age out through eviction. Excellent for immutable or derived data and for CDN assets. You store the current version somewhere authoritative (a small, cheap lookup), and it does not work when the identity must stay constant for external clients.
+
+**4. Event-driven invalidation.** Services publish "entity changed" events and cache holders subscribe. Scales across services at the price of delivery guarantees (at-least-once, ordering, lost messages).
+
+**5. Leases and tokens** (Facebook's memcache design): on a miss the cache hands one client a lease token; only that client may fill the key; if an invalidation arrives meanwhile, the token is invalidated so the stale fill is rejected. This addresses both the stale-set race and herd protection.
+
+### The stale-fill race
+
+Reader R misses and reads the old value `v1` from the database. Writer W commits `v2` and deletes the cache key. R then sets the cache to `v1`. The cache now holds stale data until TTL. Fixes: short TTL, leases, or versioned fills (only set if the version is not older than what the cache already knows).
+
+<Diagram kind="mermaid" caption="The stale-fill race in cache-aside" code={`sequenceDiagram
+  participant R as Reader
+  participant W as Writer
+  participant C as Cache
+  participant D as Database
+  R->>C: GET k (miss)
+  R->>D: read k (gets v1)
+  W->>D: write k = v2
+  W->>C: DELETE k
+  R->>C: SET k = v1 (stale!)
+  Note over C: Cache holds v1 until TTL`} />
+
+## Consistency levels you can offer
+
+- **Bounded staleness**: "at most TTL seconds old". The honest default.
+- **Read-your-writes**: after a user writes, *that user* sees it. Achieve it by routing that user's reads to the database for a short period, or by updating the cache on their write path.
+- **Strong consistency**: reads never stale. A cache fundamentally weakens this; if required, skip the cache for that data or use a design where the cache is the single owner (write-through with serialised access).
+
+Always state the staleness contract per data type: product description (minutes is fine), stock count at checkout (must be fresh), follower counts (seconds to minutes).
+
+## Cache stampede (thundering herd)
+
+A hot key expires. In the next few milliseconds, hundreds of requests all miss, all go to the database to recompute the same expensive value, and the database falls over. Related situations: a cache node restart (a whole slice of keys missing at once), a deploy that clears the cache, or many keys sharing the same TTL expiring together.
+
+Back-of-envelope: a key read 2,000 times per second whose recompute takes 300 ms. Without protection, about 2,000 x 0.3 = 600 concurrent recomputations pile up at the moment of expiry, each as costly as the original.
+
+### Mitigations
+
+| Technique | How it works | Cost |
+| --- | --- | --- |
+| Request coalescing (single flight) | In each process, concurrent misses for a key share one in-flight load | Per-process only; many processes still each load once |
+| Distributed lock / lease | One caller acquires a short lock (for example `SET key NX PX`) and rebuilds; others wait briefly or serve stale | Lock expiry tuning; waiting latency; lock failure paths |
+| Serve stale while revalidating | Keep a soft TTL (refresh time) and a hard TTL (drop time); after the soft TTL, return the old value and refresh in the background | Slightly stale reads; double memory lifetime |
+| Jittered TTL | TTL = base plus random offset so keys do not expire together | Slightly uneven freshness |
+| Probabilistic early expiration | Each reader may refresh *early* with probability rising as expiry nears; the formula (XFetch) uses recompute time and a random draw | Some extra recomputations; needs recompute-time estimate |
+| Refresh-ahead / pre-warm | Background job refreshes known hot keys before expiry; warm caches before cutover | Wasted refreshes; must know the hot set |
+| Load shedding | Cap concurrent recomputations; reject or degrade the rest | Some users get errors or defaults |
+
+### Probabilistic early expiration, runnable
+
+The XFetch rule: recompute early when `now - delta * beta * ln(random()) >= expiry`, where `delta` is how long a recompute takes and `beta` (default 1) tunes aggressiveness. Since `ln(random())` is negative, the left side adds a random positive amount, so the *chance of refreshing rises as expiry nears* and roughly one reader refreshes slightly early instead of all readers missing at expiry.
+
+<CodeRunner language="python" code={`import math, random
+
+def simulate(use_early, seed=1):
+    rng = random.Random(seed)
+    ttl, delta, beta = 10.0, 0.5, 1.0     # seconds
+    expiry = ttl                           # when the cached value stops being valid
+    done_at = None                         # when an in-progress rebuild finishes
+    blocked = rebuilds = 0
+    t = 0.0
+    while t < 100:
+        t += 0.001                         # about 1000 requests per second
+        if done_at is not None and t >= done_at:
+            expiry, done_at = done_at + ttl, None   # fresh value installed
+        if t >= expiry:
+            if done_at is None:            # first reader to miss starts the rebuild
+                done_at, rebuilds = t + delta, rebuilds + 1
+            blocked += 1                   # every reader meanwhile waits on the source
+        elif use_early and done_at is None:
+            if t - delta * beta * math.log(1 - rng.random()) >= expiry:
+                done_at, rebuilds = t + delta, rebuilds + 1   # early refresh
+    return blocked, rebuilds
+
+print("no early refresh (blocked readers, rebuilds):", simulate(False))
+print("early refresh    (blocked readers, rebuilds):", simulate(True))
+`} />
+
+A local run over 100 simulated seconds at about 1,000 requests per second printed 4,504 blocked readers and 9 rebuilds without early refresh, versus 0 blocked readers and 13 rebuilds with it. Early refresh trades a few extra rebuilds (the entry is refreshed slightly before its time) for removing the pile-up at expiry. The model is simplified: a single process, and readers that arrive while a rebuild runs are counted as blocked rather than served stale.
+
+## Hot keys
+
+A *hot key* is a single key so popular that one cache node, one shard or one database row saturates, even though the cluster as a whole has spare capacity. Sharding spreads *different* keys; it cannot spread one key. Examples: a celebrity profile, a flash-sale product, a global config.
+
+Mitigations:
+
+- **Local (in-process) cache** with a very short TTL (even 1 to 5 seconds) in front of the shared cache: each app instance fetches the key once per interval, cutting shared-cache QPS by the instance count.
+- **Key replication / suffixing**: store the value under `key#0 ... key#N-1` and have readers pick one at random; the copies land on different nodes. Writers update or invalidate all copies.
+- **Read replicas** for the hot shard.
+- **Detect and promote**: count access frequency, automatically replicate keys that cross a threshold.
+- **Request coalescing** to stop duplicates inside an instance.
+- For hot *writes* (a counter incremented thousands of times a second): shard the counter into N sub-counters and sum on read, or batch updates with write-back.
+
+<Diagram kind="flow" caption="Layered protection for a hot key" nodes={[
+  { id: "req", label: "Many readers", x: 0, y: 80, role: "Thousands of concurrent requests for the same key.", failureModes: ["Retries amplify load during an outage"], tradeoffs: ["Client-side backoff and jitter reduce herd at the cost of tail latency"] },
+  { id: "local", label: "In-process cache + single flight", x: 190, y: 80, role: "Short-TTL local copy and coalescing so each instance loads a key once at a time.", failureModes: ["Instances disagree for up to the local TTL", "Memory use grows with the number of local keys"], tradeoffs: ["Removes most shared-cache load vs extra staleness"] },
+  { id: "shared", label: "Shared cache with replicas of hot key", x: 400, y: 80, role: "Holds the value under several sub-keys across nodes to spread the load.", failureModes: ["Invalidation must update every copy", "Node loss drops some copies"], tradeoffs: ["Scales a single key vs invalidation complexity"] },
+  { id: "lock", label: "Rebuild lease", x: 590, y: 20, role: "Ensures one caller rebuilds the value on expiry while others serve stale.", failureModes: ["Lease holder dies: expiry must release it", "Waiters pile up if no stale value exists"], tradeoffs: ["Protects the DB vs adds a coordination step"] },
+  { id: "db", label: "Database", x: 590, y: 150, role: "Source of truth; sees at most one rebuild per key per interval.", failureModes: ["Still overloads if many different keys miss together"], tradeoffs: ["Protected but a cold or flushed cache still stresses it"] }
+]} edges={[
+  { from: "req", to: "local" }, { from: "local", to: "shared", label: "miss" }, { from: "shared", to: "lock", label: "expired" }, { from: "lock", to: "db", label: "rebuild" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Invalidation and stampede approaches" rows={[
+  { option: "TTL only", pros: "No coordination; bounded staleness; trivial", cons: "Stale up to TTL; synchronised expiry risk", chooseWhen: "Data where seconds to minutes of staleness is acceptable" },
+  { option: "Explicit delete + TTL backstop", pros: "Fresh quickly with a safety net", cons: "Must track derived keys; delete can fail or race", chooseWhen: "User-visible edits where freshness matters" },
+  { option: "Versioned keys", pros: "No invalidation needed, no races, CDN friendly", cons: "Requires a place to read the current version; orphan entries until evicted", chooseWhen: "Immutable assets, snapshots, configuration, derived data" },
+  { option: "Single flight and locks", pros: "Cheap, protects the source on expiry", cons: "Per-process vs distributed trade-off; lock tuning", chooseWhen: "Expensive recomputes under high read fan-in" },
+  { option: "Serve stale while revalidate", pros: "Lowest tail latency, no blocking", cons: "Brief staleness; more memory", chooseWhen: "Availability and latency matter more than perfect freshness" },
+  { option: "Key replication / local cache", pros: "Breaks single-node ceilings for hot keys", cons: "More invalidation fan-out and staleness", chooseWhen: "A few keys dominate traffic" }
+]} />
+
+## Failure modes
+
+- **Delete lost**: the invalidation message is dropped; stale data until TTL. Always keep a TTL.
+- **Herd on recovery**: after a cache outage the database receives a surge as everything misses; throttle rebuilds and warm gradually.
+- **Lock held by dead process**: always use lock timeouts and fencing or idempotent rebuilds.
+- **Negative stampede**: a missing key requested repeatedly bypasses the cache every time; cache the absence briefly.
+- **Cross-region staleness**: invalidations arrive at different times in different regions.
+
+## Pitfalls
+
+- Believing "write to DB then delete cache" is atomic. It is two operations on two systems.
+- Same TTL for everything, set by a cron-like deploy, producing synchronous expiry.
+- Updating the cache in many code paths, so one forgotten path serves stale data forever.
+- Caching authorization decisions with a long TTL.
+
+## What would you choose and why?
+
+A flash sale lists one product viewed 50,000 times per second, with a stock counter that must not oversell but may display a slightly stale number. Design the caching for the product description, the displayed stock and the checkout stock check. Which mitigations apply to each and why?
+
+## Quiz
+
+<Quiz id="sd-m06-invalidation" tags={["invalidation", "stampede", "hot-keys"]} questions={[
+  { type: "mcq", q: "What is a cache stampede?", options: ["A cache node crashing", "Many concurrent misses for the same expired key all hitting the source to rebuild it", "A full cache evicting entries", "A DNS failure"], answer: 1, explain: "When a hot entry expires, many requests simultaneously recompute the same value, overloading the backend." },
+  { type: "multi", q: "Which techniques reduce stampedes?", options: ["Jittered TTLs", "Request coalescing", "Probabilistic early expiration", "Using the same TTL for all keys"], answer: [0, 1, 2], explain: "Randomising expiry, sharing one in-flight load, and refreshing before expiry all reduce simultaneous misses; identical TTLs make it worse." },
+  { type: "mcq", q: "Why does sharding not fix a single hot key?", options: ["Sharding is slower", "A given key maps to exactly one shard, so that shard still receives all its traffic", "Hot keys cannot be cached", "Sharding duplicates keys"], answer: 1, explain: "Sharding spreads different keys across nodes but one key stays on one node unless you replicate it explicitly." },
+  { type: "mcq", q: "Reader misses and reads v1; writer commits v2 and deletes the key; reader then sets v1. What is the outcome?", options: ["Cache correctly empty", "Cache holds stale v1 until TTL or the next invalidation", "Database holds v1", "Both hold v2"], answer: 1, explain: "This is the stale-fill race; leases, versioned fills or short TTLs bound it." },
+  { type: "mcq", q: "A versioned key like app.3f9a2c.js mainly solves which problem?", options: ["Memory fragmentation", "Invalidation: a change produces a new key, so nothing must be purged", "Hot keys", "Authentication"], answer: 1, explain: "Changing content changes the key, so old copies are simply never requested again and can be evicted later." }
+]} />

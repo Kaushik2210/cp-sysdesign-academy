@@ -1,0 +1,164 @@
+---
+title: CDNs and API Design Best Practices
+track: sd
+module: networking-and-apis
+order: 5
+difficulty: beginner
+estMinutes: 35
+prerequisites: [sd/networking-and-apis/client-server-and-http, sd/networking-and-apis/dns]
+tags: [cdn, caching, pagination, idempotency, versioning, rate-limiting]
+type: lesson
+furtherReading:
+  - title: MDN, HTTP caching
+    url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Caching
+  - title: RFC 9111, HTTP Caching
+    url: https://www.rfc-editor.org/rfc/rfc9111
+  - title: IETF draft, The Idempotency-Key HTTP Header Field
+    url: https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/
+  - title: Stripe API docs, Idempotent requests
+    url: https://docs.stripe.com/api/idempotent_requests
+  - title: Google Cloud API Design Guide
+    url: https://cloud.google.com/apis/design
+---
+
+## Intuition
+
+Two ideas finish this module. First, the fastest request is the one that never reaches your servers: a **CDN** keeps copies of content close to users. Second, an API that works in a demo can still hurt in production unless it handles large lists, retries, change over time and abusive clients. The second half of this lesson collects the practices that make an API survivable.
+
+## How a CDN works
+
+A Content Delivery Network is a fleet of **edge servers** in many locations. A user's request is routed (by DNS or anycast) to a nearby edge. If the edge has a fresh copy it answers directly (**cache hit**); otherwise it fetches from your **origin**, stores the result and answers (**cache miss**).
+
+<Diagram kind="flow" caption="Request path through a CDN edge" nodes={[
+  { id: "user", label: "User", x: 0, y: 80, role: "Requests an image or script by URL.", failureModes: ["Routed to a distant edge during a regional issue"], tradeoffs: ["Nearby edges cut latency; the first user in a region pays the miss"] },
+  { id: "edge", label: "CDN edge", x: 200, y: 80, role: "Serves cached objects by cache key; fetches from the origin on a miss and respects Cache-Control.", failureModes: ["Serves stale content after a change if not purged or versioned", "Cache fragmentation from too many key variants"], tradeoffs: ["High hit ratio lowers latency and origin cost; invalidation adds operational work"] },
+  { id: "shield", label: "Origin shield", x: 400, y: 80, role: "Optional mid-tier cache that collapses misses from many edges into one request to the origin.", failureModes: ["Extra hop adds latency on a double miss", "A shield outage forces edges to hit the origin directly"], tradeoffs: ["Protects the origin at the cost of a more complex path"] },
+  { id: "origin", label: "Origin", x: 600, y: 80, role: "Source of truth for content: app servers or object storage.", failureModes: ["Origin down: edges serve stale if configured (stale-if-error), else errors", "Thundering herd on a cold cache"], tradeoffs: ["Long cache lifetimes lower origin load; they also delay content changes"] }
+]} edges={[
+  { from: "user", to: "edge", label: "GET" }, { from: "edge", to: "shield", label: "miss" }, { from: "shield", to: "origin", label: "miss" }
+]} />
+
+### Push vs pull
+
+<TradeOffs caption="CDN content population" rows={[
+  { option: "Pull (origin pull)", pros: "No upload step; the edge fetches on first request; simple to adopt", cons: "First request per edge is slow; cold caches after purge or deploy; origin sees miss bursts", chooseWhen: "Most websites and APIs with many objects and unpredictable popularity" },
+  { option: "Push", pros: "Content is placed at edges before users ask; predictable first-request latency", cons: "You manage uploads and storage across the CDN; waste for rarely requested objects", chooseWhen: "Large known releases such as software downloads or a launch video" }
+]} />
+
+### Cache keys, headers and invalidation
+
+The **cache key** decides when two requests share one cached object. By default it is roughly the host plus path plus query string. Common mistakes: including a random tracking parameter (every request becomes a unique key, hit ratio collapses) or ignoring a header the response depends on (users see each other's variants). `Vary: Accept-Encoding` tells caches that gzip and brotli responses differ.
+
+Key headers on responses:
+
+```http
+Cache-Control: public, max-age=31536000, immutable
+Cache-Control: private, no-store
+Cache-Control: public, max-age=60, stale-while-revalidate=30
+ETag: "a91f"
+```
+
+- `public` allows shared caches such as a CDN; `private` limits caching to the user's browser.
+- `max-age` is freshness lifetime in seconds. `no-store` forbids storing at all (sensitive data).
+- `ETag` plus `If-None-Match` lets a cache revalidate cheaply: the origin answers `304 Not Modified` with no body.
+
+**Invalidation strategies**, in order of preference:
+
+1. **Versioned filenames** (`app.4f9c2.js`) with a very long `max-age`: a new deploy uses a new URL, no purge needed.
+2. **Short TTL** plus revalidation for content that changes.
+3. **Explicit purge** by URL or tag for urgent fixes; fast on most CDNs but not instantaneous worldwide.
+
+<Callout type="warning" title="Never cache personalised responses publicly">
+A response containing user-specific data must be `private` or `no-store`, or be keyed by the user. A shared cache that serves one user's page to another is a classic security incident.
+</Callout>
+
+Worked number: a site gets 1,000 requests per second for static assets with a 95% edge hit ratio. The origin sees about 50 requests per second instead of 1,000, a 20 times reduction. Raising the hit ratio to 99% brings it to about 10 per second, which is why cache key hygiene is worth the effort.
+
+## API design best practices
+
+### Pagination
+
+Never return an unbounded list. Two common approaches:
+
+```http
+GET /v1/orders?limit=50&offset=100
+GET /v1/orders?limit=50&cursor=eyJpZCI6IDQ0MTJ9
+```
+
+- **Offset pagination** is simple and allows jumping to page N, but the database must skip all earlier rows (slow for deep pages) and results shift if rows are inserted during paging.
+- **Cursor (keyset) pagination** uses the last seen sort key (for example `WHERE id < :last ORDER BY id DESC LIMIT 50`). It is stable and fast at any depth, but cannot jump to an arbitrary page. Return an opaque `nextCursor` in the response so you can change its internals.
+
+### Idempotency keys
+
+Networks lose responses. If a client retries `POST /payments` after a timeout, the charge may be created twice. The client sends a unique `Idempotency-Key` header; the server stores the key with the result of the first execution and returns the saved result for any repeat with the same key, instead of running it again. Practical details: keys live for a bounded time (for example 24 hours), the key is stored atomically with the operation, and a repeat with the same key but a different body is rejected with an error.
+
+### Versioning
+
+Plan for change from day one. Common options are a path prefix (`/v1/`), a header or media type, or evolving a single version additively. Additive changes (new optional fields, new endpoints) are safe; removing, renaming or changing the meaning of fields is breaking and needs a new version plus a deprecation period announced in advance (a `Deprecation` or `Sunset` header can signal this). Tell clients to ignore unknown fields.
+
+### Rate limiting and its headers
+
+Rate limits protect shared capacity and limit abuse. When a client exceeds the limit, return `429 Too Many Requests` with a `Retry-After` header (seconds or an HTTP date) so well-behaved clients know when to come back. Many APIs also expose the remaining budget, with `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` as a widespread convention, and an IETF draft proposing standard `RateLimit-*` fields; check which one your target ecosystem uses.
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 30
+X-RateLimit-Limit: 100
+X-RateLimit-Remaining: 0
+Content-Type: application/json
+
+{"error": {"code": "rate_limited", "message": "Try again in 30 seconds"}}
+```
+
+Algorithms you will see later in depth: fixed window, sliding window and token bucket (allows bursts up to a bucket size while enforcing an average rate).
+
+### Errors and other basics
+
+- Use correct status codes and a consistent error body with a machine-readable `code`.
+- Authenticate every request; authorise per resource. Validate and bound all inputs (page size, body size).
+- Set timeouts and document them. Prefer `202 Accepted` with a status URL for long operations.
+- Log a request id and return it in a header so support can trace a failure.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant S as API server
+  participant D as Idempotency store
+  C->>S: POST /payments (Idempotency-Key: k1)
+  S->>D: lookup k1
+  D-->>S: not found
+  S->>S: charge card
+  S->>D: save k1 and result
+  S--xC: response lost (timeout)
+  C->>S: POST /payments (Idempotency-Key: k1)
+  S->>D: lookup k1
+  D-->>S: saved result
+  S-->>C: 201 same result, no second charge`} caption="A retry with the same key returns the first result instead of charging twice." />
+
+## Failure modes
+
+- **Cache stampede**: a popular object expires and thousands of requests hit the origin at once. Mitigate with request coalescing, `stale-while-revalidate` and staggered TTLs.
+- **Stale after deploy**: a new HTML page referencing assets that edges have not yet fetched, or old HTML referencing removed files. Keep old asset versions available for a while.
+- **Idempotency store outage**: decide whether to fail closed (reject writes) or open (risk duplicates); for payments, fail closed.
+- **Retry storms**: clients retrying 429 or 503 without backoff multiply load. Use exponential backoff with jitter and honour `Retry-After`.
+
+## Pitfalls
+
+- Using offset pagination on large, changing tables and wondering why deep pages are slow or repeat items.
+- Adding the idempotency check in the application but not making the key and the operation atomic.
+- Caching API responses at the CDN without accounting for authorization headers or cookies.
+- Breaking a field name "because it was ugly" with no versioning plan.
+- Returning rate-limit state only through error text instead of headers clients can parse.
+
+## What would you choose and why?
+
+Your product catalog API serves 2 million products. A mobile app wants "page 3,000 of the list" while a feed screen wants "keep scrolling". Which pagination style do you offer for each, what does the response carry, and how would you cache the first page at a CDN?
+
+## Quiz
+
+<Quiz id="sd-m02-cdn-api-design" tags={["cdn", "api-design"]} questions={[
+  { type: "mcq", q: "What is the safest way to invalidate cached JavaScript after a deploy?", options: ["Wait for the TTL to expire", "Use versioned (content-hashed) filenames with long max-age", "Disable caching entirely", "Ask users to clear their browser cache"], answer: 1, explain: "A new filename is a new cache key, so no purge is needed and old pages keep working." },
+  { type: "mcq", q: "A site has 1,000 requests per second and a 95% CDN hit ratio. About how many reach the origin?", options: ["5", "50", "500", "950"], answer: 1, explain: "5% of 1,000 is 50 requests per second." },
+  { type: "mcq", q: "Why does cursor pagination usually beat offset pagination on a large changing table?", options: ["It allows jumping to any page", "It is stable under inserts and does not scan skipped rows", "It needs no sort order", "It disables caching"], answer: 1, explain: "Keyset queries seek directly to the cursor position and are unaffected by shifting rows." },
+  { type: "multi", q: "What should a well-behaved 429 response include or enable?", options: ["A Retry-After header", "A machine-readable error body", "A 200 status code", "Client backoff with jitter"], answer: [0, 1, 3], explain: "429 tells clients to slow down; Retry-After and backoff prevent retry storms." },
+  { type: "mcq", q: "A client retries a POST after a timeout with the same Idempotency-Key. What should the server do?", options: ["Execute the operation again", "Return the stored result of the first execution", "Return 404", "Delete the key and start over"], answer: 1, explain: "Replaying the saved outcome makes the retry safe without duplicating side effects." }
+]} />

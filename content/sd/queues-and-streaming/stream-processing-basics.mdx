@@ -1,0 +1,119 @@
+---
+title: Stream Processing Basics
+track: sd
+module: queues-and-streaming
+order: 5
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/queues-and-streaming/kafka-rabbitmq-sqs"]
+tags: [stream-processing, cdc, windows, event-time]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 11 "Stream Processing"
+    url: https://dataintensive.net/
+  - title: "The Dataflow Model (Akidau et al., VLDB 2015)"
+    url: https://research.google/pubs/the-dataflow-model-a-practical-approach-to-balancing-correctness-latency-and-cost-in-massive-scale-unbounded-out-of-order-data-processing/
+  - title: Apache Kafka documentation, Kafka Streams
+    url: https://kafka.apache.org/documentation/streams/
+  - title: Debezium documentation, Architecture (change data capture)
+    url: https://debezium.io/documentation/reference/stable/architecture.html
+---
+
+## Intuition
+
+Batch processing answers questions about data that has stopped changing: "what were yesterday's sales?". **Stream processing** treats data as an unbounded sequence of events and keeps answers continuously up to date: "sales in the last 5 minutes, updated every second". You process each event as it arrives, hold a little state, and emit results with seconds of delay instead of hours.
+
+## Building blocks
+
+- **Event stream**: an append-only log of immutable facts (a click, a payment, a sensor reading), commonly in Kafka.
+- **Stateless operators**: filter, map, enrich-from-a-static-table. Easy to scale and restart.
+- **Stateful operators**: counts, joins, sessionisation. They keep state (in memory plus a local store with changelog backup) partitioned by key, so all events for a key reach the same worker.
+- **Sinks**: another topic, a database, a search index, a cache, a dashboard.
+
+## Use cases
+
+| Use case | Example | Why streaming |
+| --- | --- | --- |
+| Real-time analytics | Live dashboard of orders per minute | Low latency aggregates |
+| Fraud and anomaly detection | Flag more than 5 card attempts in 1 minute | Needs windows over recent history |
+| Change data capture (CDC) | Mirror database changes to search or cache | Derived stores kept in sync from the DB log |
+| Event-driven integration | Order placed triggers inventory, email, analytics | Decoupled reactions |
+| ETL and enrichment | Join clicks with user profiles continuously | Replaces nightly batch |
+
+### Change data capture
+
+CDC reads a database's own transaction log (MySQL binlog, PostgreSQL WAL) and emits each row change as an event. Tools such as Debezium do this. It solves the dual-write problem: instead of the application writing to the database *and* a queue, the database is the source of truth and the stream is derived from it, in the same order the database committed. Consumers keep search indexes, caches and analytic stores in sync, and snapshotting plus log tailing lets a new consumer bootstrap.
+
+## Windows and time
+
+Aggregations over an infinite stream need bounded chunks, called **windows**:
+
+- **Tumbling**: fixed, non-overlapping (every 1 minute).
+- **Hopping or sliding**: fixed length, overlapping (5 minutes, advancing each 1 minute).
+- **Session**: grouped by bursts of activity separated by an inactivity gap.
+
+There are two notions of time:
+
+- **Processing time**: when the processor sees the event. Easy, but results change with delays and replays.
+- **Event time**: when the event actually happened, carried in the event. Correct, but events arrive late and out of order (a phone offline in a tunnel). Systems use **watermarks**, an estimate that "no events older than T will arrive", to decide when a window can close, and policies for late events (drop, side output, or update the previous result).
+
+### Worked example: tumbling window counts
+
+Events with event times (seconds): 3, 12, 58, 61, 64, 125, and a late event at time 55 arriving after 64. Using 60-second tumbling windows: window `[0,60)` has 3, 12, 58 and the late 55, so 4 if the window is still open or accepted via allowed lateness, or 3 if the watermark has passed and lateness is disallowed. `[60,120)` has 61, 64, so 2. `[120,180)` has 125, so 1. The choice of lateness policy is a trade between accuracy and latency.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  DB[(Database)] -->|WAL or binlog| CDC[CDC connector]
+  APP[Services] --> K[(Kafka topics)]
+  CDC --> K
+  K --> S[Stream processor: filter, join, window]
+  S --> OUT1[(Search index)]
+  S --> OUT2[(Analytics store)]
+  S --> OUT3[Alerts]`} caption="Events and CDC feed a stream processor that updates derived stores" />
+
+## Correctness and operations
+
+- **State and recovery**: processors checkpoint state and input offsets together so a restart resumes consistently (this is how engines such as Flink or Kafka Streams provide exactly-once state effects).
+- **Reprocessing**: because the log is retained, you can fix a bug and recompute by replaying from an earlier offset into a new output.
+- **Skew and hot keys**: a popular key makes one worker the bottleneck (see the hot keys lesson in Databases II).
+- **Late data and schema evolution**: use a schema registry and compatible changes so old and new producers coexist.
+- **Lag monitoring**: end-to-end latency is event time minus processing time.
+
+## Failure modes
+
+<Diagram kind="flow" caption="A stateful stream pipeline" nodes={[
+  { id: "source", label: "Event log", x: 0, y: 80, role: "Durable, partitioned input stream (for example a Kafka topic).", failureModes: ["Retention expires before a slow job reads old data", "Skewed partition key"], tradeoffs: ["Longer retention costs storage but enables replay"] },
+  { id: "proc", label: "Stream processor", x: 220, y: 80, role: "Applies operators and maintains windowed state per key.", failureModes: ["Crash loses in-memory state unless checkpointed", "Late events change results already emitted", "State grows unbounded without TTL"], tradeoffs: ["Frequent checkpoints reduce recovery time and cost throughput"] },
+  { id: "state", label: "State store + checkpoints", x: 440, y: 20, role: "Local key-value state with durable changelog or snapshots.", failureModes: ["Restore from a large changelog is slow", "Corrupted checkpoint"], tradeoffs: ["Remote state is simpler to recover and slower to access"] },
+  { id: "sink", label: "Sink", x: 440, y: 140, role: "Receives results: topic, database, index.", failureModes: ["Duplicate writes after recovery unless idempotent or transactional", "Sink slowness exerts backpressure on the job"], tradeoffs: ["Upserts by key make sinks idempotent"] }
+]} edges={[
+  { from: "source", to: "proc", label: "consume" }, { from: "proc", to: "state", label: "checkpoint" }, { from: "proc", to: "sink", label: "emit" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Batch vs stream and processing choices" rows={[
+  { option: "Nightly batch", pros: "Simple, cheap, easy to reason about and rerun", cons: "Hours of staleness", chooseWhen: "Reports without freshness requirements" },
+  { option: "Micro-batch (seconds to minutes)", pros: "Simpler than record-at-a-time; good throughput", cons: "Latency floor of the batch interval", chooseWhen: "Near-real-time dashboards" },
+  { option: "Record-at-a-time streaming", pros: "Lowest latency; continuous results", cons: "State management, late data, operational complexity", chooseWhen: "Fraud detection, alerting, live features" },
+  { option: "CDC into streams", pros: "Consistent derived data without dual writes", cons: "Couples consumers to table schemas; needs connector ops", chooseWhen: "Syncing DB to search, cache or warehouse" }
+]} />
+
+## Pitfalls
+
+- Using processing time when the business question is about event time.
+- Unbounded state: windows without eviction, joins without time bounds.
+- Treating the stream processor as the system of record; keep the log or a database as truth.
+- Ignoring schema changes and breaking every downstream job at once.
+
+## What would you choose and why?
+
+You must show "orders in the last 5 minutes, per city" on a dashboard that updates every few seconds, and also produce an exact daily revenue report that finance relies on. Would you use the same pipeline for both? Which window type and time notion would you pick for the dashboard, and how would you handle late events for the finance report?
+
+## Quiz
+
+<Quiz id="sd-m08-stream-processing" tags={["stream-processing", "windows", "cdc"]} questions={[
+  { type: "mcq", q: "Which window type groups events by bursts of activity separated by an inactivity gap?", options: ["Tumbling", "Hopping", "Session", "Global"], answer: 2, explain: "Session windows close when no events arrive for the configured gap." },
+  { type: "mcq", q: "What problem does change data capture primarily address?", options: ["Compressing messages", "Keeping derived stores in sync from the database's own log without dual writes", "Load balancing", "Choosing partition counts"], answer: 1, explain: "CDC reads the commit log, so the stream reflects exactly what the database committed." },
+  { type: "multi", q: "Why do stream processors use event time with watermarks?", options: ["Events can arrive late or out of order", "Processing time depends on delays and replays", "It removes the need for state", "Watermarks estimate when a window can close"], answer: [0, 1, 3], explain: "Event time with watermarks gives results that do not depend on arrival delays; state is still required." },
+  { type: "mcq", q: "How can a stream job be fixed and recomputed after a bug if the log is retained?", options: ["It cannot", "Replay from an earlier offset into a corrected job or new output", "Delete the topic", "Add more partitions"], answer: 1, explain: "A retained log is replayable, so reprocessing from an earlier offset is a core benefit." }
+]} />

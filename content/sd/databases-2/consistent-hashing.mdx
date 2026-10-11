@@ -1,0 +1,171 @@
+---
+title: Consistent Hashing
+track: sd
+module: databases-2
+order: 4
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/databases-2/sharding-and-partitioning"]
+tags: [consistent-hashing, virtual-nodes, sharding, dynamo]
+type: lesson
+furtherReading:
+  - title: "Consistent Hashing and Random Trees (Karger et al., STOC 1997)"
+    url: https://dl.acm.org/doi/10.1145/258533.258660
+  - title: "Dynamo: Amazon's Highly Available Key-value Store (DeCandia et al., SOSP 2007), section 4.2"
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 6
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+With `hash(key) mod N`, changing N from 10 to 11 changes the answer for almost every key: only keys whose hash gives the same remainder under both moduli stay put (about 1 in 11 of them). For a cache that means a near-total miss storm; for a store it means moving most of the data.
+
+**Consistent hashing** fixes this by making the key-to-node assignment depend only on nearby nodes, so adding or removing one node moves only about `1/N` of the keys, the theoretical minimum.
+
+## The ring
+
+1. Hash node identifiers onto a circle of positions (for example `0 .. 2^32 - 1`).
+2. Hash each key onto the same circle.
+3. A key belongs to the first node found going clockwise from the key's position.
+
+When a node joins at some position, it takes over only the keys between its predecessor and itself, all of which came from its single clockwise successor. When a node leaves, its keys move to its successor. Nobody else is affected.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  subgraph Ring[Hash ring clockwise]
+    direction LR
+    N1((Node A at 10)) --> K1[key k1 at 25]
+    K1 --> N2((Node B at 40))
+    N2 --> K2[key k2 at 55]
+    K2 --> N3((Node C at 70))
+    N3 --> N1
+  end`} caption="k1 (position 25) is owned by Node B, the next node clockwise; k2 (55) by Node C" />
+
+## Virtual nodes
+
+With one point per physical node, the arcs between points are random lengths, so some nodes own much more of the ring than others, and a removed node dumps its entire load on one neighbour. **Virtual nodes** place each physical node at many points (commonly tens to hundreds). Then:
+
+- Load evens out by the law of large numbers.
+- A departing node's load is spread across many successors.
+- Heterogeneous machines can get proportionally more virtual nodes.
+
+The cost is a larger ring (more memory and slightly slower lookup, `O(log V)` with binary search over `V` points) and more bookkeeping for replication, since replicas must land on distinct physical nodes.
+
+## Code: a ring you can run and measure
+
+The program below builds a ring with 10 nodes and 100,000 keys, then adds an 11th node and counts how many keys changed owner, comparing against `mod N`.
+
+<CodeRunner language="python" code={`import bisect, hashlib
+
+def h(s):
+    return int(hashlib.md5(s.encode()).hexdigest(), 16) % (2**32)
+
+class Ring:
+    def __init__(self, nodes=(), vnodes=100):
+        self.vnodes, self.keys, self.owner = vnodes, [], {}
+        for n in nodes:
+            self.add(n)
+
+    def add(self, node):
+        for i in range(self.vnodes):
+            p = h(f"{node}#{i}")
+            bisect.insort(self.keys, p)
+            self.owner[p] = node
+
+    def remove(self, node):
+        for i in range(self.vnodes):
+            p = h(f"{node}#{i}")
+            self.keys.remove(p)
+            del self.owner[p]
+
+    def get(self, key):
+        i = bisect.bisect(self.keys, h(key)) % len(self.keys)
+        return self.owner[self.keys[i]]
+
+keys = [f"user:{i}" for i in range(100000)]
+
+def moved_ring(vnodes):
+    r = Ring([f"n{i}" for i in range(10)], vnodes)
+    before = {k: r.get(k) for k in keys}
+    r.add("n10")
+    return sum(before[k] != r.get(k) for k in keys) / len(keys)
+
+def moved_mod():
+    return sum(h(k) % 10 != h(k) % 11 for k in keys) / len(keys)
+
+print("mod N, 10 -> 11 nodes: %.1f%% moved" % (100 * moved_mod()))
+for v in (1, 10, 100, 200):
+    print("ring vnodes=%d: %.1f%% moved" % (v, 100 * moved_ring(v)))
+print("ideal: %.1f%%" % (100 / 11))
+
+for v in (1, 100):
+    r = Ring([f"n{i}" for i in range(10)], v)
+    c = {}
+    for k in keys:
+        c[r.get(k)] = c.get(r.get(k), 0) + 1
+    print("vnodes=%d load min/max per node: %d / %d (mean 10000)" % (v, min(c.values()), max(c.values())))
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| Scheme (10 to 11 nodes, 100,000 keys) | Keys moved | Notes |
+| --- | --- | --- |
+| `hash mod N` | 91.0% | Almost everything moves (ideal for mod is about 90.9%) |
+| Ring, 1 point per node | 1.9% | Looks great but is an accident of one small arc |
+| Ring, 10 virtual nodes | 14.4% | Noisy: arcs are still uneven |
+| Ring, 100 virtual nodes | 8.3% | Close to the ideal 1/11 = 9.1% |
+| Ring, 200 virtual nodes | 7.7% | Still within sampling noise of ideal |
+
+The load balance tells the other half of the story. With 1 point per node the busiest node held 29,051 keys and the quietest 383, against a mean of 10,000. With 100 virtual nodes the range was 8,807 to 11,791. So virtual nodes buy both even load and predictable movement. The exact digits depend on the hash function and node names; the pattern is what matters.
+
+<Callout type="note">
+The 1.9% result for one point per node is not "better". It means the new node happened to land on a tiny arc and therefore also takes on very little load. The expected movement is `1/11`, with large variance when there are few points.
+</Callout>
+
+## Where it is used, and variants
+
+- Dynamo-style stores (Cassandra, Riak, DynamoDB's lineage) partition keys on a ring and replicate each key to the next few distinct nodes clockwise.
+- Distributed caches and load balancers use it so that adding a cache node does not invalidate everything.
+- Alternatives with the same goal: rendezvous (highest-random-weight) hashing, jump consistent hash, and fixed logical partitions with an assignment table (Redis Cluster uses 16384 hash slots, not a ring).
+
+## Failure modes
+
+<Diagram kind="flow" caption="Ring-based cache cluster" nodes={[
+  { id: "client", label: "Client library", x: 0, y: 80, role: "Hashes the key and picks the owning node using its copy of the ring.", failureModes: ["Clients with different ring versions disagree on owners", "Ring update storms during membership flaps"], tradeoffs: ["Client-side routing is fast but needs ring distribution"] },
+  { id: "ring", label: "Ring / membership", x: 220, y: 80, role: "The ordered set of virtual node positions and owners, updated as nodes join or leave.", failureModes: ["Stale membership routes to a dead node", "Gossip delay causes temporary double ownership"], tradeoffs: ["Many vnodes: even load, bigger ring state"] },
+  { id: "n1", label: "Node A", x: 440, y: 20, role: "Owns many small arcs of the ring.", failureModes: ["Failure shifts its keys to many successors, each taking a share (cache cold start)"], tradeoffs: ["Weighted vnodes allow bigger machines to hold more"] },
+  { id: "n2", label: "Node B", x: 440, y: 140, role: "Owns many small arcs of the ring.", failureModes: ["New node starts empty and misses until warmed", "Rebalance streaming competes with live traffic"], tradeoffs: ["Moving only 1/N of keys keeps rebalance bounded"] }
+]} edges={[
+  { from: "client", to: "ring" }, { from: "ring", to: "n1" }, { from: "ring", to: "n2" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Key placement strategies" rows={[
+  { option: "hash mod N", pros: "Trivial, uniform", cons: "Nearly all keys move on any resize", chooseWhen: "Fixed N that never changes" },
+  { option: "Consistent hashing with vnodes", pros: "Moves about 1/N keys; smooth load; no central table", cons: "Ring state to distribute; vnode tuning; harder range queries", chooseWhen: "Elastic caches and Dynamo-style stores" },
+  { option: "Fixed logical partitions + assignment table", pros: "Simple mental model; explicit control and rebalancing", cons: "Needs a coordinator for the table; pick partition count up front", chooseWhen: "Kafka, Redis Cluster, most managed stores" },
+  { option: "Rendezvous hashing", pros: "No ring; simple; minimal movement", cons: "O(N) work per lookup unless optimised", chooseWhen: "Small to moderate node counts" }
+]} />
+
+## Pitfalls
+
+- Using too few virtual nodes and assuming balance.
+- Placing replicas on virtual nodes of the same physical machine.
+- Using a poor or unstable hash (language-default object hashes may differ between processes or runs). Use a fixed function such as MD5, Murmur or xxHash.
+- Ignoring that the ring spreads keys evenly but not load: a hot key still lands on one node.
+
+## What would you choose and why?
+
+You run a cache of 20 nodes and need to add 2 more during peak traffic. Under `mod N`, roughly what fraction of keys miss immediately? Under a ring with many virtual nodes? How would you warm the new nodes, and would you add them one at a time or together?
+
+## Quiz
+
+<Quiz id="sd-m07-consistent-hashing" tags={["consistent-hashing"]} questions={[
+  { type: "mcq", q: "With ideal consistent hashing, adding one node to a cluster of N nodes (N+1 total) moves about what fraction of keys?", options: ["All keys", "About 1/(N+1)", "About 1/2", "None"], answer: 1, explain: "The new node takes its fair share, about 1/(N+1) of the keys, and only from neighbours." },
+  { type: "mcq", q: "What is the main purpose of virtual nodes?", options: ["To encrypt keys", "To even out load and spread a failed node's keys over many nodes", "To avoid hashing", "To enable range queries"], answer: 1, explain: "Many points per physical node reduce variance in arc length and distribute reassignments." },
+  { type: "multi", q: "Which statements are true?", options: ["mod N hashing moves most keys when N changes", "A hot key is solved by consistent hashing", "Replicas should be on distinct physical nodes", "A larger vnode count increases ring memory"], answer: [0, 2, 3], explain: "Consistent hashing spreads keys, not the traffic of one popular key." },
+  { type: "predict", q: "Going clockwise, nodes sit at positions 10 (A), 40 (B), 70 (C). Which node owns a key hashed to position 75?", code: "nodes = {10: 'A', 40: 'B', 70: 'C'}\nkey_pos = 75\n# owner = first node at or after key_pos, wrapping around", options: ["A", "B", "C", "None"], answer: 0, explain: "No node at or after 75 exists, so the lookup wraps around to the first position, 10, which is A." }
+]} />

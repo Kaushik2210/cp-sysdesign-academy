@@ -1,0 +1,126 @@
+---
+title: Normalization, Denormalization and Schema Design
+track: sd
+module: databases-1
+order: 4
+difficulty: beginner
+estMinutes: 25
+prerequisites: [sd/databases-1/relational-vs-nosql, sd/databases-1/indexes-and-query-plans]
+tags: [databases, normalization, denormalization, schema-design, access-patterns]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 2 (relational vs document model)
+    url: https://dataintensive.net/
+  - title: "A Relational Model of Data for Large Shared Data Banks (E. F. Codd, 1970)"
+    url: https://www.seas.upenn.edu/~zives/03f/cis550/codd.pdf
+  - title: Amazon DynamoDB Developer Guide, Best practices for modeling relational data
+    url: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-relational-modeling.html
+---
+
+## Intuition
+
+**Normalization** means storing each fact once. If a customer's address appears in one place, updating it is one write and cannot go out of sync. **Denormalization** deliberately stores a fact in more than one place so that a read needs fewer joins or lookups. The first optimises for correctness and write simplicity, the second for read speed. Good schema design picks a point between them based on the access patterns.
+
+## Normal forms, informally
+
+- **1NF:** each column holds one atomic value; no repeating groups (no "tag1, tag2, tag3" columns or comma lists).
+- **2NF:** every non-key column depends on the *whole* key (matters when the key has several columns).
+- **3NF:** non-key columns depend only on the key, not on other non-key columns. "Every fact depends on the key, the whole key, and nothing but the key."
+
+### Worked example
+
+A single wide table:
+
+| order_id | customer_id | customer_name | customer_city | sku | sku_name | qty |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 7 | Asha | Pune | A1 | Pen | 2 |
+| 1 | 7 | Asha | Pune | B2 | Ink | 1 |
+| 2 | 7 | Asha | Pune | A1 | Pen | 5 |
+
+Problems: Asha's name and city repeat (update anomaly: change in one row only), a product with no orders cannot exist (insert anomaly), and deleting the last order of a product loses the product name (delete anomaly).
+
+Normalised:
+
+```sql
+CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT, city TEXT);
+CREATE TABLE products  (sku TEXT PRIMARY KEY, name TEXT);
+CREATE TABLE orders    (id INTEGER PRIMARY KEY, customer_id INTEGER REFERENCES customers(id));
+CREATE TABLE order_items (
+  order_id INTEGER REFERENCES orders(id),
+  sku TEXT REFERENCES products(sku),
+  qty INTEGER,
+  PRIMARY KEY (order_id, sku)
+);
+```
+
+Each fact now lives once; a city change is one row update.
+
+## Denormalization: when and how
+
+Joins cost CPU and I/O, and in sharded systems cross-shard joins are expensive or impossible. Common denormalizations:
+
+- **Copying a column** (store `customer_name` on the order so order pages never join).
+- **Precomputed aggregates** (a `like_count` column, daily totals table).
+- **Embedding** child data in the parent (document model: items inside the order).
+- **Materialised views or read models** built from the source of truth.
+
+Costs: more storage, writes touch more places, and copies can drift if an update path is missed. Mitigate with a single write path, transactions, or asynchronous rebuilds from the authoritative table.
+
+<Callout type="note" title="Snapshots are not always a bug">
+An order should usually keep the price and address *as they were at purchase time*. That is deliberate denormalization (a snapshot), not duplication to be normalised away.
+</Callout>
+
+## Schema design for access patterns
+
+1. **List the queries first**: for each, its inputs, outputs, frequency and latency target.
+2. **Model entities and relationships**, then normalise to a sensible baseline.
+3. **Add indexes** for the key queries (previous lesson).
+4. **Denormalize selectively** where measurements show joins or aggregations hurting.
+5. **Re-check** when access patterns change.
+
+In NoSQL stores the order flips: you often start from the queries and shape the data (and the partition key) to answer each with one lookup, accepting duplication.
+
+<Diagram kind="flow" caption="Schema design loop driven by access patterns" nodes={[
+  { id: "patterns", label: "Access patterns", x: 0, y: 80, role: "The list of reads and writes with frequencies and latency goals that the schema must serve.", failureModes: ["Missing a pattern leads to a redesign later", "Patterns drift as the product evolves"], tradeoffs: ["Detailed up-front patterns reduce rework but cost design time"] },
+  { id: "normal", label: "Normalised model", x: 200, y: 80, role: "Source of truth with each fact stored once and enforced by constraints.", failureModes: ["Join-heavy queries slow at scale"], tradeoffs: ["Integrity and simple writes vs read cost"] },
+  { id: "indexes", label: "Indexes", x: 400, y: 20, role: "Speed up the identified queries without changing the model.", failureModes: ["Too many indexes slow writes"], tradeoffs: ["Faster reads vs write and space cost"] },
+  { id: "denorm", label: "Denormalised views", x: 400, y: 140, role: "Copies, aggregates or read models for the hottest or slowest queries.", failureModes: ["Copies drift out of sync", "Update paths missed"], tradeoffs: ["Fast reads vs duplicated writes and consistency work"] }
+]} edges={[
+  { from: "patterns", to: "normal" }, { from: "normal", to: "indexes" }, { from: "normal", to: "denorm", label: "if indexes insufficient" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Normalised vs denormalised" rows={[
+  { option: "Fully normalised", pros: "No duplication, easy consistent updates, small storage", cons: "More joins; read latency and cross-shard queries suffer", chooseWhen: "Write-correctness matters, moderate read volume, one database" },
+  { option: "Selective denormalization", pros: "Fast hot reads; fewer joins", cons: "Must keep copies in sync; more write work", chooseWhen: "Read-heavy paths with measured join cost" },
+  { option: "Embedded / document style", pros: "Read an aggregate in one fetch; natural sharding unit", cons: "Updates to shared data touch many documents; unbounded growth risk", chooseWhen: "Data is accessed as a unit and rarely shared across entities" },
+  { option: "Query-per-table (wide-column style)", pros: "Each query is a single partition read", cons: "Heavy duplication; every write fans out to several tables", chooseWhen: "Massive scale with known, stable queries" }
+]} />
+
+## Failure modes
+
+- A background job that maintains `like_count` crashes and counters drift; plan a reconciliation job.
+- Updating a copied column in one place but not another produces contradictory pages.
+- An embedded array grows without bound and a single document becomes huge.
+- A migration to add a column locks a large table; use online schema change techniques.
+
+## What would you choose and why?
+
+Your feed page shows each post with author name and avatar. The author changes their avatar rarely. Would you join `users` on every read, copy the avatar URL into each post, or cache the author profile? Consider read volume of 50,000 per second and writes of a few per second to profiles. State the consistency you would accept.
+
+## Pitfalls
+
+- Denormalizing before measuring.
+- Storing comma-separated lists in a column (violates 1NF; cannot index or constrain).
+- Using one giant "everything" table with nullable columns.
+- Forgetting that a snapshot of historical data (price, address) should not be normalised away.
+
+## Quiz
+
+<Quiz id="sd-m04-schema-1" tags={["databases", "normalization", "schema"]} questions={[
+  { type: "mcq", q: "A column stores 'red,green,blue' as one string. Which normal form does this violate?", options: ["1NF", "2NF", "3NF", "None"], answer: 0, explain: "Columns must hold atomic values; a list in one cell breaks first normal form." },
+  { type: "mcq", q: "What is the primary risk of denormalization?", options: ["Reads become slower", "Copies of the same fact can become inconsistent", "Joins become impossible", "Indexes stop working"], answer: 1, explain: "Duplicated data must be updated in every place, so drift is the main hazard." },
+  { type: "multi", q: "Which are legitimate reasons to denormalize?", options: ["A hot read path suffers from expensive joins", "You are sharding and cross-shard joins are costly", "You want fewer constraints for their own sake", "You need a point-in-time snapshot of price on an order"], answer: [0, 1, 3], explain: "Removing constraints without a measured need is not a justification." },
+  { type: "mcq", q: "In query-driven NoSQL modelling you typically start from:", options: ["The entity-relationship diagram only", "The list of queries and access patterns", "The largest table", "The index list"], answer: 1, explain: "The partition key and layout are chosen so each query is a single efficient lookup." }
+]} />

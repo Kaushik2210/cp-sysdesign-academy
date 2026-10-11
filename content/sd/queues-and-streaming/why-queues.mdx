@@ -1,0 +1,104 @@
+---
+title: Why Queues, and Queue vs Pub/Sub
+track: sd
+module: queues-and-streaming
+order: 1
+difficulty: easy
+estMinutes: 25
+prerequisites: ["sd/what-is-system-design/requirements-and-framework"]
+tags: [queues, pub-sub, decoupling, load-leveling]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 11 "Stream Processing" (messaging systems)
+    url: https://dataintensive.net/
+  - title: "Enterprise Integration Patterns (Hohpe, Woolf): Message Queue and Publish-Subscribe Channel"
+    url: https://www.enterpriseintegrationpatterns.com/patterns/messaging/
+  - title: Amazon SQS Developer Guide
+    url: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/welcome.html
+---
+
+## Intuition
+
+A synchronous call chain makes every caller wait for, and depend on, everything behind it. A **message queue** puts a durable buffer in the middle: the producer drops a message and moves on; a consumer picks it up when it can. That one change buys three things.
+
+1. **Decoupling**: producer and consumer do not need to be up at the same moment, use the same language, or know each other's addresses. They only agree on the message format.
+2. **Buffering and load leveling**: a traffic spike fills the queue instead of overwhelming the consumer. The consumer drains at its own steady rate.
+3. **Failure isolation and retry**: if the consumer is down, messages wait; if processing fails, the message can be retried.
+
+You also gain independent scaling: add consumers to drain faster, without touching producers.
+
+## Worked example: signup email
+
+A signup request must create a user and send a welcome email. If the email provider takes 800 ms and is flaky, calling it inline makes signup slow and makes signup fail when email is down.
+
+With a queue: the signup handler writes the user row, enqueues `{type: welcome, user_id}`, and returns in tens of milliseconds. A worker sends the email, retrying on failure. A spike of 5,000 signups in a minute (about 83 per second) becomes a short backlog drained by workers at, say, 20 emails per second per worker; 4 workers clear 5,000 messages in about 62 seconds. Users see instant signup either way.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  P1[Producer API] --> Q[(Queue)]
+  P2[Producer batch job] --> Q
+  Q --> C1[Worker 1]
+  Q --> C2[Worker 2]
+  Q --> C3[Worker 3]`} caption="Point-to-point queue: each message is handled by exactly one competing consumer" />
+
+## Queue vs pub/sub
+
+| Property | Queue (point-to-point) | Pub/sub (topic) |
+| --- | --- | --- |
+| Delivery | Each message goes to one consumer in the group | Each message goes to every subscriber |
+| Consumers | Competing workers sharing the load | Independent subscribers with their own progress |
+| Typical use | Task distribution: send email, resize image | Event notification: order placed, many interested services |
+| Scaling consumers | Add workers to drain faster | Each subscriber scales itself |
+
+Modern systems blur the line. Kafka consumer groups give each *group* a copy of the stream and share work *within* a group, so one topic acts as pub/sub across groups and a queue within a group. SNS to SQS fan-out does the same: a topic publishes to several queues, one per subscribing service.
+
+<Callout type="tip">
+Rule of thumb: if the question is "who should do this job?", use a queue. If it is "who needs to know this happened?", use pub/sub.
+</Callout>
+
+## Trade-offs you accept
+
+- **Eventual consistency**: the work is done later, so the user-visible effect lags. You must design the UX around that (pending states, notifications).
+- **Operational complexity**: a broker to run, monitor and secure; lag and backlog become new things to alert on.
+- **Harder debugging**: no single stack trace; use correlation IDs and distributed tracing.
+- **Duplicates and reordering**: most queues deliver at least once, so consumers must tolerate duplicates (next lessons).
+- **Backlog risk**: a queue hides overload until the backlog is hours old. Set limits and alerts.
+
+## Failure modes
+
+<Diagram kind="flow" caption="Producer, broker and consumers" nodes={[
+  { id: "producer", label: "Producer", x: 0, y: 80, role: "Creates messages after doing its local work; returns quickly to its caller.", failureModes: ["Writes the database row but crashes before enqueueing (dual-write problem)", "Broker unavailable on publish"], tradeoffs: ["Outbox table makes enqueue atomic with the DB write at the cost of a relay process"] },
+  { id: "broker", label: "Queue / broker", x: 220, y: 80, role: "Durably stores messages until consumers acknowledge them.", failureModes: ["Broker outage blocks all producers and consumers", "Unbounded backlog exhausts storage"], tradeoffs: ["Durability (replication, fsync) costs latency and throughput"] },
+  { id: "c1", label: "Consumer A", x: 440, y: 20, role: "Pulls a message, processes it, then acknowledges.", failureModes: ["Crash after processing but before ack causes redelivery", "Slow consumer lets backlog grow"], tradeoffs: ["Ack after processing is safe but duplicate-prone; ack before is lossy"] },
+  { id: "c2", label: "Consumer B", x: 440, y: 140, role: "Another competing worker, or a subscriber in a different group.", failureModes: ["Poison message repeatedly crashes it", "Overlapping consumers process the same message twice"], tradeoffs: ["More consumers speed draining but stress downstream systems"] }
+]} edges={[
+  { from: "producer", to: "broker", label: "publish" }, { from: "broker", to: "c1", label: "deliver" }, { from: "broker", to: "c2", label: "deliver" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Synchronous call vs queue vs pub/sub" rows={[
+  { option: "Direct synchronous call", pros: "Simple; immediate result and error", cons: "Tight coupling; failures and slowness propagate; no buffering", chooseWhen: "The caller needs the answer now and the dependency is reliable" },
+  { option: "Work queue", pros: "Load leveling, retry, independent scaling", cons: "Async UX; duplicates; backlog monitoring", chooseWhen: "Background tasks that one worker should do" },
+  { option: "Pub/sub topic", pros: "Many independent consumers; easy to add new ones", cons: "Producer does not know who consumes; schema evolution needs care", chooseWhen: "Events several services react to" },
+  { option: "Log-based stream", pros: "Replay, multiple consumers, ordering per partition", cons: "More operational weight; consumer offset management", chooseWhen: "Event streams, data pipelines, CDC" }
+]} />
+
+## Pitfalls
+
+- Using a queue where the user needs a synchronous answer; polling or callbacks then re-add the complexity.
+- Dual writes (update DB, then publish) without an outbox, which drop or duplicate events when a step fails.
+- Unbounded queues with no alert on age of the oldest message.
+- Putting large payloads in messages; send a reference to object storage instead.
+
+## What would you choose and why?
+
+An image upload service must create thumbnails, scan for malware and update a search index. Is each of these a queue (one worker does it) or a pub/sub event (several systems react)? Which of the three can fail without blocking the upload response, and which must complete before the user sees the image?
+
+## Quiz
+
+<Quiz id="sd-m08-why-queues" tags={["queues", "pub-sub"]} questions={[
+  { type: "mcq", q: "Which benefit does a queue primarily provide during a traffic spike?", options: ["Lower total work", "Load leveling: the consumer drains at a steady rate while the backlog absorbs the burst", "Exactly-once delivery", "Strong consistency"], answer: 1, explain: "Buffering lets the consumer work at its own pace; total work is unchanged." },
+  { type: "mcq", q: "Three independent services each need to react to every order-placed event. Which model fits?", options: ["One queue with three competing consumers", "A pub/sub topic with one subscription per service", "Direct calls only", "A cache"], answer: 1, explain: "Competing consumers split the messages; pub/sub gives each subscriber its own copy." },
+  { type: "multi", q: "Which are costs of introducing a queue?", options: ["Eventual consistency of the result", "Duplicate delivery handling", "A new component to operate and monitor", "Guaranteed lower latency for the user's request"], answer: [0, 1, 2], explain: "The user's request often returns sooner, but the work completes later, and latency of the whole workflow is not guaranteed lower." },
+  { type: "mcq", q: "What problem does the transactional outbox pattern solve?", options: ["Slow consumers", "Atomically recording a DB change and the intent to publish an event", "Choosing partitions", "Message compression"], answer: 1, explain: "The event is stored in the same DB transaction as the change and relayed to the broker afterwards." }
+]} />

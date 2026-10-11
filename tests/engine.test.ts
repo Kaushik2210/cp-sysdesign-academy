@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { judge, normalize } from "../src/lib/runner/judge";
 import type { RunResult } from "../src/lib/runner/types";
 import { dueCards, newCard, review } from "../src/lib/srs/sm2";
-import { binarySearchSteps, bubbleSortSteps } from "../src/visualizers/algorithms";
+import { binarySearchSteps, bubbleSortSteps, slidingWindowSteps, twoPointersSteps } from "../src/visualizers/algorithms";
 
 const ok = (stdout: string): RunResult => ({ status: "ok", stdout, stderr: "", timeMs: 1 });
 
@@ -76,5 +76,25 @@ describe("visualizer generators", () => {
   });
   it("rejects bad input", () => {
     expect(() => binarySearchSteps("a b\n1")).toThrow();
+  });
+});
+
+describe("two pointers and sliding window", () => {
+  it("finds the pair", () => {
+    const last = twoPointersSteps("1 2 4 7 11 15 19\n18").at(-1)!;
+    expect(last.state.found).toEqual([3, 4]);
+  });
+  it("reports no pair", () => {
+    expect(twoPointersSteps("1 2 3\n100").at(-1)!.state.found).toBeNull();
+  });
+  it("sliding window matches brute force", () => {
+    const a = [2, 1, 5, 1, 3, 2, 9, 1];
+    const k = 3;
+    let best = -Infinity;
+    for (let i = 0; i + k <= a.length; i++) best = Math.max(best, a.slice(i, i + k).reduce((x, y) => x + y, 0));
+    expect(slidingWindowSteps(`${a.join(" ")}\n${k}`).at(-1)!.state.best).toBe(best);
+  });
+  it("rejects bad k", () => {
+    expect(() => slidingWindowSteps("1 2 3\n5")).toThrow();
   });
 });

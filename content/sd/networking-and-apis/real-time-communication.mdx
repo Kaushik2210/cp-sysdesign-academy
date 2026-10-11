@@ -1,0 +1,109 @@
+---
+title: "Real-Time Communication: Polling, SSE, WebSockets"
+track: sd
+module: networking-and-apis
+order: 3
+difficulty: beginner
+estMinutes: 25
+prerequisites: [sd/networking-and-apis/client-server-and-http]
+tags: [polling, long-polling, sse, websockets, real-time]
+type: lesson
+furtherReading:
+  - title: MDN, Server-sent events
+    url: https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events
+  - title: RFC 6455, The WebSocket Protocol
+    url: https://www.rfc-editor.org/rfc/rfc6455
+  - title: MDN, WebSockets API
+    url: https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API
+---
+
+## Intuition
+
+HTTP is "client asks, server answers". But chat messages, live scores and progress bars need the server to tell the client something *when it happens*. There are four common techniques, ranging from "ask repeatedly" to "keep a two-way pipe open". Each trades simplicity against efficiency and server resources.
+
+## The four techniques
+
+### Short polling
+
+The client asks every N seconds: "anything new?" The server answers immediately, usually with nothing.
+
+- Simple, works everywhere, plays well with caches and load balancers.
+- Wasteful: with 100,000 clients polling every 5 seconds, the server handles 20,000 requests per second, mostly empty. Worst-case delay for an event is nearly the whole interval.
+
+### Long polling
+
+The client asks and the server **holds the request open** until it has data or a timeout (often 20 to 60 seconds), then answers; the client immediately asks again.
+
+- Near-real-time delivery over plain HTTP, no special protocol.
+- Each waiting client still holds a connection and the server must manage many idle requests. Between response and the next request there is a small gap where events must be buffered or replayed by an id.
+
+### Server-sent events (SSE)
+
+One long-lived HTTP response with `Content-Type: text/event-stream`. The server writes events as text lines; the browser's `EventSource` parses them and **reconnects automatically**, sending `Last-Event-ID` so the server can resume.
+
+```text
+id: 105
+event: price
+data: {"symbol":"ABC","price":101.4}
+
+```
+
+- One direction only: server to client. Client-to-server messages use ordinary requests.
+- Works over normal HTTP (including HTTP/2 multiplexing), so proxies and auth work as usual. Text only. On HTTP/1.1, browsers limit connections per domain, which can matter.
+
+### WebSockets
+
+A request with `Upgrade: websocket` switches the connection (status `101 Switching Protocols`) into a full-duplex message channel over the same TCP connection.
+
+- Two-way, low overhead per message after the handshake, binary or text.
+- Stateful: each connection is pinned to one server, so you need a way to route messages to the right server (a pub/sub backplane), plus heartbeats, reconnect logic and backpressure handling. Some proxies and corporate networks need configuration for long-lived connections.
+
+## Decision table
+
+<TradeOffs caption="Choosing a real-time technique" rows={[
+  { option: "Short polling", pros: "Trivial, cacheable, stateless", cons: "High request volume, delay up to the interval", chooseWhen: "Updates are infrequent and a delay of seconds to minutes is fine (job status page)" },
+  { option: "Long polling", pros: "Fast delivery, works through nearly any proxy, plain HTTP", cons: "Repeated requests, many held connections, replay logic needed", chooseWhen: "Need near-real-time but cannot use SSE or WebSockets (legacy clients or networks)" },
+  { option: "SSE", pros: "Simple server push, automatic reconnect, resume with event ids, HTTP-friendly", cons: "One-way only, text only, many open connections", chooseWhen: "Feeds, notifications, live dashboards, progress streams, token streaming" },
+  { option: "WebSockets", pros: "Bidirectional, low latency, binary support, efficient for chatty traffic", cons: "Stateful servers, harder scaling and load balancing, custom reconnect and auth handling", chooseWhen: "Chat, multiplayer games, collaborative editing, anything with frequent client-to-server messages" }
+]} />
+
+## Scaling stateful connections
+
+Each open connection costs memory (commonly some KB to tens of KB, depending on buffers and the stack), and one process can hold many thousands to hundreds of thousands with careful tuning. A million concurrent users therefore needs a fleet of connection servers. The routing problem: user A is connected to server 3, user B to server 17; a message from A to B must reach server 17.
+
+<Diagram kind="flow" caption="Chat over WebSockets with a pub/sub backplane" nodes={[
+  { id: "clientA", label: "Client A", x: 0, y: 20, role: "Holds a WebSocket to one gateway; sends messages and receives pushed ones.", failureModes: ["Mobile network drop; must reconnect and resync missed messages"], tradeoffs: ["Persistent connection gives low latency but drains battery if kept chatty"] },
+  { id: "gw1", label: "WS gateway 1", x: 200, y: 20, role: "Terminates A's WebSocket, authenticates it and publishes messages to the backplane.", failureModes: ["Gateway crash drops all its connections at once, causing a reconnect storm", "Memory growth from slow consumers"], tradeoffs: ["Many connections per node is efficient but enlarges the blast radius of one failure"] },
+  { id: "bus", label: "Pub/sub backplane", x: 400, y: 80, role: "Routes a message to whichever gateway holds the recipient's connection, and to persistent storage.", failureModes: ["Backplane outage stops cross-server delivery", "Message loss if delivery is fire-and-forget"], tradeoffs: ["Decouples gateways but adds a hop and an at-most-once or at-least-once decision"] },
+  { id: "gw2", label: "WS gateway 2", x: 600, y: 140, role: "Holds B's WebSocket and pushes incoming messages to B.", failureModes: ["Recipient offline: message must be stored for later delivery"], tradeoffs: ["Sticky routing is simple; rebalancing connections is hard"] },
+  { id: "clientB", label: "Client B", x: 800, y: 140, role: "Receives the pushed message and acknowledges it.", failureModes: ["Duplicate delivery after reconnect unless messages carry ids"], tradeoffs: ["Client-side dedupe by message id is cheap and robust"] }
+]} edges={[
+  { from: "clientA", to: "gw1", label: "ws" }, { from: "gw1", to: "bus", label: "publish" }, { from: "bus", to: "gw2", label: "deliver" }, { from: "gw2", to: "clientB", label: "ws" }
+]} />
+
+## Failure modes
+
+- **Reconnect storm**: when a gateway restarts, tens of thousands of clients reconnect at the same instant. Use exponential backoff with jitter on the client.
+- **Missed messages**: connections drop silently. Give each message a monotonically increasing id and let the client ask for everything after the last id it saw.
+- **Half-open connections**: a client vanishes without closing. Use heartbeats (ping/pong) and idle timeouts.
+- **Slow consumers**: a client that cannot keep up makes server buffers grow. Bound the buffer and drop or disconnect.
+
+## Pitfalls
+
+- Reaching for WebSockets by default when SSE or polling would do. Statefulness is a real operational cost.
+- Forgetting authentication on the upgrade request and re-validation for long sessions.
+- Treating the live connection as the source of truth. It is a delivery optimisation; the durable record belongs in a store.
+- Deploying with a load balancer idle timeout shorter than your heartbeat interval.
+
+## What would you choose and why?
+
+A food-delivery app shows the courier's position updating every few seconds to the customer. The customer never sends data on this screen. Pick between short polling, SSE and WebSockets and explain what you would pay for the choice and what would make you change your mind.
+
+## Quiz
+
+<Quiz id="sd-m02-real-time" tags={["sse", "websockets"]} questions={[
+  { type: "mcq", q: "Which technique is one-way (server to client) over a single long-lived HTTP response and reconnects automatically in browsers?", options: ["WebSockets", "Short polling", "Server-sent events", "gRPC unary calls"], answer: 2, explain: "SSE uses EventSource with automatic reconnection and Last-Event-ID." },
+  { type: "mcq", q: "100,000 clients short-poll every 5 seconds. Approximately how many requests per second hit the server?", options: ["500", "2,000", "20,000", "500,000"], answer: 2, explain: "100,000 / 5 = 20,000 requests per second." },
+  { type: "multi", q: "Which are operational challenges specific to WebSockets at scale?", options: ["Routing a message to the server holding the recipient's connection", "Reconnect storms after a gateway restart", "Connections are stateless so any server works", "Heartbeats to detect dead connections"], answer: [0, 1, 3], explain: "Connections are stateful and pinned to a server, which creates the routing, reconnect and liveness problems." },
+  { type: "mcq", q: "Best fit for a live chat with frequent messages in both directions?", options: ["Short polling every minute", "SSE only", "WebSockets", "A CDN"], answer: 2, explain: "Bidirectional, low-latency chatty traffic suits WebSockets." }
+]} />

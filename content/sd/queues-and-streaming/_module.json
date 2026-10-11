@@ -1,0 +1,1 @@
+{ "title": "Queues and Streaming", "level": "Level 1: Core Building Blocks", "order": 8, "summary": "Queues, pub/sub, Kafka vs RabbitMQ vs SQS, delivery semantics, retries and dead-letter queues, and stream processing." }

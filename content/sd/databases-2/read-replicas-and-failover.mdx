@@ -1,0 +1,115 @@
+---
+title: Read Replicas and Failover
+track: sd
+module: databases-2
+order: 2
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/databases-2/replication"]
+tags: [read-replicas, failover, high-availability, split-brain]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 5 "Handling Node Outages"
+    url: https://dataintensive.net/
+  - title: PostgreSQL documentation, Log-Shipping Standby Servers
+    url: https://www.postgresql.org/docs/current/warm-standby.html
+  - title: "In Search of an Understandable Consensus Algorithm (Raft)"
+    url: https://raft.github.io/raft.pdf
+---
+
+## Intuition
+
+Replicas serve two jobs that people often conflate. **Read replicas** exist to add read capacity. **Failover** exists to survive the leader dying. The same machines can do both, but the design questions differ: for read scaling you ask "how stale can a read be?", for failover you ask "how fast can we recover, and how much data may we lose?".
+
+## Read replicas
+
+If a workload is 90% reads, sending reads to N followers can multiply read throughput roughly by N while the leader keeps all writes. Typical uses:
+
+- Product pages, feeds and profile reads served from replicas.
+- Reporting and analytics queries pointed at a dedicated replica so they cannot slow the leader.
+- Placing replicas near users in other regions to cut read latency.
+
+Limits to remember:
+
+- **Writes do not scale.** Every replica applies every write, so adding replicas to a write-bound system adds cost without relief. In fact the leader does extra work shipping the log to each follower.
+- **Staleness.** Reads are only as fresh as the replica. See the previous lesson for read-your-writes fixes.
+- **Replica lag under load.** A replica doing heavy reads and applying a busy write stream can fall further behind, so monitor lag in seconds or bytes and take a replica out of rotation when it exceeds your threshold.
+
+A simple application pattern is a router that sends writes and "must be fresh" reads to the leader, and everything else to a healthy replica below the lag threshold.
+
+## Failover
+
+Failover is promoting a follower to leader when the leader fails. It has four steps.
+
+1. **Detect** the failure. Usually a timeout on heartbeats. Too short a timeout causes false failovers during a load spike or network blip; too long extends the outage.
+2. **Choose** the new leader. The follower that is most up to date (highest applied log position) is the best candidate, minimising lost writes. Choosing is a consensus problem: nodes must agree on one candidate, typically via a coordinator or a consensus protocol such as Raft or ZooKeeper-style election.
+3. **Reconfigure** clients and the other followers to use the new leader (DNS update, virtual IP, proxy, or service discovery).
+4. **Fence** the old leader so that if it returns it cannot keep accepting writes.
+
+### What can go wrong
+
+- **Lost writes.** With asynchronous replication, the promoted follower may lack the last writes the old leader acknowledged. When the old leader comes back with those writes, the cluster must discard them (or reconcile), which is dangerous if other systems already used those values. A well-known example is an auto-increment ID the old leader issued that the new leader reissues.
+- **Split brain.** Two nodes both believe they are leader and both accept writes, so data diverges. Prevent it by fencing: shut down or isolate the old leader (STONITH), use fencing tokens so storage rejects stale leaders, and require a majority quorum to elect a leader so a minority partition cannot elect one.
+- **Flapping.** Aggressive failover under a transient problem promotes a replica that then also struggles, causing repeated failovers.
+- **Cascading overload.** After failover the new leader has cold caches and all traffic; it can fall over too. Capacity planning should assume you lose a node.
+
+<Diagram kind="mermaid" code={`flowchart TD
+  A[Leader heartbeat missed] --> B{Timeout exceeded?}
+  B -- no --> A
+  B -- yes --> C[Quorum elects most up-to-date follower]
+  C --> D[Promote new leader]
+  D --> E[Repoint clients and followers]
+  E --> F[Fence old leader]
+  F --> G[Old leader rejoins as follower, discarding unreplicated writes]`} caption="Failover sequence" />
+
+### Recovery targets
+
+Two numbers drive the choice of mechanism:
+
+- **RTO** (recovery time objective): how long the outage may last. Automated failover typically brings this to tens of seconds; manual failover to minutes or more.
+- **RPO** (recovery point objective): how much data you may lose. Asynchronous replication gives a nonzero RPO bounded by replication lag; synchronous replication to at least one standby can give RPO near zero.
+
+Managed databases (for example Amazon RDS Multi-AZ or Aurora, Cloud SQL high availability) bundle detection, promotion and DNS repointing. They typically fail over in the order of tens of seconds to a couple of minutes; check your provider's current documentation rather than relying on a figure.
+
+## Worked example: sizing replicas
+
+A service peaks at 12,000 reads per second and 800 writes per second. One database node handles about 5,000 reads per second at acceptable latency (ignoring writes for simplicity). Reads need about `12000 / 5000 = 2.4`, so 3 read-serving nodes at 100% utilisation. For headroom (target about 60% utilisation) plan for `12000 / (5000 * 0.6) = 4` read-serving nodes. For failover you also want to survive losing one node, so provision 5 read-capable nodes total, with one being the leader. Because the leader also takes writes, you would send it fewer reads. These are illustrative numbers; measure your own.
+
+<Diagram kind="flow" caption="Read-scaled topology with failover standby" nodes={[
+  { id: "app", label: "App servers", x: 0, y: 80, role: "Use a router: writes to the leader, tolerant reads to replicas.", failureModes: ["Stale reads if the router ignores lag", "Connection pool still points at the dead leader after failover"], tradeoffs: ["Read/write splitting in the app is flexible but leaks topology into code"] },
+  { id: "proxy", label: "Proxy / discovery", x: 200, y: 80, role: "Tracks the current leader and healthy replicas; repoints on failover.", failureModes: ["Proxy itself is a single point of failure unless redundant", "Stale cache of topology sends writes to a demoted node"], tradeoffs: ["Hides failover from apps at the price of one more hop"] },
+  { id: "leader", label: "Leader", x: 420, y: 80, role: "Accepts all writes; ships log to replicas.", failureModes: ["Crash triggers failover and possibly lost async writes", "Network partition can cause split brain without fencing"], tradeoffs: ["Sync standby lowers RPO but raises write latency"] },
+  { id: "standby", label: "Sync standby", x: 640, y: 20, role: "Receives log synchronously; preferred promotion candidate.", failureModes: ["If it stalls, writes stall (unless semi-sync falls back)"], tradeoffs: ["Extra node that does not add read capacity if reserved"] },
+  { id: "replica", label: "Read replicas", x: 640, y: 140, role: "Serve read traffic asynchronously behind the leader.", failureModes: ["Lag spikes make reads stale", "Replica loss reduces read capacity"], tradeoffs: ["Cheap read scaling vs. staleness"] }
+]} edges={[
+  { from: "app", to: "proxy" }, { from: "proxy", to: "leader", label: "writes" }, { from: "leader", to: "standby", label: "sync" }, { from: "leader", to: "replica", label: "async" }, { from: "proxy", to: "replica", label: "reads" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Failover approaches" rows={[
+  { option: "Manual failover", pros: "A human verifies the situation; few false failovers", cons: "Slow (minutes to hours); depends on on-call", chooseWhen: "Low-traffic systems or where wrong failover is very costly" },
+  { option: "Automated failover (coordinator or consensus)", pros: "Recovery in tens of seconds; no human in the loop", cons: "Risk of false positives and split brain if fencing is weak", chooseWhen: "Most production OLTP databases" },
+  { option: "Synchronous standby", pros: "RPO near zero", cons: "Write latency includes the standby round trip; availability depends on standby", chooseWhen: "Data that must not be lost" },
+  { option: "Multi-region standby", pros: "Survives region loss", cons: "Cross-region lag or latency; more expensive", chooseWhen: "Disaster recovery requirements" }
+]} />
+
+## Pitfalls
+
+- Pointing reporting queries at the leader and calling the replica a "backup".
+- Never testing failover; the first real one is a disaster. Run game days.
+- A promoted replica that is smaller than the old leader and cannot carry the load.
+- Forgetting that app connection pools and DNS caches keep using the old leader address for a while.
+
+## What would you choose and why?
+
+Your checkout database must lose no committed orders but can tolerate 30 seconds of unavailability. Would you choose a synchronous standby with automated failover, or asynchronous replicas with a fast manual failover? State your RPO and RTO and justify the write-latency cost.
+
+## Quiz
+
+<Quiz id="sd-m07-failover" tags={["failover", "read-replicas"]} questions={[
+  { type: "mcq", q: "Adding more read replicas to a database that is bottlenecked on write throughput will mostly:", options: ["Double write capacity", "Not help, and can add replication overhead on the leader", "Remove replication lag", "Eliminate the need for a leader"], answer: 1, explain: "Replicas apply every write; they scale reads, not writes." },
+  { type: "mcq", q: "Which best prevents split brain after a network partition?", options: ["A longer heartbeat timeout only", "Requiring a majority quorum to elect a leader and fencing the old leader", "Adding more read replicas", "Using DNS with a short TTL"], answer: 1, explain: "A minority partition cannot reach quorum, and fencing stops a stale leader from accepting writes." },
+  { type: "multi", q: "Which are risks of automated failover with asynchronous replication?", options: ["The new leader may be missing recently acknowledged writes", "The old leader may keep accepting writes if not fenced", "Read throughput doubles", "A false positive may cause an unnecessary failover"], answer: [0, 1, 3], explain: "Lost writes, split brain and false failovers are the classic hazards. Read throughput is unrelated." },
+  { type: "mcq", q: "Which metric describes the maximum acceptable data loss after a failure?", options: ["RTO", "RPO", "p99 latency", "QPS"], answer: 1, explain: "Recovery point objective is how much data (measured in time) you can afford to lose; RTO is downtime." }
+]} />

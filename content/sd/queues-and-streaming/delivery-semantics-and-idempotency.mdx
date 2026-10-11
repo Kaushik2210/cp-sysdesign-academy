@@ -1,0 +1,116 @@
+---
+title: Delivery Semantics, Idempotency and Ordering
+track: sd
+module: queues-and-streaming
+order: 3
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/queues-and-streaming/kafka-rabbitmq-sqs"]
+tags: [delivery-semantics, exactly-once, idempotency, ordering]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 11 "Fault Tolerance" and chapter 8 "The Trouble with Distributed Systems"
+    url: https://dataintensive.net/
+  - title: Apache Kafka documentation, Message Delivery Semantics
+    url: https://kafka.apache.org/documentation/#semantics
+  - title: "Exactly-once Semantics are Possible: Here's How Kafka Does it (Neha Narkhede)"
+    url: https://www.confluent.io/blog/exactly-once-semantics-are-possible-heres-how-apache-kafka-does-it/
+---
+
+## Intuition
+
+A producer sends a message, the network drops the acknowledgement, and the producer cannot tell whether the broker got it. Retry and you might duplicate; do not retry and you might lose it. A consumer processes a message and crashes before telling the broker; the broker cannot tell whether it was processed. Every messaging system must pick a side, and the names of the sides are the delivery semantics.
+
+## The three guarantees
+
+| Semantics | What it means | How it happens | Failure outcome |
+| --- | --- | --- | --- |
+| At-most-once | Delivered zero or one time | Acknowledge (commit offset) before processing; do not retry | Messages can be lost |
+| At-least-once | Delivered one or more times | Process, then acknowledge; retry until acknowledged | Messages can be duplicated |
+| Exactly-once | Effect happens once | Not a transport property on its own; see below | Needs cooperation end to end |
+
+### What "exactly once" really means
+
+Over an unreliable network, a receiver cannot be certain that a message was delivered exactly one time; this is a consequence of the two-generals problem. What systems offer is **exactly-once processing effects**: the *observable result* is as if each message were processed once. That is achieved by combining at-least-once delivery with deduplication or atomicity:
+
+- **Idempotent producers** (Kafka): each producer has an ID and sequence numbers per partition, so the broker discards a retried duplicate within a session.
+- **Transactions**: Kafka transactions write output records and the consumer's input offsets atomically, so a read-process-write pipeline *within Kafka* commits both or neither. Downstream consumers must read committed data only.
+- **Idempotent consumers or sinks**: side effects outside the transactional boundary (an email, a payment API, a database in another system) are only safe if repeating them is harmless.
+
+So the practical rule: exactly-once is "at-least-once plus idempotence". The guarantee ends at the boundary of the system that provides it.
+
+## Idempotent consumers
+
+An operation is **idempotent** if applying it repeatedly has the same effect as applying it once. `SET balance = 100` is idempotent; `balance = balance + 10` is not.
+
+Techniques:
+
+1. **Natural idempotence**: design the write as an upsert or "set to value" keyed by an ID.
+2. **Idempotency key / dedup table**: store processed message IDs (with a TTL as long as the maximum redelivery window) and skip repeats. For atomicity, record the ID in the *same transaction* as the business effect, using a unique constraint.
+3. **Conditional updates with versions**: apply only if the stored version is older (`UPDATE ... WHERE version < :v`).
+4. **Pass the key downstream**: send an idempotency key to external APIs such as payment providers, which dedupe on their side.
+
+### Worked example: crash between effect and ack
+
+A consumer reads `{id: m-17, user: 5, amount: 10}`, adds 10 to a balance, then crashes before acknowledging. The broker redelivers; the consumer adds 10 again, so the balance is wrong by 10.
+
+Fix: in one database transaction, `INSERT INTO processed(id) VALUES ('m-17')` (unique key) and update the balance. On redelivery the insert violates the unique constraint, the transaction aborts, and the consumer acknowledges the duplicate without effect.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant B as Broker
+  participant C as Consumer
+  participant D as Database
+  B->>C: deliver m-17
+  C->>D: BEGIN, insert processed m-17, update balance, COMMIT
+  C--xB: crash before ack
+  B->>C: redeliver m-17
+  C->>D: insert processed m-17 fails (duplicate)
+  C->>B: ack, no second effect`} caption="Idempotent consumer via a unique processed-ID record in the same transaction" />
+
+## Ordering
+
+- Brokers usually guarantee order only within a unit: a Kafka partition, an SQS FIFO message group, a single RabbitMQ queue with a single consumer.
+- To keep related events in order, route them by key (`order_id`, `user_id`) to the same partition or group. Unrelated keys can proceed in parallel.
+- Ordering breaks with: multiple competing consumers on one queue, retries that reinsert a failed message behind newer ones, producer retries without idempotence reordering in flight batches, and repartitioning that changes the key mapping.
+- Global total order is expensive: one partition means one consumer's throughput. Prefer per-key order.
+- When order cannot be guaranteed, make consumers tolerant: carry a version or timestamp in the event and ignore out-of-date updates.
+
+## Failure modes
+
+<Diagram kind="flow" caption="Consumer processing pipeline" nodes={[
+  { id: "broker", label: "Broker", x: 0, y: 80, role: "Holds messages; redelivers until acknowledged.", failureModes: ["Lost ack leads to redelivery", "Rebalance redelivers uncommitted messages to another consumer"], tradeoffs: ["At-least-once is the safe default; duplicates are handled downstream"] },
+  { id: "consumer", label: "Consumer", x: 220, y: 80, role: "Reads, applies effect, then acks.", failureModes: ["Crash after effect, before ack: duplicate", "Ack before effect: loss on crash"], tradeoffs: ["Ack timing chooses between duplicates and loss"] },
+  { id: "dedup", label: "Dedup / idempotency store", x: 440, y: 20, role: "Remembers processed message IDs or versions.", failureModes: ["TTL shorter than the redelivery window lets duplicates through", "Store outage blocks processing"], tradeoffs: ["Extra write per message vs. correctness"] },
+  { id: "sink", label: "Side-effect sink", x: 440, y: 140, role: "Database, email, payment API receiving the effect.", failureModes: ["Non-idempotent API double-charges", "Partial failure leaves state half applied"], tradeoffs: ["Use idempotency keys, or wrap effect and dedup record in one transaction"] }
+]} edges={[
+  { from: "broker", to: "consumer", label: "deliver" }, { from: "consumer", to: "dedup", label: "check/record" }, { from: "consumer", to: "sink", label: "apply" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Delivery guarantee choices" rows={[
+  { option: "At-most-once", pros: "Lowest latency; no duplicates; simple", cons: "Silent loss", chooseWhen: "Metrics, logs, or telemetry where an occasional gap is acceptable" },
+  { option: "At-least-once + idempotent consumer", pros: "No loss; duplicates harmless; the practical default", cons: "Need dedup logic or naturally idempotent writes", chooseWhen: "Most business events, payments with idempotency keys" },
+  { option: "Transactional exactly-once (within the broker)", pros: "Atomic read-process-write in stream pipelines", cons: "Higher latency, complexity; stops at system boundary", chooseWhen: "Stream processing aggregations that write back to the same broker" },
+  { option: "Single partition for global order", pros: "Total order", cons: "Throughput capped at one consumer; one hot spot", chooseWhen: "Small volumes that truly require global order" }
+]} />
+
+## Pitfalls
+
+- Believing a broker's "exactly-once" flag makes an email or payment safe.
+- Dedup cache TTL shorter than the longest retry or replay window.
+- Ordering by timestamp from different producers' clocks.
+- Retrying a failed message to the back of the queue and breaking per-key order.
+
+## What would you choose and why?
+
+A payments consumer reads `charge` commands from a queue and calls a card processor over HTTP. Design the idempotency strategy: what key do you use, where do you store it, and what happens if your service crashes after the processor accepts the charge but before you record the result?
+
+## Quiz
+
+<Quiz id="sd-m08-delivery-semantics" tags={["delivery-semantics", "idempotency"]} questions={[
+  { type: "mcq", q: "A consumer commits its offset before processing the message, then crashes. Which semantics does this implement?", options: ["At-most-once", "At-least-once", "Exactly-once", "Ordered"], answer: 0, explain: "The message is marked done before the effect; a crash loses it and it is not redelivered." },
+  { type: "mcq", q: "What does practical exactly-once usually consist of?", options: ["A network that never drops packets", "At-least-once delivery plus deduplication or atomic transactions", "Sending each message twice", "Removing acknowledgements"], answer: 1, explain: "The effect is made idempotent, so redelivery does not change the outcome." },
+  { type: "multi", q: "Which operations are naturally idempotent?", options: ["SET status = 'shipped' WHERE id = 7", "balance = balance + 10", "Upsert a row by primary key with the same values", "Append a log line"], answer: [0, 2], explain: "Setting to a value and keyed upserts repeat harmlessly; increments and appends accumulate." },
+  { type: "mcq", q: "Where should the processed-message ID be recorded to make dedup reliable?", options: ["In memory only", "In the same transaction as the business effect", "In a log file after the fact", "On the producer"], answer: 1, explain: "Atomic recording prevents the effect being applied without the ID being saved, or vice versa." }
+]} />

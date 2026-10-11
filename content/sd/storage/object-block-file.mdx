@@ -1,0 +1,111 @@
+---
+title: Object, Block and File Storage
+track: sd
+module: storage
+order: 1
+difficulty: beginner
+estMinutes: 25
+prerequisites: ["sd/what-is-system-design/requirements-and-framework"]
+tags: [storage, object-storage, block-storage, file-storage]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 3 (Storage and Retrieval)
+    url: https://dataintensive.net/
+  - title: Amazon S3 User Guide - What is Amazon S3?
+    url: https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html
+  - title: Amazon EBS User Guide - What is Amazon EBS?
+    url: https://docs.aws.amazon.com/ebs/latest/userguide/what-is-ebs.html
+  - title: Amazon EFS User Guide - What is Amazon EFS?
+    url: https://docs.aws.amazon.com/efs/latest/ug/whatisefs.html
+---
+
+## Intuition
+
+Every system eventually stores bytes. The question is the *shape* of the interface between your program and those bytes. There are three classic shapes, and each one trades flexibility for scalability:
+
+- **Block storage** hands you a raw device made of fixed-size blocks, like a disk. You (or a file system or database on top of it) decide what the blocks mean.
+- **File storage** gives you a hierarchy of directories and files with POSIX-like semantics: open, seek, append, rename, lock.
+- **Object storage** gives you a flat namespace of blobs addressed by a key, accessed over HTTP with `PUT`, `GET`, `DELETE` and `LIST`.
+
+A useful mental model: block is a hard drive, file is a shared network drive, object is a giant key-value map whose values are files.
+
+## Formal comparison
+
+| | Block | File | Object |
+| --- | --- | --- | --- |
+| Unit | Fixed-size block at an offset | File in a directory tree | Whole object plus metadata, addressed by key |
+| Access | Read and write byte ranges through a device interface (iSCSI, NVMe, cloud volume) | POSIX over NFS or SMB | HTTP REST API |
+| Update in place | Yes, any block | Yes, any byte range | No: replace the whole object |
+| Latency | Lowest, often sub-millisecond to low milliseconds | Low to moderate (network round trips for metadata) | Higher, typically tens of milliseconds per request |
+| Sharing | Usually attached to one machine at a time | Many clients at once | Unlimited concurrent clients |
+| Scale ceiling | One volume, bounded by device size and IOPS | Large, but metadata handling can bottleneck | Effectively unbounded objects and bytes |
+| Cost per GB | Highest | Middle | Lowest |
+| Typical user | Database data files, boot volumes | Shared home directories, legacy apps, scratch areas | Images, videos, backups, logs, data lake files |
+
+<Callout type="note">
+Latency and cost rows are order-of-magnitude. Real numbers depend on provider, region and tier; check current documentation before putting a number in a design.
+</Callout>
+
+## Why object storage scales so well
+
+Object stores give up exactly the things that are expensive to make distributed:
+
+1. **No real hierarchy.** A key like `photos/2026/cat.jpg` looks like a path but is just a string. `LIST` with a prefix and delimiter simulates folders. Without a directory tree there is no central structure to lock.
+2. **No partial update.** Overwriting means writing a new object. Whole-object replacement makes replication, caching and erasure coding much simpler.
+3. **A simple API over HTTP.** Any client, in any language, through any load balancer or CDN.
+
+Block storage cannot make that trade: databases must overwrite an 8 KB page in place with very low latency. File storage cannot either: rename and lock semantics need agreement among clients.
+
+## Worked example: where does each piece of a photo app go?
+
+A photo-sharing app has user records, photo metadata, photo bytes, thumbnails, and a nightly database backup.
+
+- *User records and photo metadata* live in a database. The database runs on a VM whose data directory sits on **block** storage, because it needs fast random reads and in-place page writes.
+- *Photo bytes and thumbnails* go to **object** storage. They are written once, read many times, can be large, and can be served by a CDN straight from the object store.
+- *The nightly backup* is a compressed dump uploaded to **object** storage, often in a cheaper tier.
+- *A legacy image-processing tool* that expects a mounted directory and POSIX locking would use **file** storage shared by several workers, unless you can change it to read from object storage.
+
+<Diagram kind="flow" caption="Photo app: which storage type serves which data" nodes={[
+  { id: "app", label: "App servers", x: 0, y: 90, role: "Stateless services that handle uploads, serve metadata and orchestrate processing.", failureModes: ["Crash during upload leaves orphan objects without metadata rows"], tradeoffs: ["Staying stateless means all durable data must live in the stores to the right"] },
+  { id: "db", label: "Database on block volume", x: 240, y: 0, role: "Holds users and photo metadata. Data files sit on a block volume for low-latency random IO.", failureModes: ["Volume failure: needs replicas and snapshots", "Volume is tied to one availability zone"], tradeoffs: ["Fast and consistent but expensive per GB and capped in size"] },
+  { id: "obj", label: "Object store", x: 240, y: 90, role: "Holds original photos, thumbnails and database backups as whole objects.", failureModes: ["Surprise bills from request and egress charges", "Overwritten object may be served stale by caches"], tradeoffs: ["Cheap and almost unlimited, but higher latency and no in-place edit"] },
+  { id: "nfs", label: "Shared file system", x: 240, y: 180, role: "Network file system mounted by legacy workers that need POSIX semantics.", failureModes: ["Metadata handling becomes a bottleneck", "Stale handles after failover"], tradeoffs: ["Familiar semantics but harder to scale than objects"] },
+  { id: "cdn", label: "CDN", x: 480, y: 90, role: "Caches photo bytes near users, pulling from the object store on a miss.", failureModes: ["Stale content after overwrite unless URLs are versioned"], tradeoffs: ["Offloads reads from the store at the price of invalidation complexity"] }
+]} edges={[
+  { from: "app", to: "db", label: "metadata" }, { from: "app", to: "obj", label: "photo bytes" }, { from: "app", to: "nfs", label: "legacy jobs" }, { from: "obj", to: "cdn", label: "origin" }
+]} />
+
+## Choosing in practice
+
+Ask three questions in order:
+
+1. **Do I need to overwrite small ranges in place with low latency?** If yes, block (usually underneath a database or file system).
+2. **Do many machines need a shared POSIX view with locks and rename?** If yes, file storage.
+3. **Otherwise**: is the data written once or rarely changed, accessed by key, and large or numerous? Object storage is almost always the right default.
+
+<TradeOffs caption="Picking a storage interface" rows={[
+  { option: "Block storage", pros: "Lowest latency, in-place updates, works with any file system or database", cons: "Usually single-attach, capped size, highest cost per GB, you manage capacity", chooseWhen: "Database files, boot disks, workloads with random small IO" },
+  { option: "File storage", pros: "Shared hierarchical namespace with POSIX semantics, no app changes for legacy software", cons: "Metadata operations can bottleneck, harder to scale, cost above objects", chooseWhen: "Shared directories, lift-and-shift apps, build and scratch areas" },
+  { option: "Object storage", pros: "Near-unlimited scale, high durability, cheap, HTTP access, tiers and lifecycle rules", cons: "No in-place edit, higher latency per request, weak listing and rename", chooseWhen: "Media, backups, logs, data lake files, static assets" }
+]} />
+
+## Pitfalls
+
+- **Treating object storage like a file system.** "Renaming" a prefix of a million keys means a million copy-and-delete operations. Choose key names so you never need to rename.
+- **Putting a database directly on object storage or a network file system** without knowing what it requires. Most databases assume fsync semantics and latency that only block storage gives.
+- **Using file storage because it is familiar** and then hitting a metadata bottleneck when one directory holds millions of files.
+- **Forgetting that block volumes are zonal.** If the zone is lost the volume is unreachable; replicas and snapshots are your protection.
+- **Ignoring request cost.** Object stores charge per request as well as per GB. Millions of tiny objects can cost more in requests than in space.
+
+## What would you choose and why?
+
+You are designing a video platform. Raw uploads (several GB each), transcoded renditions, the catalogue of titles and comments, and a scratch area where 50 transcoding workers coordinate on shared intermediate files. Assign each to block, file or object storage and justify each with one sentence about access pattern and size. Then say which choice would be hardest to change later, and why.
+
+## Quiz
+
+<Quiz id="sd-m09-object-block-file" tags={["storage"]} questions={[
+  { type: "mcq", q: "A relational database needs to overwrite individual 8 KB pages in place with low latency. Which storage type is the natural fit?", options: ["Object storage", "Block storage", "A CDN", "Archive tier storage"], answer: 1, explain: "Block storage exposes a device where any block can be rewritten in place with low latency. Object stores only replace whole objects." },
+  { type: "mcq", q: "Why is renaming a 'folder' in an object store expensive?", options: ["Folders are encrypted differently", "There are no real folders; the prefix is part of every object's key, so each object must be copied and deleted", "Object stores forbid renames", "Renames are free but listing is slow"], answer: 1, explain: "The namespace is flat. A prefix is just text inside each key, so a rename rewrites every key under it." },
+  { type: "multi", q: "Which are reasons object storage scales to enormous sizes?", options: ["Flat namespace with no directory tree to lock", "Objects are replaced as a whole rather than updated in place", "It supports POSIX file locking between clients", "Simple HTTP API that load balancers and CDNs understand"], answer: [0, 1, 3], explain: "Dropping hierarchy, in-place update and POSIX locking is exactly what makes distribution easy." },
+  { type: "mcq", q: "Many worker machines must read and write the same directory tree using POSIX calls and file locks. What fits best?", options: ["A block volume attached to every worker", "Object storage accessed with PUT and GET", "Network file storage (NFS or SMB style)", "A CDN"], answer: 2, explain: "Shared POSIX semantics are what file storage provides. A block volume is normally attached to one machine at a time." }
+]} />

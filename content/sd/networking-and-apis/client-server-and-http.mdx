@@ -1,0 +1,147 @@
+---
+title: Client-Server and HTTP
+track: sd
+module: networking-and-apis
+order: 1
+difficulty: beginner
+estMinutes: 30
+prerequisites: [sd/what-is-system-design/reading-architecture-diagrams]
+tags: [http, https, tls, client-server, http2, http3]
+type: lesson
+furtherReading:
+  - title: MDN Web Docs, HTTP overview
+    url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Overview
+  - title: RFC 9110, HTTP Semantics
+    url: https://www.rfc-editor.org/rfc/rfc9110
+  - title: RFC 9114, HTTP/3
+    url: https://www.rfc-editor.org/rfc/rfc9114
+  - title: RFC 8446, TLS 1.3
+    url: https://www.rfc-editor.org/rfc/rfc8446
+---
+
+## Intuition
+
+Almost every system you will design is a conversation between a **client** that asks and a **server** that answers. The client opens a connection, sends a request, and waits. The server may be a single process or a fleet behind a load balancer, but the client sees one address and one contract. HTTP is that contract for the web: a text-oriented request/response protocol that runs on top of a reliable byte stream (TCP, or QUIC for HTTP/3).
+
+Understanding what one request costs, and what can go wrong between the two ends, is the foundation for everything else in this module.
+
+## The client-server model
+
+- The client **initiates**; the server **responds**. A server cannot normally push to a client that has not asked (that is why real-time techniques exist; see the later lesson).
+- Servers should be **stateless between requests** where possible: each request carries what the server needs (credentials, parameters). State lives in a database or shared store.
+- Servers are shared by many clients, so they need limits (timeouts, rate limits, body-size caps) to protect themselves.
+
+A single page load is not one request. It may be one HTML document, then tens of requests for scripts, styles, images and API calls. Each one pays connection, security and server costs, which is why connection reuse and caching matter so much.
+
+## Anatomy of an HTTP exchange
+
+```http
+GET /v1/orders/4412 HTTP/1.1
+Host: api.example.com
+Accept: application/json
+Authorization: Bearer <token>
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: private, max-age=30
+ETag: "a91f"
+
+{"id": 4412, "status": "shipped"}
+```
+
+A request has a **method**, a **target**, **headers** and an optional **body**. A response has a **status code**, headers and an optional body.
+
+### Methods and their guarantees
+
+| Method | Typical use | Safe (no side effects) | Idempotent (repeat has same effect) |
+| --- | --- | --- | --- |
+| GET | Read a resource | Yes | Yes |
+| HEAD | Read headers only | Yes | Yes |
+| PUT | Replace a resource at a known URL | No | Yes |
+| DELETE | Remove a resource | No | Yes |
+| POST | Create or trigger an action | No | No |
+| PATCH | Partial update | No | Not guaranteed |
+
+*Idempotent* matters because networks fail: if a response is lost, a client does not know whether the request ran. Retrying a PUT or DELETE is safe; retrying a POST may create a second order, which is why APIs add idempotency keys (covered in the last lesson).
+
+### Status code families
+
+| Range | Meaning | Examples |
+| --- | --- | --- |
+| 2xx | Success | 200 OK, 201 Created, 202 Accepted, 204 No Content |
+| 3xx | Redirect or cache validation | 301 Moved Permanently, 302 Found, 304 Not Modified |
+| 4xx | Client error: do not retry unchanged | 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 409 Conflict, 429 Too Many Requests |
+| 5xx | Server error: may be retried | 500 Internal Server Error, 502 Bad Gateway, 503 Service Unavailable, 504 Gateway Timeout |
+
+<Callout type="tip">
+Retry guidance: retry 5xx and network timeouts (with backoff and jitter) only for idempotent requests or when an idempotency key is used. Do not retry most 4xx; the request itself is wrong. 429 is the exception: wait as told by `Retry-After`.
+</Callout>
+
+## HTTPS and the TLS handshake (high level)
+
+HTTP itself is plain text. **HTTPS** is HTTP inside a **TLS** session, which gives three properties: *confidentiality* (encrypted), *integrity* (tampering detected) and *authentication* (the server proves its identity with a certificate signed by a trusted authority).
+
+At a high level the handshake does this:
+
+1. **ClientHello**: client lists supported TLS versions and cipher suites and sends key-exchange material.
+2. **ServerHello and certificate**: the server picks parameters and sends its certificate chain, proving it owns the domain.
+3. **Key agreement**: both sides derive shared session keys using an ephemeral key exchange (so past sessions stay safe even if a long-term key leaks later, called forward secrecy).
+4. **Finished**: both confirm, then application data (the HTTP request) flows encrypted using fast symmetric cryptography.
+
+TLS 1.3 completes this in one round trip after the TCP connection is established, and can resume earlier sessions with fewer round trips. Cost summary for a brand-new HTTPS connection over TCP: DNS lookup, one round trip for TCP, one for TLS 1.3, then the request itself. On a 100 ms round-trip path, that is about 200 ms of setup before the first byte of the request is even sent, which is why **connection reuse (keep-alive)** and edge servers near the user matter.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant S as Server
+  Note over C,S: DNS lookup already done
+  C->>S: TCP SYN
+  S-->>C: TCP SYN-ACK
+  C->>S: TCP ACK + TLS ClientHello
+  S-->>C: ServerHello, certificate, Finished
+  C->>S: Finished + HTTP request (encrypted)
+  S-->>C: HTTP response (encrypted)`} caption="Setup cost of a fresh HTTPS connection over TCP with TLS 1.3 (simplified)" />
+
+## HTTP/1.1 vs HTTP/2 vs HTTP/3
+
+<TradeOffs caption="Protocol versions" rows={[
+  { option: "HTTP/1.1", pros: "Simple text protocol, universally supported, easy to debug", cons: "One request at a time per connection; browsers open several connections; verbose repeated headers", chooseWhen: "Legacy clients, simple internal tools" },
+  { option: "HTTP/2", pros: "Binary framing, many multiplexed streams on one connection, header compression (HPACK)", cons: "Runs on TCP, so one lost packet stalls all streams (TCP head-of-line blocking)", chooseWhen: "Default for modern sites and APIs; gRPC uses it" },
+  { option: "HTTP/3", pros: "Runs on QUIC over UDP: per-stream loss recovery, faster setup (TLS built in), survives network changes via connection IDs", cons: "UDP can be blocked or throttled by some networks; newer tooling; more CPU in user space", chooseWhen: "Mobile and lossy networks, latency-sensitive global users; fall back to HTTP/2 when blocked" }
+]} />
+
+All three keep the same semantics (methods, status codes, headers); only the wire format and transport change. That is why your API design does not depend on the version.
+
+## A request through a typical stack
+
+<Diagram kind="flow" caption="What a single HTTPS API call touches" nodes={[
+  { id: "client", label: "Client", x: 0, y: 80, role: "Browser or app that resolves the name, opens the connection and sends the request.", failureModes: ["Request times out and is retried, possibly duplicating a non-idempotent call", "Offline or captive-portal network"], tradeoffs: ["Short timeouts fail fast but cause more spurious retries"] },
+  { id: "edge", label: "TLS terminator / LB", x: 200, y: 80, role: "Terminates TLS, enforces limits, and forwards the request to a healthy backend.", failureModes: ["Expired certificate breaks every client", "Becomes a single point of failure without redundancy"], tradeoffs: ["Terminating TLS at the edge saves backend CPU but traffic inside the network may be unencrypted unless re-encrypted"] },
+  { id: "api", label: "API server", x: 400, y: 80, role: "Authenticates the caller, runs business logic and builds the response.", failureModes: ["Slow dependency exhausts worker threads", "Crash mid-request leaves partial work"], tradeoffs: ["Stateless servers scale easily but push state to a shared store"] },
+  { id: "db", label: "Database", x: 600, y: 80, role: "Holds the data the API reads and writes.", failureModes: ["Slow query under load", "Primary failure requires failover"], tradeoffs: ["Strong consistency and queries versus harder horizontal scaling"] }
+]} edges={[
+  { from: "client", to: "edge", label: "HTTPS" }, { from: "edge", to: "api", label: "HTTP" }, { from: "api", to: "db", label: "query" }
+]} />
+
+## Pitfalls
+
+- Using `GET` for actions with side effects. Caches, prefetchers and crawlers assume GET is safe.
+- Returning `200` with an error message in the body. Clients, caches and monitoring rely on status codes.
+- Confusing `401` (not authenticated) with `403` (authenticated but not allowed).
+- Forgetting timeouts. A client or server without a timeout can hang forever and exhaust resources.
+- Assuming HTTPS means the data is safe at rest or that the server is trustworthy; it protects the wire only.
+
+## What would you choose and why?
+
+A mobile app in a region with lossy cellular networks makes many small API calls on app start. Would you stay on HTTP/1.1 with several connections, move to HTTP/2, or enable HTTP/3 with fallback? State which cost you are reducing and what you lose.
+
+## Quiz
+
+<Quiz id="sd-m02-client-server-http" tags={["http", "tls"]} questions={[
+  { type: "mcq", q: "Which HTTP method is NOT idempotent by definition?", options: ["PUT", "DELETE", "POST", "GET"], answer: 2, explain: "Repeating a POST can create multiple resources or trigger an action again." },
+  { type: "mcq", q: "A user is logged in but tries to open an admin page. Which status is most appropriate?", options: ["401 Unauthorized", "403 Forbidden", "404 Not Found only", "502 Bad Gateway"], answer: 1, explain: "403 means the identity is known but not permitted." },
+  { type: "mcq", q: "What problem does HTTP/3 (QUIC) fix compared to HTTP/2 over TCP?", options: ["It removes the need for TLS", "A lost packet stalls all multiplexed streams", "It makes methods idempotent", "It removes DNS"], answer: 1, explain: "QUIC recovers loss per stream, avoiding TCP-level head-of-line blocking." },
+  { type: "multi", q: "Which are properties provided by TLS?", options: ["Confidentiality", "Integrity", "Server authentication via certificates", "Guaranteed delivery order across multiple servers"], answer: [0, 1, 2], explain: "TLS secures the channel; it does not coordinate multiple servers." },
+  { type: "mcq", q: "Why is connection reuse (keep-alive) important?", options: ["It avoids repeating TCP and TLS setup round trips", "It makes responses smaller", "It disables caching", "It allows POST to be retried safely"], answer: 0, explain: "Setup costs a few round trips, which dominate small requests on high-latency paths." }
+]} />

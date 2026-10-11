@@ -1,0 +1,144 @@
+---
+title: Reverse Proxies and API Gateways
+track: sd
+module: load-balancing
+order: 3
+difficulty: easy
+estMinutes: 25
+prerequisites: ["sd/load-balancing/load-balancer-basics"]
+tags: [reverse-proxy, api-gateway, rate-limiting, tls, bff, authentication]
+type: lesson
+furtherReading:
+  - title: NGINX documentation, reverse proxy
+    url: https://docs.nginx.com/nginx/admin-guide/web-server/reverse-proxy/
+  - title: Envoy proxy documentation
+    url: https://www.envoyproxy.org/docs/envoy/latest/
+  - title: Sam Newman, Pattern - Backends For Frontends
+    url: https://samnewman.io/patterns/architectural/bff/
+  - title: Kong Gateway documentation
+    url: https://docs.konghq.com/gateway/latest/
+  - title: RFC 6585 (429 Too Many Requests)
+    url: https://www.rfc-editor.org/rfc/rfc6585
+---
+
+## Intuition
+
+A **forward proxy** sits in front of *clients* and speaks for them to the internet (corporate web filters). A **reverse proxy** sits in front of *servers* and speaks for them to the world: clients believe they talk to one site, the proxy forwards to whichever backend is appropriate. A load balancer is a reverse proxy whose main job is spreading load; many reverse proxies (NGINX, HAProxy, Envoy) do both.
+
+An **API gateway** is a reverse proxy specialised for APIs: a single front door that applies cross-cutting policy (authentication, rate limits, routing, observability) so every microservice does not re-implement it.
+
+## What a reverse proxy does
+
+- **Routing**: by host, path, header or method. `/users/*` goes to the user service, `/orders/*` to the order service.
+- **TLS termination**: the proxy holds certificates, performs the handshake and talks plain HTTP (or re-encrypted mTLS) to backends. Central certificate management and one place to tune ciphers, at the cost of a trust boundary inside your network if you leave the hop unencrypted.
+- **Connection management**: client connections are long-lived and numerous; the proxy keeps a small pool of keep-alive connections to backends, shielding them from slow clients (it buffers the request, then sends it quickly).
+- **Caching and compression**: serve cached responses, gzip or brotli content.
+- **Request shaping**: size limits, timeouts, header normalisation (set `X-Forwarded-For`, strip untrusted headers), protocol translation (HTTP/2 or HTTP/3 to clients, HTTP/1.1 to old backends).
+- **Resilience**: retries on idempotent requests, circuit breaking, outlier ejection.
+
+## What an API gateway adds
+
+- **Authentication and authorisation offload**: validate API keys, OAuth access tokens or JWT signatures once at the edge, then pass a verified identity (a header or an internal token) to services. Services must still authorise *what* the caller may do and must not trust identity headers that could arrive from outside the gateway.
+- **Rate limiting and quotas**: per key, user, IP or route. Common algorithms are token bucket (allows bursts up to bucket size, refills at a steady rate) and sliding window. Respond `429 Too Many Requests` with a `Retry-After` header. Counters often live in a shared store such as Redis so that all gateway nodes enforce one limit; a local-only limit is cheaper but multiplies by the node count.
+- **Request/response transformation**: version routing, header injection, schema validation.
+- **Aggregation and the BFF pattern**: a **Backend for Frontend** is a gateway tailored to one client type (mobile, web, partner) that fans out to several services and returns exactly the payload that client needs, which reduces round trips on slow mobile networks and lets each client team evolve its API independently.
+- **Observability**: uniform access logs, metrics, trace IDs injected at the edge.
+
+### Token bucket in a few lines
+
+<CodeRunner language="python" code={`import time
+
+class TokenBucket:
+    def __init__(self, rate_per_sec, burst):
+        self.rate, self.burst = rate_per_sec, burst
+        self.tokens, self.last = burst, 0.0
+
+    def allow(self, now):
+        # refill based on elapsed time, capped at burst
+        self.tokens = min(self.burst, self.tokens + (now - self.last) * self.rate)
+        self.last = now
+        if self.tokens >= 1:
+            self.tokens -= 1
+            return True
+        return False
+
+tb = TokenBucket(rate_per_sec=5, burst=10)
+# 30 requests arriving over 1 second (one every 1/30 s): burst of 10 passes, then ~5/s
+allowed = sum(tb.allow(i / 30) for i in range(30))
+print("allowed", allowed, "of 30")
+`} />
+
+With a bucket of 10 and a refill of 5 per second, a burst of 30 requests in one second admits 10 immediately plus the roughly 5 refilled over that second, so about 14 or 15 pass.
+
+## Gateway versus service mesh versus plain LB
+
+| | Load balancer | Reverse proxy | API gateway | Service mesh sidecar |
+| --- | --- | --- | --- | --- |
+| Position | Edge or internal | Edge | Edge (north-south) | Beside each service (east-west) |
+| Focus | Spread load, health | Routing, TLS, caching | Auth, quotas, API products | mTLS, retries, telemetry between services |
+| State | Mostly none | Little | Config plus rate-limit counters | Control plane distributes config |
+
+<Diagram kind="flow" caption="Edge stack: CDN, load balancer, API gateway, then services" nodes={[
+  { id: "client", label: "Mobile and web clients", x: 0, y: 80, role: "Send API requests over HTTPS with tokens or API keys.", failureModes: ["Retry storms when the edge returns errors"], tradeoffs: ["Rich clients reduce server work but are harder to update than servers"] },
+  { id: "lb", label: "Edge load balancer", x: 180, y: 80, role: "Terminates TLS, absorbs connection volume, spreads traffic over gateway nodes.", failureModes: ["Misconfigured health checks eject healthy gateway nodes"], tradeoffs: ["Terminating TLS here centralises certificates but exposes plaintext internally"] },
+  { id: "gw", label: "API gateway", x: 360, y: 80, role: "Authenticates, rate limits, routes by path and host, adds trace IDs, can aggregate responses.", failureModes: ["Gateway outage blocks every API", "Slow auth dependency adds latency to all calls", "Business logic creeping in makes it a monolith"], tradeoffs: ["One place for policy vs a shared bottleneck and blast radius"] },
+  { id: "svcA", label: "User service", x: 560, y: 20, role: "Owns user data and profile operations.", failureModes: ["Overload without per-service limits spreads to the gateway queue"], tradeoffs: ["Independent deploys vs network hop overhead"] },
+  { id: "svcB", label: "Order service", x: 560, y: 150, role: "Owns orders and checkout logic.", failureModes: ["Cascading timeouts if it calls slow dependencies"], tradeoffs: ["Domain isolation vs distributed transaction complexity"] },
+  { id: "limiter", label: "Rate-limit store", x: 360, y: 190, role: "Shared counters so all gateway nodes enforce one limit.", failureModes: ["If down: fail open (no limits) or fail closed (reject traffic)"], tradeoffs: ["Accurate global limits vs extra network call per request"] }
+]} edges={[
+  { from: "client", to: "lb" }, { from: "lb", to: "gw" }, { from: "gw", to: "svcA", label: "/users" }, { from: "gw", to: "svcB", label: "/orders" }, { from: "gw", to: "limiter" }
+]} />
+
+<Diagram kind="mermaid" caption="Request path with auth offload and rate limiting" code={`sequenceDiagram
+  participant C as Client
+  participant G as API gateway
+  participant R as Rate-limit store
+  participant S as Service
+  C->>G: GET /orders (Bearer token)
+  G->>G: verify JWT signature and expiry
+  G->>R: increment counter for user
+  alt over limit
+    G-->>C: 429 Retry-After
+  else allowed
+    G->>S: forward with verified identity header
+    S-->>G: 200 body
+    G-->>C: 200 body
+  end`} />
+
+## Trade-offs
+
+<TradeOffs caption="Where to put cross-cutting concerns" rows={[
+  { option: "Plain reverse proxy / LB only", pros: "Simple, fast, few moving parts", cons: "Auth, quotas and shaping are repeated in every service", chooseWhen: "Few services or a monolith" },
+  { option: "Central API gateway", pros: "One place for auth, limits, routing and analytics; consistent policy", cons: "Extra hop, shared blast radius, team bottleneck for changes", chooseWhen: "Many services, external API consumers, API-as-product" },
+  { option: "Backend for Frontend", pros: "Client-specific payloads and fewer round trips; team autonomy", cons: "More services to run; duplicated aggregation logic", chooseWhen: "Distinct client types with different data needs" },
+  { option: "Per-service libraries or sidecars", pros: "No central bottleneck; policy next to the code", cons: "Version drift; many implementations to keep correct", chooseWhen: "Service-to-service traffic inside a mesh" }
+]} />
+
+## Failure modes
+
+- **Gateway as single point of failure**: run it as a replicated stateless tier behind the LB, deploy across zones, and keep its config reloadable without downtime.
+- **Rate-limit store outage**: decide explicitly. Fail open protects availability but removes abuse protection; fail closed protects backends but rejects legitimate users. Many teams fall back to coarse local limits.
+- **Auth dependency latency**: a token introspection call per request adds to every request. Prefer locally verifiable tokens (signed JWTs with short lifetimes) or cache introspection results briefly.
+- **Header spoofing**: if services trust an identity header, ensure only the gateway can reach them and that the gateway strips client-supplied copies.
+
+## Pitfalls
+
+- Letting the gateway accumulate business logic until it is an unmaintainable monolith.
+- Terminating TLS at the edge and leaving the internal hop unauthenticated in a shared network.
+- Rate limiting only by IP, which punishes users behind NAT and is trivial to evade with many IPs.
+- Applying a generous timeout at the gateway and shorter ones downstream, so work continues after the client has gone.
+- Forgetting that a gateway adds latency (typically on the order of a millisecond or a few) to every call.
+
+## What would you choose and why?
+
+A startup has a web app, an iOS app and a public partner API backed by eight services. The iOS app makes six sequential calls to render the home screen. Would you introduce a single API gateway, a BFF per client, or both? What would each own, and what would you refuse to put in them?
+
+## Quiz
+
+<Quiz id="sd-m05-gateways" tags={["api-gateway", "reverse-proxy"]} questions={[
+  { type: "mcq", q: "What distinguishes a reverse proxy from a forward proxy?", options: ["A reverse proxy acts on behalf of servers, a forward proxy on behalf of clients", "A reverse proxy only works with UDP", "A forward proxy terminates TLS for servers", "There is no difference"], answer: 0, explain: "A reverse proxy fronts a set of servers; a forward proxy fronts clients going out to the internet." },
+  { type: "multi", q: "Which are typical API gateway responsibilities?", options: ["Authenticating requests", "Rate limiting per API key", "Storing the primary business data", "Routing by path to services"], answer: [0, 1, 3], explain: "Gateways handle cross-cutting edge policy and routing; durable business data belongs in services and their stores." },
+  { type: "mcq", q: "A token bucket has burst 10 and refill 5 tokens per second. A client has been idle and sends 30 requests nearly instantly. Roughly how many are admitted?", options: ["30", "10", "5", "0"], answer: 1, explain: "The full bucket admits about 10 immediately; only a handful more are refilled during the brief burst." },
+  { type: "mcq", q: "Why is a Backend for Frontend useful for a mobile client?", options: ["It removes the need for authentication", "It aggregates several service calls into one tailored response, cutting round trips", "It replaces the database", "It makes TLS unnecessary"], answer: 1, explain: "Mobile networks have high latency; one aggregated call tuned to the screen is faster and decouples client needs from service APIs." },
+  { type: "mcq", q: "Your rate-limit store is unreachable. Which statement is accurate?", options: ["You must always fail open", "You must always fail closed", "It is a policy choice: open favours availability, closed favours protection", "Rate limiting cannot be done without it"], answer: 2, explain: "Both choices have costs; many systems degrade to coarse per-node local limits." }
+]} />
