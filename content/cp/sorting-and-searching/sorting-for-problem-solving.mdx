@@ -1,0 +1,173 @@
+---
+title: Sorting for Problem Solving
+track: cp
+module: sorting-and-searching
+order: 2
+difficulty: easy
+estMinutes: 30
+prerequisites: [cp/sorting-and-searching/binary-search]
+tags: [sorting, comparators, sweep-line, counting-sort, stability]
+type: lesson
+problems: [m06-meeting-rooms]
+furtherReading:
+  - title: cp-algorithms, Counting sort
+    url: https://cp-algorithms.com/sorting/counting_sort.html
+  - title: CSES Problem Set, Sorting and Searching
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+Shuffled playing cards hide every pattern. Sorted cards reveal them: duplicates sit side by side, the closest pair is adjacent, the median is in the middle, and a range of values is a contiguous block. Sorting costs `O(n log n)`, which is cheap compared to the `O(n^2)` pair checking it often replaces. The question "can I sort first?" is one of the highest-value habits in contest problem solving.
+
+## What sorting buys you
+
+- **Adjacent comparisons.** After sorting, the minimum difference between any two elements is the minimum over adjacent pairs.
+- **Grouping.** Equal items become contiguous, so counting distinct values is one scan.
+- **Monotonicity.** Sorted data allows [binary search](/cp/sorting-and-searching/binary-search/) and [two pointers](/cp/arrays-and-windows/two-pointers/).
+- **Greedy order.** Many greedy algorithms say "process items in order of X": earliest deadline, shortest job, smallest end time.
+- **Sweeping.** Convert a 2D or interval problem into a sorted event list and scan once.
+
+## Sorting with keys and comparators
+
+Most languages let you sort by a **key** (a derived value) or by a **comparator** (a function that says which of two items goes first). Keys are simpler and less error-prone.
+
+<CodeRunner language="python" code={`people = [("ann", 30), ("bob", 25), ("cy", 30), ("di", 25)]
+
+# age descending (negate the number), then name ascending
+people.sort(key=lambda p: (-p[1], p[0]))
+print(people)
+
+# sort strings by length, then alphabetically
+words = ["pear", "fig", "apple", "kiwi", "date"]
+print(sorted(words, key=lambda w: (len(w), w)))
+`} />
+
+### Comparator rules
+
+A comparator must define a **strict weak ordering**: `cmp(a, a)` is "not before", it is antisymmetric, and transitive. If it breaks these rules, C++ `std::sort` can crash or loop forever, and Java throws "Comparison method violates its general contract".
+
+Classic correct and incorrect examples (C++):
+
+```cpp
+// sort by value descending: correct
+sort(v.begin(), v.end(), [](int a, int b) { return a > b; });
+
+// WRONG: <= violates strict weak ordering (equal elements compare "before" each other)
+sort(v.begin(), v.end(), [](int a, int b) { return a >= b; });
+```
+
+In Java and C++, `a - b` as a comparator can overflow for large values; compare with `<` or `Integer.compare`.
+
+## Stability
+
+A sort is **stable** if equal items keep their original relative order. Python's `sorted`, Java's object sorts and C++ `std::stable_sort` are stable; `std::sort` is not guaranteed to be.
+
+Stability enables **multi-key sorting by passes**: sort by the least significant key first, then by the most significant key with a stable sort.
+
+<CodeRunner language="python" code={`rows = [("x", 2), ("y", 1), ("z", 2), ("w", 1)]
+rows.sort(key=lambda r: r[0])    # secondary key: name
+rows.sort(key=lambda r: r[1])    # primary key: stable, so ties keep name order
+print(rows)   # [('w', 1), ('y', 1), ('x', 2), ('z', 2)]
+`} />
+
+## Sort plus sweep: the busiest moment
+
+**Task.** Given intervals `[s, e)`, find the maximum number that overlap at once.
+
+Turn each interval into two events, `(s, +1)` and `(e, -1)`, sort the events, and scan with a running counter. At equal times process `-1` before `+1` so that back-to-back intervals `[1,3)` and `[3,5)` do not count as overlapping. Sorting the tuples `(time, delta)` does this automatically because `-1 < +1`.
+
+<CodeRunner language="python" code={`iv = [(1, 5), (2, 6), (5, 8), (7, 9)]
+ev = []
+for s, e in iv:
+    ev.append((s, 1))
+    ev.append((e, -1))
+ev.sort()
+cur = best = 0
+for t, d in ev:
+    cur += d
+    best = max(best, cur)
+print(best)   # at time 2..4 intervals 1 and 2 overlap -> 2
+`} />
+
+**Merging intervals** is the same style: sort by start, keep the current merged `[cs, ce)`, and extend it while the next start is at most `ce`.
+
+<CodeRunner language="python" code={`iv = [(1, 3), (2, 6), (8, 10), (9, 12), (15, 16)]
+iv.sort()
+merged = []
+for s, e in iv:
+    if merged and s <= merged[-1][1]:
+        merged[-1][1] = max(merged[-1][1], e)
+    else:
+        merged.append([s, e])
+print(merged)
+print(sum(e - s for s, e in merged))   # total covered length
+`} />
+
+<Complexity time="O(n log n)" space="O(n)" note="dominated by the sort; the scan is linear" />
+
+## Why O(n log n)? A lower bound
+
+Any algorithm that sorts by **comparing pairs** must distinguish `n!` possible input orders. Each comparison has two outcomes, so after `k` comparisons it can tell apart at most `2^k` cases. Therefore `2^k >= n!`, which gives `k >= log2(n!)`. Since `n! >= (n/2)^(n/2)`, we get `log2(n!) >= (n/2) log2(n/2)`, which is `Ω(n log n)`. Merge sort and heap sort meet this bound, so `O(n log n)` is optimal for comparison sorting.
+
+## Beating the bound: counting sort
+
+The lower bound only applies to comparison-based sorts. If keys are integers in a small range `[0, M)`, count how many times each value appears and then write them out. That is `O(n + M)` time and `O(M)` memory.
+
+<CodeRunner language="python" code={`def counting_sort(a, M):
+    cnt = [0] * M
+    for x in a:
+        cnt[x] += 1
+    out = []
+    for v in range(M):
+        out.extend([v] * cnt[v])
+    return out
+
+print(counting_sort([3, 1, 4, 1, 5, 2, 6, 5, 3, 5], 7))
+`} />
+
+Use it when `M` is comparable to `n` (grades 0 to 100, letters, digits, ages). If `M` is huge (`10^9`), counting sort is hopeless; use a comparison sort or coordinate compression (see [Sorting and Binary Search Combos](/cp/sorting-and-searching/sorting-and-binary-search-combos/)).
+
+## Choosing what to sort
+
+You often sort **indices** (or pairs of value and index) so you can recover the original positions afterwards:
+
+<CodeRunner language="python" code={`a = [40, 10, 30, 20]
+order = sorted(range(len(a)), key=lambda i: a[i])
+print(order)                       # [1, 3, 2, 0]: positions from smallest to largest value
+rank = [0] * len(a)
+for r, i in enumerate(order):
+    rank[i] = r
+print(rank)                        # [3, 0, 2, 1]
+`} />
+
+## Pitfalls
+
+1. **Inconsistent comparator** (`>=`, or a comparator mixing keys inconsistently) makes behaviour undefined in C++ and Java.
+2. **Overflow in `a - b` comparators** for 32-bit ints.
+3. **Sorting strings that hold numbers**: `"10" < "9"` lexicographically. Convert to integers first.
+4. **Event tie order**: decide explicitly whether ends precede starts at the same time; it depends on whether intervals are closed or half-open.
+5. **Forgetting that sorting destroys the original order**: copy the array or sort indices when you still need positions.
+6. **Assuming `sort` is `O(n)` for nearly sorted input**: most library sorts are `O(n log n)` regardless (Timsort in Python is the notable exception for presorted runs).
+
+## Practice
+
+<Problem id="m06-meeting-rooms" />
+
+## Problem ladder
+
+- [CSES 1619, Restaurant Customers](https://cses.fi/problemset/task/1619) (the same sweep at scale)
+- [CSES 1629, Movie Festival](https://cses.fi/problemset/task/1629) (sort by end time, greedy)
+- [CSES 1621, Distinct Numbers](https://cses.fi/problemset/task/1621) (sort and count changes)
+- [CSES 1074, Stick Lengths](https://cses.fi/problemset/task/1074) (median after sorting)
+- [LeetCode 56, Merge Intervals](https://leetcode.com/problems/merge-intervals/)
+- [Codeforces 492C, Vanya and Exams](https://codeforces.com/problemset/problem/492/C) (about 1400, sort by a key then greedy)
+
+## Quiz
+
+<Quiz id="m06-sorting-quiz" tags={["sorting", "sweep-line"]} questions={[
+  { type: "mcq", q: "Intervals are half-open [s, e). At the same time t, one interval ends and another starts. In the sweep, which event should be processed first?", options: ["The start (+1)", "The end (-1)", "Either, the answer is the same", "Whichever input line came first"], answer: 1, explain: "A half-open interval no longer contains its end time, so the ending interval is gone before the new one starts; processing the end first avoids counting a false overlap." },
+  { type: "multi", q: "Which statements about sorting are true?", options: ["Any comparison sort needs Omega(n log n) comparisons in the worst case", "Counting sort runs in O(n + M) for integer keys in [0, M)", "A comparator that returns a >= b is a valid strict weak ordering", "A stable sort keeps equal elements in their original relative order"], answer: [0, 1, 3], explain: "Using >= treats equal items as 'before' each other, which violates the strict weak ordering requirement." },
+  { type: "predict", q: "What does this print?", code: "rows = [('a', 2), ('b', 1), ('c', 2), ('d', 1)]\nrows.sort(key=lambda r: r[1])\nprint(''.join(r[0] for r in rows))", options: ["bdac", "dbca", "abcd", "bdca"], answer: 0, explain: "Python's sort is stable: the key-1 items b, d keep their order, then the key-2 items a, c." },
+  { type: "mcq", q: "Why does counting sort not contradict the n log n lower bound?", options: ["It is randomised", "It does not compare elements; it uses the values as array indices", "It only works on sorted input", "It is actually O(n log n)"], answer: 1, explain: "The bound applies to algorithms that only learn about the input through pairwise comparisons. Counting sort exploits the bounded integer range." }
+]} />

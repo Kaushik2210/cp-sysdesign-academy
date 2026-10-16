@@ -1,0 +1,1 @@
+{ "title": "Hashing", "level": "Level 1: Core Data Structures & Techniques", "order": 8, "summary": "Hash maps and sets for counting and grouping, coordinate compression, polynomial string hashing, rolling hashes, and the pitfalls that get solutions hacked." }

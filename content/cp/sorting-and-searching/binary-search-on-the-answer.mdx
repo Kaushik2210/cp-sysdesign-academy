@@ -1,0 +1,197 @@
+---
+title: Binary Search on the Answer
+track: cp
+module: sorting-and-searching
+order: 3
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/sorting-and-searching/binary-search]
+tags: [binary-search, binary-search-on-answer, greedy, feasibility]
+type: lesson
+problems: [m06-place-routers, m06-split-array]
+furtherReading:
+  - title: cp-algorithms, Binary search (search on the answer)
+    url: https://cp-algorithms.com/num_methods/binary_search.html
+  - title: CSES Problem Set, Factory Machines and Array Division
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+You are asked: "what is the smallest truck capacity that can ship all packages in `D` days?" Finding the best capacity directly is hard. But the opposite question is easy: "**given** a capacity `C`, can we ship in `D` days?" You just simulate. And if `C` works then any bigger capacity works too. The answers to the easy question look like `NO NO NO YES YES YES`, so a binary search over `C` finds the boundary.
+
+This turns many *optimisation* problems ("minimise the maximum", "maximise the minimum") into a sequence of *decision* problems, each answered by a simple greedy simulation.
+
+## The pattern
+
+1. Identify the answer variable `v` (a number you can try).
+2. Write `ok(v)`: a yes/no check, usually a greedy scan in `O(n)`.
+3. Prove **monotonicity**: if `ok(v)` is true then `ok(v')` is true for all `v'` on one side of `v`.
+4. Pick bounds `[lo, hi]` such that the answer is inside.
+5. Binary search for the first true (or last true).
+
+Total cost: `O(cost(ok) · log(range))`. With `range` up to `10^18` that is only about 60 evaluations.
+
+### First-true template (minimise)
+
+<CodeRunner language="python" code={`def first_true(lo, hi, ok):
+    # ok is False...False True...True on [lo, hi]; ok(hi) is True
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if ok(mid):
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+
+# smallest x with x*x >= 1000
+print(first_true(0, 1000, lambda x: x * x >= 1000))   # 32
+`} />
+
+### Last-true template (maximise)
+
+When the feasible values are the *small* ones (`T…T F…F`), find the last true. Round `mid` **up**, otherwise `lo = mid` never advances.
+
+<CodeRunner language="python" code={`def last_true(lo, hi, ok):
+    # ok is True...True False...False on [lo, hi]; ok(lo) is True
+    while lo < hi:
+        mid = (lo + hi + 1) // 2      # round up!
+        if ok(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+# largest x with x*x <= 1000
+print(last_true(0, 1000, lambda x: x * x <= 1000))    # 31
+`} />
+
+## Worked example 1: maximise the minimum distance
+
+**Problem.** Positions `[1, 2, 8, 4, 9]`, place `k = 3` routers on distinct positions to maximise the smallest gap between chosen routers.
+
+Sorted: `1 2 4 8 9`.
+
+**Check.** `ok(d)`: greedily place the first router at the leftmost position, then the next at the first position at least `d` further, and so on. Return whether `k` routers fit.
+
+**Why greedy is right.** Placing the leftmost router at the smallest position can only leave more room; in any valid placement you can shift the first chosen router left to the leftmost position without breaking the spacing, then repeat for the second, and so on (an exchange argument). So the greedy count is the maximum number placeable with gap `d`.
+
+**Monotone.** If gap `d` fits `k` routers, so does any smaller gap (the same placement satisfies it).
+
+| d | greedy picks | count | ok? |
+|---|---|---|---|
+| 3 | 1, 4, 8 | 3 | yes |
+| 4 | 1, 8 | 2 | no |
+
+So the answer is 3, found by searching `d` in `[1, 9 - 1]`.
+
+<CodeRunner language="python" code={`def max_min_gap(pos, k):
+    a = sorted(pos)
+
+    def ok(d):
+        placed, last = 1, a[0]
+        for x in a[1:]:
+            if x - last >= d:
+                placed += 1
+                last = x
+        return placed >= k
+
+    lo, hi = 1, a[-1] - a[0]       # ok(1) is True when positions are distinct
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if ok(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+print(max_min_gap([1, 2, 8, 4, 9], 3))   # 3
+`} />
+
+## Worked example 2: minimise the largest part
+
+**Problem.** Split `[7, 2, 5, 10, 8]` into `k = 2` contiguous parts to minimise the largest part sum.
+
+**Check.** `ok(C)`: fill parts greedily; start a new part only when adding the next element would exceed `C`. Return `parts <= k`.
+
+- `ok(18)`: `7+2+5 = 14`, adding 10 would give 24 > 18, so new part `10+8 = 18`. Two parts: yes.
+- `ok(17)`: `14 | 10 | 8`, three parts: no.
+
+So the answer is 18. Bounds: the answer is at least `max(a)` (one element must fit) and at most `sum(a)` (one part).
+
+<CodeRunner language="python" code={`def min_largest_part(a, k):
+    def ok(cap):
+        parts, cur = 1, 0
+        for x in a:
+            if cur + x > cap:
+                parts += 1
+                cur = x
+            else:
+                cur += x
+        return parts <= k
+
+    lo, hi = max(a), sum(a)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if ok(mid):
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+
+print(min_largest_part([7, 2, 5, 10, 8], 2))   # 18
+print(min_largest_part([1, 2, 3, 4, 5], 5))    # 5
+`} />
+
+Notice that `ok` uses `parts <= k`, not `== k`: if fewer than `k` parts suffice, extra parts can be made by splitting (with `k <= n`), which never increases the maximum.
+
+<Complexity time="O(n log(sum))" space="O(1)" note="log(sum a) is about 60 for sums up to 10^18" />
+
+## Proving monotonicity
+
+Never skip this step. Two typical arguments:
+
+- **Relaxation.** A larger capacity or a smaller required gap *relaxes* the constraint, so any solution for the stricter value is a solution for the looser one.
+- **Cost is monotone.** If you can compute a cost `f(v)` that is non-decreasing in `v` and you want the first `v` with `f(v) >= target`, then monotonicity of `f` is what you must show (for example the number of pieces `floor(len / L)` summed over ropes is non-increasing in `L`).
+
+If `ok` is not monotone, binary search returns garbage without any error message.
+
+## Choosing bounds
+
+- Smallest value that could possibly be right (`max(a)`, `0`, `1`).
+- Largest value that is certainly feasible (`sum(a)`, the full range).
+- Make sure `ok(hi)` is true for first-true searches, and `ok(lo)` is true for last-true searches. If no value is feasible, add a sentinel (`hi + 1`) and check the result.
+- Use 64-bit integers: `hi` can reach `n · max(a)`.
+
+## Pitfalls
+
+1. **`lo = mid` with floor division** loops forever once `hi = lo + 1`. Round `mid` up for last-true searches.
+2. **Wrong direction**: for "minimise", search first-true; for "maximise", last-true. Re-derive which side is feasible from the predicate.
+3. **Greedy check that is not actually optimal**: if the check can be fooled, the whole search is wrong. State the exchange argument.
+4. **Bounds that exclude the answer**, e.g. `lo = 0` when the answer must be at least `max(a)` is harmless, but `hi = sum(a) / 2` may silently cut it off.
+5. **`ok` too slow**: if `ok` is `O(n^2)`, the total is `O(n^2 log V)`. Search for a linear check.
+6. **Overflow** in `mid = lo + hi` with 32-bit ints.
+
+## Practice
+
+<Problem id="m06-place-routers" />
+
+<Problem id="m06-split-array" />
+
+## Problem ladder
+
+- [CSES 1085, Array Division](https://cses.fi/problemset/task/1085) (the split problem at scale)
+- [CSES 1620, Factory Machines](https://cses.fi/problemset/task/1620) (minimise time, monotone count)
+- [Codeforces 670D2, Magic Powder - 2](https://codeforces.com/problemset/problem/670/D2) (about 1500)
+- [Codeforces 460C, Present](https://codeforces.com/problemset/problem/460/C) (about 1700, check with a difference array)
+- [LeetCode 1011, Capacity To Ship Packages Within D Days](https://leetcode.com/problems/capacity-to-ship-packages-within-d-days/)
+- [LeetCode 875, Koko Eating Bananas](https://leetcode.com/problems/koko-eating-bananas/)
+
+## Quiz
+
+<Quiz id="m06-bs-on-answer-quiz" tags={["binary-search", "feasibility"]} questions={[
+  { type: "mcq", q: "You want the LARGEST v with ok(v) true, where ok is T...T F...F. Which update is correct?", options: ["mid = (lo + hi) // 2; if ok(mid): lo = mid", "mid = (lo + hi + 1) // 2; if ok(mid): lo = mid else hi = mid - 1", "mid = (lo + hi) // 2; if ok(mid): hi = mid", "mid = (lo + hi) // 2; if ok(mid): lo = mid + 1"], answer: 1, explain: "When lo = mid is a possible assignment, mid must round up, otherwise lo never advances once hi = lo + 1." },
+  { type: "multi", q: "Which of these are valid reasons the capacity check ok(C) is monotone in C?", options: ["A bigger capacity relaxes the constraint, so any plan valid for C is valid for C + 1", "The array is sorted", "The greedy part count is non-increasing as C grows", "Capacities must be powers of two"], answer: [0, 2], explain: "Relaxation and the non-increasing greedy part count give monotonicity. Sortedness and powers of two are irrelevant." },
+  { type: "predict", q: "What does this print?", code: "a = [5, 5, 5, 5]\nk = 2\ndef ok(c):\n    parts, cur = 1, 0\n    for x in a:\n        if cur + x > c:\n            parts += 1\n            cur = x\n        else:\n            cur += x\n    return parts <= k\nlo, hi = max(a), sum(a)\nwhile lo < hi:\n    mid = (lo + hi) // 2\n    if ok(mid):\n        hi = mid\n    else:\n        lo = mid + 1\nprint(lo)", options: ["5", "10", "15", "20"], answer: 1, explain: "Two parts of two elements each give a maximum of 10; capacity 9 would need three parts." },
+  { type: "mcq", q: "Roughly how many ok() evaluations does a search over the integer range [0, 10^18] need?", options: ["About 60", "About 1000", "About 10^9", "About 10^18"], answer: 0, explain: "log2(10^18) is about 59.8, so roughly 60 evaluations." }
+]} />

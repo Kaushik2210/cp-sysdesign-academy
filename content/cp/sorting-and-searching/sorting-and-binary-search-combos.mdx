@@ -1,0 +1,180 @@
+---
+title: Sorting and Binary Search Combos
+track: cp
+module: sorting-and-searching
+order: 5
+difficulty: medium
+estMinutes: 30
+prerequisites: [cp/sorting-and-searching/binary-search, cp/sorting-and-searching/sorting-for-problem-solving]
+tags: [sorting, binary-search, coordinate-compression, counting, lower-bound]
+type: lesson
+problems: [m06-compress-ranks, m06-count-close-pairs]
+furtherReading:
+  - title: cp-algorithms, Binary search
+    url: https://cp-algorithms.com/num_methods/binary_search.html
+  - title: CSES Problem Set, Sorting and Searching
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+Sorting turns an array into a ruler. Binary search then reads positions off that ruler in `O(log n)`. Together they answer, after one `O(n log n)` preparation:
+
+- how many elements are in a value range?
+- what is the closest element to `x`?
+- what is the rank of `x`?
+
+These three operations cover a surprising fraction of "counting pairs" and "compress the coordinates" tasks.
+
+## The two idioms you need in your fingers
+
+On a sorted array `a`:
+
+- `lower_bound(x)`: index of the first element `>= x` (or `n` if none).
+- `upper_bound(x)`: index of the first element `> x` (or `n` if none).
+
+Everything else is built from those two:
+
+| question | answer |
+|---|---|
+| count of elements `< x` | `lower_bound(x)` |
+| count of elements `<= x` | `upper_bound(x)` |
+| count in `[lo, hi]` | `upper_bound(hi) - lower_bound(lo)` |
+| count of exactly `x` | `upper_bound(x) - lower_bound(x)` |
+| does `x` occur? | `lower_bound(x) < n` and `a[lower_bound(x)] == x` |
+| smallest element `>= x` | `a[lower_bound(x)]` if index `< n` |
+| largest element `<= x` | `a[upper_bound(x) - 1]` if index `>= 0` |
+
+<CodeRunner language="python" code={`from bisect import bisect_left, bisect_right
+
+a = [1, 3, 3, 5, 8, 8, 8, 10]      # sorted
+print(bisect_left(a, 8), bisect_right(a, 8))                 # 4 7
+print(bisect_right(a, 8) - bisect_left(a, 8))                # 3 copies of 8
+print(bisect_right(a, 9) - bisect_left(a, 3))                # elements in [3, 9] -> 6
+i = bisect_left(a, 4)
+print(a[i])                                                  # smallest >= 4 -> 5
+j = bisect_right(a, 4) - 1
+print(a[j])                                                  # largest <= 4 -> 3
+`} />
+
+In C++ the same functions are `lower_bound` and `upper_bound`; in Java you write the loop yourself or use `Arrays.binarySearch` with care (it returns any matching index and a negative insertion point otherwise).
+
+## Coordinate compression
+
+Many structures (count arrays, Fenwick trees, difference arrays) want indices `0..m-1`, but the values are up to `10^9`. **Compression** replaces each value by its rank among the distinct values; order is preserved, which is all that comparisons need.
+
+1. Copy and sort the values.
+2. Remove duplicates.
+3. The compressed id of `x` is its position in the unique list (`lower_bound`).
+
+<CodeRunner language="python" code={`from bisect import bisect_left
+
+a = [40, 10, 40, -5, 10, 99]
+u = sorted(set(a))
+print(u)                                  # [-5, 10, 40, 99]
+print([bisect_left(u, x) for x in a])     # [2, 1, 2, 0, 1, 3]
+`} />
+
+Typical use: compress, then use a count array or Fenwick tree of size `len(u)` to count inversions, process offline queries, or paint intervals whose endpoints are huge. When you compress interval endpoints for range painting, remember that points between two kept coordinates also matter; either include `x` and `x + 1`, or treat each compressed coordinate as the segment up to the next one.
+
+## Counting pairs with a condition
+
+**Task.** Count pairs `i < j` with `|a_i - a_j| <= D`.
+
+Pairs are unordered and the condition depends only on values, so sorting first is free. In sorted order, the partners of `a[i]` among earlier elements are those with `a[j] >= a[i] - D`, a contiguous suffix of the prefix `[0, i)`. With binary search: `i - lower_bound(a[i] - D)`. With a monotone pointer (as `i` increases the threshold only rises): the two-pointer version.
+
+<CodeRunner language="python" code={`from bisect import bisect_left
+
+def close_pairs(a, D):
+    a = sorted(a)
+    cnt = 0
+    for i, x in enumerate(a):
+        j = bisect_left(a, x - D)       # first index with a[j] >= x - D
+        cnt += i - j                    # partners j..i-1
+    return cnt
+
+print(close_pairs([1, 10, 4, 7, 2], 3))   # (1,2),(1,4),(2,4),(7,10),(4,7) -> 5
+print(close_pairs([2, 2, 2, 3], 0))       # three equal 2s -> 3
+`} />
+
+<Complexity time="O(n log n)" space="O(1)" note="sort plus one binary search per element; the two-pointer scan makes the counting O(n)" />
+
+### Counting pairs across two arrays
+
+For each `x` in `A`, count the elements of a sorted `B` below it:
+
+<CodeRunner language="python" code={`from bisect import bisect_left
+
+A = [5, 1, 9]
+B = sorted([2, 8, 3, 7])
+print(sum(bisect_left(B, x) for x in A))   # 5 -> 2 ; 1 -> 0 ; 9 -> 4  => 6
+`} />
+
+This is the core of counting `(i, j)` pairs with `a_i < b_j` (and, with sorted `A` as well, of the merge step in counting inversions).
+
+## Nearest neighbour queries
+
+To find the element closest to `q`, look at the two candidates around `lower_bound(q)`, the first element `>= q` and the one just before it:
+
+<CodeRunner language="python" code={`from bisect import bisect_left
+
+def nearest(a, q):          # a sorted, non-empty; ties go to the smaller value
+    i = bisect_left(a, q)
+    cands = []
+    if i < len(a):
+        cands.append(a[i])
+    if i > 0:
+        cands.append(a[i - 1])
+    return min(cands, key=lambda v: (abs(v - q), v))
+
+a = [1, 5, 9, 14]
+print(nearest(a, 7), nearest(a, 100), nearest(a, -3))   # 5 14 1
+`} />
+
+The query `7` is a tie between 5 and 9 (both at distance 2); the key `(distance, value)` resolves it toward the smaller value.
+
+<Callout type="warning" title="Define tie-breaking">
+When two elements are equally close, the statement says which one to take (smaller, larger, either). Decide explicitly instead of relying on the order of your candidate list.
+</Callout>
+
+## Choosing between sort, hash and binary search
+
+| need | tool |
+|---|---|
+| membership, exact counts, no order | hash set / map |
+| order-based queries (range count, floor/ceiling) on a static set | sorted array + binary search |
+| order-based queries with insertions and deletions | balanced BST / ordered set (`std::set`, `TreeMap`) |
+| ranks for further structures | coordinate compression |
+
+## Pitfalls
+
+1. **Using `lower_bound` where `upper_bound` is needed** (counting `<= x` versus `< x`). Test with duplicates.
+2. **Forgetting that `bisect` requires sorted input.** It silently returns nonsense otherwise.
+3. **Compressing without deduplicating**: equal values would get different ranks.
+4. **Pair counting with duplicates**: decide whether `i != j` positions or distinct values are being counted; `i - j` counts partners strictly before `i` in sorted order, so each unordered pair is counted exactly once.
+5. **Repeated sorting inside loops** turns `O(n log n)` into `O(n^2 log n)`.
+6. **Java `Arrays.binarySearch`** with duplicates returns an arbitrary matching index; write your own bound functions.
+
+## Practice
+
+<Problem id="m06-compress-ranks" />
+
+<Problem id="m06-count-close-pairs" />
+
+## Problem ladder
+
+- [CSES 1621, Distinct Numbers](https://cses.fi/problemset/task/1621)
+- [CSES 1640, Sum of Two Values](https://cses.fi/problemset/task/1640)
+- [CSES 1084, Apartments](https://cses.fi/problemset/task/1084) (sort both sides, two pointers or binary search)
+- [CSES 1163, Traffic Lights](https://cses.fi/problemset/task/1163) (ordered set, or offline with compression)
+- [LeetCode 1331, Rank Transform of an Array](https://leetcode.com/problems/rank-transform-of-an-array/)
+- [LeetCode 34, Find First and Last Position of Element in Sorted Array](https://leetcode.com/problems/find-first-and-last-position-of-element-in-sorted-array/)
+
+## Quiz
+
+<Quiz id="m06-combos-quiz" tags={["binary-search", "coordinate-compression"]} questions={[
+  { type: "mcq", q: "How many elements of a sorted array lie in the closed range [lo, hi]?", options: ["lower_bound(hi) - lower_bound(lo)", "upper_bound(hi) - lower_bound(lo)", "upper_bound(hi) - upper_bound(lo)", "lower_bound(hi) - upper_bound(lo)"], answer: 1, explain: "upper_bound(hi) counts elements <= hi and lower_bound(lo) counts elements < lo; the difference is the elements with lo <= x <= hi." },
+  { type: "multi", q: "Which are required for correct coordinate compression?", options: ["Sort the values", "Remove duplicates", "Preserve the relative order of values", "Make all ranks even"], answer: [0, 1, 2], explain: "Rank = index in the sorted unique list, which preserves order and gives equal values equal ids." },
+  { type: "predict", q: "What does this print?", code: "from bisect import bisect_left, bisect_right\na = [1, 2, 2, 2, 5]\nprint(bisect_right(a, 2) - bisect_left(a, 2), bisect_left(a, 3))", options: ["3 4", "3 3", "4 4", "2 4"], answer: 0, explain: "There are three 2s (indices 1 to 3), and the first element >= 3 is the 5 at index 4." },
+  { type: "mcq", q: "Why is the count of close pairs after sorting a sum of i - j rather than a sum over all (i, j)?", options: ["Partners within distance D of a[i] among earlier elements form a contiguous block j..i-1", "Because duplicates are removed", "Because the array is reversed", "Because D is small"], answer: 0, explain: "Sorted order makes the valid partners contiguous, so counting them is a subtraction of indices." }
+]} />

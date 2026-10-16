@@ -1,0 +1,227 @@
+---
+title: Hash Maps and Sets for Counting and Lookup
+track: cp
+module: hashing
+order: 1
+difficulty: easy
+estMinutes: 30
+prerequisites: []
+tags: [hash-map, hash-set, counting, two-sum, prefix-sums, anti-hash]
+type: lesson
+problems: [m08-pair-sum-count, m08-subarray-sum-k]
+furtherReading:
+  - title: cp-algorithms, Hashing (overview and hash tables)
+    url: https://cp-algorithms.com/string/string-hashing.html
+  - title: Codeforces blog, Blowing up unordered_map
+    url: https://codeforces.com/blog/entry/62393
+  - title: CSES Problem Set (sorting and searching)
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+A phone book sorted by name lets you binary-search in `O(log n)`. A **hash table** goes further: it computes, from the key alone, the *address* where the entry must be stored, so the lookup is a single jump. No comparisons, no ordering, just "where would this key live?".
+
+In contests this turns "have I seen this value before?", "how many times did it occur?" and "what is stored for this key?" into `O(1)` operations (expected), and with them whole `O(n^2)` solutions into `O(n)`.
+
+## Definition
+
+A **hash map** (dictionary) stores key-value pairs; a **hash set** stores keys only. Both support, in *expected* `O(1)` time:
+
+- insert / update
+- membership test / lookup
+- erase
+
+They do **not** keep elements ordered and cannot answer "next larger key" (use a balanced tree, `std::map`/`TreeMap`, or sorting for that).
+
+### How it works
+
+1. A **hash function** `h(key)` maps the key to an integer; the table index is `h(key) mod m`.
+2. Two keys can land in the same slot: a **collision**. Chaining (a small list per slot) or open addressing (probe to the next free slot) resolves it.
+3. With a good hash and a table that grows when the **load factor** (entries / slots) passes a threshold, chains stay short, so the expected cost per operation is `O(1)`. A single operation costs `O(n)` in the worst case if every key lands in one slot.
+
+<Complexity time="O(1) expected per operation" space="O(n)" note="worst case O(n) per operation under adversarial or degenerate hashing" />
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+unordered_map<long long, int> cnt;   // hash map
+cnt[x]++;                            // inserts 0 then increments
+auto it = cnt.find(y);               // iterator; end() if absent
+if (it != cnt.end()) ans += it->second;
+
+unordered_set<int> seen;             // hash set
+if (!seen.insert(v).second) { /* v was already present */ }
+// Ordered alternatives (O(log n)): map, set
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+cnt = {}                      # dict
+cnt[x] = cnt.get(x, 0) + 1    # or collections.Counter
+if y in cnt: ans += cnt[y]
+seen = set()
+if v in seen: ...
+seen.add(v)
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+HashMap<Long, Integer> cnt = new HashMap<>();
+cnt.merge(x, 1, Integer::sum);          // increment
+ans += cnt.getOrDefault(y, 0);
+HashSet<Integer> seen = new HashSet<>();
+if (!seen.add(v)) { /* already present */ }
+```
+
+</Tab>
+</Tabs>
+
+## Pattern 1: frequency counting
+
+Count occurrences, find the most frequent value, detect duplicates, check "is this a permutation?":
+
+<CodeRunner snippets={{ python: `from collections import Counter
+
+a = [4, 7, 4, 1, 7, 4, 9]
+cnt = Counter(a)
+print(cnt)
+print("most common:", cnt.most_common(1))
+print("distinct values:", len(cnt))
+print("has duplicate:", len(cnt) < len(a))
+`, javascript: `const a = [4, 7, 4, 1, 7, 4, 9];
+const cnt = new Map();
+for (const x of a) cnt.set(x, (cnt.get(x) || 0) + 1);
+let best = null;
+for (const [k, v] of cnt) if (best === null || v > cnt.get(best)) best = k;
+console.log([...cnt.entries()].map(([k, v]) => k + ':' + v).join(' '));
+console.log('most common:', best, 'distinct:', cnt.size);
+` }} />
+
+## Pattern 2: two-sum and "have I seen the complement?"
+
+**Task:** count pairs `i < j` with `a[i] + a[j] = k`. For a fixed `j`, the earlier partner must have value `k - a[j]`. Keep a map of how many times each value occurred so far, and **look up before inserting**:
+
+<CodeRunner language="python" code={`def count_pairs(a, k):
+    cnt = {}
+    ans = 0
+    for x in a:
+        ans += cnt.get(k - x, 0)     # earlier partners
+        cnt[x] = cnt.get(x, 0) + 1   # then insert x
+    return ans
+
+def brute(a, k):
+    return sum(1 for i in range(len(a)) for j in range(i + 1, len(a)) if a[i] + a[j] == k)
+
+import random
+random.seed(1)
+for _ in range(300):
+    a = [random.randint(-4, 4) for _ in range(random.randint(1, 12))]
+    k = random.randint(-6, 6)
+    assert count_pairs(a, k) == brute(a, k), (a, k)
+print(count_pairs([1, 5, 3, 3, 2], 6))   # 2
+print("random tests agree")
+`} />
+
+For `[1, 5, 3, 3, 2]` and `k = 6` the pairs are `(1, 5)`, and the two `3`s are *one* pair `(3, 3)`: the answer is `2`. Looking up **before** inserting is what prevents pairing an element with itself and what counts `(3, 3)` exactly once.
+
+## Pattern 3: prefix sums + map (subarray sums)
+
+A subarray sum is a difference of two prefix sums, so "count subarrays with sum `k`" becomes a two-sum on prefix sums: for each prefix `P[j]`, count earlier prefixes equal to `P[j] - k`. Start the map with the empty prefix `{0: 1}`.
+
+<CodeRunner language="python" code={`def count_subarrays(a, k):
+    cnt = {0: 1}          # empty prefix
+    s = ans = 0
+    for x in a:
+        s += x
+        ans += cnt.get(s - k, 0)
+        cnt[s] = cnt.get(s, 0) + 1
+    return ans
+
+print(count_subarrays([1, 2, 3, -3, 3], 3))   # [1,2], [3], [1,2,3,-3], [3,-3,3], [3] -> 5
+print(count_subarrays([0, 0, 0], 0))          # 6 = 3*4/2
+print(count_subarrays([1, -1, 1, -1], 0))     # 4
+`} />
+
+This works with **negative numbers and zeros**, where a two-pointer window fails. Variants: subarrays whose sum is divisible by `m` (key = prefix `mod m`), equal number of `0`s and `1`s (map `0 -> -1`, key = prefix), longest subarray with sum `k` (store the *first* index of each prefix instead of a count).
+
+## The C++ trap: `unordered_map` can be made quadratic
+
+Hash tables give `O(1)` *expected* time only if keys spread out. `std::unordered_map<int, ...>` uses a fixed, public hash (identity for integers) and a known set of bucket counts (prime sizes). On sites with open hacking (Codeforces), an adversary can submit inputs whose keys are all multiples of a bucket count, forcing every key into one bucket: `n` insertions cost `O(n^2)` and your solution times out.
+
+Safe options, in order of preference:
+
+1. **Avoid hashing:** sort + compress, or use `std::map` (`O(log n)`, no attack possible).
+2. **Randomised hash:** supply your own hash functor with a random per-run offset.
+
+```cpp
+struct SafeHash {
+    static uint64_t mix(uint64_t x) {            // splitmix64
+        x += 0x9e3779b97f4a7c15ULL;
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+        return x ^ (x >> 31);
+    }
+    size_t operator()(uint64_t x) const {
+        static const uint64_t R =
+            chrono::steady_clock::now().time_since_epoch().count();
+        return mix(x + R);
+    }
+};
+unordered_map<long long, int, SafeHash> cnt;
+// cnt.reserve(1 << 20); cnt.max_load_factor(0.25); also help constants
+```
+
+Other languages: Java's `HashMap` converts long chains to balanced trees (since Java 8) so adversarial collisions cost `O(log n)` per operation for comparable keys, but boxing makes it heavy. Python's `dict` uses open addressing with `hash(int) = int` for small ints; targeted attacks exist in principle, and the common defence is the same: avoid predictable keys (XOR keys with a random value) when hacks are a risk.
+
+<Callout type="warning" title="Hash tables return nothing in order">
+Iterating an `unordered_map` or a Python `set` gives an arbitrary order. If the output must be sorted, sort the keys first. Relying on iteration order is a classic reason for solutions that pass locally and fail on the judge.
+</Callout>
+
+## Choosing the structure
+
+<TradeOffs caption="Pick by the queries you need, not by habit" rows={[
+  { option: "Hash map / set", pros: "Expected O(1) insert, lookup, erase", cons: "No order, worst case O(n), attackable in C++", chooseWhen: "Counting, membership, seen-before, two-sum style matching" },
+  { option: "Ordered map / set (tree)", pros: "O(log n) worst case, sorted iteration, lower/upper bound", cons: "Slower constants, more memory", chooseWhen: "Need predecessor/successor or sorted output, or want no attack surface" },
+  { option: "Sorted array + binary search", pros: "Cache friendly, deterministic, tiny code", cons: "Static data only", chooseWhen: "Offline queries on a fixed collection" },
+  { option: "Plain array indexed by value", pros: "Fastest, O(1) worst case", cons: "Only if values are small or compressed", chooseWhen: "Values up to about 10^6 to 10^7, or after coordinate compression" }
+]} />
+
+## Pitfalls
+
+1. **Insert before lookup** in two-sum counting: pairs an element with itself.
+2. **Missing the empty prefix** `{0: 1}`: subarrays starting at index 0 are lost.
+3. **Overflow of counts.** Pair counts reach `n^2 / 2`; use 64-bit (`long long`, `long`) for the answer and for prefix sums.
+4. **`cnt[x]` in C++ inserts** a zero entry on a mere read. Use `find` (or `count`) for lookups to avoid growing the map and invalidating iterators.
+5. **Mutating a map while iterating** it.
+6. **Floating point keys.** Never hash doubles; scale to integers or use an ordered structure with an epsilon-aware comparison.
+7. **Mutable keys.** Python lists are unhashable (use tuples); Java arrays hash by identity (use `List` or `Arrays.toString`).
+
+## Practice
+
+<Problem id="m08-pair-sum-count" />
+
+<Problem id="m08-subarray-sum-k" />
+
+## Problem ladder
+
+- [Distinct Numbers](https://cses.fi/problemset/task/1621) (CSES): a set, or sort and count.
+- [Sum of Two Values](https://cses.fi/problemset/task/1640) (CSES): the two-sum pattern with indices.
+- [Subarray Sums II](https://cses.fi/problemset/task/1661) (CSES): prefix sums with a map, 64-bit counts.
+- [Subarray Divisibility](https://cses.fi/problemset/task/1662) (CSES): prefix sums modulo `n` (watch negative remainders).
+- [Two Sum](https://leetcode.com/problems/two-sum/) (LeetCode, easy).
+- [Registration System](https://codeforces.com/problemset/problem/4/C) (Codeforces 4C, rating about 1300): map from string to counter.
+
+## Quiz
+
+<Quiz id="cp-m08-hash-maps" tags={["hash-map"]} questions={[
+  { type: "mcq", q: "In the pair-sum loop, why must the lookup of k - x happen BEFORE inserting x into the map?", options: ["Insertion is slower than lookup", "Otherwise an element can be paired with itself", "The map must stay sorted", "To avoid integer overflow"], answer: 1, explain: "If x is inserted first and k - x = x, the lookup would count x as its own partner." },
+  { type: "multi", q: "Which are true about hash tables in contests?", options: ["Expected O(1) per operation does not rule out adversarial O(n) cases for predictable hashes", "std::map is immune to collision attacks", "Iteration order of unordered_map is sorted by key", "Sort + binary search or coordinate compression can replace a hash map for offline problems"], answer: [0, 1, 3], explain: "std::map is a balanced tree (O(log n) guaranteed). unordered containers give no ordering guarantee." },
+  { type: "predict", q: "What does this print?", code: "a = [1, 1, 1]\ncnt = {0: 1}\ns = ans = 0\nfor x in a:\n    s += x\n    ans += cnt.get(s - 2, 0)\n    cnt[s] = cnt.get(s, 0) + 1\nprint(ans)", options: ["0", "1", "2", "3"], answer: 2, explain: "Subarrays with sum 2 are [1,1] at positions 1-2 and 2-3." },
+  { type: "mcq", q: "Why is the empty prefix {0: 1} needed when counting subarrays with sum k?", options: ["To handle negative numbers", "To count subarrays that start at the first element", "To avoid division by zero", "To make the map non-empty"], answer: 1, explain: "A subarray starting at index 0 has sum P[j] - 0, which needs the empty prefix to be counted." }
+]} />

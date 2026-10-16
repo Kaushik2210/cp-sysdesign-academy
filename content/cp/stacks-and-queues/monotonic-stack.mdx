@@ -1,0 +1,207 @@
+---
+title: Monotonic Stack
+track: cp
+module: stacks-and-queues
+order: 3
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/stacks-and-queues/stacks-and-brackets]
+tags: [monotonic-stack, next-greater, histogram, invariants]
+type: lesson
+problems: [m07-next-greater, m07-largest-rectangle]
+furtherReading:
+  - title: cp-algorithms, Minimum stack / minimum queue
+    url: https://cp-algorithms.com/data_structures/stack_queue_modification.html
+  - title: CSES Problem Set, Nearest Smaller Values
+    url: https://cses.fi/problemset/task/1645
+---
+
+## Intuition
+
+You are walking along a row of buildings and want, for each one, the first building **to its right** that is taller. Brute force looks right from every building: `O(n^2)`.
+
+Notice something: if building `B` stands to the right of building `A`, and `B` is at least as tall as `A`, then **`A` can never be the answer to anyone standing to the left of `B`** that `B` could not already answer better. A building that has been "covered" by a taller one to its right is dead weight. A **monotonic stack** keeps only the buildings that are still useful, and their heights are therefore sorted.
+
+## Definition
+
+A monotonic stack is an ordinary stack with one extra rule: before pushing a new element you pop every element that would break a chosen order (increasing or decreasing). The stack then stays monotone from bottom to top.
+
+The template for **next strictly greater element to the right**:
+
+```python
+res = [None] * n          # None = no greater element
+st = []                   # indices; a[st[0]] >= a[st[1]] >= ... (non-increasing)
+for i in range(n):
+    while st and a[st[-1]] < a[i]:
+        res[st.pop()] = i     # i is the answer for everything popped
+    st.append(i)
+```
+
+### The invariant
+
+> After processing index `i`, the stack holds exactly the indices `j <= i` that have **no strictly greater element in `a[j+1..i]`**, in increasing order of index, so their values are non-increasing from bottom to top.
+
+*Proof sketch.* Adding `a[i]`: an index `j` stays "unanswered" iff `a[j] >= a[i]`. Because values on the stack are non-increasing bottom to top, the indices with `a[j] < a[i]` form a suffix (the top) of the stack, so popping from the top while `a[top] < a[i]` removes exactly the answered indices. Each popped index gets `i` as its answer, and it is the *first* such `i`, because it was unanswered until now. Finally `i` itself has no greater element yet, so it joins the stack. The invariant is restored. Anything left at the end has no greater element: answer "none".
+
+### Amortised cost
+
+Each index is pushed once and popped at most once, so the loop does at most `2n` stack operations: **`O(n)` total**, although a single iteration may pop many elements. (More on this in [amortized analysis](/cp/stacks-and-queues/amortized-analysis/).)
+
+<Complexity time="O(n)" space="O(n)" note="each index pushed once and popped at most once" />
+
+## Worked example
+
+Array `a = [2, 1, 5, 3, 4]`, 1-based answers (0 = none):
+
+| i | a[i] | pops (index -> answer) | stack of indices after push |
+| --- | --- | --- | --- |
+| 1 | 2 | | 1 |
+| 2 | 1 | | 1 2 |
+| 3 | 5 | 2 -> 3, 1 -> 3 | 3 |
+| 4 | 3 | | 3 4 |
+| 5 | 4 | 4 -> 5 | 3 5 |
+
+Index `3` and `5` remain: answer 0. Result: `3 3 0 5 0`.
+
+<CodeRunner language="python" code={`def next_greater(a):
+    n = len(a)
+    res = [0] * n          # 1-based index of next strictly greater, or 0
+    st = []
+    for i in range(n):
+        while st and a[st[-1]] < a[i]:
+            res[st.pop()] = i + 1
+        st.append(i)
+    return res
+
+print(next_greater([2, 1, 5, 3, 4]))
+print(next_greater([3, 3, 3]))        # strict: equal values do not count
+print(next_greater([5, 4, 3, 2, 1]))
+`} />
+
+## Variations: same pattern, different order
+
+| question | pop while | when to read the answer |
+| --- | --- | --- |
+| next greater to the right | `a[top] < a[i]` | when popped, answer is `i` |
+| next smaller to the right | `a[top] > a[i]` | when popped, answer is `i` |
+| previous greater to the left | `a[top] <= a[i]` | after popping, answer is the new top |
+| previous smaller to the left (CSES "Nearest Smaller Values") | `a[top] >= a[i]` | after popping, answer is the new top |
+
+Previous-smaller form: the element still on top after the pops is the nearest index to the left with a strictly smaller value. Choosing `<` vs `<=` decides how **ties** are treated, which matters a lot below.
+
+## Worked example: largest rectangle in a histogram
+
+Bars of width 1 and heights `h[0..n-1]`. The largest rectangle has some bar `m` as its shortest bar. If we know the nearest strictly lower bar on the left (`L`) and on the right (`R`), the widest rectangle limited by `m` spans `(L, R)`, width `R - L - 1`, area `h[m] * (R - L - 1)`.
+
+One stack pass gives both boundaries:
+
+- keep a stack of bar indices with **strictly increasing** heights;
+- when bar `i` arrives, pop every bar with height `>= h[i]`; for each popped bar, `R = i` and `L = ` the new top (or `-1`);
+- add a sentinel height `0` at the end to flush the stack.
+
+<CodeRunner language="python" code={`def largest_rectangle(h):
+    n = len(h)
+    st = []
+    best = 0
+    for i in range(n + 1):
+        cur = h[i] if i < n else 0           # sentinel
+        while st and h[st[-1]] >= cur:
+            height = h[st.pop()]
+            left = st[-1] + 1 if st else 0   # first index covered
+            best = max(best, height * (i - left))
+        st.append(i)
+    return best
+
+def brute(h):
+    best = 0
+    for i in range(len(h)):
+        m = h[i]
+        for j in range(i, len(h)):
+            m = min(m, h[j])
+            best = max(best, m * (j - i + 1))
+    return best
+
+import random
+random.seed(1)
+for _ in range(300):
+    h = [random.randint(0, 6) for _ in range(random.randint(1, 9))]
+    assert largest_rectangle(h) == brute(h), h
+print(largest_rectangle([2, 1, 5, 6, 2, 3]))   # 10: the bars 5 and 6, width 2
+print("all random tests agree")
+`} />
+
+**Why popping on `>=` is fine.** If two equal bars are adjacent in the stack, the earlier one is popped with a width that stops at the later equal bar (an underestimate), but the later one extends all the way left to the same boundary and reports the full width. The maximum is still found.
+
+## Worked example: contribution counting
+
+A powerful trick: instead of enumerating subarrays, ask for each element "in how many subarrays am I the minimum?". With `left[i]` = number of choices for the left end and `right[i]` = number of choices for the right end, element `i` is the minimum of `left[i] * right[i]` subarrays.
+
+**Tie-breaking must be asymmetric**: take the previous *strictly* smaller on one side and the next smaller-*or-equal* on the other, so each subarray is credited to exactly one of its minimum elements (the rightmost one here).
+
+<CodeRunner language="python" code={`def sum_subarray_min(a):
+    n = len(a)
+    left = [0] * n
+    right = [0] * n
+    st = []
+    for i in range(n):
+        while st and a[st[-1]] >= a[i]:      # previous STRICTLY smaller remains
+            st.pop()
+        left[i] = i - (st[-1] if st else -1)
+        st.append(i)
+    st = []
+    for i in range(n - 1, -1, -1):
+        while st and a[st[-1]] > a[i]:       # next smaller-OR-EQUAL remains
+            st.pop()
+        right[i] = (st[-1] if st else n) - i
+        st.append(i)
+    return sum(a[i] * left[i] * right[i] for i in range(n))
+
+def brute(a):
+    return sum(min(a[i:j + 1]) for i in range(len(a)) for j in range(i, len(a)))
+
+import random
+random.seed(2)
+for _ in range(300):
+    a = [random.randint(1, 5) for _ in range(random.randint(1, 10))]
+    assert sum_subarray_min(a) == brute(a), a
+print(sum_subarray_min([3, 1, 2, 4]))   # 17
+print("all random tests agree")
+`} />
+
+Replace `min` by `max` (flip the comparisons) to get the sum of subarray maximums; subtract the two to get "sum over all subarrays of (max - min)".
+
+## When to reach for a monotonic stack
+
+Phrases that signal it: "nearest to the left/right with a larger/smaller value", "how far can I extend while staying below/above", "span", "visible buildings", "largest area", "count subarrays where this element is the maximum/minimum".
+
+## Pitfalls
+
+1. **Wrong strictness.** `<` versus `<=` decides how equal values behave. Write down what "next greater" means for equal elements (strict here) before coding.
+2. **Storing values instead of indices.** Most applications need positions (to compute widths or distances), so store indices and look up values.
+3. **Forgetting the flush.** Elements left in the stack at the end have no answer: handle them (sentinel or final loop).
+4. **Double counting ties in contribution sums.** Use one strict and one non-strict comparison, never two strict (undercount) or two non-strict (overcount).
+5. **Overflow.** Areas and contribution sums reach `n * max * ...`; use 64-bit integers (and often a modulus).
+6. **Circular arrays.** Iterate `2n` positions (index `i mod n`) and only record answers on the first pass.
+
+## Practice
+
+<Problem id="m07-next-greater" />
+
+<Problem id="m07-largest-rectangle" />
+
+## Problem ladder
+
+- [Nearest Smaller Values](https://cses.fi/problemset/task/1645) (CSES): previous smaller element, the exact template above.
+- [Daily Temperatures](https://leetcode.com/problems/daily-temperatures/) (LeetCode, medium): next greater distance.
+- [Largest Rectangle in Histogram](https://leetcode.com/problems/largest-rectangle-in-histogram/) (LeetCode, hard).
+- [Sum of Subarray Minimums](https://leetcode.com/problems/sum-of-subarray-minimums/) (LeetCode, medium): contribution counting with tie-breaking.
+- [Imbalanced Array](https://codeforces.com/problemset/problem/817/D) (Codeforces 817D, rating about 1900): sum of max minus min over all subarrays.
+
+## Quiz
+
+<Quiz id="cp-m07-monotonic-stack" tags={["monotonic-stack"]} questions={[
+  { type: "mcq", q: "In the next-greater-element loop, what is the time complexity and why?", options: ["O(n^2), because of the inner while loop", "O(n), because each index is pushed once and popped at most once", "O(n log n), because of the stack", "O(n), because the inner loop runs at most twice per index"], answer: 1, explain: "A single iteration can pop many items, but the total number of pops is at most the total number of pushes, n." },
+  { type: "multi", q: "Which of these are valid uses of a monotonic stack?", options: ["Nearest smaller value to the left of each element", "Largest rectangle in a histogram", "Sorting an array in O(n)", "Counting subarrays in which each element is the maximum"], answer: [0, 1, 3], explain: "The stack finds nearest greater/smaller boundaries, which drive the first, second and fourth tasks. It does not sort." },
+  { type: "predict", q: "What does this print?", code: "a = [4, 4, 2, 5]\nres = [0] * 4\nst = []\nfor i in range(4):\n    while st and a[st[-1]] < a[i]:\n        res[st.pop()] = i + 1\n    st.append(i)\nprint(res)", options: ["[4, 4, 4, 0]", "[2, 4, 4, 0]", "[4, 0, 4, 0]", "[0, 0, 0, 0]"], answer: 0, explain: "Equal values are not popped (strict comparison); the 5 at index 4 (1-based) pops indices 3, 2 and 1, so the first three entries are 4." },
+  { type: "mcq", q: "When counting, over all subarrays, how many have element i as their minimum, why do we use one strict and one non-strict comparison?", options: ["To make the stack faster", "So every subarray is assigned to exactly one of its minimum elements", "To avoid integer overflow", "Because the array is circular"], answer: 1, explain: "With ties, a subarray has several minimum positions. Asymmetric comparisons credit it to exactly one of them (for instance the rightmost)." }
+]} />

@@ -1,0 +1,209 @@
+---
+title: Stacks, Brackets and Expressions
+track: cp
+module: stacks-and-queues
+order: 1
+difficulty: easy
+estMinutes: 30
+prerequisites: []
+tags: [stack, brackets, expression-evaluation, parsing]
+type: lesson
+problems: [m07-bracket-sequence, m07-rpn-eval]
+furtherReading:
+  - title: cp-algorithms, Stacks and queues (minimum stack)
+    url: https://cp-algorithms.com/data_structures/stack_queue_modification.html
+  - title: cp-algorithms, Expression parsing
+    url: https://cp-algorithms.com/string/expression_parsing.html
+  - title: CLRS, Elementary Data Structures (stacks and queues)
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+---
+
+## Intuition
+
+A stack of plates: you can only add or remove at the top, so the plate you used **last** is the one you meet **first**. Whenever a problem has *nested* structure, where the most recently opened thing must be closed first, a stack is the natural tool:
+
+- parentheses and tags: `( [ { } ] )`
+- function calls: the innermost call returns first (the "call stack")
+- undo history: the last action is the first one undone
+- evaluating `3 + 4 * (2 - 1)`: you must finish the innermost parenthesis before the outer one
+
+## Definition
+
+A **stack** supports three operations, each in `O(1)`:
+
+| operation | meaning |
+| --- | --- |
+| `push(x)` | put `x` on top |
+| `pop()` | remove and return the top |
+| `top()` | look at the top without removing it |
+
+plus `empty()` / `size()`. The discipline is **LIFO**: last in, first out.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+vector<int> st;          // a vector is the fastest stack
+st.push_back(5);         // push
+int x = st.back();       // top
+st.pop_back();           // pop (undefined behaviour if empty!)
+// std::stack<int> works too but is not faster
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+st = []
+st.append(5)     # push
+x = st[-1]       # top
+st.pop()         # pop (IndexError if empty)
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+// Prefer ArrayDeque; java.util.Stack is synchronized and legacy.
+Deque<Integer> st = new ArrayDeque<>();
+st.push(5);               // push
+int x = st.peek();        // top (null if empty)
+st.pop();                 // pop (NoSuchElementException if empty)
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(1) per operation" space="O(n)" note="n = number of elements currently stored" />
+
+## Worked example: bracket matching
+
+**Problem.** Is `{[()]}()` balanced? Is `([)]`?
+
+**Idea.** Every closing bracket must close the *most recent* bracket that is still open, and it must be of the same kind. "Most recent still open" is exactly the top of a stack of unmatched openers.
+
+**Invariant.** After processing a prefix, the stack holds, in order, every opening bracket of that prefix that has not been closed yet.
+
+Trace for `([)]`:
+
+| char | action | stack after |
+| --- | --- | --- |
+| `(` | push | `(` |
+| `[` | push | `( [` |
+| `)` | top is `[`, but `)` needs `(`: **fail** | |
+
+Why is this correct? If the string is balanced, the matching partner of a closing bracket is the nearest unmatched opener to its left, which is the stack top by the invariant. Conversely, if the algorithm never fails and ends with an empty stack, the pops pair every bracket with a partner of the right kind in properly nested order.
+
+<CodeRunner language="python" code={`def balanced(s):
+    pair = {')': '(', ']': '[', '}': '{'}
+    st = []
+    for c in s:
+        if c in '([{':
+            st.append(c)
+        elif not st or st.pop() != pair[c]:
+            return False
+    return not st
+
+for s in ["{[()]}()", "([)]", "((", ")(", ""]:
+    print(repr(s), balanced(s))
+`} />
+
+Each character is pushed at most once and popped at most once: `O(n)` time.
+
+<Callout type="pitfall" title="Counting is not enough">
+Checking that each kind of bracket appears equally often accepts `([)]`. With several kinds you need the stack to enforce the *nesting order*. With a single kind, a running counter (never negative, ends at zero) is enough and uses `O(1)` memory.
+</Callout>
+
+## Worked example: evaluating expressions
+
+### Postfix (reverse Polish) is trivial
+
+In postfix notation the operator comes after its operands: `3 4 + 2 *` means `(3 + 4) * 2`. Read left to right; push numbers; on an operator pop two values `b` then `a` (the first pop is the **right** operand), push `a op b`. After the last token the stack holds the answer.
+
+### Infix with precedence: two stacks
+
+For `3 + 4 * 2 - (1 + 1)` keep a stack of numbers and a stack of operators. When a new operator `c` arrives, first apply every operator on top of the stack that binds at least as tightly (left associativity), then push `c`. `(` is pushed; `)` applies operators back to the matching `(`. At the end apply what remains.
+
+Why "at least as tightly"? For `10 - 2 - 3` we must compute `(10 - 2) - 3 = 5`, so when the second `-` arrives the first `-` must be applied immediately; `>=` precedence gives left associativity.
+
+<CodeRunner language="python" code={`def evaluate(expr):
+    prec = {'+': 1, '-': 1, '*': 2, '/': 2}
+    nums, ops = [], []
+
+    def apply():
+        op = ops.pop()
+        b = nums.pop()
+        a = nums.pop()
+        if op == '+': nums.append(a + b)
+        elif op == '-': nums.append(a - b)
+        elif op == '*': nums.append(a * b)
+        else: nums.append(int(a / b))   # truncate toward zero, like C++/Java
+
+    i = 0
+    while i < len(expr):
+        c = expr[i]
+        if c.isdigit():
+            j = i
+            while j < len(expr) and expr[j].isdigit():
+                j += 1
+            nums.append(int(expr[i:j]))
+            i = j
+            continue
+        if c == '(':
+            ops.append(c)
+        elif c == ')':
+            while ops[-1] != '(':
+                apply()
+            ops.pop()
+        elif c in prec:
+            while ops and ops[-1] != '(' and prec[ops[-1]] >= prec[c]:
+                apply()
+            ops.append(c)
+        i += 1
+    while ops:
+        apply()
+    return nums[0]
+
+for e in ["3+4*2-(1+1)", "10-2-3", "2*(3+4)*5", "100/7/2"]:
+    print(e, '=', evaluate(e))
+`} />
+
+Every number is pushed once and every operator pushed and applied once, so evaluation is `O(n)`.
+
+## Other classic stack uses
+
+- **Undo / DFS without recursion:** an explicit stack avoids deep recursion limits (Python's default is about 1000 frames).
+- **"Nearest to the left that ..." questions:** keep a stack of candidates; this becomes the [monotonic stack](/cp/stacks-and-queues/monotonic-stack/).
+- **Stack with `O(1)` minimum:** store the minimum so far next to each element (see [amortized analysis](/cp/stacks-and-queues/amortized-analysis/)).
+
+## Pitfalls
+
+1. **Popping from an empty stack.** Undefined behaviour in C++ (`back()` on an empty vector), exception in Python/Java. Test emptiness before every `pop`/`top`; many bracket bugs are exactly "closing bracket with nothing open".
+2. **Forgetting the final emptiness check.** `((` never fails mid-scan but is unbalanced.
+3. **Operand order.** For `-` and `/` the first value you pop is the *right* operand.
+4. **Division semantics.** C++ and Java truncate toward zero (`-7 / 2 = -3`); Python's `//` floors (`-7 // 2 = -4`). Pick one deliberately.
+5. **Modulus and negatives.** `(a - b) % M` can be negative in C++/Java/JavaScript; add `M` before the final `%`.
+6. **Unary minus** (`-3 + 2`, `2 * (-1)`) needs special handling: treat a `-` that follows `(` or an operator, or starts the string, as unary (for example push a `0` first).
+
+## Practice
+
+<Problem id="m07-bracket-sequence" />
+
+<Problem id="m07-rpn-eval" />
+
+## Problem ladder
+
+- [Valid Parentheses](https://leetcode.com/problems/valid-parentheses/) (LeetCode, easy): the warm-up above.
+- [Evaluate Reverse Polish Notation](https://leetcode.com/problems/evaluate-reverse-polish-notation/) (LeetCode, medium).
+- [Basic Calculator II](https://leetcode.com/problems/basic-calculator-ii/) (LeetCode, medium): infix with `+ - * /` and no parentheses.
+- [Basic Calculator](https://leetcode.com/problems/basic-calculator/) (LeetCode, hard): parentheses and unary minus.
+- [Longest Regular Bracket Sequence](https://codeforces.com/problemset/problem/5/C) (Codeforces 5C, rating about 1900): the stack stores indices, not characters.
+
+## Quiz
+
+<Quiz id="cp-m07-stacks-brackets" tags={["stack", "brackets"]} questions={[
+  { type: "mcq", q: "Which string is NOT balanced when three bracket kinds are allowed?", options: ["{[()]}", "([]){}", "([)]", "()()()"], answer: 2, explain: "In ([)] the ) arrives while the top of the stack is [, so the nesting order is violated even though every kind is balanced in count." },
+  { type: "multi", q: "Which of these make the stack-based bracket checker give a wrong answer if forgotten?", options: ["Checking that the stack is non-empty before popping on a closing bracket", "Checking that the stack is empty after the scan", "Checking that the popped opener has the same kind as the closer", "Sorting the characters first"], answer: [0, 1, 2], explain: "All three are needed: closing with nothing open, leftover openers, and mismatched kinds each produce an invalid string. Sorting would destroy the order that matters." },
+  { type: "predict", q: "What does this print?", code: "st = []\nfor tok in '2 3 4 * + 5 -'.split():\n    if tok in '+-*':\n        b = st.pop(); a = st.pop()\n        st.append(a + b if tok == '+' else a - b if tok == '-' else a * b)\n    else:\n        st.append(int(tok))\nprint(st[-1])", options: ["9", "21", "-5", "15"], answer: 0, explain: "2 + (3 * 4) = 14, then 14 - 5 = 9." },
+  { type: "mcq", q: "Evaluating 10 - 2 - 3 with an operator stack: when the second minus arrives, what must happen to preserve left associativity?", options: ["Push it immediately on top of the first minus", "Apply the first minus before pushing the second", "Discard the first minus", "Swap the two minus signs"], answer: 1, explain: "Operators of equal precedence on top of the stack are applied first (precedence >= comparison), giving (10 - 2) - 3 = 5." }
+]} />

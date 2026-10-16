@@ -1,0 +1,249 @@
+---
+title: String Hashing
+track: cp
+module: hashing
+order: 3
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/hashing/hash-maps-counting]
+tags: [string-hashing, polynomial-hash, modular-arithmetic, collisions, birthday-bound]
+type: lesson
+problems: [m08-substring-equal-queries]
+furtherReading:
+  - title: cp-algorithms, String hashing
+    url: https://cp-algorithms.com/string/string-hashing.html
+  - title: CLRS, Rabin-Karp and universal hashing
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+---
+
+## Intuition
+
+Comparing two strings of length `L` takes `O(L)`. Suppose you must answer `10^5` queries of the form "are `s[l1..r1]` and `s[l2..r2]` equal?" on a string of length `10^5`. Naively that is `10^10` character comparisons.
+
+A **fingerprint** fixes this. Give every string a small number, its *hash*, such that:
+
+1. equal strings always get equal hashes;
+2. different strings *almost always* get different hashes;
+3. the hash of **any substring** can be computed in `O(1)` after `O(n)` preprocessing.
+
+Then comparing strings means comparing two integers. The price: the answer is only *probably* right, and we must quantify "probably".
+
+## Definition: polynomial hash
+
+Pick a modulus `M` (a prime) and a base `B` with `1 < B < M`. Map characters to numbers `c(x)` in `1..` (use `x - 'a' + 1`; never `0`). For `s = s_0 s_1 ... s_{n-1}`:
+
+`H(s) = c(s_0) * B^(n-1) + c(s_1) * B^(n-2) + ... + c(s_{n-1}) * B^0   (mod M)`
+
+Read it as `s` interpreted as a number written in base `B`.
+
+### Prefix hashes and the substring formula
+
+Define `P[0] = 0` and `P[i+1] = P[i] * B + c(s_i)  (mod M)`. So `P[i]` is the hash of the first `i` characters. For the half-open range `[l, r)`:
+
+`H(s[l..r)) = P[r] - P[l] * B^(r-l)   (mod M)`
+
+*Why:* `P[r]` is `P[l]` shifted left by `r - l` places plus the substring's digits. Subtracting the shifted prefix leaves exactly the substring's number.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+const ll M = 1000000007LL;
+vector<ll> P(n + 1, 0), pw(n + 1, 1);
+for (int i = 0; i < n; i++) {
+    P[i + 1] = (P[i] * B + (s[i] - 'a' + 1)) % M;
+    pw[i + 1] = pw[i] * B % M;
+}
+// hash of s[l..r), 0-based half-open
+auto get = [&](int l, int r) {
+    return ((P[r] - P[l] * pw[r - l]) % M + M) % M;
+};
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+M = 1_000_000_007
+P = [0] * (n + 1)
+pw = [1] * (n + 1)
+for i, ch in enumerate(s):
+    P[i + 1] = (P[i] * B + ord(ch) - 96) % M
+    pw[i + 1] = pw[i] * B % M
+
+def get(l, r):          # hash of s[l:r]
+    return (P[r] - P[l] * pw[r - l]) % M   # Python % is non-negative
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+final long M = 1_000_000_007L;
+long[] P = new long[n + 1], pw = new long[n + 1];
+pw[0] = 1;
+for (int i = 0; i < n; i++) {
+    P[i + 1] = (P[i] * B + (s.charAt(i) - 'a' + 1)) % M;
+    pw[i + 1] = pw[i] * B % M;
+}
+// hash of s[l..r)
+long get(int l, int r) {
+    return ((P[r] - P[l] * pw[r - l]) % M + M) % M;
+}
+```
+
+</Tab>
+</Tabs>
+
+<Complexity time="O(n) build, O(1) per substring hash" space="O(n)" />
+
+Try it, with a brute-force comparison:
+
+<CodeRunner snippets={{ python: `import random
+
+M = 1_000_000_007
+B = 911382323
+s = "abracadabra"
+n = len(s)
+P = [0] * (n + 1)
+pw = [1] * (n + 1)
+for i, ch in enumerate(s):
+    P[i + 1] = (P[i] * B + ord(ch) - 96) % M
+    pw[i + 1] = pw[i] * B % M
+
+def get(l, r):
+    return (P[r] - P[l] * pw[r - l]) % M
+
+print("abra at 0 vs 7:", get(0, 4) == get(7, 11), s[0:4] == s[7:11])
+print("abra at 0 vs 3:", get(0, 4) == get(3, 7), s[0:4] == s[3:7])
+
+# exhaustive check against string comparison
+bad = 0
+for l1 in range(n):
+    for l2 in range(n):
+        for ln in range(1, n - max(l1, l2) + 1):
+            same = s[l1:l1 + ln] == s[l2:l2 + ln]
+            if same != (get(l1, l1 + ln) == get(l2, l2 + ln)):
+                bad += 1
+print("mismatches:", bad)
+`, javascript: `// JavaScript doubles are exact only up to 2^53, so use a modulus below
+// sqrt(2^53) ~ 9.49e7 so that a product of two residues stays exact.
+const M = 94905991;
+const B = 131071;
+const s = "abracadabra";
+const n = s.length;
+const P = new Array(n + 1).fill(0), pw = new Array(n + 1).fill(1);
+for (let i = 0; i < n; i++) {
+  P[i + 1] = (P[i] * B + s.charCodeAt(i) - 96) % M;
+  pw[i + 1] = (pw[i] * B) % M;
+}
+const get = (l, r) => (((P[r] - (P[l] * pw[r - l]) % M) % M) + M) % M;
+console.log(get(0, 4) === get(7, 11), s.slice(0, 4) === s.slice(7, 11));
+console.log(get(0, 4) === get(3, 7), s.slice(0, 4) === s.slice(3, 7));
+` }} />
+
+## How reliable is it?
+
+### One comparison
+
+Fix two different strings `x != y` of the **same length** `n`. Their hash difference `H(x) - H(y)` is a polynomial in `B` of degree at most `n - 1`, and it is not the zero polynomial (the strings differ somewhere). Over the field `Z_M` (`M` prime) a nonzero polynomial of degree `d` has at most `d` roots. If `B` is chosen **uniformly at random**, then
+
+`Pr[H(x) = H(y)] <= (n - 1) / M`.
+
+This is a *guarantee* for any fixed pair of strings, as long as the base is random and unknown to whoever produced the strings.
+
+### Many comparisons: the union bound and the birthday paradox
+
+- **Union bound.** With `q` comparisons of strings of length up to `n`, the chance that *any* comparison is wrong is at most `q * (n - 1) / M`. With `M = 10^9 + 7`, `q = n = 10^5`, that is `10`, which is a vacuous bound (the typical collision probability is nearer `1 / M`, but you can no longer *prove* safety).
+- **Birthday paradox.** If you put `k` different strings into a hash set, any *pair* may collide. Expected number of colliding pairs is about `k(k - 1) / (2M)`. One collision is likely once `k` is about `sqrt(M)`: for `M ~ 10^9`, around `3.2 * 10^4` strings give a `1 - e^(-1/2)`, about `39%`, chance of a collision.
+
+| modulus size | strings `k` | expected colliding pairs `k^2 / 2M` |
+| --- | --- | --- |
+| `~10^9` | `10^5` | `~5` |
+| `~10^9` | `10^6` | `~500` |
+| `~10^18` (two mods or `2^61 - 1`) | `10^6` | `~5 * 10^-7` |
+| `~10^18` | `10^7` | `~5 * 10^-5` |
+
+So **a single `10^9` modulus is not enough** whenever you store many hashes, but a `~10^18` combined space is.
+
+<CodeRunner language="python" code={`import random
+
+# Birthday experiment: a small modulus so collisions appear quickly.
+M = 100003            # prime
+B = 131
+
+def h(s):
+    x = 0
+    for ch in s:
+        x = (x * B + ord(ch)) % M
+    return x
+
+random.seed(42)
+results = []
+for trial in range(8):
+    seen = {}
+    count = 0
+    while True:
+        t = "".join(random.choice("abcdefghij") for _ in range(10))
+        if t in seen.values():
+            continue                  # same string, not a real collision
+        count += 1
+        v = h(t)
+        if v in seen:
+            break
+        seen[v] = t
+    results.append(count)
+print("strings inserted before a hash collision:", results)
+print("average:", sum(results) / len(results), "(theory: about", round((3.14159 * M / 2) ** 0.5), ")")
+`} />
+
+## Choosing the modulus and base
+
+| choice | verdict |
+| --- | --- |
+| prime near `10^9` (`10^9 + 7`, `998244353`) | products fit in signed 64-bit; **combine two** such moduli for safety |
+| prime `2^61 - 1` | about `2.3 * 10^18` space with one hash; needs 128-bit multiplication (`__int128`) or a split multiply |
+| `2^64` via unsigned overflow | fast, but **breakable** by Thue-Morse strings for every odd base; never use it where adversarial tests exist |
+| non-prime modulus | the polynomial can have more roots; avoid |
+| base `B` | random in `[256, M - 1]` chosen at run time; avoid tiny bases (`B = 2`), and avoid `B = 0, 1` |
+| character map | `c(x) >= 1`, otherwise `"a"` and `"aa"` can hash equal when `c(a) = 0` |
+
+<Callout type="warning" title="Randomise the base">
+A fixed `(B, M)` in your source can be attacked by anyone who reads it (on Codeforces, other participants during the hacking phase). Derive `B` from a clock, `random_device` or a per-run RNG so no fixed input is bad for you.
+</Callout>
+
+## Worked example: palindromic substring queries
+
+A substring `s[l..r)` is a palindrome iff it equals its reverse. Build prefix hashes for `s` and for `rev(s)`. The reverse of `s[l..r)` is `rev(s)[n-r .. n-l)`, so the check is two `O(1)` hash comparisons after `O(n)` preprocessing. (Manacher's algorithm answers every centre in `O(n)` deterministically; the hash version generalises to "almost palindromes" and to queries on updated strings.)
+
+## Pitfalls
+
+1. **Negative remainder.** In C++/Java `(a - b) % M` may be negative; add `M` and take `% M` again.
+2. **Overflow.** `P[l] * pw[k]` is a product of two residues below `M`: it needs `M < 3 * 10^9` for signed 64-bit. With `M ~ 10^18` use `__int128` or `unsigned __int128`.
+3. **Comparing different lengths** without including the length: always compare hashes of equal-length ranges (or store `(hash, length)`).
+4. **Zero character value** makes strings of different lengths indistinguishable.
+5. **Off-by-one in half-open vs inclusive ranges.** Pick `[l, r)` internally and convert once at the input boundary.
+6. **Trusting a hash match as proof.** Hash equality means "equal with high probability"; when exactness is cheap (a single verified comparison), verify.
+7. **Fixed base in public code.** See above; randomise.
+
+## Practice
+
+<Problem id="m08-substring-equal-queries" />
+
+## Problem ladder
+
+- [String Matching](https://cses.fi/problemset/task/1753) (CSES): count occurrences of a pattern; hashing, KMP or Z all work.
+- [Finding Borders](https://cses.fi/problemset/task/1732) (CSES): prefix equals suffix checks in `O(1)` each.
+- [Find the Index of the First Occurrence in a String](https://leetcode.com/problems/find-the-index-of-the-first-occurrence-in-a-string/) (LeetCode, easy): Rabin-Karp.
+- [Good Substrings](https://codeforces.com/problemset/problem/271/D) (Codeforces 271D, rating about 1800): count distinct good substrings with hashing.
+- [Longest Duplicate Substring](https://leetcode.com/problems/longest-duplicate-substring/) (LeetCode, hard): next lesson's technique.
+
+## Quiz
+
+<Quiz id="cp-m08-string-hashing" tags={["string-hashing"]} questions={[
+  { type: "mcq", q: "With prefix hashes P and powers pw, the hash of s[l..r) (half-open) is:", options: ["P[r] - P[l]", "P[r] - P[l] * pw[r - l]", "P[r] - P[l] * pw[l]", "P[r] * pw[l] - P[l]"], answer: 1, explain: "P[l] must be shifted left by the substring length r - l before it is subtracted from P[r]." },
+  { type: "multi", q: "Which choices make a polynomial string hash more robust?", options: ["A random base chosen at run time", "Two independent prime moduli of about 10^9", "Mapping 'a' to 0", "Using 2^64 overflow arithmetic when tests may be adversarial"], answer: [0, 1], explain: "Randomising the base and enlarging the space with two moduli help. Mapping a to 0 makes 'a' and 'aa' collide, and 2^64 overflow is breakable by Thue-Morse strings." },
+  { type: "predict", q: "About how many different strings are needed before two collide with probability around 39%, for a single modulus of about 10^9 (assume uniformly distributed hashes)?", options: ["About 32,000", "About 1,000,000", "About 500", "About 10^9"], answer: 0, explain: "The birthday bound: k = sqrt(M) gives 1 - e^(-1/2), roughly 39%; sqrt(10^9) is about 31,600." },
+  { type: "mcq", q: "For two different strings of length n and a uniformly random base modulo a prime M, the collision probability is at most:", options: ["1 / n", "(n - 1) / M", "n / 2", "M / n"], answer: 1, explain: "The difference of the two hash polynomials has degree at most n - 1 and is nonzero, so it has at most n - 1 roots in Z_M." }
+]} />

@@ -1,0 +1,88 @@
+{
+  "id": "m08-anagram-classes",
+  "title": "Anagram Families",
+  "source": {
+    "name": "Original exercise; classic hashing technique"
+  },
+  "rating": 1000,
+  "tags": [
+    "hashing",
+    "strings",
+    "grouping"
+  ],
+  "statement": "Two words are **anagrams** if one can be rearranged into the other (they have the same multiset of letters). Given `n` lowercase words, split them into families of mutually anagram words.\n\n**Input.** First line: `n`. Then `n` lines, one word each.\n\n**Output.** Two integers on one line: the number of families, and the size of the largest family.",
+  "constraints": [
+    "1 ≤ n ≤ 1000, total length of all words ≤ 3000 in this browser version",
+    "words consist of lowercase letters `a`-`z` and have length ≥ 1"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "6\nlisten\nsilent\nenlist\ngoogle\ngogole\ncat\n",
+      "output": "3 3\n",
+      "hidden": false
+    },
+    {
+      "input": "1\na\n",
+      "output": "1 1\n",
+      "hidden": false
+    },
+    {
+      "input": "7\nab\nba\nabb\nbab\nbba\naab\nab\n",
+      "output": "3 3\n",
+      "hidden": true
+    },
+    {
+      "input": "3\nabc\ndef\nghi\n",
+      "output": "3 1\n",
+      "hidden": true
+    },
+    {
+      "input": "6\naaaa\naaaa\naaaa\naaaa\naaaa\naaaa\n",
+      "output": "1 6\n",
+      "hidden": true
+    },
+    {
+      "input": "60\nxzzy\nbca\nyzzx\nsntlei\nitnlse\nnaaanb\nbaa\nacb\nabc\nentlsi\naba\nabc\ncab\neisltn\nananba\nbnaana\nieltns\nitslen\naba\nnilset\ncba\nacb\nbaaann\nitnles\nannaba\nzzyx\ntsienl\nbca\ncab\naab\nabanan\naab\nntesil\nnabaan\nbca\ncba\naba\nbaa\nacb\nsiletn\nbca\nnsilet\nbnnaaa\nzyxz\netinls\nsieltn\naba\nsetnil\naab\nnnabaa\naab\nnliste\nslneti\nzxzy\naba\nyzzx\ncab\nnaaabn\nnsleti\naab\n",
+      "output": "5 18\n",
+      "hidden": true
+    },
+    {
+      "input": "400\nc\naaac\nbbab\nc\nb\naacb\nacbb\ncb\nc\nbaa\ncaa\ncaa\nabb\nb\nbbca\na\ncaa\nccc\nb\ncbcb\nac\ncaab\na\nac\naccc\nab\nc\nbc\nb\nbc\nbc\nac\na\nacaa\nb\nb\nca\nccba\nb\nba\nbabb\nbccb\na\na\nbacb\nbab\naba\nbaca\nbc\nbaa\na\nb\na\naccc\naca\nccca\nbacc\ncbbb\nbab\nca\nabbc\nab\nabaa\naaa\nb\naab\nbab\nc\nacb\nac\nccaa\na\nabb\ncac\ncca\naccb\nac\ncbb\na\nbb\ncbbb\naaa\ncaa\nbcac\ncc\ncaaa\naa\ncbc\ncbcc\nab\nbaa\nc\nbba\na\nbacc\ncbcb\ncbba\naabb\nbba\nacaa\nca\nbb\nacc\ncac\ncc\nbbbb\nbab\nb\nbbcc\ncb\ncaac\nabba\naac\nab\na\ncca\nbabb\nc\nba\naca\naa\naaba\naaa\ncb\nca\nba\nbcba\nc\ncaba\naaab\nbaca\nac\ncb\nbb\nbb\naa\na\nab\naba\ncca\nab\nacca\nab\nbbca\nbbbc\nac\naa\nbcab\ncb\nc\nbabc\nb\nac\nc\ncc\naa\na\ncbaa\nabb\nabc\ncc\ncaa\nbbac\nac\ncaa\na\nabb\na\nacca\nc\nc\nb\ncc\nbb\nbaaa\naa\nbaa\nbac\na\nacac\nbab\nacab\nbc\na\nb\ncac\naaa\naaa\nbaaa\ncc\nca\nbc\nbbb\nca\naaac\na\ncaac\nabc\nacba\nb\nbc\nb\ncbcc\nba\ncac\ncacc\nacb\nca\na\naaac\ncc\nba\nbccc\nb\nb\ncbb\na\nc\nacc\nc\nccc\nbc\nba\naa\nb\nab\nb\nbb\ncc\nacb\na\naba\naca\nb\nc\na\na\naca\naa\nba\ncc\nc\na\ncbbc\naa\ncca\nbacc\nbc\nba\nac\nabc\na\naaa\nb\na\nbcbc\nbba\nbc\na\naa\nbc\nbcac\nab\nbbcc\nac\naccb\nb\nacb\nc\ncba\nbbca\nbb\ncabb\nbaa\ncb\nbc\nc\ncc\nab\ncbcb\naa\nca\nba\ncc\nbcbb\nac\naba\ncab\nabbb\nc\nccaa\nabba\naac\nbb\nccab\nacb\nbbc\nb\ncbaa\nbcb\ncba\nabca\nbbc\nb\na\ncbba\nc\na\naabb\ncc\nccba\ncbb\na\nac\na\ncc\na\nbccc\ncac\naab\nccbc\nbaaa\ncccc\ncac\nbccb\nb\na\nb\naa\nc\naab\nb\nabaa\nca\ncab\na\nab\nb\nc\nccb\nab\na\nbbb\nbbaa\ncb\nbc\nc\nb\nc\nbcc\naa\nab\ncb\nab\nc\nb\na\nc\nac\ncba\nb\nc\nb\naa\na\naba\ncaca\ncc\naaab\naaa\nba\nac\ncb\nb\nba\ncbac\ncaaa\na\nc\nbbac\nc\na\nb\nacbb\ncbcb\naaab\nb\naacc\nbaac\ncacc\naab\nc\ncb\nb\nca\nc\nb\na\nc\nc\n",
+      "output": "33 40\n",
+      "hidden": true
+    },
+    {
+      "input": "100\nhdlgokaejbicmfn\nchgdfjibea\nhgicjefsoaqdpklmbrn\nfadcbe\nfemkcgaoibphjnlqd\nblnvdrcgsmpkjauqifhtwoe\nbac\njkihfgbadec\netmbcjokrivqngupshdfal\nbejfpamdtqgrslniuvohcwk\nbca\nafbgced\nshjmlcbrnoikqdgpafe\ndfjkelamicnhgb\nab\njlcnakbhqdfiemgop\na\niglproceamdsqfbkhjn\njhfilngdakbmce\nhjfebigcad\nhcdebgiafj\nbadgefch\ncab\ndbca\ncabjfidkgeh\nfjerknglmapbihdsoqc\nfbedac\nadbce\nhpatjeudfswvklocyzgbqinmrx\nbhifgnmjekdlcoa\ndfihkbgjeac\ndjekarnomwqpfcthlvsbuxig\nfedcbga\nba\nfbgiaedhc\nfdbgeca\na\nbcdaef\njqkucltbhvnfmpdeaogisr\nab\nlbcahmdnrpigjkefoq\nhjicgakebfnmld\ncghdbfea\ndhijkebcfag\nfnhgkljmicdeba\npanledmjgbhckfio\nacebd\npdknfceiolrsqhgmuajbt\nndebiajchglfmk\ngfdcbhae\nfqodcpjehbkaringlm\npejblmfgcidohkna\nalcepnqdhbromfsigkj\nehodrcgubkqysvwpxnaljitmf\nqinmkbagjlofepdhcr\ndaebc\njrkbqaltfudcvoeinpgsmh\nqakflimsutjpncrboehdg\ncab\na\ngkijaedflcbh\nedlgacobikmhjfn\npmencidhlvajbruskfgotq\nspbqitfagrkcvhnjdlouem\nbca\nbmjdhlfgkecia\ndaicgbfeh\ngeqnpmkrcbljdsahiof\nbdajlhegcifk\nbac\nafcojbedhilmkng\nrsfivudqhkgmxoljenapwcbt\nnoasqfgbujmlpiecdkrht\nckeglbhidmajf\nlkfcijhegbadmn\niltsrkdounqbjhmcaegpf\nbagedcf\ndfbecga\ndcfighabje\naceqdvuklfjiybnxhpgsrmtwo\nab\nkgihfjcebad\nbgljinhcqpkmdoefa\ndahenlkmcgibjf\negahbdcf\nehfgabcd\nwimlsvnjfuedxprkygbozqahtc\nhoegdinjbfkcalm\npbmjecudkwonvaqsfglihtrx\ndacbe\ncab\nba\nbhfjckaidge\ntlcvnujwxdsagiopbhkqmerf\nabfcde\ncba\nbhfadgjeci\nhcjbdkmanipflgeo\njmdhanlbefickg\nifcdghjbae\n",
+      "output": "25 8\n",
+      "hidden": true
+    },
+    {
+      "input": "4\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab\nbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "output": "2 2\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Two words are in the same family exactly when some 'signature' of the word is equal. What is a good canonical form?",
+    "The sorted letters of a word, or the vector of 26 letter counts, are both canonical forms.",
+    "Group by that signature in a hash map signature -> size. The answer is the number of keys and the maximum value. Counting letters costs O(length), sorting O(length log length)."
+  ],
+  "editorial": "A canonical signature identifies a family: either the sorted letters, or the 26-length vector of letter counts. Put every word into a hash map keyed by its signature, incrementing a counter. The number of keys is the number of families and the maximum counter is the largest family.\n\nBuilding a count-vector key takes `O(L)` per word (plus `O(26)` for hashing), slightly better than sorting for long words. Total work is linear in the total input length.",
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\n# group by canonical signature\ndata = sys.stdin.read().split()\n# your code here\n",
+    "javascript": "// group by canonical signature\n// readLine() returns the next input line (or null).\n// your code here\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // group by canonical signature\n    return 0;\n}\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        // group by canonical signature\n    }\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\nfrom collections import Counter\ndata = sys.stdin.read().split()\nn = int(data[0])\ncnt = Counter()\nfor w in data[1:1+n]:\n    c = [0] * 26\n    for ch in w:\n        c[ord(ch) - 97] += 1\n    cnt[tuple(c)] += 1\nprint(len(cnt), max(cnt.values()))\n",
+    "javascript": "const n = parseInt(readLine());\nconst cnt = new Map();\nlet best = 0;\nfor (let i = 0; i < n; i++) {\n  const w = readLine().trim();\n  const c = new Array(26).fill(0);\n  for (let j = 0; j < w.length; j++) c[w.charCodeAt(j) - 97]++;\n  const key = c.join(',');\n  const v = (cnt.get(key) || 0) + 1;\n  cnt.set(key, v);\n  if (v > best) best = v;\n}\nconsole.log(cnt.size + ' ' + best);\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));\n        int n = Integer.parseInt(br.readLine().trim());\n        HashMap<String, Integer> cnt = new HashMap<>();\n        int best = 0;\n        for (int i = 0; i < n; i++) {\n            String w = br.readLine().trim();\n            int[] c = new int[26];\n            for (int j = 0; j < w.length(); j++) c[w.charAt(j) - 'a']++;\n            String key = Arrays.toString(c);\n            int v = cnt.merge(key, 1, Integer::sum);\n            best = Math.max(best, v);\n        }\n        System.out.println(cnt.size() + \" \" + best);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n;\n    cin >> n;\n    map<array<int, 26>, int> cnt;\n    int best = 0;\n    for (int i = 0; i < n; i++) {\n        string w;\n        cin >> w;\n        array<int, 26> c;\n        c.fill(0);\n        for (char ch : w) c[ch - 'a']++;\n        best = max(best, ++cnt[c]);\n    }\n    cout << cnt.size() << \" \" << best << \"\\n\";\n    return 0;\n}\n"
+  }
+}

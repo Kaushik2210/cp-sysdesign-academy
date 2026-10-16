@@ -1,0 +1,1 @@
+{ "title": "Stacks, Queues and Monotonic Structures", "level": "Level 1: Core Data Structures & Techniques", "order": 7, "summary": "LIFO and FIFO structures, bracket and expression processing, BFS-style simulation, monotonic stacks and queues, and the amortised analysis that makes them linear." }

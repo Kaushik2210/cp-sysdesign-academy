@@ -1,0 +1,172 @@
+---
+title: Coordinate Compression, Value Mapping and Grouping
+track: cp
+module: hashing
+order: 2
+difficulty: easy
+estMinutes: 25
+prerequisites: [cp/hashing/hash-maps-counting]
+tags: [coordinate-compression, grouping, canonical-form, hash-map, sorting]
+type: lesson
+problems: [m08-coordinate-compress, m08-anagram-classes]
+furtherReading:
+  - title: cp-algorithms, Fenwick tree (typically used over compressed coordinates)
+    url: https://cp-algorithms.com/data_structures/fenwick.html
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+Many problems give you values as large as `10^9` but only `10^5` of them. The values themselves do not matter, only their **relative order** or **identity**. You then want to *rename* them to small dense numbers `0, 1, 2, ...` so you can use arrays, Fenwick trees or bitsets, which are much faster and simpler than a map.
+
+A second, closely related idea: to group objects that are "the same up to some irrelevant detail" (anagrams, rotated strings, equal sets), compute a **canonical form** that is identical for every member of a group, and use it as a hash-map key.
+
+## Coordinate compression
+
+**Definition.** Given values `a[0..n-1]`, let `u` be the sorted list of distinct values. The compressed value of `x` is its position in `u` (its **rank**). The mapping is order preserving: `x < y` iff `rank(x) < rank(y)`.
+
+Two standard implementations:
+
+| approach | build | lookup | notes |
+| --- | --- | --- | --- |
+| sort + unique + binary search | `O(n log n)` | `O(log n)` | no hashing, deterministic |
+| sort + unique + dictionary | `O(n log n)` | `O(1)` expected | convenient in Python |
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+vector<long long> u = a;
+sort(u.begin(), u.end());
+u.erase(unique(u.begin(), u.end()), u.end());
+// rank of x, 0-based:
+int r = lower_bound(u.begin(), u.end(), x) - u.begin();
+// original value from rank: u[r]
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+u = sorted(set(a))
+rank = {v: i for i, v in enumerate(u)}   # 0-based
+compressed = [rank[x] for x in a]
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] u = a.clone();
+Arrays.sort(u);
+int m = 0;
+for (int i = 0; i < u.length; i++)
+    if (i == 0 || u[i] != u[i - 1]) u[m++] = u[i];
+// 0-based rank of x:
+int r = Arrays.binarySearch(u, 0, m, x);
+```
+
+</Tab>
+</Tabs>
+
+<CodeRunner language="python" code={`a = [100, 5, 100, -3, 5, 10**9]
+u = sorted(set(a))
+rank = {v: i + 1 for i, v in enumerate(u)}    # 1-based
+print("distinct sorted:", u)
+print("compressed     :", [rank[x] for x in a])
+print("restore        :", [u[rank[x] - 1] for x in a])
+`} />
+
+### Why compress?
+
+- **Fenwick / segment tree over values:** "count of smaller elements to my left" over values up to `10^9` becomes a tree of size `n`.
+- **Arrays instead of maps:** `cnt[rank[x]]++` is much faster than a hash lookup.
+- **Offline problems:** collect *all* coordinates that will ever matter (array values, query endpoints, event times), compress them once, then process.
+- **2D coordinates:** compress `x` and `y` independently to turn a `10^9 x 10^9` plane into at most `n x n`.
+
+### Compressing intervals: keep the gaps in mind
+
+If points `5` and `9` are adjacent after compression but you need to know that *4 empty cells* lie between them (areas, lengths), compression discards the gap. Keep the original values `u[i]` and use differences `u[i+1] - u[i]`, or insert the neighbours (`x - 1`, `x + 1`) into the coordinate list before compressing.
+
+## Grouping by a canonical form
+
+To partition items into equivalence classes, find a function `canon(item)` such that `canon(x) = canon(y)` exactly when `x` and `y` are equivalent, then group with a map.
+
+| equivalence | canonical form |
+| --- | --- |
+| anagrams | sorted letters, or 26 letter counts |
+| same multiset of numbers | sorted tuple |
+| same up to rotation (cyclic strings) | lexicographically smallest rotation |
+| same shape, different letters (`abb`, `xyy`) | first-occurrence pattern: `0 1 1` |
+| fractions `a/b` | `(a/g, b/g)` with `g = gcd(a, b)` and sign normalised |
+| unordered pairs | `(min(x, y), max(x, y))` |
+
+<CodeRunner language="python" code={`from collections import defaultdict
+
+words = ["listen", "silent", "enlist", "google", "gogole", "cat", "act", "tac", "dog"]
+
+groups = defaultdict(list)
+for w in words:
+    key = "".join(sorted(w))           # canonical form: sorted letters
+    groups[key].append(w)
+
+for key, members in groups.items():
+    print(key, "->", members)
+print("families:", len(groups), "largest:", max(len(v) for v in groups.values()))
+
+def pattern(s):
+    first = {}
+    return tuple(first.setdefault(c, len(first)) for c in s)
+
+print(pattern("abb") == pattern("xyy"), pattern("abb") == pattern("xyx"))
+`} />
+
+Cost: sorting each word of length `L` is `O(L log L)`; counting letters is `O(L)`. For a fixed small alphabet use counts, for generic items use sorting.
+
+## Interning: map arbitrary objects to ids
+
+When strings, pairs or tuples are used as nodes (graph of words, states of a puzzle), assign each *new* object the next free integer id the first time it is seen, then run the algorithm on ids:
+
+```python
+ids = {}
+def get_id(obj):
+    if obj not in ids:
+        ids[obj] = len(ids)
+    return ids[obj]
+```
+
+You can then use plain lists indexed by id for adjacency, visited flags and distances.
+
+## Pitfalls
+
+1. **0-based vs 1-based ranks.** Fenwick trees are 1-based; decide once and stay consistent.
+2. **Forgetting to deduplicate** before `lower_bound` indexing: ranks then leave gaps and table sizes are wrong.
+3. **Compressing before all values are known** (online problems). Compression is an *offline* technique; for online queries use an ordered map or a dynamic structure.
+4. **Compressing coordinates but then using differences of ranks as distances.** Ranks preserve order, not distance. Use the stored real values.
+5. **Unhashable or identity-hashed keys.** Python lists as dict keys raise; use tuples. Java `int[]` keys use identity hashing: wrap them (`List<Integer>`, `Arrays.toString`, or a string key).
+6. **Canonical forms that are not injective.** Summing letter codes is *not* canonical for anagrams (`ad` and `bc` collide). Use sorted letters or full count vectors.
+7. **Key size.** Using a 26-int tuple per word is fine for thousands of words; with `10^6` short words encode the counts into a string or a pair of 64-bit hashes (and see the string-hashing lessons).
+
+## Practice
+
+<Problem id="m08-coordinate-compress" />
+
+<Problem id="m08-anagram-classes" />
+
+## Problem ladder
+
+- [Distinct Numbers](https://cses.fi/problemset/task/1621) (CSES): the smallest case of "identity only matters".
+- [Playlist](https://cses.fi/problemset/task/1141) (CSES): longest window of distinct values with a set and two pointers.
+- [Group Anagrams](https://leetcode.com/problems/group-anagrams/) (LeetCode, medium): canonical signature grouping.
+- [Rank Transform of an Array](https://leetcode.com/problems/rank-transform-of-an-array/) (LeetCode, easy): coordinate compression itself.
+- [Registration System](https://codeforces.com/problemset/problem/4/C) (Codeforces 4C, rating about 1300): map from a name to a counter.
+
+## Quiz
+
+<Quiz id="cp-m08-compression-grouping" tags={["coordinate-compression", "grouping"]} questions={[
+  { type: "mcq", q: "After coordinate compression of [100, 5, 100, 42] to 1-based ranks, what is the result?", options: ["[3, 1, 3, 2]", "[4, 1, 4, 2]", "[2, 0, 2, 1]", "[3, 1, 2, 2]"], answer: 0, explain: "Distinct sorted values are 5, 42, 100 with ranks 1, 2, 3; equal values share a rank." },
+  { type: "multi", q: "Which are valid canonical forms for deciding whether two words are anagrams?", options: ["The sorted letters", "The 26-length vector of letter counts", "The sum of the letter codes", "The word length"], answer: [0, 1], explain: "Sums and lengths collide for non-anagrams (ad and bc have equal sum, cat and dog have equal length)." },
+  { type: "predict", q: "What does this print?", code: "def pattern(s):\n    first = {}\n    return tuple(first.setdefault(c, len(first)) for c in s)\nprint(pattern('xyzx'))", options: ["(0, 1, 2, 0)", "(0, 1, 2, 3)", "(1, 2, 3, 1)", "(0, 0, 0, 0)"], answer: 0, explain: "Each new character receives the next id in order of first appearance; the repeated x reuses id 0." },
+  { type: "mcq", q: "Why can coordinate compression not be used directly for online queries whose values are revealed one by one?", options: ["It needs all values known in advance to sort them", "It only works for negative numbers", "Hash maps cannot store large values", "Ranks cannot be computed in O(log n)"], answer: 0, explain: "Ranks depend on the whole set of values, so the technique is offline unless you switch to an ordered or dynamic structure." }
+]} />

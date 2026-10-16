@@ -1,0 +1,170 @@
+---
+title: Prefix Sums (1D and 2D)
+track: cp
+module: arrays-and-windows
+order: 2
+difficulty: easy
+estMinutes: 30
+prerequisites: [cp/arrays-and-windows/array-and-string-basics]
+tags: [prefix-sums, arrays, 2d, hashing, queries]
+type: lesson
+problems: [m05-range-sum-queries, m05-rect-sum-queries]
+furtherReading:
+  - title: cp-algorithms, Fenwick tree (prefix sums with point updates)
+    url: https://cp-algorithms.com/data_structures/fenwick.html
+  - title: CSES Problem Set, Range Queries
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+A taxi odometer reads the total distance driven since the car was built. To know how far you drove between two stops you do not replay the trip: you subtract the odometer reading at the first stop from the reading at the second. A **prefix sum** array is an odometer for an array. Once built, the sum of any range is one subtraction.
+
+## Definition
+
+For an array `a[1..n]` define `pre[0] = 0` and `pre[i] = a[1] + ... + a[i]`. Then for any `1 <= l <= r <= n`:
+
+`sum(a[l..r]) = pre[r] - pre[l-1]`
+
+Why: `pre[r]` contains `a[1..r]`, `pre[l-1]` contains `a[1..l-1]`, and the common part cancels.
+
+Build is `O(n)`, each query is `O(1)`. Without it, `q` queries cost `O(nq)`.
+
+<Complexity time="O(n + q)" space="O(n)" note="build once in O(n), answer each query in O(1)" />
+
+## Worked example
+
+`a = [4, -1, 3, 5, -2]` gives `pre = [0, 4, 3, 6, 11, 9]`.
+
+Query `l = 2, r = 4`: `pre[4] - pre[1] = 11 - 4 = 7`, and indeed `-1 + 3 + 5 = 7`.
+
+<CodeRunner language="python" code={`n, q = map(int, input().split())
+a = list(map(int, input().split()))
+pre = [0] * (n + 1)
+for i in range(n):
+    pre[i + 1] = pre[i] + a[i]
+for _ in range(q):
+    l, r = map(int, input().split())
+    print(pre[r] - pre[l - 1])
+`} stdin={"5 3\n4 -1 3 5 -2\n2 4\n1 5\n3 3\n"} />
+
+<CodeRunner language="javascript" code={`const n = 5;
+const a = [4, -1, 3, 5, -2];
+const pre = [0];
+for (let i = 0; i < n; i++) pre.push(pre[i] + a[i]);
+console.log(pre.join(" "));      // 0 4 3 6 11 9
+console.log(pre[4] - pre[1]);    // 7
+`} />
+
+<Callout type="tip" title="Keep pre one slot longer">
+Using `pre[0] = 0` as a sentinel means a range starting at position 1 needs no special case. This sentinel idea shows up everywhere: difference arrays, 2D prefix sums, hash-map prefix counting.
+</Callout>
+
+## What else is a prefix?
+
+The trick works for any **invertible, associative** operation, not only `+`:
+
+- **XOR**: `xor(l..r) = px[r] ^ px[l-1]` because `x ^ x = 0`.
+- **Counts**: for each letter keep a prefix count array to answer "how many `a` between `l` and `r`".
+- **Products modulo a prime**, using modular inverses (advanced).
+
+It does **not** work directly for `max`, `min` or `gcd` ranges, since you cannot "subtract" a prefix maximum. Those need a sparse table or segment tree.
+
+## Counting subarrays with a given sum
+
+**Problem.** Count subarrays with sum exactly `K`, where values may be negative.
+
+A subarray `(l, r]` has sum `pre[r] - pre[l] = K`. Scan `r` from left to right, keep a hash map from prefix value to how many times it appeared so far, and add `count[pre[r] - K]`. Seed the map with `pre = 0` seen once (the empty prefix).
+
+<CodeRunner language="python" code={`from collections import defaultdict
+
+def count_sum(a, K):
+    seen = defaultdict(int)
+    seen[0] = 1            # the empty prefix
+    pre = 0
+    ans = 0
+    for x in a:
+        pre += x
+        ans += seen[pre - K]
+        seen[pre] += 1
+    return ans
+
+print(count_sum([1, 2, 3], 3))        # [1,2] and [3] -> 2
+print(count_sum([1, -1, 0], 0))       # [1,-1], [0], [1,-1,0] -> 3
+print(count_sum([2, 2, 2], 5))        # 0
+`} />
+
+This is `O(n)` expected and works with negatives, unlike the sliding-window method that needs positive values (see [Sliding Window](/cp/arrays-and-windows/sliding-window/)). Forgetting the seed `seen[0] = 1` misses every subarray that starts at position 1.
+
+## 2D prefix sums
+
+For a grid `g`, let `P[i][j]` be the sum of the rectangle with corners `(1,1)` and `(i,j)`. Row 0 and column 0 are zeros.
+
+**Build** by inclusion-exclusion:
+
+`P[i][j] = g[i][j] + P[i-1][j] + P[i][j-1] - P[i-1][j-1]`
+
+`P[i-1][j]` and `P[i][j-1]` both include the rectangle `(1,1)..(i-1,j-1)`, so subtract it once.
+
+**Query** rectangle `(r1,c1)..(r2,c2)`:
+
+`P[r2][c2] - P[r1-1][c2] - P[r2][c1-1] + P[r1-1][c1-1]`
+
+Take the big prefix, remove the strip above, remove the strip to the left, and add back the corner that was removed twice.
+
+<CodeRunner language="python" code={`g = [
+    [1, 2, 3],
+    [4, 5, 6],
+    [7, 8, 9],
+]
+n, m = 3, 3
+P = [[0] * (m + 1) for _ in range(n + 1)]
+for i in range(1, n + 1):
+    for j in range(1, m + 1):
+        P[i][j] = g[i-1][j-1] + P[i-1][j] + P[i][j-1] - P[i-1][j-1]
+
+def rect(r1, c1, r2, c2):
+    return P[r2][c2] - P[r1-1][c2] - P[r2][c1-1] + P[r1-1][c1-1]
+
+print(rect(1, 1, 3, 3))   # 45
+print(rect(2, 2, 3, 3))   # 5+6+8+9 = 28
+print(rect(2, 1, 2, 3))   # row 2 = 15
+`} />
+
+<Complexity time="O(nm + q)" space="O(nm)" note="2D build once, O(1) per rectangle query" />
+
+## When prefix sums apply (and when they do not)
+
+Use them when the array is **static** (no updates between queries) or the updates are all known in advance. If values change between queries, you need a Fenwick tree or segment tree (a later module): updating a prefix array costs `O(n)` per update.
+
+## Pitfalls
+
+1. **Off-by-one**: `pre[r] - pre[l]` answers `(l, r]`, not `[l, r]`. Pick one convention and test the single-element range `l = r`.
+2. **Overflow**: `pre` values reach `n · max|a|`. Use 64-bit integers in C++ and Java.
+3. **2D inclusion-exclusion sign errors**: recheck with a 2x2 grid by hand.
+4. **Mutating the array** after building `pre` makes it stale. Rebuild or switch data structure.
+5. **Modulo**: if answers are mod `p`, normalise negative differences with `(x % p + p) % p`.
+
+## Practice
+
+<Problem id="m05-range-sum-queries" />
+
+<Problem id="m05-rect-sum-queries" />
+
+## Problem ladder
+
+- [CSES 1646, Static Range Sum Queries](https://cses.fi/problemset/task/1646)
+- [CSES 1652, Forest Queries](https://cses.fi/problemset/task/1652) (2D prefix sums)
+- [CSES 1661, Subarray Sums II](https://cses.fi/problemset/task/1661) (prefix sums plus hash map, negatives allowed)
+- [Codeforces 313B, Ilya and Queries](https://codeforces.com/problemset/problem/313/B) (about 1100)
+- [LeetCode 560, Subarray Sum Equals K](https://leetcode.com/problems/subarray-sum-equals-k/)
+- [LeetCode 724, Find Pivot Index](https://leetcode.com/problems/find-pivot-index/)
+
+## Quiz
+
+<Quiz id="m05-prefix-sums-quiz" tags={["prefix-sums"]} questions={[
+  { type: "mcq", q: "With pre[0] = 0 and pre[i] the sum of the first i elements, what is the sum of the (1-indexed) range l..r?", options: ["pre[r] - pre[l]", "pre[r] - pre[l-1]", "pre[r-1] - pre[l-1]", "pre[r] + pre[l-1]"], answer: 1, explain: "pre[r] holds a[1..r] and pre[l-1] holds a[1..l-1]; subtracting leaves a[l..r]." },
+  { type: "multi", q: "For which range queries on a static array does a prefix array alone give O(1) answers?", options: ["Sum", "XOR", "Maximum", "Count of a given letter (one prefix array per letter)"], answer: [0, 1, 3], explain: "Sum, XOR and counts are invertible, so a prefix can be undone by subtraction. Maximum is not invertible; it needs a sparse table or segment tree." },
+  { type: "predict", q: "What does this print?", code: "a = [2, -2, 2, -2]\nfrom collections import defaultdict\nseen = defaultdict(int)\nseen[0] = 1\npre = ans = 0\nfor x in a:\n    pre += x\n    ans += seen[pre]\n    seen[pre] += 1\nprint(ans)", options: ["2", "3", "4", "6"], answer: 2, explain: "It counts subarrays with sum 0, i.e. pairs of equal prefix values. The prefix values (including the seed) are 0, 2, 0, 2, 0: three zeros give 3 pairs and two twos give 1 pair, total 4." },
+  { type: "mcq", q: "In the 2D formula P[i][j] = g[i][j] + P[i-1][j] + P[i][j-1] - P[i-1][j-1], why is the last term subtracted?", options: ["It corrects for rounding", "The top-left rectangle is included in both P[i-1][j] and P[i][j-1]", "It removes g[i][j] twice", "It is the boundary row"], answer: 1, explain: "Both neighbours contain the rectangle ending at (i-1, j-1), so adding them double-counts it." }
+]} />

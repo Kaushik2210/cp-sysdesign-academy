@@ -1,0 +1,128 @@
+---
+title: Difference Arrays (Range Updates)
+track: cp
+module: arrays-and-windows
+order: 3
+difficulty: easy
+estMinutes: 25
+prerequisites: [cp/arrays-and-windows/prefix-sums]
+tags: [difference-array, prefix-sums, range-update, offline]
+type: lesson
+problems: [m05-range-add-final]
+furtherReading:
+  - title: CSES Problem Set, Range Queries
+    url: https://cses.fi/problemset/
+  - title: cp-algorithms, Fenwick tree (when updates and queries are interleaved)
+    url: https://cp-algorithms.com/data_structures/fenwick.html
+---
+
+## Intuition
+
+Painting a fence section by section is slow. If a hundred painters each say "I will add one coat from post 30 to post 70", it is much cheaper to write down only two notes per painter: "a coat starts at post 30" and "a coat stops after post 70". At the end, walk along the fence once, keeping a running count of active coats.
+
+A **difference array** stores exactly those notes. It is the inverse of a prefix sum: where prefix sums turn point values into range answers, a difference array turns range updates into point notes.
+
+## Definition
+
+Given an array `a[0..n-1]`, define `d[0] = a[0]` and `d[i] = a[i] - a[i-1]`. Then `a[i] = d[0] + d[1] + ... + d[i]`: the prefix sum of `d` recovers `a`.
+
+**Range add.** To add `x` to every `a[l..r]` (0-based, inclusive):
+
+```
+d[l]   += x      # from l onward everything is x bigger
+d[r+1] -= x      # ...until r+1, where the extra x stops
+```
+
+Two `O(1)` writes replace an `O(r - l + 1)` loop. After all updates, one prefix-sum pass reconstructs the array in `O(n)`. Allocate `d` with `n + 1` slots so `r + 1 = n` is legal.
+
+<Complexity time="O(n + q)" space="O(n)" note="versus O(nq) for applying each update element by element" />
+
+## Worked example
+
+`n = 6`, all zeros. Updates: add 5 on `[1,3]`, add 2 on `[2,5]`, add -1 on `[0,1]`.
+
+| step | d (indices 0..6) |
+|---|---|
+| start | 0 0 0 0 0 0 0 |
+| add 5 on [1,3] | 0 5 0 0 -5 0 0 |
+| add 2 on [2,5] | 0 5 2 0 -5 0 -2 |
+| add -1 on [0,1] | -1 5 3 0 -5 0 -2 |
+
+The last update does `d[0] += -1` and `d[2] -= -1` (that is `d[2] += 1`, turning 2 into 3). The prefix sums of `d = [-1, 5, 3, 0, -5, 0, -2]` are `[-1, 4, 7, 7, 2, 2]` for indices 0..5. Check index 1 by hand: the updates covering it are `+5` and `-1`, giving 4. ✓
+
+<CodeRunner language="python" code={`n = 6
+d = [0] * (n + 1)
+for l, r, x in [(1, 3, 5), (2, 5, 2), (0, 1, -1)]:
+    d[l] += x
+    d[r + 1] -= x
+print(d)
+cur = 0
+res = []
+for i in range(n):
+    cur += d[i]
+    res.append(cur)
+print(res)
+`} />
+
+## Event-style use: maximum overlap
+
+Difference arrays are the array form of a **sweep**. For intervals `[s, e)` on small coordinates, `d[s] += 1; d[e] -= 1` and a prefix pass gives how many intervals cover each point. The maximum of that is the busiest moment. When coordinates are huge (up to `10^9`), store the events in a sorted list instead, which is the subject of [Sorting for Problem Solving](/cp/sorting-and-searching/sorting-for-problem-solving/).
+
+<CodeRunner language="python" code={`# car pooling style: trips (passengers, from, to) with half-open [from, to)
+trips = [(2, 1, 5), (3, 3, 7), (1, 5, 6)]
+N = 8
+d = [0] * (N + 1)
+for p, a, b in trips:
+    d[a] += p
+    d[b] -= p
+cur = best = 0
+for i in range(N):
+    cur += d[i]
+    best = max(best, cur)
+print(best)   # at time 3..4 both 2 and 3 are on board -> 5
+`} />
+
+## 2D difference arrays
+
+To add `x` to a whole rectangle `(r1,c1)..(r2,c2)` do four writes:
+
+```
+D[r1][c1]     += x
+D[r1][c2+1]   -= x
+D[r2+1][c1]   -= x
+D[r2+1][c2+1] += x
+```
+
+Then take a 2D prefix sum of `D`. It is the exact mirror of the 2D prefix query formula from [Prefix Sums](/cp/arrays-and-windows/prefix-sums/): the four corners cancel everything outside the rectangle.
+
+## Offline versus online
+
+A difference array is **offline**: you must know all updates before you ask what a value is. If updates and point queries are interleaved ("add on range, then ask a value, then add again"), you need a Fenwick tree or segment tree. Many contest tasks are secretly offline, so check the statement before reaching for something heavier.
+
+## Pitfalls
+
+1. **Size `n + 1`**: `d[r+1]` with `r = n-1` is index `n`.
+2. **Mixing conventions**: 1-based `l, r` in the statement become `d[l-1] += x; d[r] -= x` in 0-based code. Write the conversion once, at the top.
+3. **Half-open vs closed** intervals: for `[s, e)` the stop note goes at `e`, for `[s, e]` at `e + 1`.
+4. **Overflow**: after `q` updates of size `x` values reach `q · x`. Use 64-bit.
+5. **Forgetting the initial array**: `final[i] = initial[i] + running sum`. The difference array holds only the *additions*.
+
+## Practice
+
+<Problem id="m05-range-add-final" />
+
+## Problem ladder
+
+- [Codeforces 816B, Karen and Coffee](https://codeforces.com/problemset/problem/816/B) (about 1400, range increments then prefix counts)
+- [Codeforces 295A, Greg and Array](https://codeforces.com/problemset/problem/295/A) (about 1400, difference array applied twice)
+- [LeetCode 1109, Corporate Flight Bookings](https://leetcode.com/problems/corporate-flight-bookings/)
+- [LeetCode 1094, Car Pooling](https://leetcode.com/problems/car-pooling/)
+- [CSES 1619, Restaurant Customers](https://cses.fi/problemset/task/1619) (the sweep version with large coordinates)
+
+## Quiz
+
+<Quiz id="m05-difference-arrays-quiz" tags={["difference-array"]} questions={[
+  { type: "mcq", q: "To add x to a[l..r] (0-based, inclusive) using a difference array d, which two updates are correct?", options: ["d[l] += x and d[r] -= x", "d[l] += x and d[r+1] -= x", "d[l-1] += x and d[r] -= x", "d[l] += x and d[r+1] += x"], answer: 1, explain: "The addition must start at l and stop after r, so the cancelling note goes at r+1." },
+  { type: "multi", q: "Which statements about difference arrays are true?", options: ["They are the inverse of a prefix sum", "They support interleaved range add and point query in O(1) each", "A range add costs O(1) after the array is allocated", "The array needs n + 1 slots to handle r = n - 1"], answer: [0, 2, 3], explain: "Reading a value needs a prefix sum, so interleaved queries are not O(1); you would need a Fenwick tree for that." },
+  { type: "predict", q: "What does this print?", code: "n = 4\nd = [0] * (n + 1)\nfor l, r, x in [(0, 3, 2), (1, 2, 3)]:\n    d[l] += x\n    d[r + 1] -= x\ncur = 0\nout = []\nfor i in range(n):\n    cur += d[i]\n    out.append(cur)\nprint(out)", options: ["[2, 5, 5, 2]", "[2, 3, 3, 2]", "[5, 5, 5, 5]", "[2, 5, 2, 2]"], answer: 0, explain: "Everyone gets +2; indices 1 and 2 additionally get +3, so [2, 5, 5, 2]." }
+]} />

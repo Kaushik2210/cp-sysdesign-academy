@@ -1,0 +1,186 @@
+---
+title: Sliding Window
+track: cp
+module: arrays-and-windows
+order: 5
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/arrays-and-windows/two-pointers, cp/arrays-and-windows/prefix-sums]
+tags: [sliding-window, two-pointers, hashing, monotonicity]
+type: lesson
+problems: [m05-longest-k-distinct, m05-count-windows-sum]
+furtherReading:
+  - title: CSES Problem Set, Sorting and Searching (Playlist, Sum of Two Values, Subarray Sums)
+    url: https://cses.fi/problemset/
+  - title: LeetCode, sliding-window problem tag
+    url: https://leetcode.com/tag/sliding-window/
+---
+
+## Intuition
+
+Imagine a camera frame sliding along a long photo strip. You never re-photograph the whole frame: when it moves one step right, one column leaves on the left and one enters on the right. If you track a summary of what is inside the frame (a sum, a count of colours), each step updates it in `O(1)`.
+
+A **sliding window** is a pair of indices `[l, r]` describing the current frame. The right end advances to include new elements; the left end advances to evict old ones.
+
+## Fixed-size windows
+
+**Task.** Largest sum of any `k` consecutive elements.
+
+Compute the first window directly, then slide: add the entering element, subtract the leaving one.
+
+<CodeRunner language="python" code={`a = [2, 1, 5, 1, 3, 2]
+k = 3
+cur = sum(a[:k])
+best = cur
+for r in range(k, len(a)):
+    cur += a[r] - a[r - k]    # add entering, remove leaving
+    best = max(best, cur)
+print(best)   # 5 + 1 + 3 = 9
+`} />
+
+<Complexity time="O(n)" space="O(1)" note="versus O(nk) when re-summing every window" />
+
+A fixed window with a non-invertible summary (maximum of each window) needs a monotonic deque, covered in the data structures module; the sliding idea is the same.
+
+## Variable-size windows and why they are valid
+
+Now the window length is not fixed: "longest block with at most `k` distinct values", "shortest block with sum at least `S`", "number of blocks with sum at most `K`".
+
+Two pointers work when the property is **monotone under shrinking** (or growing). Let `valid(l, r)` be the property.
+
+**Shrink-monotone (the common case).** If `valid(l, r)` holds then `valid(l', r')` holds for every `l <= l' <= r' <= r`. Examples: "sum at most `K` with positive values", "at most `k` distinct values", "no repeated character".
+
+Claim: for each `r`, the valid left ends form a suffix `[L(r), r]` (if `l` is valid, so is `l + 1`), and `L(r)` is non-decreasing in `r`.
+
+Proof of the second part: suppose `L(r + 1) < L(r)`. Then `[L(r+1), r+1]` is valid, and by shrink-monotonicity so is `[L(r+1), r]`, contradicting that `L(r)` was the smallest valid left end for `r`. ∎
+
+So a single pass with a left pointer that only moves right computes `L(r)` for all `r` in `O(n)` total moves.
+
+### Template
+
+```
+l = 0
+for r in range(n):
+    add(a[r])
+    while not valid():      # shrink until valid again
+        remove(a[l]); l += 1
+    # now [l, r] is the longest valid window ending at r
+    best = max(best, r - l + 1)
+```
+
+Counting windows ending at `r` adds `r - l + 1`.
+
+## Worked example 1: longest block with at most k distinct values
+
+`a = [1, 2, 1, 3, 3, 3, 4]`, `k = 2`. Track a map value -> count.
+
+| r | add | window | distinct | action |
+|---|---|---|---|---|
+| 0 | 1 | [1] | 1 | length 1 |
+| 1 | 2 | [1,2] | 2 | length 2 |
+| 2 | 1 | [1,2,1] | 2 | length 3 |
+| 3 | 3 | [1,2,1,3] | 3 | too many: evict 1, then 2, leaving [1,3] |
+| 4 | 3 | [1,3,3] | 2 | length 3 |
+| 5 | 3 | [1,3,3,3] | 2 | length 4 |
+| 6 | 4 | [1,3,3,3,4] | 3 | too many: evict 1, leaving [3,3,3,4], length 4 |
+
+Best is 4 (`3,3,3,4`).
+
+<CodeRunner language="python" code={`def longest_at_most_k_distinct(a, k):
+    cnt = {}
+    l = best = 0
+    for r, x in enumerate(a):
+        cnt[x] = cnt.get(x, 0) + 1
+        while len(cnt) > k:
+            y = a[l]
+            cnt[y] -= 1
+            if cnt[y] == 0:
+                del cnt[y]        # otherwise len(cnt) overcounts
+            l += 1
+        best = max(best, r - l + 1)
+    return best
+
+print(longest_at_most_k_distinct([1, 2, 1, 3, 3, 3, 4], 2))   # 4
+print(longest_at_most_k_distinct([5, 5, 5], 1))               # 3
+`} />
+
+## Worked example 2: counting windows with a sum bound
+
+With **positive** values, count subarrays with sum at most `K`: for each `r`, shrink until the sum is at most `K`, then every start in `[l, r]` works, giving `r - l + 1` new subarrays.
+
+<CodeRunner language="python" code={`def count_at_most(a, K):
+    l = s = cnt = 0
+    for r in range(len(a)):
+        s += a[r]
+        while s > K:
+            s -= a[l]
+            l += 1
+        cnt += r - l + 1
+    return cnt
+
+print(count_at_most([1, 2, 3, 4], 5))   # 1;2;3;4;1,2;2,3 -> 6
+`} />
+
+<Callout type="pitfall" title="Negative numbers break the window">
+With negative values the sum is not monotone in `l`: dropping a negative element *increases* the sum, so "shrink until valid" can overshoot a valid window. Use prefix sums with a hash map for exact sums (see [Prefix Sums](/cp/arrays-and-windows/prefix-sums/)), or sort-based methods.
+</Callout>
+
+## Shortest valid window (grow-monotone)
+
+For "shortest block with sum at least `S`" (positive values) validity is preserved when you **grow** the window, so flip the loop: extend `r` until valid, then shrink `l` as long as it stays valid, recording the length at each valid step.
+
+<CodeRunner language="python" code={`def shortest_at_least(a, S):
+    l = s = 0
+    best = None
+    for r in range(len(a)):
+        s += a[r]
+        while s >= S:              # still valid: try to shrink
+            length = r - l + 1
+            if best is None or length < best:
+                best = length
+            s -= a[l]
+            l += 1
+    return best
+
+print(shortest_at_least([2, 3, 1, 2, 4, 3], 7))   # [4,3] -> 2
+`} />
+
+## Exactly k via "at most"
+
+"Exactly `k` distinct" is not shrink-monotone, but `exactly(k) = atMost(k) - atMost(k - 1)` reduces it to the monotone case, because the windows with at most `k-1` distinct are a subset of those with at most `k`. This is a standard trick for counting.
+
+## Complexity
+
+Both pointers move only right, at most `n` times each, so `O(n)` pointer moves. Map operations are `O(1)` expected, giving `O(n)`; with a balanced tree it is `O(n log n)`.
+
+## Pitfalls
+
+1. **Non-monotone property** (negatives, "exactly k"): the template returns wrong answers without any error.
+2. **Stale map entries**: delete keys whose count reaches 0 when the property is "number of distinct".
+3. **Empty windows**: if one element alone is invalid, `l` ends at `r + 1` and `r - l + 1 = 0`; make sure your loop and your length formula handle it.
+4. **Update order**: add the new element *before* testing validity, and evict *inside* the shrink loop.
+5. **Counting vs longest**: for the longest window take the max of `r - l + 1`, for counting add it. Mixing the two is a common slip.
+
+## Practice
+
+<Problem id="m05-longest-k-distinct" />
+
+<Problem id="m05-count-windows-sum" />
+
+## Problem ladder
+
+- [CSES 1141, Playlist](https://cses.fi/problemset/task/1141) (longest window of distinct values)
+- [CSES 1660, Subarray Sums I](https://cses.fi/problemset/task/1660) (positive values, exact sum)
+- [Codeforces 279B, Books](https://codeforces.com/problemset/problem/279/B) (about 1400)
+- [Codeforces 224B, Array](https://codeforces.com/problemset/problem/224/B) (about 1500, minimal window with k distinct)
+- [LeetCode 3, Longest Substring Without Repeating Characters](https://leetcode.com/problems/longest-substring-without-repeating-characters/)
+- [LeetCode 209, Minimum Size Subarray Sum](https://leetcode.com/problems/minimum-size-subarray-sum/)
+
+## Quiz
+
+<Quiz id="m05-sliding-window-quiz" tags={["sliding-window"]} questions={[
+  { type: "mcq", q: "Why can the left pointer of a shrink-monotone window never need to move left?", options: ["Because the array is sorted", "If [l, r+1] is valid then [l, r] is valid too, so the smallest valid left end cannot decrease as r grows", "Because the right pointer always moves faster", "Because values are distinct"], answer: 1, explain: "A valid window ending at r+1 starting at l would make [l, r] valid by shrink-monotonicity, so L(r+1) is at least L(r)." },
+  { type: "multi", q: "For which tasks is the standard two-pointer window correct?", options: ["Longest block with sum at most K, all values positive", "Longest block with at most k distinct values", "Count blocks with sum exactly K when values may be negative", "Longest block with no repeated element"], answer: [0, 1, 3], explain: "The first, second and fourth are shrink-monotone. Exact sums with negatives are not monotone; use prefix sums and a hash map." },
+  { type: "predict", q: "What does this print?", code: "a = [1, 1, 1]\nK = 2\nl = s = c = 0\nfor r in range(3):\n    s += a[r]\n    while s > K:\n        s -= a[l]\n        l += 1\n    c += r - l + 1\nprint(c)", options: ["3", "5", "6", "4"], answer: 1, explain: "Windows ending at 0 add 1, ending at 1 add 2 (sum 2), ending at 2 shrink to l=1 and add 2. Total 5." },
+  { type: "mcq", q: "How do you count windows with exactly k distinct values using monotone windows?", options: ["Run the window with k twice", "atMost(k) minus atMost(k-1)", "atMost(k) plus atMost(k+1)", "It cannot be done in O(n)"], answer: 1, explain: "Windows with at most k distinct contain those with at most k-1; subtracting leaves exactly k." }
+]} />

@@ -1,0 +1,177 @@
+---
+title: Amortized Analysis of Stacks and Queues
+track: cp
+module: stacks-and-queues
+order: 5
+difficulty: medium
+estMinutes: 30
+prerequisites: [cp/stacks-and-queues/monotonic-stack, cp/stacks-and-queues/monotonic-queue]
+tags: [amortized, potential-method, min-stack, two-stack-queue, complexity]
+type: lesson
+problems: [m07-min-stack]
+furtherReading:
+  - title: CLRS, Amortized Analysis (chapter 16)
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: cp-algorithms, Minimum stack / minimum queue
+    url: https://cp-algorithms.com/data_structures/stack_queue_modification.html
+---
+
+## Intuition
+
+The monotonic stack has a `while` loop inside a `for` loop, which *looks* quadratic. It is not, because the loop can only pop what was previously pushed. **Amortized analysis** is the bookkeeping that makes this argument rigorous: it bounds the cost of a **whole sequence** of operations rather than the worst single operation.
+
+Think of a bank account. Cheap operations deposit a little "credit" each; a rare expensive operation spends the saved credit. If the account never goes negative, the average cost per operation is the deposit rate.
+
+## Three ways to prove it
+
+### 1. Aggregate analysis
+
+Count the total work of the whole algorithm directly.
+
+*Monotonic stack over `n` elements.* Every index is pushed exactly once, and an index can be popped at most once, so there are at most `n` pushes and `n` pops: `<= 2n` stack operations in total, hence `O(n)`, even though one iteration may pop `n - 1` elements.
+
+### 2. Accounting (credits)
+
+Charge each operation a fixed amount, which may exceed its real cost; keep the surplus as credit stored on data items.
+
+*Same stack.* Charge **2** per push: 1 pays for the push itself, 1 is stored on the element to pay for its eventual pop. Pops now cost 0 amortised. Credit is never negative (every popped element carries its own credit), so `n` pushes cost at most `2n`.
+
+### 3. Potential method
+
+Define a potential function `Phi >= 0` on the data structure state. Amortised cost of an operation = real cost + `Phi(after) - Phi(before)`. Summing over all operations, the potential terms telescope, so
+
+`total real cost = total amortised cost - Phi(end) + Phi(start) <= total amortised cost` (when `Phi(start) = 0`).
+
+*Same stack*, `Phi` = number of elements on the stack. A push costs `1 + 1 = 2`. A pop of `m` elements costs `m - m = 0`. So each loop iteration (one push plus any pops) has amortised cost `2`, total `<= 2n`.
+
+<Callout type="note" title="Amortized is not average-case">
+Amortised bounds are **worst-case guarantees over any sequence of operations**, no randomness involved. What they do not promise is that each individual operation is fast: a single pop may take `O(n)`.
+</Callout>
+
+## Verify the bound empirically
+
+The snippet counts stack operations of the next-greater loop on several array shapes. It never exceeds `2n`.
+
+<CodeRunner language="python" code={`import random
+
+def ops_next_greater(a):
+    st, ops = [], 0
+    for i in range(len(a)):
+        while st and a[st[-1]] < a[i]:
+            st.pop()
+            ops += 1
+        st.append(i)
+        ops += 1
+    return ops
+
+n = 1000
+random.seed(3)
+cases = {
+    "increasing": list(range(n)),
+    "decreasing": list(range(n, 0, -1)),
+    "all equal": [7] * n,
+    "random": [random.randint(1, 10**6) for _ in range(n)],
+    "sawtooth": [i % 50 for i in range(n)],
+}
+for name, a in cases.items():
+    ops = ops_next_greater(a)
+    print("%-11s ops=%4d  bound 2n=%d  ok=%s" % (name, ops, 2 * n, ops <= 2 * n))
+`} />
+
+## Worked example: a queue from two stacks
+
+Implement a queue using only stacks `inbox` and `outbox`:
+
+- `push(x)`: push onto `inbox`.
+- `pop()`: if `outbox` is empty, move **all** of `inbox` into `outbox` (reversing order), then pop `outbox`.
+
+A single `pop` can cost `O(n)`, but each element is moved from `inbox` to `outbox` **at most once** in its lifetime and popped at most once. So `n` operations cost at most `3n` element touches: `O(1)` amortised.
+
+<CodeRunner language="python" code={`class TwoStackQueue:
+    def __init__(self):
+        self.inbox, self.outbox = [], []
+        self.moves = 0
+
+    def push(self, x):
+        self.inbox.append(x)
+
+    def pop(self):
+        if not self.outbox:
+            while self.inbox:
+                self.outbox.append(self.inbox.pop())
+                self.moves += 1
+        return self.outbox.pop()
+
+q = TwoStackQueue()
+for i in range(5):
+    q.push(i)
+print([q.pop() for _ in range(3)])
+for i in range(5, 8):
+    q.push(i)
+print([q.pop() for _ in range(5)])
+print("elements moved between stacks:", q.moves, "(8 pushed in total)")
+`} />
+
+**Why this matters:** if each stack also stores an aggregate (minimum, gcd, ...) next to its elements, the queue answers "aggregate of the whole queue" in `O(1)`: combine the tops of the two stacks. That gives a minimum queue or **gcd of a sliding window** for any associative operation, which a monotonic deque cannot do.
+
+### The min-stack
+
+Store with each element the minimum of everything beneath and including it. `push` computes `min(x, below)`, `pop` just discards. Every operation is `O(1)` *worst case*, no amortisation needed. The same trick works for any associative summary.
+
+## Two more classic amortised structures
+
+**Dynamic array (`vector`, `ArrayList`, Python `list`).** When full, allocate double the capacity and copy. Resizes happen at sizes `1, 2, 4, ..., 2^m` with `2^m < n`, copying `1 + 2 + ... + 2^m < 2 * 2^m < 2n` elements in total, so `n` pushes cost less than `n + 2n = 3n` element writes: `O(1)` amortised. A growth factor of `1.5` also works; growing by a constant `+10` does not (quadratic).
+
+**Binary counter.** Incrementing a `b`-bit counter flips a run of trailing ones to zero and one zero to one. Bit `j` flips only once every `2^j` increments, so `n` increments flip at most `n * (1 + 1/2 + 1/4 + ...) < 2n` bits.
+
+<CodeRunner language="python" code={`def increments_cost(n):
+    bits = [0] * 64
+    total = 0
+    for _ in range(n):
+        i = 0
+        while bits[i] == 1:
+            bits[i] = 0
+            total += 1
+            i += 1
+        bits[i] = 1
+        total += 1
+    return total
+
+for n in [1, 10, 1000, 100000]:
+    print(n, increments_cost(n), "< 2n =", 2 * n)
+`} />
+
+## When the amortised argument breaks
+
+1. **Persistence or rollback.** If you can return to an older version and redo an expensive operation repeatedly (for example backtracking through a state that is "about to rebuild"), the saved credit is spent more than once. Amortised bounds assume a single linear history.
+2. **Bad shrink policies.** If an array doubles when full *and* halves as soon as it is half empty, alternating push/pop at the boundary costs `O(n)` every time. Shrink only at one quarter full to keep the amortised bound.
+3. **Hard real-time or interactive limits.** In contest code it is irrelevant, but a single `O(n)` spike can matter in production.
+4. **Hidden cost per operation.** Moving an element may itself cost more than `O(1)` (copying a long string): the bound is in "element moves", multiply by the real cost.
+
+## Pitfalls
+
+1. **Saying "O(n^2) because of nested loops"** when the inner loop's total is bounded by the outer's pushes. Always ask: what is the total number of times the inner loop body can run across all outer iterations?
+2. **Forgetting the credit must never go negative.** If a pop can happen without a matching earlier push you have no argument.
+3. **Using list-as-queue** (`pop(0)`): each pop is `O(n)` and there is no credit to pay for it.
+4. **Mutating while iterating** the container you are amortising over.
+5. **Confusing amortised with expected.** Hash table `O(1)` is *expected* (randomisation); dynamic array `O(1)` is *amortised* (a worst-case guarantee over sequences).
+
+## Practice
+
+<Problem id="m07-min-stack" />
+
+## Problem ladder
+
+- [Min Stack](https://leetcode.com/problems/min-stack/) (LeetCode, medium): the exact structure above.
+- [Implement Queue using Stacks](https://leetcode.com/problems/implement-queue-using-stacks/) (LeetCode, easy): amortised `O(1)` pop.
+- [Online Stock Span](https://leetcode.com/problems/online-stock-span/) (LeetCode, medium): monotonic stack with counts.
+- [Maximum Frequency Stack](https://leetcode.com/problems/maximum-frequency-stack/) (LeetCode, hard): a stack of stacks keyed by frequency.
+
+## Quiz
+
+<Quiz id="cp-m07-amortized" tags={["amortized"]} questions={[
+  { type: "mcq", q: "A loop pushes each of n items once onto a stack and sometimes pops many in one iteration. What is the total number of pops over the whole run?", options: ["At most n", "At most n log n", "Up to n^2", "Unbounded"], answer: 0, explain: "A pop needs a previously pushed element, and each is pushed once, so there are at most n pops overall." },
+  { type: "multi", q: "Which of these are amortised O(1) per operation?", options: ["push on a dynamic array that doubles when full", "pop on a two-stack queue", "pop(0) on a Python list", "increment of a binary counter"], answer: [0, 1, 3], explain: "Doubling, two-stack queue and binary counter all have O(1) amortised cost. list.pop(0) is O(n) every time." },
+  { type: "predict", q: "How many element moves between stacks does this perform?", code: "inbox, outbox = [], []\nmoves = 0\nfor x in [1, 2, 3]:\n    inbox.append(x)\n# first pop\nwhile inbox:\n    outbox.append(inbox.pop()); moves += 1\nouts = [outbox.pop()]\ninbox.append(4)\n# second pop: outbox not empty\nouts.append(outbox.pop())\nprint(moves)", options: ["1", "2", "3", "4"], answer: 2, explain: "Only the first pop transfers (3 elements). The second pop finds the outbox non-empty and moves nothing." },
+  { type: "mcq", q: "In the potential method, the amortised cost of an operation is:", options: ["Its real cost", "Its real cost plus the change in potential", "The maximum cost of any operation", "Real cost divided by n"], answer: 1, explain: "Amortised = real + Phi(after) - Phi(before). The potential differences telescope over a sequence." }
+]} />

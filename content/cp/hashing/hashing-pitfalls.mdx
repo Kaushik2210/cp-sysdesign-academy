@@ -1,0 +1,177 @@
+---
+title: Hashing Pitfalls, Anti-Hash Tests and Safe Practice
+track: cp
+module: hashing
+order: 5
+difficulty: hard
+estMinutes: 30
+prerequisites: [cp/hashing/string-hashing, cp/hashing/rolling-hash-repeats]
+tags: [hashing, anti-hash, thue-morse, double-hashing, randomization, pitfalls]
+type: lesson
+problems: [m08-distinct-substrings-k]
+furtherReading:
+  - title: cp-algorithms, String hashing (choosing parameters)
+    url: https://cp-algorithms.com/string/string-hashing.html
+  - title: Codeforces blog, Blowing up unordered_map
+    url: https://codeforces.com/blog/entry/62393
+  - title: Wikipedia, Prouhet-Thue-Morse sequence
+    url: https://en.wikipedia.org/wiki/Thue%E2%80%93Morse_sequence
+---
+
+## Intuition
+
+Hashing solutions fail in a particular way: they pass every sample, every random test, and then die on one hand-crafted input, or worse, on a test crafted against *your* constants. Because the answer is only probably right, the question is always **who chooses the inputs**. Random tests are harmless. An adversary who sees your modulus and base (or the standard-library hash function) is not.
+
+This lesson collects the failure modes and the habits that avoid them.
+
+## Pitfall 1: natural overflow (`mod 2^64`) is breakable
+
+Using `unsigned long long` and letting arithmetic wrap is fast and tempting: the modulus is `2^64`. The polynomial hash of a string is then a polynomial over a ring with huge zero divisors, and the **Thue-Morse** construction exploits this.
+
+Let `T_0 = "a"`, `S_0 = "b"` and `T_{k+1} = T_k + S_k`, `S_{k+1} = S_k + T_k`. The strings `T_k` and `S_k` have length `2^k`, differ in *every* position, and yet
+
+`H(T_k) - H(S_k) = +-(a - b) * product over i < k of (B^(2^i) - 1)`.
+
+For an odd base `B`, `B^(2^i) - 1` is divisible by `2^(i+2)` for `i >= 1` and by `2` for `i = 0`, so the product is divisible by `2^(1 + 3 + 4 + ... + (k+1))`. For `k = 10` the exponent is `64`, so the difference is `0 mod 2^64`: the two *different* strings of length 1024 have **equal** hash for **every odd base**. (An even base is no safer: `B^64 = 0 mod 2^64`, so only the last 64 characters would matter.) The sequence is deterministic, so no randomisation of `B` helps.
+
+Run it:
+
+<CodeRunner language="python" code={`MASK = (1 << 64) - 1
+
+def thue_morse_pair(k):
+    t, s = "a", "b"
+    for _ in range(k):
+        t, s = t + s, s + t
+    return t, s
+
+def h64(x, base):
+    h = 0
+    for ch in x:
+        h = (h * base + ord(ch)) & MASK      # wraps like unsigned long long
+    return h
+
+def hmod(x, base, mod):
+    h = 0
+    for ch in x:
+        h = (h * base + ord(ch)) % mod
+    return h
+
+t, s = thue_morse_pair(10)
+print("lengths:", len(t), len(s), " strings differ:", t != s)
+for base in (131, 911382323, 1000003, 123456789):
+    print("base", base, "equal under 2^64:", h64(t, base) == h64(s, base))
+
+M1, M2 = 1_000_000_007, 998_244_353
+print("mod 1e9+7 differ:", hmod(t, 131, M1) != hmod(s, 131, M1))
+print("double mod differ:", (hmod(t, 131, M1), hmod(t, 911, M2)) != (hmod(s, 131, M1), hmod(s, 911, M2)))
+`} />
+
+The same collision exists for many other composite or power-of-two moduli. **Rule: use a large prime modulus (or `2^61 - 1`), never `2^64`.**
+
+## Pitfall 2: fixed base and modulus
+
+Even with a prime modulus, a **known** `(B, M)` lets anyone find two strings with equal hash (for instance by the birthday attack or lattice methods). In a contest with open hacks, your constants are public. Fix:
+
+```cpp
+mt19937_64 rng(chrono::steady_clock::now().time_since_epoch().count());
+const ll B = uniform_int_distribution<ll>(1000, M - 2)(rng);
+```
+
+Randomisation is what turns the *per-pair* guarantee of the previous lessons (`<= (n - 1) / M`) into a real property: the inputs were fixed first, the base chosen afterwards.
+
+## Pitfall 3: single modulus around `10^9` and the birthday bound
+
+Distinct strings stored together collide after about `sqrt(M)` of them. With `M ~ 10^9` that is a few `10^4` strings; problems with `10^5` to `10^6` substrings **will** see false matches. Two independent moduli (about `10^18` combined) or one `2^61 - 1` hash push that to about `10^9` strings.
+
+Check yourself: how many windows can you hash with a single `10^9` modulus before the expected number of colliding pairs `k^2 / (2M)` reaches `1`? About `k = sqrt(2 * 10^9) ~ 44,700`.
+
+## Pitfall 4: arithmetic mistakes
+
+| bug | symptom | fix |
+| --- | --- | --- |
+| `(a - b) % M` negative | negative hashes never equal anything, or `-x != M - x` | `((a - b) % M + M) % M` |
+| product overflows signed 64-bit | wrong only for large inputs | keep `M < 3 * 10^9`, or use `__int128` for `2^61 - 1` |
+| `c('a') = 0` | `"a"` and `"aa"` hash equal | map to `1..26` or use the raw ASCII value |
+| comparing different-length ranges | false positives | assert equal lengths |
+| `pw[]` computed with a different `B` than `P[]` | everything wrong but "works" on tiny tests | one source of truth for `B` |
+| hash of the *reversed* string built with the same prefix recurrence | palindrome test off | build it from `rev(s)` as a separate string |
+
+## Pitfall 5: hash tables themselves (`unordered_map`)
+
+As covered earlier, the keys can be chosen to land in one bucket: all multiples of the table's prime bucket count. The snippet shows the mechanism on a simulated table:
+
+<CodeRunner language="python" code={`buckets = 1000003            # a prime bucket count, like libstdc++ uses
+n = 2000
+
+def max_load(keys):
+    load = {}
+    for k in keys:
+        b = k % buckets
+        load[b] = load.get(b, 0) + 1
+    return max(load.values())
+
+friendly = list(range(1, n + 1))
+hostile = [i * buckets for i in range(1, n + 1)]     # all land in bucket 0
+
+print("max chain length, ordinary keys:", max_load(friendly))
+print("max chain length, hostile keys :", max_load(hostile))
+print("work for chained inserts ~ n^2/2 =", n * (n - 1) // 2)
+`} />
+
+Remedies: a randomised hash functor (splitmix64 plus a time-based offset), `std::map`, sorting, or compressing the keys to small integers first.
+
+## Pitfall 6: using hashing where the answer must be exact
+
+Every hash-based algorithm is *Monte Carlo*: correct with probability `1 - epsilon`. When `epsilon` is small and the input is non-adversarial, fine. But if:
+
+- the problem needs a **proof-grade** answer (counting exactly, constructing a witness),
+- the judge uses **many** tests (the failure probability multiplies),
+- you can afford it,
+
+prefer a deterministic tool: KMP / Z-function (matching, borders, periods), suffix array + LCP (repeats, distinct substrings), suffix automaton, or Manacher (palindromes). Hashing's advantage is flexibility and simplicity, not guaranteed correctness.
+
+## A safe default recipe
+
+1. Prime modulus: `2^61 - 1` with `__int128` multiplication, or **two** moduli near `10^9` combined into one 64-bit key.
+2. Random base per run, not in source.
+3. Characters mapped to `1..K`.
+4. Compare only equal-length ranges.
+5. Large sets of hashes: prefer sorting the vector of keys over a hash table.
+6. If correctness is critical and cheap: verify a hash match with a direct comparison.
+
+<TradeOffs caption="Choosing a string-hash configuration" rows={[
+  { option: "Single mod ~10^9, random base", pros: "Simple, 64-bit safe", cons: "Birthday collisions beyond ~10^4 to 10^5 distinct strings", chooseWhen: "A few hundred comparisons, small n" },
+  { option: "Two mods ~10^9, random bases", pros: "~10^18 space, portable arithmetic", cons: "Twice the work and memory", chooseWhen: "Default in most contests; up to ~10^6 hashed strings" },
+  { option: "Mod 2^61 - 1, random base", pros: "~2.3 * 10^18 space, one value", cons: "Needs 128-bit multiply (or split multiply)", chooseWhen: "Large n, many stored hashes, C++ with __int128" },
+  { option: "Mod 2^64 overflow", pros: "Fastest, trivial code", cons: "Broken by Thue-Morse strings for every odd base", chooseWhen: "Never when adversarial tests are possible" },
+  { option: "Deterministic (KMP, Z, suffix array)", pros: "No error probability", cons: "More code, less flexible for ad-hoc queries", chooseWhen: "Exactness required, or problem fits a standard structure" }
+]} />
+
+## Pitfalls summary
+
+1. `2^64` overflow hashing on adversarial data.
+2. Constants visible in the source or predictable from the clock at coarse granularity.
+3. One `10^9` modulus when `10^5+` strings are stored.
+4. Negative remainders, overflow, zero character values, mismatched lengths.
+5. Iteration order of hash containers leaking into output.
+6. Treating a probabilistic match as a proof.
+
+## Practice
+
+<Problem id="m08-distinct-substrings-k" />
+
+## Problem ladder
+
+- [Password](https://codeforces.com/problemset/problem/126/B) (Codeforces 126B, rating about 1700): borders and prefix-suffix matching; hashing and the prefix function both work.
+- [Good Substrings](https://codeforces.com/problemset/problem/271/D) (Codeforces 271D, rating about 1800): distinct substrings under a constraint.
+- [Longest Common Subpath](https://leetcode.com/problems/longest-common-subpath/) (LeetCode, hard): binary search with hashes over integer sequences.
+- [Distinct Substrings](https://cses.fi/problemset/task/2105) (CSES): the deterministic suffix-array way, to compare with hashing.
+
+## Quiz
+
+<Quiz id="cp-m08-hashing-pitfalls" tags={["hashing", "anti-hash"]} questions={[
+  { type: "mcq", q: "Why does randomising the base NOT rescue a polynomial hash computed modulo 2^64?", options: ["Random numbers are not available in C++", "The Thue-Morse strings collide for every odd base, so the failure does not depend on the base", "2^64 is prime", "The hash becomes too slow"], answer: 1, explain: "The difference of the hashes is a multiple of 2^64 for every odd base once the strings have length 2^10, so no choice of base avoids it." },
+  { type: "multi", q: "Which practices make a string hash safer?", options: ["Choose the base at run time from a random source", "Use two independent prime moduli of about 10^9", "Map 'a' to 0 to save a subtraction", "Verify hash matches directly when the cost is acceptable"], answer: [0, 1, 3], explain: "Mapping a to 0 makes strings of different lengths collide. The other three are standard hardening steps." },
+  { type: "predict", q: "What does this print?", code: "M = 1_000_000_007\nh = lambda s: sum((ord(c) - 96) * 31 ** (len(s) - 1 - i) for i, c in enumerate(s)) % M\nprint(h('ab') == h('b'))", options: ["True", "False", "Error", "None"], answer: 1, explain: "h('ab') = 1*31 + 2 = 33 while h('b') = 2. Because 'a' maps to 1 (not 0), the leading 'a' contributes." },
+  { type: "mcq", q: "When is a deterministic algorithm (KMP, suffix array) preferable to hashing?", options: ["When you need a guaranteed exact answer and the structure fits", "Whenever n is small", "Only for numbers, never for strings", "When the alphabet has more than 26 letters"], answer: 0, explain: "Hashing is Monte Carlo. If an incorrect answer is unacceptable and a standard deterministic tool applies, use it." }
+]} />

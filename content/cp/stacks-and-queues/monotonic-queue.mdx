@@ -1,0 +1,190 @@
+---
+title: Monotonic Queue and Sliding Window Maximum
+track: cp
+module: stacks-and-queues
+order: 4
+difficulty: medium
+estMinutes: 30
+prerequisites: [cp/stacks-and-queues/queues-deques-bfs, cp/stacks-and-queues/monotonic-stack]
+tags: [monotonic-queue, deque, sliding-window, dp-optimization]
+type: lesson
+problems: [m07-sliding-window-max]
+furtherReading:
+  - title: cp-algorithms, Minimum stack / minimum queue and the sliding window technique
+    url: https://cp-algorithms.com/data_structures/stack_queue_modification.html
+  - title: CSES Problem Set
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+You slide a window of width `k` over an array and want the maximum inside it at every step. Recomputing is `O(nk)`. But when the window slides by one:
+
+- one element **leaves** on the left,
+- one element **arrives** on the right.
+
+An element that is smaller than a newer element **in the same window** will never be the maximum again: the newer one is bigger *and* leaves the window later. So it can be discarded the moment the bigger one arrives. What remains are candidates whose values decrease from oldest to newest, the biggest being the oldest.
+
+## Definition: the monotonic queue
+
+Maintain a deque of **indices** of the current window such that their values are strictly decreasing from front to back. For each new index `i`:
+
+1. **Push with cleanup (back):** pop from the back while `a[back] <= a[i]`, then push `i`.
+2. **Expire (front):** if the front index is `<= i - k`, pop it from the front.
+3. **Answer:** once `i >= k - 1`, the maximum of the window is `a[front]`.
+
+```python
+dq = deque()
+for i in range(n):
+    while dq and a[dq[-1]] <= a[i]:
+        dq.pop()
+    dq.append(i)
+    if dq[0] <= i - k:
+        dq.popleft()
+    if i >= k - 1:
+        out.append(a[dq[0]])
+```
+
+### Invariant and proof
+
+> After handling index `i`, the deque holds exactly the indices `j` in the window `(i-k, i]` that are **not dominated**, meaning no later index `j' in (j, i]` has `a[j'] >= a[j]`. They appear in increasing index order, hence in strictly decreasing value order.
+
+- *Safe to discard:* a dominated `j` is never a window maximum from now on, since `j'` is at least as large and stays in the window at least as long.
+- *Front is the maximum:* the front is the oldest non-dominated index, hence the largest of the candidates, and every non-candidate is dominated by some candidate, so the front is the window maximum.
+- *Expiry:* indices leave the window in index order, so only the front can expire, and at most one per step (the window moves by one).
+
+### Complexity
+
+Each index is pushed once and popped at most once (from the back or the front): **`O(n)` total, independent of `k`**.
+
+<Complexity time="O(n)" space="O(k)" note="amortised O(1) per element" />
+
+## Watch it run
+
+<CodeRunner snippets={{ python: `from collections import deque
+
+def window_max(a, k):
+    dq = deque()
+    out = []
+    for i, x in enumerate(a):
+        while dq and a[dq[-1]] <= x:
+            dq.pop()
+        dq.append(i)
+        if dq[0] <= i - k:
+            dq.popleft()
+        if i >= k - 1:
+            out.append(a[dq[0]])
+        print("i=%d x=%d deque(values)=%s" % (i, x, [a[j] for j in dq]))
+    return out
+
+a = [1, 3, -1, -3, 5, 3, 6, 7]
+print(window_max(a, 3))
+`, javascript: `function windowMax(a, k) {
+  const dq = [];          // indices
+  let head = 0;
+  const out = [];
+  for (let i = 0; i < a.length; i++) {
+    while (dq.length > head && a[dq[dq.length - 1]] <= a[i]) dq.pop();
+    dq.push(i);
+    if (dq[head] <= i - k) head++;
+    if (i >= k - 1) out.push(a[dq[head]]);
+  }
+  return out;
+}
+console.log(windowMax([1, 3, -1, -3, 5, 3, 6, 7], 3).join(' '));
+` }} />
+
+Expected output of the maxima: `3 3 5 5 6 7`.
+
+## Sliding window minimum, and checking against brute force
+
+For the minimum, flip the comparison (`a[back] >= a[i]`). The snippet below tests both against a naive implementation on random input.
+
+<CodeRunner language="python" code={`import random
+from collections import deque
+
+def sliding(a, k, better):
+    # better(x, y) is True if x should evict y (>= for max, <= for min)
+    dq, out = deque(), []
+    for i, x in enumerate(a):
+        while dq and better(x, a[dq[-1]]):
+            dq.pop()
+        dq.append(i)
+        if dq[0] <= i - k:
+            dq.popleft()
+        if i >= k - 1:
+            out.append(a[dq[0]])
+    return out
+
+random.seed(5)
+for _ in range(500):
+    n = random.randint(1, 15)
+    k = random.randint(1, n)
+    a = [random.randint(-5, 5) for _ in range(n)]
+    mx = sliding(a, k, lambda x, y: x >= y)
+    mn = sliding(a, k, lambda x, y: x <= y)
+    assert mx == [max(a[i:i + k]) for i in range(n - k + 1)]
+    assert mn == [min(a[i:i + k]) for i in range(n - k + 1)]
+print("500 random cases agree with brute force")
+`} />
+
+## Application: DP over a sliding range
+
+A common pattern: `dp[i] = cost[i] + min(dp[j] for j in [i-k, i-1])`. The inner minimum is a sliding window minimum **over the dp values themselves**, which are produced online. Keep a monotonic deque of indices with increasing `dp` values; the front gives the best predecessor.
+
+<CodeRunner language="python" code={`from collections import deque
+
+def min_cost_path(cost, k):
+    # start at index 0, reach index n-1, each jump moves 1..k steps,
+    # paying cost of every index landed on (including the first).
+    n = len(cost)
+    dp = [0] * n
+    dp[0] = cost[0]
+    dq = deque([0])            # indices with increasing dp
+    for i in range(1, n):
+        while dq[0] < i - k:
+            dq.popleft()
+        dp[i] = cost[i] + dp[dq[0]]
+        while dq and dp[dq[-1]] >= dp[i]:
+            dq.pop()
+        dq.append(i)
+    return dp[-1]
+
+print(min_cost_path([1, 100, 1, 1, 100, 1], 2))   # 4
+print(min_cost_path([5, 1, 1, 1, 5], 3))         # 11
+`} />
+
+With `k = 2` the first call prints `4` (path `0 -> 2 -> 3 -> 5`, each jump at most 2 steps, landing on costs `1 + 1 + 1 + 1`). The second prints `11`: the ends cost `10` and one cheap cell in between costs `1`.
+
+<Callout type="note" title="Same idea, other aggregates">
+The window aggregate must be *selective* (max, min). For sum or count you simply keep a running total. For gcd, or any associative non-invertible operation, use the "two stacks" queue: see [amortized analysis](/cp/stacks-and-queues/amortized-analysis/).
+</Callout>
+
+## Pitfalls
+
+1. **Expiry check uses the index, not the value.** The deque must store indices (or `(index, value)` pairs); otherwise you cannot tell what has left the window.
+2. **`<` versus `<=` when evicting.** Both are correct for the maximum value; `<=` keeps the deque strictly decreasing and slightly shorter. If you need the *position* of the leftmost/rightmost maximum, the choice matters.
+3. **Reading the answer before the first full window** (`i < k - 1`).
+4. **Off-by-one in expiry.** The window ending at `i` contains `i-k+1 .. i`, so an index is expired when `idx <= i - k`.
+5. **Using a heap** gives `O(n log n)` with lazy deletion. It works but is slower and needs deletion care. The deque is simpler *and* faster.
+6. **Variable-width windows.** The same structure handles windows where the left end only moves right (two pointers): expire by index whenever the left pointer passes the front.
+
+## Practice
+
+<Problem id="m07-sliding-window-max" />
+
+## Problem ladder
+
+- [Sliding Window Maximum](https://leetcode.com/problems/sliding-window-maximum/) (LeetCode, hard): the exact template.
+- [Jump Game VI](https://leetcode.com/problems/jump-game-vi/) (LeetCode, medium): the DP application above.
+- [Longest Continuous Subarray With Absolute Diff Less Than or Equal to Limit](https://leetcode.com/problems/longest-continuous-subarray-with-absolute-diff-less-than-or-equal-to-limit/) (LeetCode, medium): two deques (max and min) with two pointers.
+- [Shortest Subarray with Sum at Least K](https://leetcode.com/problems/shortest-subarray-with-sum-at-least-k/) (LeetCode, hard): monotonic deque over prefix sums.
+
+## Quiz
+
+<Quiz id="cp-m07-monotonic-queue" tags={["monotonic-queue", "deque"]} questions={[
+  { type: "mcq", q: "Why can an element be discarded as soon as a larger-or-equal element arrives later in the window?", options: ["It is smaller than the array's median", "The newer element is at least as large and also stays in the window longer", "Smaller elements are never needed", "Because the window shrinks"], answer: 1, explain: "Domination: the newer element is >= and leaves the window later, so the older one can never be the maximum again." },
+  { type: "multi", q: "Which statements about the sliding window maximum deque are true?", options: ["It stores indices so expiry can be detected", "Values are decreasing from front to back", "Total time is O(nk)", "The maximum of the window is at the front"], answer: [0, 1, 3], explain: "Indices allow expiry checks; values decrease front to back; the front is the maximum. Total time is O(n)." },
+  { type: "predict", q: "What does this print?", code: "from collections import deque\na = [2, 1, 3]\nk = 2\ndq = deque(); out = []\nfor i, x in enumerate(a):\n    while dq and a[dq[-1]] <= x: dq.pop()\n    dq.append(i)\n    if dq[0] <= i - k: dq.popleft()\n    if i >= k - 1: out.append(a[dq[0]])\nprint(out)", options: ["[2, 3]", "[2, 1]", "[1, 3]", "[3, 3]"], answer: 0, explain: "Windows are [2,1] with max 2 and [1,3] with max 3." },
+  { type: "mcq", q: "A solution that keeps all window elements in a max-heap with lazy deletion of expired ones runs in:", options: ["O(n)", "O(n log n)", "O(n log^2 n)", "O(nk)"], answer: 1, explain: "Each element is pushed once and popped at most once, each costing O(log n)." }
+]} />

@@ -1,0 +1,200 @@
+---
+title: Floating-Point Binary Search and Ternary Search
+track: cp
+module: sorting-and-searching
+order: 4
+difficulty: medium
+estMinutes: 30
+prerequisites: [cp/sorting-and-searching/binary-search-on-the-answer]
+tags: [binary-search, ternary-search, floating-point, unimodal, convex]
+type: lesson
+problems: [m06-rope-pieces, m06-fuel-depot]
+furtherReading:
+  - title: cp-algorithms, Ternary search
+    url: https://cp-algorithms.com/num_methods/ternary_search.html
+  - title: What Every Computer Scientist Should Know About Floating-Point Arithmetic
+    url: https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html
+---
+
+## Intuition
+
+Two related questions:
+
+- **Where does a monotone predicate flip on the real line?** (the largest length of rope pieces, the cube root of 30.) You cannot step by 1, but you can still halve the interval.
+- **Where is the lowest point of a valley?** (the cheapest position for a depot, the best time to sell.) A valley has a shape you can exploit: sample two points; whichever is higher cannot be on the side of the valley floor that is farther away. That is **ternary search**.
+
+Both are "throw away part of the interval each step" algorithms; they differ in what makes the discarding safe.
+
+## Binary search over real numbers
+
+For a monotone predicate over reals, keep `lo` and `hi` as floats and halve for a **fixed number of iterations**:
+
+<CodeRunner language="python" code={`n = 2.0
+lo, hi = 0.0, max(1.0, n)     # sqrt(n) lies in [0, max(1, n)]
+for _ in range(100):
+    mid = (lo + hi) / 2
+    if mid * mid >= n:
+        hi = mid
+    else:
+        lo = mid
+print("%.10f" % hi)           # 1.4142135624
+`} />
+
+Why a fixed count instead of `while hi - lo > eps`?
+
+- `double` has a 53-bit significand: about 15 to 16 significant decimal digits. Near `10^15` neighbouring doubles are `0.125` apart. A condition like `hi - lo > 1e-9` can then **never become false**, because `mid` rounds to `lo` or `hi` and the interval stops shrinking.
+- 100 halvings reduce any realistic interval to the limit of double precision, and the loop count is deterministic.
+
+<CodeRunner language="python" code={`# the epsilon trap: the interval cannot shrink below one double spacing
+lo, hi = 1e15, 1e15 + 1
+steps = 0
+while hi - lo > 1e-9 and steps < 1000:      # cap added so the demo ends
+    mid = (lo + hi) / 2
+    if mid >= 1e15 + 0.3:
+        hi = mid
+    else:
+        lo = mid
+    steps += 1
+print(steps, hi - lo)    # 1000 steps, width stuck at 0.125
+`} />
+
+### Worked example: equal rope pieces
+
+Ropes `802, 743, 457, 539`; we need `k = 11` pieces of equal length `L`. The piece count `f(L) = sum floor(len / L)` is non-increasing in `L`, so "`f(L) >= 11`" is `T…T F…F`; find the last true.
+
+<CodeRunner language="python" code={`ropes = [802, 743, 457, 539]
+k = 11
+
+def pieces(L):
+    return sum(int(x / L) for x in ropes)
+
+lo, hi = 0.0, float(max(ropes))
+for _ in range(100):
+    mid = (lo + hi) / 2
+    if mid > 0 and pieces(mid) >= k:
+        lo = mid
+    else:
+        hi = mid
+print("%.4f" % lo)    # 200.5000, which is 802 / 4
+`} />
+
+Check by hand at `L = 200.5`: `802/200.5 = 4`, `743/200.5 = 3.7` so 3, `457/200.5 = 2.28` so 2, `539/200.5 = 2.69` so 2: total 11. Any larger `L` makes `802/L < 4` and drops a piece, so 200.5 is the maximum.
+
+### Exact reformulation when possible
+
+If you must print a rounded value, ask whether the answer can be searched in integer units. Here `floor(100 · L*)` equals the largest integer `c` with `sum(floor(100 · len / c)) >= k`, because `c/100 <= L*` exactly when `c` is feasible. Then the search is exact integer arithmetic with no epsilon (that is how the problem below is judged exactly). When the statement requires real output, print with enough digits (`%.9f`) and rely on the checker's tolerance, typically `10^-6` absolute or relative.
+
+## Unimodal functions and ternary search
+
+A function `f` on `[lo, hi]` is **unimodal (for minimisation)** if there is a point `x*` such that `f` is **strictly decreasing** on `[lo, x*]` and **strictly increasing** on `[x*, hi]`. Convex functions are unimodal (apart from flat bottoms).
+
+Take `m1 < m2` inside the interval:
+
+- if `f(m1) < f(m2)`, the minimum cannot be in `(m2, hi]`, because `f` would have to go up then down. Set `hi = m2`.
+- otherwise the minimum cannot be in `[lo, m1)`. Set `lo = m1`.
+
+Picking `m1, m2` at the thirds shrinks the interval to `2/3` of its size per iteration.
+
+<CodeRunner language="python" code={`def ternary_min(f, lo, hi, iters=100):
+    for _ in range(iters):
+        m1 = lo + (hi - lo) / 3
+        m2 = hi - (hi - lo) / 3
+        if f(m1) < f(m2):
+            hi = m2
+        else:
+            lo = m1
+    return (lo + hi) / 2
+
+x = ternary_min(lambda x: (x - 2.5) ** 2 + 1, -10, 10)
+print(round(x, 6))   # 2.5
+`} />
+
+How many iterations? Each shrinks by `2/3`; reducing a width of `10^9` to `10^-9` is a factor `10^18`, needing `ln(10^18) / ln(1.5)` which is about 102. So 100 to 200 iterations is a safe default.
+
+### Integer ternary search
+
+On integers stop when the range is tiny and scan:
+
+<CodeRunner language="python" code={`def ternary_int(f, lo, hi):
+    while hi - lo > 2:
+        m1 = lo + (hi - lo) // 3
+        m2 = hi - (hi - lo) // 3
+        if f(m1) < f(m2):
+            hi = m2
+        else:
+            lo = m1
+    return min(range(lo, hi + 1), key=f)
+
+g = [x * x - 10 * x + 3 for x in range(21)]
+print(ternary_int(lambda i: g[i], 0, 20))   # 5
+`} />
+
+### A better integer tool: binary search on the discrete derivative
+
+For a function on integers that is **convex** (or just "non-increasing then non-decreasing"), the predicate `f(x) <= f(x + 1)` is `F…F T…T`. Binary search its first true index. One pair of evaluations per step, half the intervals each time, and it copes with flat bottoms.
+
+<CodeRunner language="python" code={`b = [9, 7, 5, 3, 3, 3, 4, 8]       # flat bottom is fine
+lo, hi = 0, len(b) - 1
+while lo < hi:
+    mid = (lo + hi) // 2
+    if b[mid] <= b[mid + 1]:
+        hi = mid
+    else:
+        lo = mid + 1
+print(lo, b[lo])   # 3 3
+`} />
+
+This is the fastest and safest method for integer convex minimisation, and it is what the Fuel Depot problem below uses.
+
+## Pitfalls
+
+1. **Plateaus break ternary search.** The comparison assumes strictness. On `[3, 2, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5]` both probes can land on the flat top where `f(m1) == f(m2)`, the code takes the "else" branch and discards the left part, which contains the minimum:
+
+<CodeRunner language="python" code={`def ternary_int(f, lo, hi):
+    while hi - lo > 2:
+        m1 = lo + (hi - lo) // 3
+        m2 = hi - (hi - lo) // 3
+        if f(m1) < f(m2):
+            hi = m2
+        else:
+            lo = m1
+    return min(range(lo, hi + 1), key=f)
+
+a = [3, 2, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5]
+i = ternary_int(lambda i: a[i], 0, len(a) - 1)
+print(i, a[i], "true minimum", min(a))
+`} />
+
+   Fix: use the derivative binary search (it only compares neighbours, so a flat top beyond the minimum is harmless), or make sure the function is strictly unimodal.
+2. **Not unimodal at all.** Two valleys, or a sum of non-convex terms: both searches silently return one of the local minima.
+3. **Epsilon loops** (see above). Use a fixed iteration count.
+4. **Precision of the answer vs precision of the argument.** At a minimum the function is flat, so `x` is only accurate to about `sqrt(machine epsilon)` (`10^-8`) even when `f(x)` is accurate to `10^-16`. Do not demand more digits of `x` than that.
+5. **Printing**: print with fixed precision (`%.9f`); never compare floats with `==`.
+6. **Mixing integer and real search**: if the answer must be an integer, use integer search, do not round a float answer.
+
+## A remark: golden-section search
+
+Ternary search evaluates `f` twice per iteration and keeps `2/3` of the interval. Choosing the probe points at the golden ratio lets one probe be **reused** in the next iteration, so only one new evaluation is needed per step and the interval shrinks by a factor `0.618` per evaluation, instead of `sqrt(2/3)` of about `0.816`. It matters when `f` is expensive. In contests ternary search with 100 iterations is almost always enough.
+
+## Practice
+
+<Problem id="m06-rope-pieces" />
+
+<Problem id="m06-fuel-depot" />
+
+## Problem ladder
+
+- [CSES 1620, Factory Machines](https://cses.fi/problemset/task/1620) (integer search on time)
+- [Codeforces 939E, Maximize!](https://codeforces.com/problemset/problem/939/E) (about 2200, unimodal function; the intended solution can also use two pointers)
+- [LeetCode 69, Sqrt(x)](https://leetcode.com/problems/sqrtx/)
+- [LeetCode 162, Find Peak Element](https://leetcode.com/problems/find-peak-element/) (binary search on the slope)
+- [LeetCode 1095, Find in Mountain Array](https://leetcode.com/problems/find-in-mountain-array/)
+
+## Quiz
+
+<Quiz id="m06-float-ternary-quiz" tags={["ternary-search", "floating-point"]} questions={[
+  { type: "mcq", q: "Why is a fixed iteration count preferred over 'while hi - lo > 1e-9' for floating-point binary search?", options: ["Fixed loops are faster per iteration", "At large magnitudes the interval can stop shrinking, so the epsilon test never becomes false", "Binary search is only correct for 100 iterations", "Floats cannot be compared with <"], answer: 1, explain: "Near 1e15 consecutive doubles are about 0.125 apart; mid collapses onto lo or hi and the width never drops below 1e-9." },
+  { type: "multi", q: "Which conditions are required for ternary search to find the minimum of f?", options: ["f is strictly decreasing, then strictly increasing", "f is defined on a sorted array", "No flat segment away from the minimum", "f has exactly one local minimum"], answer: [0, 2, 3], explain: "Unimodality with strictness (single valley, no plateaus) is what makes comparing f(m1) and f(m2) safe." },
+  { type: "predict", q: "What does this print?", code: "b = [8, 6, 4, 4, 5, 9]\nlo, hi = 0, len(b) - 1\nwhile lo < hi:\n    mid = (lo + hi) // 2\n    if b[mid] <= b[mid + 1]:\n        hi = mid\n    else:\n        lo = mid + 1\nprint(lo)", options: ["2", "3", "4", "5"], answer: 0, explain: "It finds the first index where b[i] <= b[i+1]: b[2]=4 <= b[3]=4, so the answer is 2." },
+  { type: "mcq", q: "About how many ternary-search iterations shrink a width of 10^9 to 10^-9?", options: ["About 30", "About 100", "About 1000", "About 10^9"], answer: 1, explain: "Factor 10^18 at 2/3 per iteration: ln(10^18)/ln(1.5) is about 102." }
+]} />

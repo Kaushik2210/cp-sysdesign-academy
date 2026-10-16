@@ -1,0 +1,228 @@
+---
+title: Rolling Hash, Pattern Search and Repeated Substrings
+track: cp
+module: hashing
+order: 4
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/hashing/string-hashing]
+tags: [rolling-hash, rabin-karp, binary-search, repeated-substring, sliding-window]
+type: lesson
+problems: [m08-longest-repeated-substring]
+furtherReading:
+  - title: cp-algorithms, Rabin-Karp algorithm for string matching
+    url: https://cp-algorithms.com/string/rabin-karp.html
+  - title: cp-algorithms, String hashing
+    url: https://cp-algorithms.com/string/string-hashing.html
+  - title: CSES Problem Set (string algorithms)
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+Prefix hashes (previous lesson) let you hash any substring in `O(1)`. A **rolling hash** is the same idea seen from a window's point of view: when a fixed-length window slides one position to the right, its hash can be updated in `O(1)` by removing the character that left and adding the one that arrived, without looking at the other `L - 2` characters.
+
+With `O(1)` hashes of all length-`L` windows you can solve in near-linear time problems that would otherwise compare `O(n^2)` pairs of substrings.
+
+## The rolling update
+
+Let `W_i` be the hash of the window `s[i..i+L)`, with `H = c_0 * B^(L-1) + ... + c_{L-1}`. Sliding by one:
+
+`W_{i+1} = (W_i - c(s_i) * B^(L-1)) * B + c(s_{i+L})   (mod M)`
+
+Subtract the leading digit, shift left, append the new digit. Precompute `B^(L-1) mod M` once.
+
+Equivalent and often simpler: use prefix hashes and read `P[i+L] - P[i] * B^L`. The two are the same value; the prefix version needs no incremental state and is harder to get wrong.
+
+## Application 1: Rabin-Karp pattern search
+
+Find every occurrence of a pattern `p` (length `m`) in a text `t` (length `n`): compute `H(p)`, slide a window over `t`, and report positions where the window hash equals `H(p)`.
+
+A hash match is only *probably* a real match. Two ways to deal with that:
+
+- **Monte Carlo**: trust the hash (use a ~`10^18` hash space; error probability is negligible).
+- **Las Vegas**: verify each hash match by direct comparison. The answer is always correct; expected time stays `O(n + m)` because false matches are rare, though a string with *many* true matches costs `O(m)` per match for the verification.
+
+<CodeRunner language="python" code={`import random
+
+def rabin_karp(t, p):
+    n, m = len(t), len(p)
+    if m > n:
+        return []
+    M = (1 << 61) - 1                 # Mersenne prime, big hash space
+    B = random.randrange(10**6, M - 1)
+    top = pow(B, m - 1, M)
+    hp = ht = 0
+    for i in range(m):
+        hp = (hp * B + ord(p[i])) % M
+        ht = (ht * B + ord(t[i])) % M
+    res = []
+    for i in range(n - m + 1):
+        if ht == hp and t[i:i + m] == p:      # verify: Las Vegas
+            res.append(i)
+        if i + m < n:
+            ht = ((ht - ord(t[i]) * top) * B + ord(t[i + m])) % M
+    return res
+
+print(rabin_karp("abracadabra", "abra"))
+print(rabin_karp("aaaaa", "aa"))
+print(rabin_karp("hello", "xyz"))
+
+# Compare with a naive search on random strings
+def naive(t, p):
+    return [i for i in range(len(t) - len(p) + 1) if t[i:i + len(p)] == p]
+
+random.seed(9)
+for _ in range(500):
+    t = "".join(random.choice("ab") for _ in range(random.randint(1, 20)))
+    p = "".join(random.choice("ab") for _ in range(random.randint(1, 4)))
+    assert rabin_karp(t, p) == naive(t, p)
+print("random tests agree")
+`} />
+
+Expected time `O(n + m)`. (KMP and the Z-function give a *deterministic* `O(n + m)`; use hashing when you need the flexibility below.)
+
+## Application 2: longest repeated substring
+
+**Problem.** Longest substring that occurs at least twice in `s` (occurrences may overlap).
+
+**Key observation (monotonicity).** If a substring of length `L` occurs twice, every shorter prefix of it occurs twice at the same places. So `R(L) = "some length-L substring repeats"` is true for small `L` and false from some point on: **binary search on `L`**.
+
+**Check for a fixed `L`.** Compute the hash of every window of length `L` in `O(n)` and look for a duplicate in a hash set. (Sorting the hashes instead of a set is deterministic in time and also fine.)
+
+Total expected `O(n log n)`.
+
+<CodeRunner language="python" code={`import random
+
+def longest_repeat(s):
+    n = len(s)
+    M1, M2 = 1_000_000_007, 998_244_353
+    B1 = random.randrange(1000, M1 - 1)
+    B2 = random.randrange(1000, M2 - 1)
+    h1, h2, p1, p2 = [0] * (n + 1), [0] * (n + 1), [1] * (n + 1), [1] * (n + 1)
+    for i, ch in enumerate(s):
+        c = ord(ch)
+        h1[i + 1] = (h1[i] * B1 + c) % M1
+        h2[i + 1] = (h2[i] * B2 + c) % M2
+        p1[i + 1] = p1[i] * B1 % M1
+        p2[i + 1] = p2[i] * B2 % M2
+
+    def repeats(L):
+        seen = set()
+        for i in range(n - L + 1):
+            key = ((h1[i + L] - h1[i] * p1[L]) % M1, (h2[i + L] - h2[i] * p2[L]) % M2)
+            if key in seen:
+                return True
+            seen.add(key)
+        return False
+
+    lo, hi = 0, n - 1          # largest L for which repeats(L) holds
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if repeats(mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+def brute(s):
+    n = len(s)
+    best = 0
+    for L in range(1, n):
+        subs = [s[i:i + L] for i in range(n - L + 1)]
+        if len(set(subs)) < len(subs):
+            best = L
+    return best
+
+for w in ["banana", "abcd", "aaaaa", "abcabcabc"]:
+    print(w, longest_repeat(w), brute(w))
+
+random.seed(4)
+for _ in range(200):
+    w = "".join(random.choice("abc") for _ in range(random.randint(1, 14)))
+    assert longest_repeat(w) == brute(w), w
+print("random tests agree")
+`} />
+
+For `banana` the answer is `3`: `ana` occurs at positions 1 and 3 (overlapping). A suffix array with an LCP array gives the same answer deterministically in `O(n log n)`.
+
+## More things rolling hashes do
+
+| task | idea |
+| --- | --- |
+| count distinct substrings of length `L` | put all window hashes into a set |
+| longest common substring of two strings | binary search `L`; hashes of windows of `a` in a set, test windows of `b` |
+| is `s` a rotation of `t`? | search `t + t` for `s`, or compare hashes of rotations |
+| smallest period / borders | compare `H(prefix of length k)` with `H(suffix of length k)` |
+| palindrome checks / counting | hash `s` and `rev(s)` |
+| 2D pattern search | hash rows, then hash the column of row-hashes |
+| substring with a single changed character | binary search the first mismatch using hash equality of prefixes (`O(log n)` per query) |
+
+The last row is powerful: hash equality turns "longest common prefix of two suffixes" into a binary search with `O(1)` checks, which is how many string problems are solved without suffix structures.
+
+<CodeRunner language="python" code={`import random
+
+M = (1 << 61) - 1
+B = random.randrange(10**6, M - 1)
+
+def build(s):
+    n = len(s)
+    P = [0] * (n + 1)
+    pw = [1] * (n + 1)
+    for i, ch in enumerate(s):
+        P[i + 1] = (P[i] * B + ord(ch)) % M
+        pw[i + 1] = pw[i] * B % M
+    return P, pw
+
+s = "abcabcabxabcabcabc"
+P, pw = build(s)
+n = len(s)
+
+def get(l, r):
+    return (P[r] - P[l] * pw[r - l]) % M
+
+def lcp(i, j):
+    # longest common prefix of suffixes starting at i and j, by binary search on hashes
+    lo, hi = 0, n - max(i, j)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if get(i, i + mid) == get(j, j + mid):
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+print(lcp(0, 3), lcp(0, 9), lcp(3, 12), lcp(0, 6))
+`} />
+
+The outputs are the lengths of the common prefix of the suffix pairs `(0,3)`, `(0,9)`, `(3,12)`, `(0,6)`: here `5`, `8`, `5`, `2`. Verify one by hand to convince yourself.
+
+## Pitfalls
+
+1. **Off-by-one in the window formula.** The leading digit has weight `B^(L-1)`, not `B^L`.
+2. **Not normalising the subtraction** in languages with signed remainders.
+3. **Forgetting the monotonicity argument.** Binary search on length is only valid for properties closed under shortening (repeats, common substring). "Longest substring that occurs exactly twice" is **not** monotone.
+4. **A hash set of many hashes with a single `10^9` modulus** invites birthday collisions; with `n = 10^6` windows you *will* see false repeats. Use two moduli or `2^61 - 1`.
+5. **Memory.** Storing `n` pairs of 64-bit values in a hash set has noticeable overhead; sorting a vector of combined keys is usually lighter and cache friendly.
+6. **Verification cost.** In Las Vegas mode, a text of all `a` and a pattern of all `a` makes every position a true match and verification costs `O(nm)`. Either trust a large-space hash (Monte Carlo) or verify only the first match when you only need existence.
+
+## Practice
+
+<Problem id="m08-longest-repeated-substring" />
+
+## Problem ladder
+
+- [Repeated DNA Sequences](https://leetcode.com/problems/repeated-dna-sequences/) (LeetCode, medium): fixed length 10 windows in a set.
+- [Longest Duplicate Substring](https://leetcode.com/problems/longest-duplicate-substring/) (LeetCode, hard): the exact binary search plus rolling hash.
+- [Finding Periods](https://cses.fi/problemset/task/1733) (CSES): all periods of a string; hashing or Z-function.
+- [Longest Palindrome](https://cses.fi/problemset/task/1111) (CSES): hash with binary search on radius, or Manacher.
+- [Shortest Palindrome](https://leetcode.com/problems/shortest-palindrome/) (LeetCode, hard): longest palindromic prefix via forward and reverse hashes.
+
+## Quiz
+
+<Quiz id="cp-m08-rolling-hash" tags={["rolling-hash", "rabin-karp"]} questions={[
+  { type: "mcq", q: "When a length-L window slides one step, the leading character must be removed using which power of the base?", options: ["B^L", "B^(L-1)", "B^(L+1)", "B^0"], answer: 1, explain: "The first character of a length-L window sits at weight B^(L-1) in the polynomial." },
+  { type: "multi", q: "Which properties allow binary search on the answer length L for repeated-substring problems?", options: ["If a length-L substring repeats then some length L-1 substring repeats", "The predicate is true for small L and false for large L", "The string must be sorted", "Checking one L can be done in O(n) with hashes"], answer: [0, 1, 3], explain: "Monotonicity plus a fast check is what binary search needs; the string need not be sorted." },
+  { type: "predict", q: "What is the longest substring occurring at least twice (overlap allowed) in 'aaaa'?", code: "s = 'aaaa'\nbest = 0\nfor L in range(1, len(s)):\n    subs = [s[i:i+L] for i in range(len(s) - L + 1)]\n    if len(set(subs)) < len(subs):\n        best = L\nprint(best)", options: ["1", "2", "3", "4"], answer: 2, explain: "'aaa' occurs at positions 0 and 1, overlapping. Length 4 occurs only once." },
+  { type: "mcq", q: "Why verify a hash match by direct comparison in Rabin-Karp?", options: ["Hashes are always wrong", "It turns the Monte Carlo answer into one that is always correct, at some expected cost", "Because the modulus must be even", "It makes the hash faster"], answer: 1, explain: "Equal hashes do not imply equal strings; verification removes the error probability (Las Vegas) while expected time stays linear unless there are many true matches." }
+]} />

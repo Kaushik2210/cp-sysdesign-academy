@@ -1,0 +1,227 @@
+---
+title: Queues, Deques and BFS-style Simulation
+track: cp
+module: stacks-and-queues
+order: 2
+difficulty: easy
+estMinutes: 30
+prerequisites: [cp/stacks-and-queues/stacks-and-brackets]
+tags: [queue, deque, bfs, simulation, 0-1-bfs]
+type: lesson
+problems: [m07-josephus-queue, m07-grid-steps]
+furtherReading:
+  - title: cp-algorithms, Breadth-first search
+    url: https://cp-algorithms.com/graph/breadth-first-search.html
+  - title: cp-algorithms, 0-1 BFS
+    url: https://cp-algorithms.com/graph/01_bfs.html
+  - title: CSES Problem Set (graph section)
+    url: https://cses.fi/problemset/
+---
+
+## Intuition
+
+A queue is a line at a ticket counter: first come, first served. Where a stack revisits the *newest* item, a queue processes things in the **order they were discovered**. That is exactly what you want when "earlier discovered" means "closer", "older" or "has been waiting longer".
+
+A **deque** (double-ended queue) lets you add and remove at both ends. It is a queue and a stack in one, and it is the engine behind 0-1 BFS and the [monotonic queue](/cp/stacks-and-queues/monotonic-queue/).
+
+## Definition
+
+| operation | queue | deque |
+| --- | --- | --- |
+| add | `push_back` | `push_back`, `push_front` |
+| remove | `pop_front` | `pop_front`, `pop_back` |
+| peek | `front` | `front`, `back` |
+
+All `O(1)`.
+
+<Tabs>
+<Tab label="C++">
+
+```cpp
+queue<int> q;            // FIFO
+q.push(1); int x = q.front(); q.pop();
+
+deque<int> d;            // double ended; random access too
+d.push_front(1); d.push_back(2); d.pop_back();
+```
+
+</Tab>
+<Tab label="Python">
+
+```python
+from collections import deque
+q = deque()
+q.append(1)          # push_back
+q.appendleft(0)      # push_front
+x = q.popleft()      # pop_front
+# NEVER use list.pop(0): it shifts every element, O(n).
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+Deque<Integer> q = new ArrayDeque<>();
+q.addLast(1);            // push_back
+q.addFirst(0);           // push_front
+int x = q.pollFirst();   // pop_front (null if empty)
+```
+
+</Tab>
+</Tabs>
+
+<Callout type="pitfall" title="Python lists are not queues">
+`list.pop(0)` is `O(n)`. A BFS written with it on `10^5` nodes is a silent time-limit failure. Use `collections.deque`. In JavaScript `Array.shift()` is also linear in the worst case; keep a head index (`head++`) over a growing array instead.
+</Callout>
+
+## Simulation with a queue: the counting-out game
+
+`n` people stand in a circle; every `k`-th is eliminated. Model the circle as a queue whose front is where counting starts: to eliminate the `k`-th, move `k - 1` people from the front to the back, then remove the front.
+
+<CodeRunner language="python" code={`from collections import deque
+
+def eliminate(n, k):
+    q = deque(range(1, n + 1))
+    order = []
+    while q:
+        q.rotate(-((k - 1) % len(q)))   # move k-1 fronts to the back
+        order.append(q.popleft())
+    return order
+
+print(eliminate(7, 3))
+print(eliminate(5, 2))
+`} />
+
+Rotating by `(k - 1) mod size` is valid because a whole lap leaves the queue unchanged. Total work is `O(n^2)` in the worst case (each round rotates up to `size - 1` times); a Fenwick tree reaches `O(n log n)`.
+
+## BFS: the queue that finds shortest paths
+
+In an **unweighted** graph (or a grid where every step costs 1), breadth-first search finds the fewest edges from a source to every node.
+
+```python
+dist = [-1] * n
+dist[s] = 0
+q = deque([s])
+while q:
+    u = q.popleft()
+    for v in adj[u]:
+        if dist[v] == -1:        # not yet discovered
+            dist[v] = dist[u] + 1
+            q.append(v)
+```
+
+### Why it is correct (the invariant)
+
+At every moment the queue contains nodes in **non-decreasing distance**, and the distances in it take at most two values, `d` and `d + 1`.
+
+- Initially the queue is `[s]` with distance `0`.
+- Popping a node at distance `d` appends nodes at distance `d + 1`, which keeps the queue sorted, because everything already in the queue has distance `d` or `d + 1`.
+- So nodes leave the queue in non-decreasing distance order, and a node is discovered by the *first* (hence closest) neighbour that reaches it, which proves `dist[v]` is minimal.
+
+Each node is enqueued once and each edge examined at most twice (undirected): `O(V + E)`.
+
+### BFS on a grid
+
+Cells are nodes, the four neighbours are edges. Run it below on a small maze (`S` start, `T` target, `#` wall):
+
+<CodeRunner language="python" code={`from collections import deque
+
+grid = [
+    "S..#....",
+    ".#.#.##.",
+    ".#...#..",
+    ".####.#.",
+    "......#T",
+]
+h, w = len(grid), len(grid[0])
+dist = [[-1] * w for _ in range(h)]
+q = deque()
+for i in range(h):
+    for j in range(w):
+        if grid[i][j] == 'S':
+            dist[i][j] = 0
+            q.append((i, j))
+while q:
+    i, j = q.popleft()
+    for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        a, b = i + di, j + dj
+        if 0 <= a < h and 0 <= b < w and grid[a][b] != '#' and dist[a][b] == -1:
+            dist[a][b] = dist[i][j] + 1
+            q.append((a, b))
+for i in range(h):
+    for j in range(w):
+        if grid[i][j] == 'T':
+            print("steps to T:", dist[i][j])
+`} />
+
+<Callout type="tip" title="Mark on push, not on pop">
+Set `dist[v]` (or a visited flag) when you **enqueue** `v`. If you mark on dequeue, the same node can be enqueued many times by different neighbours, so the queue can hold up to `E` entries instead of `V` (a real memory problem on dense graphs) and every duplicate is re-examined.
+</Callout>
+
+### Multi-source BFS
+
+Put **all** sources into the queue at distance `0` before starting. The result is the distance to the *nearest* source for every node ("distance to the closest fire", "rotting oranges"). It is the same invariant: the initial queue is sorted (all zeros).
+
+## Deque: 0-1 BFS
+
+If every edge costs `0` or `1`, you do not need Dijkstra. Push a node to the **front** when reached via a `0` edge and to the **back** for a `1` edge. The deque keeps the same two-value invariant (`d` at the front part, `d + 1` at the back), so nodes still leave in non-decreasing distance order.
+
+<CodeRunner language="python" code={`from collections import deque
+
+# edges: (to, cost) with cost 0 or 1
+adj = {
+    0: [(1, 1), (2, 0)],
+    1: [(3, 0)],
+    2: [(4, 1)],
+    3: [(4, 0)],
+    4: [],
+}
+INF = 10**9
+dist = {u: INF for u in adj}
+dist[0] = 0
+dq = deque([0])
+while dq:
+    u = dq.popleft()
+    for v, c in adj[u]:
+        if dist[u] + c < dist[v]:
+            dist[v] = dist[u] + c
+            if c == 0:
+                dq.appendleft(v)
+            else:
+                dq.append(v)
+print(dist)
+`} />
+
+A node may be pushed again when its distance improves, but each edge relaxation pushes at most once, so the total is `O(V + E)`. Typical use: grids where moving in one direction is free and turning (or breaking a wall) costs 1.
+
+## Pitfalls
+
+1. **`list.pop(0)` / `Array.shift()` as a queue**: quadratic.
+2. **Marking visited on pop** instead of on push.
+3. **Using BFS with weighted edges** (other than 0/1): it returns fewest *edges*, not smallest total weight. Use Dijkstra.
+4. **Distance array of size `n` for a grid**: allocate `h * w` and map `(i, j)` to `i * w + j`.
+5. **Simulations with huge `k`**: reduce the rotation count with `mod size`, never loop `k` times.
+6. **Reading the answer too early**: in multi-source or target-driven BFS, stop only after popping (or assigning distance to) the target, not when first seeing a neighbour of it.
+
+## Practice
+
+<Problem id="m07-josephus-queue" />
+
+<Problem id="m07-grid-steps" />
+
+## Problem ladder
+
+- [Message Route](https://cses.fi/problemset/task/1667) (CSES): plain BFS with path reconstruction.
+- [Labyrinth](https://cses.fi/problemset/task/1193) (CSES): grid BFS and printing the path.
+- [Monsters](https://cses.fi/problemset/task/1194) (CSES): multi-source BFS, two waves of distances.
+- [Rotting Oranges](https://leetcode.com/problems/rotting-oranges/) (LeetCode, medium): multi-source BFS by levels.
+- [Labyrinth](https://codeforces.com/problemset/problem/1063/B) (Codeforces 1063B, rating about 1700): 0-1 BFS where only left/right moves are limited.
+
+## Quiz
+
+<Quiz id="cp-m07-queues-bfs" tags={["queue", "bfs"]} questions={[
+  { type: "mcq", q: "Why is `list.pop(0)` a bad queue in Python?", options: ["It returns the wrong element", "It shifts every remaining element, costing O(n)", "It is not thread safe", "It raises an exception on lists with duplicates"], answer: 1, explain: "Removing from the front of an array-backed list moves all other elements one slot; use collections.deque for O(1) popleft." },
+  { type: "multi", q: "Which statements about BFS on an unweighted graph are true?", options: ["Nodes leave the queue in non-decreasing distance order", "Marking a node visited when it is enqueued ensures it is enqueued at most once", "It finds minimum total weight on graphs with weights 1 to 5", "Running time is O(V + E) with adjacency lists"], answer: [0, 1, 3], explain: "BFS counts edges, not weights, so it is wrong for general positive weights. The other three are the standard properties." },
+  { type: "predict", q: "What does this print?", code: "from collections import deque\nq = deque([1, 2, 3, 4, 5])\nq.rotate(-2)\nprint(q.popleft())", options: ["1", "2", "3", "5"], answer: 2, explain: "rotate(-2) moves the first two items to the back: [3, 4, 5, 1, 2], so popleft returns 3." },
+  { type: "mcq", q: "In 0-1 BFS, where do you push a node reached through an edge of cost 0?", options: ["At the back of the deque", "At the front of the deque", "In a separate priority queue", "It is skipped"], answer: 1, explain: "Cost-0 neighbours have the same distance as the current node, so they belong at the front to keep distances non-decreasing." }
+]} />

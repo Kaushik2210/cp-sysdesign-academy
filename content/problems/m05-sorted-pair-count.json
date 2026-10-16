@@ -1,0 +1,90 @@
+{
+  "id": "m05-sorted-pair-count",
+  "title": "Matching Pairs",
+  "source": {
+    "name": "Two-pointer sum search with duplicates; compare CSES 'Sum of Two Values'",
+    "url": "https://cses.fi/problemset/task/1640"
+  },
+  "rating": 1200,
+  "tags": [
+    "two-pointers",
+    "sorting",
+    "counting"
+  ],
+  "statement": "You are given a **sorted** (non-decreasing) array of `n` integers and a target `T`. Count the pairs of positions `i < j` with `a[i] + a[j] = T`. Equal values at different positions count as different pairs.\n\n**Input.** First line `n T`. Second line the `n` sorted integers.\n\n**Output.** One integer: the number of pairs.\n\n**Example.**\n\nInput:\n```\n6 7\n1 2 3 4 5 6\n```\nOutput:\n```\n3\n```",
+  "constraints": [
+    "1 ≤ n ≤ 1000 in this browser version (the idea scales to 2·10^5)",
+    "−10^9 ≤ a[i], T ≤ 10^9 (T may be as large as 2·10^9 in absolute value)",
+    "the array is sorted non-decreasing"
+  ],
+  "timeLimitMs": 1000,
+  "tests": [
+    {
+      "input": "6 7\n1 2 3 4 5 6\n",
+      "output": "3\n",
+      "hidden": false
+    },
+    {
+      "input": "2 10\n5 5\n",
+      "output": "1\n",
+      "hidden": false
+    },
+    {
+      "input": "5 6\n3 3 3 3 3\n",
+      "output": "10\n",
+      "hidden": true
+    },
+    {
+      "input": "4 100\n1 2 3 4\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "6 4\n1 1 2 2 3 3\n",
+      "output": "5\n",
+      "hidden": true
+    },
+    {
+      "input": "4 2000000000\n1000000000 1000000000 1000000000 1000000000\n",
+      "output": "6\n",
+      "hidden": true
+    },
+    {
+      "input": "1 4\n2\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "1000 2\n1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1\n",
+      "output": "499500\n",
+      "hidden": true
+    },
+    {
+      "input": "1000 7\n-50 -50 -50 -50 -50 -50 -49 -49 -49 -49 -49 -49 -49 -49 -49 -48 -48 -48 -48 -48 -48 -48 -48 -48 -48 -47 -47 -47 -47 -47 -47 -47 -47 -47 -47 -46 -46 -46 -46 -46 -46 -46 -46 -46 -46 -45 -45 -45 -45 -45 -45 -44 -44 -44 -44 -44 -44 -44 -44 -44 -44 -43 -43 -43 -43 -43 -43 -43 -43 -43 -43 -43 -43 -43 -42 -42 -42 -42 -42 -42 -42 -42 -42 -42 -42 -42 -41 -41 -41 -41 -41 -41 -41 -41 -41 -41 -41 -41 -41 -41 -41 -40 -40 -40 -40 -40 -40 -40 -40 -40 -39 -39 -39 -39 -39 -39 -39 -39 -39 -39 -38 -38 -38 -38 -38 -38 -38 -38 -38 -37 -37 -37 -37 -37 -37 -37 -37 -37 -37 -37 -37 -36 -36 -36 -36 -36 -36 -36 -36 -36 -36 -36 -36 -35 -35 -35 -35 -35 -35 -35 -35 -35 -35 -34 -34 -34 -34 -34 -33 -33 -33 -33 -33 -33 -33 -33 -32 -32 -32 -32 -32 -32 -32 -32 -32 -32 -32 -31 -31 -31 -31 -31 -31 -31 -31 -31 -31 -31 -31 -31 -31 -30 -30 -30 -30 -30 -30 -30 -30 -30 -30 -30 -29 -29 -29 -29 -29 -29 -29 -29 -29 -29 -28 -28 -28 -28 -28 -28 -28 -28 -28 -28 -28 -28 -27 -27 -27 -27 -26 -26 -26 -26 -26 -26 -26 -26 -26 -26 -26 -26 -26 -26 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -25 -24 -24 -24 -24 -24 -24 -23 -23 -23 -23 -23 -23 -23 -23 -23 -22 -22 -22 -22 -22 -22 -22 -22 -22 -22 -21 -21 -21 -21 -21 -21 -21 -21 -21 -21 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -20 -19 -19 -19 -19 -19 -19 -19 -18 -18 -18 -18 -18 -18 -18 -18 -18 -18 -18 -18 -18 -18 -18 -18 -18 -17 -17 -17 -17 -17 -17 -16 -16 -16 -16 -16 -16 -16 -16 -16 -15 -15 -15 -15 -15 -15 -15 -15 -15 -15 -15 -15 -15 -15 -15 -14 -14 -14 -14 -14 -14 -14 -13 -13 -13 -13 -13 -13 -13 -13 -13 -13 -12 -12 -12 -12 -12 -12 -12 -12 -11 -11 -11 -11 -11 -11 -11 -11 -10 -10 -10 -10 -10 -10 -10 -10 -10 -10 -10 -10 -10 -10 -10 -9 -9 -9 -9 -9 -9 -9 -9 -9 -8 -8 -8 -8 -8 -8 -8 -8 -8 -8 -8 -8 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -7 -6 -6 -6 -6 -6 -6 -6 -6 -5 -5 -5 -5 -5 -5 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -4 -3 -3 -3 -3 -3 -3 -3 -3 -3 -3 -2 -2 -2 -2 -2 -2 -2 -2 -2 -1 -1 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 2 2 2 2 2 2 2 3 3 3 3 3 3 3 4 4 4 4 4 4 4 4 4 5 5 5 5 5 5 5 6 6 6 6 6 6 7 7 7 7 7 7 7 8 8 8 8 8 8 8 8 8 8 8 8 8 9 9 9 9 9 9 9 9 9 10 10 10 10 10 10 10 11 11 11 11 11 11 11 11 11 11 11 11 11 11 11 12 12 12 12 12 12 12 12 12 12 13 13 13 13 13 13 13 13 13 13 13 14 14 14 14 14 14 14 15 15 15 15 15 15 15 15 15 15 16 16 16 17 17 17 17 17 17 17 17 18 18 18 18 18 18 19 19 19 19 19 19 19 19 19 19 19 20 20 20 20 20 20 20 20 20 21 21 21 21 21 21 21 21 22 22 22 22 22 22 22 23 23 23 23 24 24 24 24 24 24 24 24 25 25 25 25 25 25 25 25 26 26 26 26 26 26 26 26 26 26 26 26 27 27 27 27 27 27 27 27 27 28 28 28 28 28 28 28 28 28 28 28 28 28 29 29 29 29 29 29 29 29 29 29 29 30 30 30 30 30 30 30 30 30 30 30 30 30 31 31 31 31 31 31 31 31 31 31 31 31 31 31 31 31 31 31 32 32 32 32 32 32 32 32 32 32 32 33 33 33 33 33 33 33 33 33 33 33 34 34 34 34 34 34 34 34 35 35 35 35 35 35 35 35 36 36 36 36 36 36 36 36 37 37 37 37 37 37 37 37 37 38 38 38 38 38 38 39 39 39 39 40 40 40 40 40 40 40 40 40 40 40 40 41 41 41 41 41 41 41 41 41 41 41 41 42 42 42 42 42 42 42 43 43 43 43 43 43 43 44 44 44 44 44 44 44 44 44 44 44 44 45 45 45 45 45 45 45 45 45 45 45 46 46 46 46 46 46 46 46 46 46 46 47 47 47 47 47 47 47 47 48 48 48 48 48 48 48 48 48 48 48 48 48 49 49 49 49 49 49 49 49 49 49 49 50 50 50 50 50 50 50 50 50 50 50 50\n",
+      "output": "4643\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Because the array is sorted, a pair sum that is too small tells you which end to move. Which pointer?",
+    "Put one pointer at each end. If the sum is below `T` move the left pointer right; if above, move the right pointer left.",
+    "When the sum equals `T`, count a whole block: `cntLeft * cntRight`, or `m(m-1)/2` when both ends are inside one block of equal values."
+  ],
+  "editorial": "Start `i = 0`, `j = n-1`. If `a[i] + a[j] < T`, no pair using `a[i]` and any element at or left of `j` can work (they are all ≤ `a[j]`), so advance `i`. Symmetrically, if the sum is too large retire `a[j]`. On equality, if `a[i] != a[j]` count the block of copies of `a[i]` times the block of copies of `a[j]`, skip both blocks. If `a[i] == a[j]` the whole range `[i, j]` is one value: it contributes `m(m-1)/2` pairs and we stop.\n\nEach pointer only moves inward, so `O(n)` after sorting. The count can reach `n(n-1)/2`, and `a[i] + a[j]` can exceed 32 bits, so use 64-bit arithmetic.",
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(1)"
+  },
+  "starter": {
+    "python": "import sys\n\n# Count pairs i<j with a[i]+a[j]=T in a sorted array.\ndata = sys.stdin.read().split()\n# your code here\n",
+    "javascript": "// Count pairs i<j with a[i]+a[j]=T in a sorted array.\n// readLine() returns the next line of input (or null).\n// your code here\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    // Count pairs i<j with a[i]+a[j]=T in a sorted array.\n    // your code here\n}\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner in = new Scanner(System.in);\n        // Count pairs i<j with a[i]+a[j]=T in a sorted array.\n        // your code here\n    }\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\n\ndef main():\n    d = sys.stdin.read().split()\n    n, target = int(d[0]), int(d[1])\n    a = list(map(int, d[2:2 + n]))\n    i, j, cnt = 0, n - 1, 0\n    while i < j:\n        s = a[i] + a[j]\n        if s < target:\n            i += 1\n        elif s > target:\n            j -= 1\n        elif a[i] == a[j]:\n            m = j - i + 1            # every pair inside the block works\n            cnt += m * (m - 1) // 2\n            break\n        else:\n            x, y = a[i], a[j]\n            ci = cj = 0\n            while a[i] == x:\n                ci += 1\n                i += 1\n            while a[j] == y:\n                cj += 1\n                j -= 1\n            cnt += ci * cj\n    print(cnt)\n\nmain()\n",
+    "javascript": "const __L = [];\nlet __s;\nwhile ((__s = readLine()) !== null) __L.push(__s);\nconst T = __L.join(' ').split(/\\s+/).filter((x) => x.length).map(Number);\nconst n = T[0], target = T[1];\nconst a = T.slice(2, 2 + n);\nlet i = 0, j = n - 1, cnt = 0;\nwhile (i < j) {\n  const s = a[i] + a[j];\n  if (s < target) i++;\n  else if (s > target) j--;\n  else if (a[i] === a[j]) {\n    const m = j - i + 1;\n    cnt += (m * (m - 1)) / 2;\n    break;\n  } else {\n    const x = a[i], y = a[j];\n    let ci = 0, cj = 0;\n    while (a[i] === x) { ci++; i++; }\n    while (a[j] === y) { cj++; j--; }\n    cnt += ci * cj;\n  }\n}\nconsole.log(String(cnt));\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    static StreamTokenizer st;\n\n    static long nl() throws IOException {\n        st.nextToken();\n        return (long) st.nval;\n    }\n\n    public static void main(String[] args) throws IOException {\n        st = new StreamTokenizer(new BufferedInputStream(System.in));\n        int n = (int) nl();\n        long target = nl();\n        long[] a = new long[n];\n        for (int i = 0; i < n; i++) a[i] = nl();\n        int i = 0, j = n - 1;\n        long cnt = 0;\n        while (i < j) {\n            long s = a[i] + a[j];\n            if (s < target) i++;\n            else if (s > target) j--;\n            else if (a[i] == a[j]) {\n                long m = j - i + 1;\n                cnt += m * (m - 1) / 2;\n                break;\n            } else {\n                long x = a[i], y = a[j];\n                long ci = 0, cj = 0;\n                while (a[i] == x) { ci++; i++; }\n                while (a[j] == y) { cj++; j--; }\n                cnt += ci * cj;\n            }\n        }\n        System.out.println(cnt);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n;\n    long long target;\n    scanf(\"%d %lld\", &n, &target);\n    vector<long long> a(n);\n    for (auto &v : a) scanf(\"%lld\", &v);\n    int i = 0, j = n - 1;\n    long long cnt = 0;\n    while (i < j) {\n        long long s = a[i] + a[j];\n        if (s < target) i++;\n        else if (s > target) j--;\n        else if (a[i] == a[j]) {\n            long long m = j - i + 1;\n            cnt += m * (m - 1) / 2;\n            break;\n        } else {\n            long long x = a[i], y = a[j], ci = 0, cj = 0;\n            while (a[i] == x) { ci++; i++; }\n            while (a[j] == y) { cj++; j--; }\n            cnt += ci * cj;\n        }\n    }\n    printf(\"%lld\\n\", cnt);\n}\n"
+  }
+}

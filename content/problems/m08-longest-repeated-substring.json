@@ -1,0 +1,98 @@
+{
+  "id": "m08-longest-repeated-substring",
+  "title": "Longest Repeat",
+  "source": {
+    "name": "Original exercise; classic string-hashing technique"
+  },
+  "rating": 1900,
+  "tags": [
+    "hashing",
+    "binary-search",
+    "strings"
+  ],
+  "statement": "Given a string `s`, find the length of the longest substring that occurs **at least twice** in `s` (the two occurrences may overlap). Print `0` if every character is distinct.\n\n**Input.** One line: the string `s` of lowercase letters.\n\n**Output.** The length of the longest repeated substring.",
+  "constraints": [
+    "1 ≤ |s| ≤ 2000 in this browser version (the idea scales to 10^5 to 10^6)",
+    "lowercase letters only"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "banana\n",
+      "output": "3\n",
+      "hidden": false
+    },
+    {
+      "input": "a\n",
+      "output": "0\n",
+      "hidden": false
+    },
+    {
+      "input": "abcd\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "aaaaa\n",
+      "output": "4\n",
+      "hidden": true
+    },
+    {
+      "input": "abcabcabc\n",
+      "output": "6\n",
+      "hidden": true
+    },
+    {
+      "input": "abababab\n",
+      "output": "6\n",
+      "hidden": true
+    },
+    {
+      "input": "bbabbabbbaaabbaabaaabbaabbbbbbbbababbbbababbababbbabbbaaabaababbababbabbbababbabbbaaabbababbbaabaaabbbabaaaaabbbbabaababbbbaaabaabbbaaaabbbababbabaaabababbaaaaababbbabbabbabbaaaaabaaabbaababaababbbbbbbaaabaaaaababababbbbabbaaaaaabbababbbbababaabaaaaababbbbabbbbbaaaabaaababaababbbbaabbbabbababaababba\n",
+      "output": "14\n",
+      "hidden": true
+    },
+    {
+      "input": "zqzyqhxyxdxafeptgovuqrtjvoocejeifzrztrkxlbzintibckwclpyxcmomoasbjpljwbbgkhqosvvnhbcffafhkpmcyrzfyuoryckyzntypgxjbaemzdlfijedtplnnpdiifixhjcpygrmwlcdtvlnmlpnmqebxmmuositlszustfmphzolxgxyxkwyvwmcwninjqhfbnvbnxmjmycryupvxnpuydppaxecxmjgvgzuvapdhkxwrnlzvfysgzajavwcgqdmzjiqkhapboaopeziycoscwuqpezlugzybozwikaizuqdkfiufagegbregukiaqmzmbldgqxfzoqagiilpuvmxgjlomsdiakdnuyllqgmllycammsmdxbykfpuspasscjdckmprqckoombfgmuvmxpefhwdzfylgjqyovikrqcvycxtnlpszolflngcrggxlgzwjlvvxvnucybqjvqupxgtvkykiaawvtvyotqhhkumpawmslgxhpeuxcfcgdreaodlqbevcjiyvobeqvpwgvslpkpsoxpxtbwvkmbhuxgyotuygzpdtlsfquwzujkkcvbjmhfarcpqlizzxmniicqnvssefbusravhrmtdyfhpzzgofrbfjnzamkuhzjtuxqdetdufxklmjdgkzwdqsmlrvcukzmteyjzuxtydtimoijwzkutsbizurvhgwmzozpesadcsvcxbswhvajtedatcgibpniklsgypaobsbvamtxomajfitnabhygvvbakmumwewdvpqkyljvkjyaxnqhrmgyrhjzwlljxcxynqhuxphhrwhmwuvshtjpssfpgjhnvhamzvinfwytznmyhmthrxwfsveyugpimzsqgrrzwnytjunpckjoxlabrqentqbdlksgdinfhsyqwkuvhtazsvcovrnmdbmhqwdkvnlaoitszvxaoxgtwjxcnzbrucliigiorlcacpbzzcsttjhxbtucltatmpzegncnqbptkkxqquyihrbppjbjflclzyapwtvyunwjxcfuhknqhngjyfvyialwcpqipxkgonevuwayoxljwoovgjjxoswfxqincoecfzcpdvxwidpiruobgozzqcgwxutmselxtrnuesaqbudpgnrikqnhicocoyliwasrenuojovxcdrdiifonacwwhcpavrjmnuueqjpelnnmyqkulxoxaxfytxdxhwvyopbbouibpljeookkuvpnwvsukxaxjyakhvmobpnqsxwhzdkjxbxvxfwptajxsoxabrwokajblkrstcchkkweuxwrrhonyjnbxxhhairxvlcphpkwdmqicmghtgqelewnrnywlhblkxgrgjzogtixzsxuhyuflevpfaaktpfalpcobxjvwmwvgqyyjtpxtyekzmfctezcgetqudxtmdxgvyhmdqjhvhmbrwdipzuzlkscpnvmknondbobhidazjyhqrdmcekgppulhhpne\n",
+      "output": "4\n",
+      "hidden": true
+    },
+    {
+      "input": "abbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaababbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaabbaababbaabbabaababbabaabbaababbabaababbaabbabaababbabaabbaababbaabbabaabbaababbabaababbaabbabaab\n",
+      "output": "512\n",
+      "hidden": true
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+      "output": "1999\n",
+      "hidden": true
+    },
+    {
+      "input": "baaaabbbbbabbbbaaaaabbbbbabbbabbbabbbbabaabaaaababbabbbbbbaabbaabbbbaabbaabbbbaabbaaabaaabaabbabbbbaababbbaabbabbabbababaabbbabbababaaabbabaaababaabababbaaaabababbaabbbaabaabbabbbbbaaabbbbaaabbaaaabaaaababbaabaaababaababbbabaabababbbababaaaabaabbbaabbbaaaabaabbbbaabaaababbbabbbbabbbbbbbabbababbabbaaabaabbaabbabbaabaababbabbbbaaabbababbbbbaaaaabaababbbbaaabaabbbaabababbbaaabbaabaaaaaababbabbbbbbbbbbbbaabaabaaaaababbababbaabbbaababaabababbbbbbbbbbbaaabbababbbbaaabaabbbbabbabbbabaabbaaaaabaabaaababbbbaabbbbbbabbbbbabababbababaaaabbbaabbbabaababbabbbababbbaaaababbaabbabbaababbbaaabaaabaaababaaabbaaaaabbaabbbbabbbababbbaaabbaaabaabbbbababaaaaabbbbababaaaaabbaabaaaabbbbaabaaaaabbabaaababaabaaabbbabbbaabbbaababaaababbbaaaaabbbaabbbbababbbaaabbbbba\n",
+      "output": "20\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "If some substring of length L occurs twice, what can you say about length L - 1?",
+    "That makes 'is there a repeated substring of length L?' monotone in L, so binary search on L. You need a fast check for a fixed L.",
+    "For a fixed L compute the hash of every window of length L with prefix hashes (O(n)) and look for a duplicate in a hash set. Total O(n log n) expected. Use two moduli so a false repeat is very unlikely."
+  ],
+  "editorial": "Monotonicity: if a substring of length `L` occurs twice, then its first `L-1` characters occur twice as well (at the same two places). So the predicate `R(L) = 'some length-L substring repeats'` is `true...true false...false`, and binary search finds the largest `L` with `R(L)` true.\n\nTo test `R(L)` compute the hashes of all `n - L + 1` windows in `O(n)` from prefix hashes and look for a duplicate in a hash set (or by sorting). With double hashing a false positive is negligible. Total expected `O(n log n)`; an exact alternative is a suffix array plus LCP array in `O(n log n)` as well.",
+  "complexity": {
+    "time": "O(n log n)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\n# binary search on length + rolling hash\ndata = sys.stdin.read().split()\n# your code here\n",
+    "javascript": "// binary search on length + rolling hash\n// readLine() returns the next input line (or null).\n// your code here\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // binary search on length + rolling hash\n    return 0;\n}\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        // binary search on length + rolling hash\n    }\n}\n"
+  },
+  "solutions": {
+    "python": "import sys, random\ns = sys.stdin.readline().strip()\nn = len(s)\nM1, M2 = 1_000_000_007, 998_244_353\nB1 = random.randrange(1000, M1 - 1)\nB2 = random.randrange(1000, M2 - 1)\nh1 = [0] * (n + 1)\nh2 = [0] * (n + 1)\np1 = [1] * (n + 1)\np2 = [1] * (n + 1)\nfor i, ch in enumerate(s):\n    c = ord(ch)\n    h1[i + 1] = (h1[i] * B1 + c) % M1\n    h2[i + 1] = (h2[i] * B2 + c) % M2\n    p1[i + 1] = p1[i] * B1 % M1\n    p2[i + 1] = p2[i] * B2 % M2\n\ndef has_repeat(L):\n    seen = set()\n    for i in range(n - L + 1):\n        key = ((h1[i + L] - h1[i] * p1[L]) % M1, (h2[i + L] - h2[i] * p2[L]) % M2)\n        if key in seen:\n            return True\n        seen.add(key)\n    return False\n\nlo, hi = 0, n - 1   # largest L with a repeat; L = 0 is always fine\nwhile lo < hi:\n    mid = (lo + hi + 1) // 2\n    if has_repeat(mid):\n        lo = mid\n    else:\n        hi = mid - 1\nprint(lo)\n",
+    "javascript": "const s = readLine().trim();\nconst n = s.length;\nconst P1 = 94905991, P2 = 94905989;\nconst B1 = 1000 + Math.floor(Math.random() * (P1 - 2000));\nconst B2 = 1000 + Math.floor(Math.random() * (P2 - 2000));\nconst h1 = new Array(n + 1).fill(0), h2 = new Array(n + 1).fill(0);\nconst p1 = new Array(n + 1).fill(1), p2 = new Array(n + 1).fill(1);\nfor (let i = 0; i < n; i++) {\n  const c = s.charCodeAt(i);\n  h1[i + 1] = (h1[i] * B1 + c) % P1;\n  h2[i + 1] = (h2[i] * B2 + c) % P2;\n  p1[i + 1] = (p1[i] * B1) % P1;\n  p2[i + 1] = (p2[i] * B2) % P2;\n}\nfunction hasRepeat(L) {\n  const seen = new Set();\n  for (let i = 0; i + L <= n; i++) {\n    const x = ((h1[i + L] - (h1[i] * p1[L]) % P1) % P1 + P1) % P1;\n    const y = ((h2[i + L] - (h2[i] * p2[L]) % P2) % P2 + P2) % P2;\n    const key = x * P2 + y;\n    if (seen.has(key)) return true;\n    seen.add(key);\n  }\n  return false;\n}\nlet lo = 0, hi = n - 1;\nwhile (lo < hi) {\n  const mid = (lo + hi + 1) >> 1;\n  if (hasRepeat(mid)) lo = mid; else hi = mid - 1;\n}\nconsole.log(lo);\n",
+    "java": "import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    static final long M1 = 1_000_000_007L, M2 = 998_244_353L;\n    static long[] h1, h2, p1, p2;\n    static int n;\n\n    static boolean hasRepeat(int L) {\n        HashSet<Long> seen = new HashSet<>();\n        for (int i = 0; i + L <= n; i++) {\n            long x = ((h1[i + L] - h1[i] * p1[L]) % M1 + M1) % M1;\n            long y = ((h2[i + L] - h2[i] * p2[L]) % M2 + M2) % M2;\n            if (!seen.add(x * M2 + y)) return true;\n        }\n        return false;\n    }\n\n    public static void main(String[] args) throws IOException {\n        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));\n        String s = br.readLine().trim();\n        n = s.length();\n        Random rnd = new Random();\n        long B1 = 1000 + rnd.nextInt((int) M1 - 2000);\n        long B2 = 1000 + rnd.nextInt((int) M2 - 2000);\n        h1 = new long[n + 1]; h2 = new long[n + 1];\n        p1 = new long[n + 1]; p2 = new long[n + 1];\n        p1[0] = 1; p2[0] = 1;\n        for (int i = 0; i < n; i++) {\n            int c = s.charAt(i);\n            h1[i + 1] = (h1[i] * B1 + c) % M1;\n            h2[i + 1] = (h2[i] * B2 + c) % M2;\n            p1[i + 1] = p1[i] * B1 % M1;\n            p2[i + 1] = p2[i] * B2 % M2;\n        }\n        int lo = 0, hi = n - 1;\n        while (lo < hi) {\n            int mid = (lo + hi + 1) / 2;\n            if (hasRepeat(mid)) lo = mid; else hi = mid - 1;\n        }\n        System.out.println(lo);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\nconst ll M1 = 1000000007LL, M2 = 998244353LL;\nint n;\nvector<ll> h1, h2, p1, p2;\nbool hasRepeat(int L) {\n    vector<ll> keys;\n    for (int i = 0; i + L <= n; i++) {\n        ll x = ((h1[i + L] - h1[i] * p1[L]) % M1 + M1) % M1;\n        ll y = ((h2[i + L] - h2[i] * p2[L]) % M2 + M2) % M2;\n        keys.push_back(x * M2 + y);\n    }\n    sort(keys.begin(), keys.end());\n    return adjacent_find(keys.begin(), keys.end()) != keys.end();\n}\nint main() {\n    string s;\n    cin >> s;\n    n = s.size();\n    mt19937_64 rng(chrono::steady_clock::now().time_since_epoch().count());\n    ll B1 = 1000 + rng() % (M1 - 2000), B2 = 1000 + rng() % (M2 - 2000);\n    h1.assign(n + 1, 0); h2.assign(n + 1, 0);\n    p1.assign(n + 1, 1); p2.assign(n + 1, 1);\n    for (int i = 0; i < n; i++) {\n        h1[i + 1] = (h1[i] * B1 + s[i]) % M1;\n        h2[i + 1] = (h2[i] * B2 + s[i]) % M2;\n        p1[i + 1] = p1[i] * B1 % M1;\n        p2[i + 1] = p2[i] * B2 % M2;\n    }\n    int lo = 0, hi = n - 1;\n    while (lo < hi) {\n        int mid = (lo + hi + 1) / 2;\n        if (hasRepeat(mid)) lo = mid; else hi = mid - 1;\n    }\n    cout << lo << \"\\n\";\n    return 0;\n}\n"
+  }
+}
