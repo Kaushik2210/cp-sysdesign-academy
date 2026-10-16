@@ -3,6 +3,7 @@
     "version": "0.1.0",
     "private": true,
     "license": "MIT",
+    "packageManager": "pnpm@12.10.1",
     "scripts": {
         "dev": "tsx scripts/gen-search-index.ts && next dev",
         "build": "tsx scripts/prebuild.ts && next build",

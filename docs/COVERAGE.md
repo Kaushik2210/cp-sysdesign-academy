@@ -27,9 +27,10 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 2 Language setup, fast I/O | Complete (4) | 4 |
 | 3 Math basics | Complete (5) | 5 |
 | 4 Complexity analysis | Complete (5) | 5 |
-| 5 Arrays, strings, windows | In progress (agent writing; check folder) | - |
-| 6 Sorting and binary search | Partial (1 committed; more in progress) | 1+ |
-| 7 Stacks and queues, 8 Hashing | In progress (agent writing; check folders) | - |
+| 5 Arrays, strings, windows | Complete (5) | 5 |
+| 6 Sorting and binary search | Complete (5) | 5 |
+| 7 Stacks and queues | Complete (5) | 5 |
+| 8 Hashing | Complete (5) | 5 |
 | 9 Recursion and bitmasks | Complete (5) | 5 |
 | 10 Greedy | Complete (5) | 5 |
 | 11-26 (Levels 2-3) | Planned | 0 |
