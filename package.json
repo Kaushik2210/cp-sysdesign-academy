@@ -8,6 +8,7 @@
         "dev": "tsx scripts/gen-search-index.ts && next dev",
         "build": "tsx scripts/prebuild.ts && next build",
         "check-links": "tsx scripts/check-links.ts",
+        "check-external": "tsx scripts/check-external-links.ts",
         "gen": "tsx scripts/gen-search-index.ts && tsx scripts/gen-sitemap.ts",
         "e2e": "playwright test",
         "lint": "eslint .",
