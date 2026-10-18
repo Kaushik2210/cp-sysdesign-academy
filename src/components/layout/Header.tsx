@@ -25,6 +25,9 @@ export function Header() {
           <Link href="/templates/" className="hover:text-fg">
             Templates
           </Link>
+          <Link href="/glossary/" className="hover:text-fg">
+            Glossary
+          </Link>
           <Link href="/paths/" className="hover:text-fg">
             Paths
           </Link>
