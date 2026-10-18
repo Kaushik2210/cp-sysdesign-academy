@@ -66,3 +66,22 @@ test("review queue page loads", async ({ page }) => {
   await page.goto("/review/");
   await expect(page.getByRole("heading", { name: "Review queue" })).toBeVisible();
 });
+test("pattern library filters by topic and search, and links to lessons", async ({ page }) => {
+  await page.goto("/patterns/");
+  await expect(page.getByRole("heading", { level: 1, name: "Pattern library" })).toBeVisible();
+  const status = page.getByRole("status");
+  await expect(status).toContainText(/\d+ of \d+ patterns/);
+
+  await page.getByRole("searchbox", { name: /describe what you see/i }).fill("range sum");
+  await expect(page.getByRole("heading", { name: /Prefix sums/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Dijkstra/ })).toHaveCount(0);
+
+  await page.getByRole("searchbox", { name: /describe what you see/i }).fill("");
+  await page.getByRole("button", { name: "dp", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /Knapsack/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "All", exact: true }).click();
+  await page.getByRole("searchbox", { name: /describe what you see/i }).fill("prefix sums");
+  await page.getByRole("link", { name: "Prefix Sums" }).first().click();
+  await expect(page).toHaveURL(/arrays-and-windows\/prefix-sums/);
+});
