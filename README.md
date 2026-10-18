@@ -3,6 +3,7 @@
 # CP & SysDesign Academy
 
 **An open-source, interactive course in competitive programming and system design.**
+**Live site: https://kaushik2210.github.io/cp-sysdesign-academy/**
 Runs entirely in your browser: no backend, no sign-up, progress stays on your device.
 
 </div>
