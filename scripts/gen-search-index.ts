@@ -4,6 +4,7 @@ import path from "node:path";
 import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
 import { getPatterns } from "../src/lib/content/patterns";
+import { getTemplates } from "../src/lib/content/templates";
 import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
@@ -64,6 +65,17 @@ for (const p of getPatterns()) {
     href: "/patterns/",
     tags: p.tags.join(" "),
     text: `${p.signal} ${p.why}`,
+  });
+}
+
+for (const tpl of getTemplates()) {
+  docs.push({
+    id: `template:${tpl.slug}`,
+    kind: "template",
+    title: tpl.title,
+    href: `/templates/${tpl.slug}/`,
+    tags: tpl.tags.join(" "),
+    text: `${tpl.summary} ${tpl.complexity}`,
   });
 }
 
