@@ -85,3 +85,22 @@ test("pattern library filters by topic and search, and links to lessons", async 
   await page.getByRole("link", { name: "Prefix Sums" }).first().click();
   await expect(page).toHaveURL(/arrays-and-windows\/prefix-sums/);
 });
+test("template library lists templates and shows code in three languages", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
+  await page.goto("/templates/");
+  await expect(page.getByRole("heading", { level: 1, name: "Algorithm templates" })).toBeVisible();
+  await page.getByRole("searchbox", { name: "Filter templates" }).fill("dijkstra");
+  await expect(page.getByRole("status")).toContainText("1 of");
+  await page.getByRole("link", { name: "Dijkstra's shortest paths" }).click();
+
+  await expect(page.getByRole("heading", { level: 1, name: /Dijkstra/ })).toBeVisible();
+  const cpp = page.getByRole("tabpanel").filter({ hasText: "priority_queue" });
+  await expect(cpp).toBeVisible();
+  await page.getByRole("tab", { name: "Python" }).click();
+  await expect(page.getByRole("tabpanel").filter({ hasText: "heapq" })).toBeVisible();
+  await page.getByRole("tab", { name: "Java" }).click();
+  await expect(page.getByRole("tabpanel").filter({ hasText: "PriorityQueue" })).toBeVisible();
+
+  await page.getByRole("button", { name: /copy code/i }).click();
+  await expect(page.getByText("Copied")).toBeVisible();
+});
