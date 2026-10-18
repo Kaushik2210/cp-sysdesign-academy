@@ -15,6 +15,7 @@ Runs entirely in your browser: no backend, no sign-up, progress stays on your de
 - **Quizzes** (MCQ, multi-select, predict-the-output) and a **spaced-repetition review queue** (SM-2) built from completed lessons and missed questions.
 - **Visualizers** with play/pause/step/speed and highlighted pseudocode.
 - **Interactive diagrams**: click a component to see its role, failure modes and trade-offs.
+- **Glossary** with 240 cross-linked system design terms.
 - **Pattern library** (problem signal to technique) and **algorithm templates** (copy-paste C++/Python/Java, each executed in CI).
 - **Learning paths** that generate daily checklists, a **dashboard** (progress, streaks, weakest topics, achievements), **Cmd/Ctrl+K search**, notes and bookmarks, JSON export/import, print styles.
 - Dark mode by default, keyboard accessible, honours `prefers-reduced-motion`.
