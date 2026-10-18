@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
 import { getPatterns } from "../src/lib/content/patterns";
+import { getTemplates } from "../src/lib/content/templates";
 
 const only = process.argv[2]; // e.g. `cp/math-basics`
 const errors: string[] = [];
@@ -29,6 +30,8 @@ const routes = new Set<string>([
   "/review/",
   "/paths/",
   "/patterns/",
+  "/templates/",
+  ...getTemplates().map((t) => `/templates/${t.slug}/`),
   ...pathSlugs.map((s) => `/paths/${s}/`),
   ...lessons.map((l) => l.href),
 ]);
@@ -46,6 +49,14 @@ try {
 try {
   for (const pat of getPatterns()) {
     for (const l of pat.lessons) if (!ids.has(l)) errors.push(`pattern "${pat.id}": unknown lesson "${l}"`);
+  }
+} catch (e) {
+  errors.push(String(e instanceof Error ? e.message : e));
+}
+
+try {
+  for (const tpl of getTemplates()) {
+    for (const l of tpl.lessons) if (!ids.has(l)) errors.push(`template "${tpl.slug}": unknown lesson "${l}"`);
   }
 } catch (e) {
   errors.push(String(e instanceof Error ? e.message : e));
