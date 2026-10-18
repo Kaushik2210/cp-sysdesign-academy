@@ -1,6 +1,5 @@
 /* Builds public/search-index.json (lessons, problems, patterns, templates and glossary terms). */
 import fs from "node:fs";
-import path from "node:path";
 import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
 import { getPatterns } from "../src/lib/content/patterns";
