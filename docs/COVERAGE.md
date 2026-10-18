@@ -17,7 +17,8 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Design canvas and other SD sandboxes | Planned | |
 | Pattern library | Partial | 38 patterns; 8 point to planned lessons |
-| Template library, problem ladder, glossary, cheat sheets, interview playbook | Planned | |
+| Template library | Partial | 9 tested templates (Python/Java run locally, C++ in CI); spec lists many more (segment tree, LCA, Dinic, FFT...) |
+| Problem ladder, glossary, cheat sheets, interview playbook | Planned | |
 | PDF per module | Partial | print CSS only |
 
 ## Track 1: Competitive Programming
