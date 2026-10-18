@@ -30,6 +30,7 @@ jobs:
       - run: pnpm build
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          SITE_URL: https://${{ github.repository_owner }}.github.io
       - run: pnpm check-links
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
