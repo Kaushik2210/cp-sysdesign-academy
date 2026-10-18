@@ -32,6 +32,7 @@ const routes = new Set<string>([
   "/paths/",
   "/patterns/",
   "/templates/",
+  "/glossary/",
   ...getTemplates().map((t) => `/templates/${t.slug}/`),
   ...pathSlugs.map((s) => `/paths/${s}/`),
   ...lessons.map((l) => l.href),
