@@ -1,0 +1,102 @@
+[
+  {
+    "id": "prefix-sums",
+    "signal": "Many range-sum (or range-count) queries on an array that does not change",
+    "technique": "Prefix sums",
+    "why": "Precompute P[i] = a[0] + ... + a[i-1] once; any range sum is P[r+1] - P[l], so each query is O(1) instead of O(n).",
+    "complexity": "O(n + q)",
+    "tags": ["arrays", "queries", "precomputation"],
+    "lessons": ["cp/arrays-and-windows/prefix-sums"],
+    "constraints": "n and q up to 2*10^5"
+  },
+  {
+    "id": "difference-array",
+    "signal": "Many 'add x to every element in [l, r]' updates, with the final array needed only after all updates",
+    "technique": "Difference array",
+    "why": "Record +x at l and -x at r+1 in O(1) per update, then one prefix-sum pass rebuilds the final array.",
+    "complexity": "O(n + q)",
+    "tags": ["arrays", "range-update", "sweep"],
+    "lessons": ["cp/arrays-and-windows/difference-arrays"],
+    "constraints": "n and q up to 2*10^5"
+  },
+  {
+    "id": "two-pointers",
+    "signal": "Sorted array (or one you may sort) and you must find or count pairs satisfying a sum or difference condition",
+    "technique": "Two pointers",
+    "why": "When moving a pointer can only help (or only hurt) the condition, each pointer sweeps the array once, replacing a nested loop.",
+    "complexity": "O(n) after sorting",
+    "tags": ["arrays", "sorting", "pairs"],
+    "lessons": ["cp/arrays-and-windows/two-pointers"],
+    "constraints": "n up to 2*10^5; brute force pairs is O(n^2)"
+  },
+  {
+    "id": "sliding-window",
+    "signal": "Longest, shortest or number of subarrays where a property survives shrinking the window (for example non-negative sums, at most k distinct values)",
+    "technique": "Sliding window (variable size)",
+    "why": "Validity is monotone: if a window is valid, every sub-window is valid. So the left end only moves right and the whole scan is amortised linear.",
+    "complexity": "O(n)",
+    "tags": ["arrays", "strings", "windows"],
+    "lessons": ["cp/arrays-and-windows/sliding-window", "cp/complexity-analysis/amortized-analysis"],
+    "constraints": "n up to 10^6"
+  },
+  {
+    "id": "kadane",
+    "signal": "Maximum (or minimum) sum of a contiguous subarray, values may be negative",
+    "technique": "Kadane's algorithm",
+    "why": "The best subarray ending at i either extends the best ending at i-1 or starts fresh at i, so one running value suffices.",
+    "complexity": "O(n)",
+    "tags": ["arrays", "dp"],
+    "lessons": ["cp/arrays-and-windows/array-and-string-basics"],
+    "constraints": "n up to 10^6"
+  },
+  {
+    "id": "binary-search-sorted",
+    "signal": "Sorted data and a question like 'first position with value >= x' or 'how many elements are <= x'",
+    "technique": "Binary search (lower/upper bound)",
+    "why": "The predicate flips from false to true exactly once along the order, so halving the range finds the flip point.",
+    "complexity": "O(log n) per query",
+    "tags": ["binary-search", "sorting"],
+    "lessons": ["cp/sorting-and-searching/binary-search", "cp/sorting-and-searching/sorting-and-binary-search-combos"],
+    "constraints": "n, q up to 2*10^5"
+  },
+  {
+    "id": "binary-search-on-answer",
+    "signal": "'Minimise the maximum' or 'maximise the minimum', or the answer is a number and checking 'is value v achievable?' is easy and monotone in v",
+    "technique": "Binary search on the answer",
+    "why": "If v is feasible then every larger (or smaller) v is too, so search the value range with a greedy or simulated feasibility check.",
+    "complexity": "O(check * log(range))",
+    "tags": ["binary-search", "greedy", "optimisation"],
+    "lessons": ["cp/sorting-and-searching/binary-search-on-the-answer"],
+    "constraints": "answer up to 10^9 or 10^18; check must be about O(n)"
+  },
+  {
+    "id": "ternary-search",
+    "signal": "Maximise or minimise a function that strictly rises then falls (unimodal) over a continuous or integer range",
+    "technique": "Ternary search",
+    "why": "Comparing two interior points tells you which outer third cannot contain the optimum, so each step discards a third of the range.",
+    "complexity": "O(log(range) * cost of f)",
+    "tags": ["search", "unimodal", "geometry"],
+    "lessons": ["cp/sorting-and-searching/float-and-ternary-search"],
+    "constraints": "a flat plateau away from the optimum breaks it"
+  },
+  {
+    "id": "sort-and-sweep",
+    "signal": "Intervals, meetings, events or points where only the relative order of starts/ends matters",
+    "technique": "Sort then sweep",
+    "why": "After sorting by a key, conflicts or overlaps only need to be checked against the neighbouring or currently open items.",
+    "complexity": "O(n log n)",
+    "tags": ["sorting", "intervals", "events"],
+    "lessons": ["cp/sorting-and-searching/sorting-for-problem-solving"],
+    "constraints": "n up to 2*10^5"
+  },
+  {
+    "id": "coordinate-compression",
+    "signal": "Values go up to 10^9 or 10^18 but there are only n of them, and you want array indexing or a Fenwick/segment tree over values",
+    "technique": "Coordinate compression",
+    "why": "Replace each value by its rank among the sorted distinct values; relative order is preserved and indices shrink to at most n.",
+    "complexity": "O(n log n)",
+    "tags": ["sorting", "hashing", "indexing"],
+    "lessons": ["cp/sorting-and-searching/sorting-and-binary-search-combos", "cp/hashing/coordinate-mapping-grouping"],
+    "constraints": "n up to 2*10^5, values up to 10^9"
+  }
+]
