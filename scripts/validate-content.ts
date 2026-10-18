@@ -5,6 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
+import { getPatterns } from "../src/lib/content/patterns";
 
 const only = process.argv[2]; // e.g. `cp/math-basics`
 const errors: string[] = [];
@@ -36,6 +37,14 @@ try {
   for (const p of getAllProblems()) {
     if (problemIds.has(p.id)) errors.push(`duplicate problem id ${p.id}`);
     problemIds.add(p.id);
+  }
+} catch (e) {
+  errors.push(String(e instanceof Error ? e.message : e));
+}
+
+try {
+  for (const pat of getPatterns()) {
+    for (const l of pat.lessons) if (!ids.has(l)) errors.push(`pattern "${pat.id}": unknown lesson "${l}"`);
   }
 } catch (e) {
   errors.push(String(e instanceof Error ? e.message : e));
