@@ -18,11 +18,16 @@ export const patternSchema = z.object({
 });
 export type Pattern = z.infer<typeof patternSchema>;
 
-const FILE = path.join(process.cwd(), "content", "extras", "patterns.json");
+/** Patterns live in content/extras/patterns/*.json, one file per category (each file is an array). */
+const DIR = path.join(process.cwd(), "content", "extras", "patterns");
 
 export function getPatterns(): Pattern[] {
-  if (!fs.existsSync(FILE)) return [];
-  const data = z.array(patternSchema).parse(JSON.parse(fs.readFileSync(FILE, "utf8")));
+  if (!fs.existsSync(DIR)) return [];
+  const data = fs
+    .readdirSync(DIR)
+    .filter((f) => f.endsWith(".json"))
+    .sort()
+    .flatMap((f) => z.array(patternSchema).parse(JSON.parse(fs.readFileSync(path.join(DIR, f), "utf8"))));
   const seen = new Set<string>();
   for (const p of data) {
     if (seen.has(p.id)) throw new Error(`Duplicate pattern id "${p.id}"`);
