@@ -16,7 +16,7 @@
         "test": "vitest run",
         "format": "prettier --write .",
         "validate": "tsx scripts/validate-content.ts",
-        "verify": "tsx scripts/verify-solutions.ts"
+        "verify": "tsx scripts/verify-solutions.ts && tsx scripts/verify-templates.ts"
     },
     "dependencies": {
         "@monaco-editor/react": "^4.7.0",
