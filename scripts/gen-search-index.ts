@@ -3,11 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
+import { getPatterns } from "../src/lib/content/patterns";
 import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
   id: string;
-  kind: "lesson" | "problem" | "glossary" | "template";
+  kind: "lesson" | "problem" | "glossary" | "template" | "pattern";
   title: string;
   href: string;
   tags: string;
@@ -52,6 +53,17 @@ for (const p of getAllProblems()) {
     href,
     tags: p.tags.join(" "),
     text: `rating ${p.rating} ${strip(p.statement)}`,
+  });
+}
+
+for (const p of getPatterns()) {
+  docs.push({
+    id: `pattern:${p.id}`,
+    kind: "pattern",
+    title: p.technique,
+    href: "/patterns/",
+    tags: p.tags.join(" "),
+    text: `${p.signal} ${p.why}`,
   });
 }
 
