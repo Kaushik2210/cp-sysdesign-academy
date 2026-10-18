@@ -7,6 +7,7 @@ import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
 import { getPatterns } from "../src/lib/content/patterns";
 import { getTemplates } from "../src/lib/content/templates";
+import { getGlossary } from "../src/lib/content/glossary";
 
 const only = process.argv[2]; // e.g. `cp/math-basics`
 const errors: string[] = [];
@@ -57,6 +58,18 @@ try {
 try {
   for (const tpl of getTemplates()) {
     for (const l of tpl.lessons) if (!ids.has(l)) errors.push(`template "${tpl.slug}": unknown lesson "${l}"`);
+  }
+} catch (e) {
+  errors.push(String(e instanceof Error ? e.message : e));
+}
+
+try {
+  const terms = getGlossary();
+  const termIds = new Set(terms.map((t) => t.id));
+  for (const t of terms) {
+    for (const r of t.related) if (!termIds.has(r)) errors.push(`glossary "${t.id}": unknown related term "${r}"`);
+    if (t.related.includes(t.id)) errors.push(`glossary "${t.id}": lists itself as related`);
+    for (const l of t.lessons) if (!ids.has(l)) errors.push(`glossary "${t.id}": unknown lesson "${l}"`);
   }
 } catch (e) {
   errors.push(String(e instanceof Error ? e.message : e));
