@@ -38,6 +38,7 @@ test("marking a lesson complete persists across reloads and shows on the dashboa
 
 test("Ctrl+K search finds a lesson and navigates to it", async ({ page }) => {
   await page.goto("/");
+  await page.waitForLoadState("networkidle");
   await page.keyboard.press("Control+k");
   const box = page.getByRole("combobox", { name: "Search query" });
   await expect(box).toBeFocused();
@@ -103,4 +104,22 @@ test("template library lists templates and shows code in three languages", async
 
   await page.getByRole("button", { name: /copy code/i }).click();
   await expect(page.getByText("Copied")).toBeVisible();
+});
+test("glossary searches, cross-links terms and deep-links from search", async ({ page }) => {
+  await page.goto("/glossary/");
+  await expect(page.getByRole("heading", { level: 1, name: "Glossary" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(/\d+ of \d+ terms/);
+
+  await page.getByRole("searchbox", { name: "Search terms" }).fill("vector clock");
+  await expect(page.locator("#vector-clock")).toBeVisible();
+  await expect(page.locator("#lamport-clock")).toHaveCount(0); // hidden by the filter
+  // Following a related link to a filtered-out term clears the filter and scrolls to it.
+  await page.locator("#vector-clock").getByRole("link", { name: "Lamport clock" }).click();
+  await expect(page.locator("#lamport-clock")).toBeInViewport();
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  await page.keyboard.press("Control+k");
+  await page.getByRole("combobox", { name: "Search query" }).fill("quorum");
+  await page.getByRole("option").filter({ hasText: "Quorum" }).first().getByRole("button").click();
+  await expect(page).toHaveURL(/glossary\/#quorum/);
 });
