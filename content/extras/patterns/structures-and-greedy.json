@@ -1,0 +1,107 @@
+[
+  {
+    "id": "bracket-stack",
+    "signal": "Matching brackets, nested structure, undo operations, or evaluating an expression",
+    "technique": "Stack",
+    "why": "The most recent unmatched item is always the next one to resolve, which is exactly last-in-first-out.",
+    "complexity": "O(n)",
+    "tags": ["stack", "parsing"],
+    "lessons": ["cp/stacks-and-queues/stacks-and-brackets"],
+    "constraints": "n up to 10^6"
+  },
+  {
+    "id": "monotonic-stack",
+    "signal": "For each element find the nearest greater or smaller element, a span, or the largest rectangle in a histogram",
+    "technique": "Monotonic stack",
+    "why": "Keep indices on a stack ordered by value; each index is pushed once and popped once, so all answers come out in linear time.",
+    "complexity": "O(n)",
+    "tags": ["stack", "arrays", "amortized"],
+    "lessons": ["cp/stacks-and-queues/monotonic-stack", "cp/stacks-and-queues/amortized-analysis"],
+    "constraints": "n up to 10^6"
+  },
+  {
+    "id": "monotonic-queue",
+    "signal": "Maximum or minimum of every window of size k, or a DP that takes the best of the last k states",
+    "technique": "Monotonic deque",
+    "why": "Drop candidates that can never be the maximum again; the front of the deque is always the current window maximum.",
+    "complexity": "O(n)",
+    "tags": ["deque", "windows", "dp-optimisation"],
+    "lessons": ["cp/stacks-and-queues/monotonic-queue"],
+    "constraints": "n up to 10^6"
+  },
+  {
+    "id": "bfs-shortest-steps",
+    "signal": "Fewest moves in a grid or unweighted graph, or a process that spreads outward one layer at a time",
+    "technique": "Breadth-first search",
+    "why": "A queue visits nodes in order of distance, so the first time you reach a node is via a shortest path.",
+    "complexity": "O(V + E)",
+    "tags": ["graphs", "queue", "grid"],
+    "lessons": ["cp/stacks-and-queues/queues-deques-bfs"],
+    "constraints": "grid up to 1000 x 1000"
+  },
+  {
+    "id": "hash-count",
+    "signal": "Count pairs or subarrays with a target sum, equal values, or equal prefix state",
+    "technique": "Hash map of counts (often with prefix sums)",
+    "why": "Instead of scanning all earlier positions, look up in O(1) how many earlier states complete the condition.",
+    "complexity": "O(n) expected",
+    "tags": ["hashing", "prefix-sums", "counting"],
+    "lessons": ["cp/hashing/hash-maps-counting", "cp/arrays-and-windows/prefix-sums"],
+    "constraints": "n up to 2*10^5; beware adversarial keys with unordered_map"
+  },
+  {
+    "id": "group-by-signature",
+    "signal": "Group items that are 'the same up to some transformation' (anagrams, rotations, equivalent forms)",
+    "technique": "Canonical form as a hash key",
+    "why": "Map every item to a canonical signature (sorted letters, normalised tuple); equal signatures mean equivalent items.",
+    "complexity": "O(total size) expected",
+    "tags": ["hashing", "strings", "grouping"],
+    "lessons": ["cp/hashing/coordinate-mapping-grouping"]
+  },
+  {
+    "id": "string-hash",
+    "signal": "Compare many substrings for equality, or find repeated substrings, without an expensive character-by-character check",
+    "technique": "Polynomial rolling hash",
+    "why": "Prefix hashes let you compute the hash of any substring in O(1); equal hashes mean equal strings with high probability.",
+    "complexity": "O(n) precompute, O(1) per comparison",
+    "tags": ["strings", "hashing"],
+    "lessons": ["cp/hashing/string-hashing", "cp/hashing/rolling-hash-repeats", "cp/hashing/hashing-pitfalls"],
+    "constraints": "use a random base and a large modulus to resist anti-hash tests"
+  },
+  {
+    "id": "greedy-exchange",
+    "signal": "Order jobs or items to minimise a total (weighted completion time, lateness) where swapping two neighbours changes only their own contribution",
+    "technique": "Sort by a comparator proved with an exchange argument",
+    "why": "If any out-of-order adjacent pair can be swapped without making things worse, sorting by that key is optimal.",
+    "complexity": "O(n log n)",
+    "tags": ["greedy", "sorting", "scheduling"],
+    "lessons": ["cp/greedy/exchange-arguments", "cp/greedy/what-makes-greedy-valid"]
+  },
+  {
+    "id": "interval-greedy",
+    "signal": "Pick the maximum number of non-overlapping intervals, or the fewest points that hit every interval",
+    "technique": "Sort by right end, take greedily",
+    "why": "Choosing the interval that finishes earliest leaves the most room for the rest.",
+    "complexity": "O(n log n)",
+    "tags": ["greedy", "intervals"],
+    "lessons": ["cp/greedy/interval-greedy"]
+  },
+  {
+    "id": "greedy-heap",
+    "signal": "Jobs with deadlines and profits, or 'always process the cheapest/best currently available item' as time advances",
+    "technique": "Greedy with a priority queue",
+    "why": "A heap exposes the best available candidate in O(log n) while newly available items keep arriving.",
+    "complexity": "O(n log n)",
+    "tags": ["greedy", "heap", "scheduling"],
+    "lessons": ["cp/greedy/greedy-with-heaps"]
+  },
+  {
+    "id": "greedy-fails",
+    "signal": "A greedy choice looks natural but you cannot prove it (coin systems, knapsack-like capacity limits)",
+    "technique": "Stress-test the greedy, then switch to DP",
+    "why": "A single counterexample kills a greedy; brute force on small inputs finds it quickly and tells you to use dynamic programming instead.",
+    "complexity": "depends on the DP",
+    "tags": ["greedy", "dp", "proof"],
+    "lessons": ["cp/greedy/proofs-and-when-greedy-fails", "cp/language-setup-fast-io/stress-testing"]
+  }
+]
