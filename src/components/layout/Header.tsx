@@ -22,6 +22,9 @@ export function Header() {
           <Link href="/patterns/" className="hover:text-fg">
             Patterns
           </Link>
+          <Link href="/templates/" className="hover:text-fg">
+            Templates
+          </Link>
           <Link href="/paths/" className="hover:text-fg">
             Paths
           </Link>
