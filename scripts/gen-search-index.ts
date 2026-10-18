@@ -1,10 +1,11 @@
-/* Builds public/search-index.json (lessons, problems, and optional glossary/templates). */
+/* Builds public/search-index.json (lessons, problems, patterns, templates and glossary terms). */
 import fs from "node:fs";
 import path from "node:path";
 import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
 import { getPatterns } from "../src/lib/content/patterns";
 import { getTemplates } from "../src/lib/content/templates";
+import { getGlossary } from "../src/lib/content/glossary";
 import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
@@ -79,24 +80,15 @@ for (const tpl of getTemplates()) {
   });
 }
 
-// Optional extras: content/extras/glossary.json = [{ term, definition, href? }]
-const glossary = path.join(process.cwd(), "content", "extras", "glossary.json");
-if (fs.existsSync(glossary)) {
-  const terms = JSON.parse(fs.readFileSync(glossary, "utf8")) as {
-    term: string;
-    definition: string;
-    href?: string;
-  }[];
-  for (const t of terms) {
-    docs.push({
-      id: `glossary:${t.term}`,
-      kind: "glossary",
-      title: t.term,
-      href: t.href ?? "/sd/glossary/",
-      tags: "glossary",
-      text: t.definition,
-    });
-  }
+for (const term of getGlossary()) {
+  docs.push({
+    id: `glossary:${term.id}`,
+    kind: "glossary",
+    title: term.term,
+    href: `/glossary/#${term.id}`,
+    tags: ["glossary", ...term.aliases].join(" "),
+    text: term.definition,
+  });
 }
 
 fs.mkdirSync("public", { recursive: true });
