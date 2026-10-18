@@ -28,6 +28,7 @@ const routes = new Set<string>([
   "/dashboard/",
   "/review/",
   "/paths/",
+  "/patterns/",
   ...pathSlugs.map((s) => `/paths/${s}/`),
   ...lessons.map((l) => l.href),
 ]);
