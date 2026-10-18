@@ -1,0 +1,168 @@
+[
+  {
+    "id": "sieve",
+    "signal": "Many primality or factorisation queries below a bound, or you need all primes up to about 10^7",
+    "technique": "Sieve of Eratosthenes",
+    "why": "Cross out multiples of each prime once; every composite is removed by its smallest prime factor, giving near-linear total work.",
+    "complexity": "O(n log log n)",
+    "tags": ["number-theory", "primes"],
+    "lessons": ["cp/math-basics/primes-and-sieve"],
+    "constraints": "n up to about 10^7 in memory and time"
+  },
+  {
+    "id": "trial-division",
+    "signal": "Test primality or factorise a single number up to about 10^12",
+    "technique": "Trial division up to the square root",
+    "why": "If n has a factor greater than sqrt(n), it also has one smaller than sqrt(n), so checking divisors up to sqrt(n) is enough.",
+    "complexity": "O(sqrt n)",
+    "tags": ["number-theory", "primes"],
+    "lessons": ["cp/math-basics/primes-and-sieve"],
+    "constraints": "n up to 10^12"
+  },
+  {
+    "id": "binary-exponentiation",
+    "signal": "Compute a^b (mod m) where b is huge (up to 10^18)",
+    "technique": "Binary exponentiation",
+    "why": "Square the base and consume the exponent bit by bit, so only about log2(b) multiplications are needed.",
+    "complexity": "O(log b)",
+    "tags": ["number-theory", "modular-arithmetic"],
+    "lessons": ["cp/math-basics/fast-exponentiation", "cp/math-basics/modular-arithmetic"],
+    "constraints": "use 64-bit or wider intermediates to avoid overflow"
+  },
+  {
+    "id": "gcd-lcm",
+    "signal": "Divisibility, simplifying fractions, repeating cycles, or 'smallest common multiple'",
+    "technique": "Euclid's algorithm",
+    "why": "gcd(a, b) = gcd(b, a mod b) shrinks the numbers geometrically; lcm(a, b) = a / gcd(a, b) * b (divide first to avoid overflow).",
+    "complexity": "O(log min(a, b))",
+    "tags": ["number-theory"],
+    "lessons": ["cp/math-basics/gcd-and-lcm"]
+  },
+  {
+    "id": "ncr-mod-prime",
+    "signal": "Many queries for C(n, k) modulo a prime larger than n, with n up to about 10^6",
+    "technique": "Factorials and inverse factorials",
+    "why": "Precompute n! and its modular inverse once; each C(n, k) is then three multiplications.",
+    "complexity": "O(n) precompute, O(1) per query",
+    "tags": ["combinatorics", "modular-arithmetic"],
+    "lessons": ["cp/math-basics/combinatorics-basics", "cp/math-basics/modular-arithmetic"],
+    "constraints": "modulus must be prime for Fermat inverses"
+  },
+  {
+    "id": "bitmask-enumeration",
+    "signal": "About n <= 20 items and you must consider every subset (assignment, selection, state of a small set)",
+    "technique": "Bitmask enumeration",
+    "why": "A subset of n items is an n-bit integer; looping 0 .. 2^n - 1 visits every subset with cheap bit operations.",
+    "complexity": "O(2^n * n)",
+    "tags": ["bitmask", "brute-force"],
+    "lessons": ["cp/recursion-and-bitmasks/bitmask-subset-enumeration", "cp/recursion-and-bitmasks/bit-manipulation-basics"],
+    "constraints": "n up to about 20"
+  },
+  {
+    "id": "meet-in-the-middle",
+    "signal": "Subset-sum style question with n around 30 to 40, where 2^n is too slow but 2^(n/2) is fine",
+    "technique": "Meet in the middle",
+    "why": "Split the items in two halves, enumerate each half's 2^(n/2) sums, then combine the two sorted lists with binary search or two pointers.",
+    "complexity": "O(2^(n/2) * n)",
+    "tags": ["brute-force", "subsets", "sorting"],
+    "lessons": ["cp/recursion-and-bitmasks/meet-in-the-middle"],
+    "constraints": "n up to about 40"
+  },
+  {
+    "id": "backtracking",
+    "signal": "Generate or count arrangements (permutations, placements, partitions) with constraints, n at most about 12 to 15",
+    "technique": "Backtracking with pruning",
+    "why": "Extend a partial solution one choice at a time and abandon a branch as soon as it cannot lead to a valid answer.",
+    "complexity": "exponential, pruned",
+    "tags": ["recursion", "brute-force", "search"],
+    "lessons": ["cp/recursion-and-bitmasks/backtracking", "cp/recursion-and-bitmasks/recursion-and-call-stack"],
+    "constraints": "n up to about 12 to 15 without strong pruning"
+  },
+  {
+    "id": "xor-parity",
+    "signal": "Every value appears an even number of times except one or two, or you need to toggle and compare states",
+    "technique": "XOR properties",
+    "why": "x XOR x = 0 and XOR is commutative, so paired values cancel and only the unpaired survive.",
+    "complexity": "O(n)",
+    "tags": ["bit-manipulation"],
+    "lessons": ["cp/recursion-and-bitmasks/bit-manipulation-basics"]
+  },
+  {
+    "id": "dijkstra",
+    "signal": "Shortest path in a weighted graph with non-negative edge weights",
+    "technique": "Dijkstra with a priority queue",
+    "why": "Settle the closest unsettled vertex each step; with non-negative weights its distance can never improve later.",
+    "complexity": "O((V + E) log V)",
+    "tags": ["graphs", "shortest-path"],
+    "lessons": [],
+    "constraints": "V, E up to 2*10^5"
+  },
+  {
+    "id": "dsu",
+    "signal": "Edges or links arrive over time and you must answer 'are these two connected?' or merge groups",
+    "technique": "Disjoint set union (union-find)",
+    "why": "Path compression and union by size make each operation effectively constant time.",
+    "complexity": "O(alpha(n)) per operation",
+    "tags": ["graphs", "connectivity"],
+    "lessons": [],
+    "constraints": "n, q up to 10^6"
+  },
+  {
+    "id": "fenwick-segment-tree",
+    "signal": "Point updates interleaved with range-sum, range-min or range-max queries",
+    "technique": "Fenwick tree or segment tree",
+    "why": "A tree over the array answers each query and update by touching only O(log n) nodes.",
+    "complexity": "O(log n) per operation",
+    "tags": ["data-structures", "queries"],
+    "lessons": [],
+    "constraints": "n, q up to 2*10^5"
+  },
+  {
+    "id": "knapsack-dp",
+    "signal": "Choose items with weights and values under a capacity, where greedy by ratio fails and n * capacity is at most about 10^7",
+    "technique": "Knapsack dynamic programming",
+    "why": "dp[w] stores the best value achievable with capacity w; process items one at a time, updating capacities from high to low for 0/1 items.",
+    "complexity": "O(n * W)",
+    "tags": ["dp"],
+    "lessons": [],
+    "constraints": "n * W up to about 10^7"
+  },
+  {
+    "id": "lis",
+    "signal": "Longest increasing (or non-decreasing) subsequence of an array",
+    "technique": "LIS with binary search on tails",
+    "why": "Keep, for every length, the smallest possible tail value; the tails array is sorted, so each element is placed by binary search.",
+    "complexity": "O(n log n)",
+    "tags": ["dp", "binary-search"],
+    "lessons": [],
+    "constraints": "n up to 2*10^5"
+  },
+  {
+    "id": "topological-order",
+    "signal": "Tasks with 'A must happen before B' dependencies, or a DP over a directed acyclic graph",
+    "technique": "Topological sort",
+    "why": "Process vertices in an order where every edge points forward; this also detects cycles when no such order exists.",
+    "complexity": "O(V + E)",
+    "tags": ["graphs", "dag"],
+    "lessons": []
+  },
+  {
+    "id": "prefix-function",
+    "signal": "Find a pattern in a text, or periodicity and borders of a string",
+    "technique": "KMP prefix function or Z-function",
+    "why": "Reuse the longest border already matched instead of restarting, so the text is scanned once.",
+    "complexity": "O(n + m)",
+    "tags": ["strings"],
+    "lessons": []
+  },
+  {
+    "id": "tree-dp",
+    "signal": "Optimise or count something over a rooted tree where a node's answer combines its children's answers",
+    "technique": "Tree DP",
+    "why": "A tree has no cycles, so process children first (post-order) and combine their states in the parent.",
+    "complexity": "O(n)",
+    "tags": ["trees", "dp"],
+    "lessons": [],
+    "constraints": "n up to 2*10^5; mind recursion depth"
+  }
+]
