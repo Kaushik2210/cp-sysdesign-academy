@@ -186,6 +186,10 @@ A local run printed about 80.1 percent moved for mod N and about 19.7 percent fo
 
 A search service has 40 backends. Most queries take 5 ms but a few take 800 ms. You run eight LB nodes. Round robin gives a bad p99. Which algorithm would you try first and why, and what could go wrong with plain least connections here?
 
+## Try it
+
+Compare these policies on identical traffic in the [load balancer sandbox](/sandbox/load-balancer/): change server sizes, load and request cost, and see why even request counts do not mean even work.
+
 ## Quiz
 
 <Quiz id="sd-m05-algorithms" tags={["load-balancer", "algorithms"]} questions={[
