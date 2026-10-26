@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -418,4 +418,64 @@ test("design canvas reviews an architecture and updates as you edit it", async (
   await page.getByRole("button", { name: "Fewer instances" }).click();
   await expect(page.getByText("App servers run as a single instance")).toBeVisible();
   await expect(score).toHaveText("85");
+});
+test.describe("algorithm visualizers", () => {
+  /** Step forward until the explanation says "Sorted." (or give up), returning the final array cells. */
+  async function stepToEnd(page: import("@playwright/test").Page) {
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 80 && (await forward.isEnabled()); i++) await forward.click();
+    return page.getByRole("list", { name: "Array state" }).locator("li > div").allInnerTexts();
+  }
+  const setInput = async (page: import("@playwright/test").Page, value: string) => {
+    await page.getByRole("textbox").first().fill(value);
+  };
+
+  test("the gallery lists every visualizer by category", async ({ page }) => {
+    await page.goto("/visualizers/");
+    await expect(page.getByRole("heading", { level: 1, name: "Algorithm visualizers" })).toBeVisible();
+    for (const name of ["Binary search", "Bubble sort", "Insertion sort", "Merge sort", "Quick sort"]) {
+      await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+    }
+  });
+
+  test("merge sort sorts the input and shows merge buffers along the way", async ({ page }) => {
+    await page.goto("/visualizers/merge-sort/");
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("heading", { level: 1, name: "Merge sort" })).toBeVisible();
+    await setInput(page, "3 1 2");
+    let sawBuffers = false;
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 40 && (await forward.isEnabled()); i++) {
+      if (await page.getByLabel("Merge buffers").count()) sawBuffers = true;
+      await forward.click();
+    }
+    expect(sawBuffers).toBe(true);
+    expect(await page.getByRole("list", { name: "Array state" }).locator("li > div").allInnerTexts()).toEqual(["1", "2", "3"]);
+    await expect(page.getByText(/Sorted\./)).toBeVisible();
+  });
+
+  test("insertion sort lifts a key out of the array", async ({ page }) => {
+    await page.goto("/visualizers/insertion-sort/");
+    await page.waitForLoadState("networkidle");
+    await setInput(page, "4 2 9 1");
+    await page.getByRole("button", { name: "Step forward" }).click();
+    await expect(page.getByText(/Holding key =/)).toBeVisible();
+    expect(await stepToEnd(page)).toEqual(["1", "2", "4", "9"]);
+  });
+
+  test("quick sort partitions around a pivot and ends sorted", async ({ page }) => {
+    await page.goto("/visualizers/quick-sort/");
+    await page.waitForLoadState("networkidle");
+    await setInput(page, "5 1 4 2 3");
+    await page.getByRole("button", { name: "Step forward" }).click();
+    await expect(page.getByText(/Partition \[0\.\.4\] around the pivot 3/)).toBeVisible();
+    expect(await stepToEnd(page)).toEqual(["1", "2", "3", "4", "5"]);
+  });
+
+  test("the sorting lesson embeds the three sorts", async ({ page }) => {
+    await page.goto("/cp/sorting-and-searching/sorting-for-problem-solving/");
+    for (const t of ["Insertion sort", "Merge sort", "Quick sort"]) {
+      await expect(page.getByRole("region", { name: `${t} visualizer` })).toBeVisible({ timeout: 15000 });
+    }
+  });
 });

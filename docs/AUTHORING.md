@@ -77,7 +77,7 @@ Original explanations only; never copy text or statements from other sites.
   A --> B`} caption="..." />
 <Diagram kind="flow" caption="..." nodes={[{ id, label, x, y, role, failureModes: [..], tradeoffs: [..] }]} edges={[{ from, to, label }]} />
 
-<Visualizer name="binary-search" />   {/* only: "binary-search", "bubble-sort" for now */}
+<Visualizer name="binary-search" />   {/* any name in src/visualizers/meta.ts, e.g. "binary-search", "merge-sort" */}
 ```
 
 MDX gotchas: leave a blank line before and after fenced code inside `<Tab>`; in prose, wrap `<`, `>`, `{`, `}` in backticks (e.g. `a < b`), or the MDX compiler fails; JSX attribute strings do not process `\n` (use `{"...\n"}` expressions). Each Quiz needs a globally unique `id`; each question needs 3-4 options with exactly the stated answer index/indices.
