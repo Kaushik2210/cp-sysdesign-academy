@@ -19,6 +19,7 @@
     { "kind": "lesson", "ref": "sd/interview-playbook/ai-assisted-rounds" },
     { "kind": "lesson", "ref": "sd/interview-playbook/project-stories-and-behavioral" },
     { "kind": "page", "title": "Algorithm templates", "href": "/templates/", "note": "Know these cold so you spend interview time on the problem, not on boilerplate." },
+    { "kind": "page", "title": "Mock interview tool", "href": "/mock/", "note": "A timed random question with phase prompts and a rubric. Do at least two a week and watch your weakest dimension." },
     { "kind": "page", "title": "Hiring market findings", "href": "/market/", "note": "Re-read the interview section so you know the formats you may meet." },
     { "kind": "external", "title": "Meta's AI-enabled coding interview: how to prepare (Hello Interview)", "url": "https://www.hellointerview.com/blog/meta-ai-enabled-coding", "type": "article", "note": "A detailed account of the phases and what interviewers look for. Formats change, so confirm with the recruiter." },
     { "kind": "external", "title": "NeetCode roadmap", "url": "https://neetcode.io/roadmap", "type": "practice", "note": "A topic-ordered problem list for interview-style practice." },
