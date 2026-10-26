@@ -23,7 +23,9 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Glossary | Complete | 240 cross-linked system design terms (spec: 200+) |
 | Interview playbook | Complete | 5 lessons, 25-question bank across 4 kinds, scoring rubric |
 | Mock interview tool | Complete | Timer, phase prompts, rubric self-scoring and history; no AI grader, scores are self-reported |
-| Problem ladder, cheat sheets | Planned | |
+| Numbers cheat sheet | Complete | Latency scale, powers of two, sizes, rules of thumb, 3 estimators |
+| Trade-off cheat sheets | Planned | |
+| Problem ladder | Planned | |
 | PDF per module | Partial | print CSS only |
 
 ## Track 1: Competitive Programming
