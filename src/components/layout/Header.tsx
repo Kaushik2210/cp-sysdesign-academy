@@ -22,6 +22,9 @@ export function Header() {
           <Link href="/sd/" className="inline-flex min-h-11 items-center hover:text-fg">
             System Design
           </Link>
+          <Link href="/mock/" className="inline-flex min-h-11 items-center hover:text-fg">
+            Mock
+          </Link>
           <Link href="/patterns/" className="inline-flex min-h-11 items-center hover:text-fg">
             Patterns
           </Link>
