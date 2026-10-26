@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -184,4 +184,39 @@ test("roadmap external resources open safely in a new tab", async ({ page }) => 
   const link = page.getByRole("link", { name: /Competitive Programmer's Handbook/ }).first();
   await expect(link).toHaveAttribute("target", "_blank");
   await expect(link).toHaveAttribute("rel", /noopener/);
+});
+test("mock interview: timed round, rubric scoring, saved history", async ({ page }) => {
+  await page.goto("/mock/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: "Mock interviews" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Draw a question and start/ }).click();
+  await expect(page.getByRole("timer", { name: "Time elapsed" })).toBeVisible();
+  await expect(page.getByText(/Now: Clarify/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Pause" }).click();
+  await expect(page.getByRole("button", { name: "Resume" })).toBeVisible();
+  await page.getByRole("button", { name: "Resume" }).click();
+
+  await page.getByRole("button", { name: /Finish and review/ }).click();
+  await expect(page.getByRole("heading", { name: /^Review:/ })).toBeVisible();
+
+  const save = page.getByRole("button", { name: "Save attempt" });
+  await expect(save).toBeDisabled();
+  const groups = page.getByRole("radiogroup");
+  const n = await groups.count();
+  expect(n).toBe(8); // system design rubric has 8 dimensions
+  for (let i = 0; i < n; i++) await groups.nth(i).locator("label").nth(2).click(); // score 3
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(page.getByRole("heading", { name: "Saved" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: /Overall 75%/ })).toBeVisible();
+
+  await expect(page.getByRole("heading", { name: /Your history \(1\)/ })).toBeVisible();
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: /Your history \(1\)/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /Delete attempt/ }).click();
+  await expect(page.getByRole("heading", { name: /Your history \(0\)/ })).toBeVisible();
 });
