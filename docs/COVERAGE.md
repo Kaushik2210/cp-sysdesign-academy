@@ -17,7 +17,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Zero-to-elite roadmap | Complete | 10 phases, 138 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
-| Design canvas and other SD sandboxes | Planned | |
+| Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
 | Pattern library | Partial | 38 patterns; 8 point to planned lessons |
 | Template library | Partial | 9 tested templates (Python/Java run locally, C++ in CI); spec lists many more (segment tree, LCA, Dinic, FFT...) |
 | Glossary | Complete | 240 cross-linked system design terms (spec: 200+) |
