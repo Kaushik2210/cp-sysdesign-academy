@@ -1,0 +1,106 @@
+[
+  {
+    "id": "sql-vs-nosql",
+    "title": "Relational (SQL) vs NoSQL stores",
+    "summary": "Decide whether your data and access patterns suit a relational database or a non-relational store such as key-value, document or wide-column.",
+    "options": [{ "id": "sql", "name": "Relational (SQL)" }, { "id": "nosql", "name": "NoSQL (key-value, document, wide-column)" }],
+    "rows": [
+      { "dimension": "Data model", "values": { "sql": "Tables with a fixed schema and relationships between them", "nosql": "Flexible records addressed by key or document, often denormalised" } },
+      { "dimension": "Queries", "values": { "sql": "Rich ad-hoc queries, joins and aggregations", "nosql": "Fast by key or a few predefined access patterns; joins are limited or absent" } },
+      { "dimension": "Transactions", "values": { "sql": "Multi-row ACID transactions are standard", "nosql": "Often single-item atomicity; multi-item transactions vary by product" } },
+      { "dimension": "Scaling writes", "values": { "sql": "Scales up easily; scaling out needs sharding work", "nosql": "Designed to scale out horizontally by partition key" } },
+      { "dimension": "Consistency", "values": { "sql": "Strong consistency on a single primary", "nosql": "Often tunable, with eventual consistency as a common default" } },
+      { "dimension": "Schema change", "values": { "sql": "Explicit migrations, safer but slower to change", "nosql": "Flexible, but the application must handle varying shapes" } }
+    ],
+    "choose": {
+      "sql": ["Data is relational and queried in many ways you cannot predict yet.", "You need multi-row transactions, for example payments or inventory.", "The dataset fits comfortably on one primary with replicas."],
+      "nosql": ["Access is mostly by key and the patterns are known in advance.", "You need very high write throughput or horizontal scale from the start.", "Records are self-contained documents or time-ordered events."]
+    },
+    "watchOut": ["Choosing NoSQL for scale you do not have, then re-implementing joins in application code.", "Treating SQL as unable to scale: read replicas and careful indexing go a long way before sharding."],
+    "tags": ["databases", "storage"],
+    "lessons": ["sd/databases-1/relational-vs-nosql", "sd/databases-1/acid-and-transactions"]
+  },
+  {
+    "id": "queue-vs-stream",
+    "title": "Message queue vs event stream (log)",
+    "summary": "Choose between a broker that delivers and deletes messages and a replicated log that keeps events for replay.",
+    "options": [{ "id": "queue", "name": "Message queue (RabbitMQ, SQS)" }, { "id": "stream", "name": "Event stream / log (Kafka)" }],
+    "rows": [
+      { "dimension": "Model", "values": { "queue": "Broker routes a message to a consumer, which acknowledges it and the message is removed", "stream": "Append-only partitioned log that consumers read at their own offset" } },
+      { "dimension": "Replay", "values": { "queue": "Not possible once a message is acknowledged", "stream": "Consumers can rewind and reprocess history while retained" } },
+      { "dimension": "Consumers", "values": { "queue": "Competing consumers share work on one queue", "stream": "Many independent consumer groups each read the full stream" } },
+      { "dimension": "Ordering", "values": { "queue": "Best effort, or strict only in FIFO variants with limits", "stream": "Ordered within a partition; choose the key to group related events" } },
+      { "dimension": "Throughput", "values": { "queue": "Good for task distribution at moderate rates", "stream": "Built for very high throughput through sequential writes and partitioning" } },
+      { "dimension": "Typical use", "values": { "queue": "Background jobs, task distribution, per-message routing", "stream": "Event pipelines, analytics, change data capture, multiple readers of the same data" } }
+    ],
+    "choose": {
+      "queue": ["You distribute jobs where each message is handled once by one worker.", "You need flexible routing, priorities or per-message delay.", "You do not need to keep or replay old messages."],
+      "stream": ["Several systems need the same events independently.", "You need replay to rebuild state or recover from a bug.", "Volume is high and ordering per key matters."]
+    },
+    "watchOut": ["Assuming exactly-once delivery: design consumers to be idempotent either way.", "Using a stream as a task queue and fighting its partition and offset semantics."],
+    "tags": ["messaging", "queues", "streaming"],
+    "lessons": ["sd/queues-and-streaming/kafka-rabbitmq-sqs", "sd/queues-and-streaming/delivery-semantics-and-idempotency"]
+  },
+  {
+    "id": "replication-models",
+    "title": "Replication: leader-follower, multi-leader, leaderless",
+    "summary": "Pick how copies of data stay in sync, trading write availability against the complexity of conflicts.",
+    "options": [{ "id": "leader", "name": "Leader-follower" }, { "id": "multi", "name": "Multi-leader" }, { "id": "leaderless", "name": "Leaderless (quorum)" }],
+    "rows": [
+      { "dimension": "Who accepts writes", "values": { "leader": "One leader; followers are read-only", "multi": "Several leaders, often one per region", "leaderless": "Any replica, with the client or a coordinator writing to several" } },
+      { "dimension": "Conflicts", "values": { "leader": "None: one writer defines the order", "multi": "Concurrent writes conflict and need resolution", "leaderless": "Possible; resolved by versioning or last write wins" } },
+      { "dimension": "Failover", "values": { "leader": "Needs leader election and can cause brief write unavailability", "multi": "Another region keeps accepting writes", "leaderless": "No failover step; quorums tolerate node loss" } },
+      { "dimension": "Read consistency", "values": { "leader": "Followers can lag; read from the leader for the latest data", "multi": "Reads in one region may be behind another", "leaderless": "Tunable with quorum sizes (R + W greater than N)" } },
+      { "dimension": "Complexity", "values": { "leader": "Lowest", "multi": "High: conflict handling and topology", "leaderless": "High: repair mechanisms and tuning" } }
+    ],
+    "choose": {
+      "leader": ["Most applications: simple reasoning and strong consistency for writes.", "Reads dominate and followers can absorb them."],
+      "multi": ["Users in several regions need low-latency local writes.", "You can define a sound conflict-resolution rule."],
+      "leaderless": ["You need very high write availability and tolerate eventual consistency.", "You are building or using a Dynamo-style store."]
+    },
+    "watchOut": ["Reading from a lagging follower right after a write: route those reads to the leader or use read-your-writes.", "Last write wins silently discards one of two concurrent updates."],
+    "tags": ["databases", "replication", "consistency"],
+    "lessons": ["sd/databases-2/replication", "sd/databases-2/read-replicas-and-failover"]
+  },
+  {
+    "id": "sharding-strategies",
+    "title": "Sharding: range, hash or directory",
+    "summary": "Choose how records are assigned to shards, balancing even load against efficient range queries.",
+    "options": [{ "id": "range", "name": "Range" }, { "id": "hash", "name": "Hash" }, { "id": "directory", "name": "Directory (lookup)" }],
+    "rows": [
+      { "dimension": "How a key maps to a shard", "values": { "range": "Contiguous key ranges per shard", "hash": "Hash of the key modulo or on a ring", "directory": "A lookup table maps each key or tenant to a shard" } },
+      { "dimension": "Range queries", "values": { "range": "Efficient: neighbouring keys live together", "hash": "Poor: adjacent keys are scattered", "directory": "Depends on how entries are assigned" } },
+      { "dimension": "Load balance", "values": { "range": "Risk of hot ranges, for example the newest timestamps", "hash": "Even spread for well-distributed keys", "directory": "Fully controllable, including moving hot tenants" } },
+      { "dimension": "Adding shards", "values": { "range": "Split ranges and move data", "hash": "Consistent hashing moves only a fraction of keys; plain modulo reshuffles most", "directory": "Update the directory and move the chosen data" } },
+      { "dimension": "Extra moving parts", "values": { "range": "Range metadata", "hash": "Little beyond the hash function", "directory": "The directory itself must be fast and highly available" } }
+    ],
+    "choose": {
+      "range": ["Queries scan ordered ranges, such as time series.", "You can manage hot ranges, for example by salting keys."],
+      "hash": ["Access is mostly by key and even distribution matters most.", "You expect to add nodes and want minimal data movement (use consistent hashing)."],
+      "directory": ["You shard by tenant with very uneven sizes.", "You need to move specific data between shards deliberately."]
+    },
+    "watchOut": ["A shard key that does not match your queries forces cross-shard scans.", "Hash modulo N moves almost every key when N changes."],
+    "tags": ["databases", "sharding", "scaling"],
+    "lessons": ["sd/databases-2/sharding-and-partitioning", "sd/databases-2/consistent-hashing"]
+  },
+  {
+    "id": "consistency-models",
+    "title": "Strong vs eventual consistency",
+    "summary": "Decide how fresh reads must be, knowing that stronger guarantees cost latency and availability.",
+    "options": [{ "id": "strong", "name": "Strong consistency" }, { "id": "eventual", "name": "Eventual consistency" }],
+    "rows": [
+      { "dimension": "What readers see", "values": { "strong": "The latest committed write, as if there were one copy", "eventual": "Possibly stale data that converges if writes stop" } },
+      { "dimension": "Latency", "values": { "strong": "Higher: coordination across replicas on the critical path", "eventual": "Lower: answer from the nearest replica" } },
+      { "dimension": "Availability in a partition", "values": { "strong": "May reject requests to preserve correctness", "eventual": "Keeps serving, reconciles later" } },
+      { "dimension": "Programming model", "values": { "strong": "Simple to reason about", "eventual": "The application must tolerate staleness and conflicts" } },
+      { "dimension": "Typical data", "values": { "strong": "Money, inventory, identity, uniqueness constraints", "eventual": "Feeds, counters, caches, recommendations, search indexes" } }
+    ],
+    "choose": {
+      "strong": ["A stale read could cause real harm or double spending.", "You must enforce a uniqueness or balance invariant."],
+      "eventual": ["Slightly stale data is acceptable to the user.", "You need low latency across regions or high availability."]
+    },
+    "watchOut": ["Mixing models silently: say per feature which one you provide.", "Session guarantees such as read-your-writes often matter more to users than global ordering."],
+    "tags": ["consistency", "distributed-systems"],
+    "lessons": ["sd/what-is-system-design/non-functional-tradeoffs", "sd/databases-2/replication"]
+  }
+]
