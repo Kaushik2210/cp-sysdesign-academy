@@ -6,7 +6,7 @@ import { Search } from "lucide-react";
 
 type Doc = {
   id: string;
-  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market";
+  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap";
   title: string;
   href: string;
   tags: string;

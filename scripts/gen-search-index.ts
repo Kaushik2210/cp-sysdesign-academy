@@ -6,11 +6,12 @@ import { getPatterns } from "../src/lib/content/patterns";
 import { getTemplates } from "../src/lib/content/templates";
 import { getGlossary } from "../src/lib/content/glossary";
 import { getInsights } from "../src/lib/content/market";
+import { getRoadmap } from "../src/lib/content/roadmap";
 import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
   id: string;
-  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market";
+  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap";
   title: string;
   href: string;
   tags: string;
@@ -99,6 +100,17 @@ for (const i of getInsights()) {
     href: `/market/#${i.topic}`,
     tags: ["hiring", "market", i.topic].join(" "),
     text: `${i.finding} ${i.implication}`,
+  });
+}
+
+for (const p of getRoadmap()) {
+  docs.push({
+    id: `roadmap:${p.id}`,
+    kind: "roadmap",
+    title: `Roadmap phase ${p.order}: ${p.title}`,
+    href: `/roadmap/#${p.id}`,
+    tags: "roadmap plan learning path",
+    text: `${p.goal} ${p.when}`,
   });
 }
 
