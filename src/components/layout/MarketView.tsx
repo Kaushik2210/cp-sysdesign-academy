@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 
 export interface InsightView {
   id: string;
-  topic: string;
   finding: string;
   figure?: string;
   implication: string;
