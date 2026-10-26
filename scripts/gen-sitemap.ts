@@ -3,11 +3,12 @@ import fs from "node:fs";
 import { getAllLessons } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
 import { getTemplates } from "../src/lib/content/templates";
+import { VIZ_META } from "../src/visualizers/meta";
 
 const site = (process.env.SITE_URL ?? "https://example.github.io").replace(/\/$/, "");
 const base = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const lessons = getAllLessons();
-const paths = ["/", "/cp/", "/sd/", "/dashboard/", "/review/", "/paths/", "/patterns/", "/templates/", "/glossary/", "/market/", "/roadmap/", "/mock/", "/sandbox/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/cheatsheets/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", ...getTemplates().map((t) => `/templates/${t.slug}/`), ...lessons.map((l) => l.href)];
+const paths = ["/", "/cp/", "/sd/", "/dashboard/", "/review/", "/paths/", "/patterns/", "/templates/", "/glossary/", "/market/", "/roadmap/", "/mock/", "/visualizers/", ...VIZ_META.map((m) => `/visualizers/${m.name}/`), "/sandbox/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/cheatsheets/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", ...getTemplates().map((t) => `/templates/${t.slug}/`), ...lessons.map((l) => l.href)];
 
 const xml =
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +

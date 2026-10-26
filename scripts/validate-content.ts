@@ -12,6 +12,7 @@ import { getInsights } from "../src/lib/content/market";
 import { getRoadmap } from "../src/lib/content/roadmap";
 import { getQuestions, getRubric } from "../src/lib/content/questions";
 import { getTradeoffSheets } from "../src/lib/content/tradeoffs";
+import { VIZ_META } from "../src/visualizers/meta";
 
 const only = process.argv[2]; // e.g. `cp/math-basics`
 const errors: string[] = [];
@@ -40,6 +41,8 @@ const routes = new Set<string>([
   "/market/",
   "/roadmap/",
   "/mock/",
+  "/visualizers/",
+  ...VIZ_META.map((m) => `/visualizers/${m.name}/`),
   "/sandbox/",
   "/sandbox/consistent-hashing/",
   "/sandbox/rate-limiter/",
@@ -126,6 +129,10 @@ try {
   }
 } catch (e) {
   errors.push(String(e instanceof Error ? e.message : e));
+}
+
+for (const m of VIZ_META) {
+  for (const l of m.lessons) if (!ids.has(l)) errors.push(`visualizer "${m.name}": unknown lesson "${l}"`);
 }
 
 const quizIds = new Map<string, string>();
