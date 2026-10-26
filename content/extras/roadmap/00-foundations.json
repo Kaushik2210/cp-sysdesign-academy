@@ -1,0 +1,25 @@
+{
+  "id": "foundations",
+  "order": 1,
+  "title": "Foundations: write, run and version code",
+  "goal": "Become comfortable writing small programs in one language, using a terminal and Git, and reading a problem statement the way a contest or interview expects.",
+  "when": "Month 1",
+  "hoursPerWeek": 12,
+  "whyNow": ["so-2026-python-js-ai", "juniors-who-ship"],
+  "steps": [
+    { "kind": "external", "title": "The Python Tutorial", "url": "https://docs.python.org/3/tutorial/", "type": "docs", "note": "Python is the fastest language to learn algorithms in, and it is the most used language with AI tools. Add C++ or Java later for contests." },
+    { "kind": "external", "title": "CS50x: Introduction to Computer Science", "url": "https://cs50.harvard.edu/x/", "type": "course", "note": "Optional but excellent if you have never programmed. It also builds C intuition for memory and performance." },
+    { "kind": "external", "title": "The Missing Semester of Your CS Education", "url": "https://missing.csail.mit.edu/", "type": "course", "note": "Shell, editors, Git, debugging and the practical skills courses skip." },
+    { "kind": "external", "title": "Pro Git (chapters 1 to 3)", "url": "https://git-scm.com/book/en/v2", "type": "book", "note": "Branches, merges and remotes. You will use these daily." },
+    { "kind": "lesson", "ref": "cp/how-cp-works/verdicts-and-contests" },
+    { "kind": "lesson", "ref": "cp/how-cp-works/reading-problems" },
+    { "kind": "lesson", "ref": "cp/language-setup-fast-io/cpp-template-and-fast-io" },
+    { "kind": "lesson", "ref": "cp/language-setup-fast-io/debugging-techniques" },
+    { "kind": "project", "title": "Ship a command-line tool", "brief": "Build a small useful CLI (a habit tracker, a markdown note searcher, a unit converter). Add tests, a README with usage examples and a license.", "deliverable": "A public GitHub repository with at least 10 commits, tests that pass and a clear README." }
+  ],
+  "exit": [
+    "You can create a branch, commit, push and open a pull request without looking anything up.",
+    "You have solved 20 easy problems on a judge using the same language each time.",
+    "You can read a problem and state the input, output and constraints in your own words."
+  ]
+}
