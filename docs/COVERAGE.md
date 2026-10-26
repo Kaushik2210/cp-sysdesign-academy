@@ -1,4 +1,4 @@
-﻿# Content coverage
+# Content coverage
 
 Legend: **Complete** = module as specified, all code/solutions executed; **Partial** = some lessons or less depth than specified; **Planned** = not started. Updated honestly after each phase.
 
