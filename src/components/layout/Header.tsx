@@ -28,6 +28,9 @@ export function Header() {
           <Link href="/glossary/" className="hover:text-fg">
             Glossary
           </Link>
+          <Link href="/market/" className="hover:text-fg">
+            Market
+          </Link>
           <Link href="/paths/" className="hover:text-fg">
             Paths
           </Link>
