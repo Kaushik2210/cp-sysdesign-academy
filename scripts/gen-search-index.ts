@@ -12,7 +12,7 @@ import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
   id: string;
-  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap" | "question";
+  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap" | "question" | "cheatsheet";
   title: string;
   href: string;
   tags: string;
@@ -125,6 +125,15 @@ for (const q of getQuestions()) {
     text: q.prompt,
   });
 }
+
+docs.push({
+  id: "cheatsheet:numbers",
+  kind: "cheatsheet",
+  title: "Numbers cheat sheet: latency, powers of two, availability nines",
+  href: "/cheatsheets/numbers/",
+  tags: "cheatsheet numbers latency estimation availability qps storage",
+  text: "Latency numbers every engineer should know, powers of two, common sizes and estimators for traffic, storage, bandwidth and availability.",
+});
 
 fs.mkdirSync("public", { recursive: true });
 fs.writeFileSync("public/search-index.json", JSON.stringify(docs));
