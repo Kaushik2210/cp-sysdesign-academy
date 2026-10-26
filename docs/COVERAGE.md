@@ -13,6 +13,8 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Visualizers | Partial | binary search, bubble sort, two pointers, sliding window (spec lists 9+) |
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
+| Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
+| Zero-to-elite roadmap | Complete | 10 phases, 138 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Design canvas and other SD sandboxes | Planned | |
