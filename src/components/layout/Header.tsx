@@ -28,6 +28,9 @@ export function Header() {
           <Link href="/patterns/" className="inline-flex min-h-11 items-center hover:text-fg">
             Patterns
           </Link>
+          <Link href="/cheatsheets/" className="inline-flex min-h-11 items-center hover:text-fg">
+            Cheat sheets
+          </Link>
           <Link href="/templates/" className="inline-flex min-h-11 items-center hover:text-fg">
             Templates
           </Link>
