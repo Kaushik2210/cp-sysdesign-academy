@@ -1,0 +1,26 @@
+{
+  "id": "systems-fundamentals",
+  "order": 3,
+  "title": "Computer systems fundamentals: OS, networks and databases",
+  "goal": "Understand what happens beneath your code: processes and memory, the network stack, and how databases store and query data, so that design trade-offs later rest on real mechanisms.",
+  "when": "Months 3 to 7",
+  "hoursPerWeek": 8,
+  "whyNow": ["so-2026-conditional-trust", "google-ai-generated-code", "role-demand-vendor"],
+  "steps": [
+    { "kind": "external", "title": "Operating Systems: Three Easy Pieces", "url": "https://pages.cs.wisc.edu/~remzi/OSTEP/", "type": "book", "note": "Free. Read virtualization (CPU and memory) and concurrency first." },
+    { "kind": "external", "title": "Computer Networking: A Top-Down Approach (companion site)", "url": "https://gaia.cs.umass.edu/kurose_ross/", "type": "book", "note": "Follow the application, transport and network layers; use the free lecture videos." },
+    { "kind": "external", "title": "CMU 15-445 Database Systems", "url": "https://15445.courses.cs.cmu.edu/", "type": "course", "note": "Lecture videos and notes on storage, indexing, query execution and transactions." },
+    { "kind": "lesson", "ref": "sd/networking-and-apis/client-server-and-http" },
+    { "kind": "lesson", "ref": "sd/networking-and-apis/dns" },
+    { "kind": "lesson", "ref": "sd/databases-1/relational-vs-nosql" },
+    { "kind": "lesson", "ref": "sd/databases-1/acid-and-transactions" },
+    { "kind": "lesson", "ref": "sd/databases-1/indexes-and-query-plans" },
+    { "kind": "page", "title": "Glossary", "href": "/glossary/", "note": "Look up any term that is new; follow its related links." },
+    { "kind": "project", "title": "Build a tiny database", "brief": "Implement a key-value store with a write-ahead log, a simple index and crash recovery, then add a text protocol over TCP. Measure throughput before and after adding the index.", "deliverable": "A repository with the store, a test that kills the process mid-write and recovers, and a benchmark table in the README." }
+  ],
+  "exit": [
+    "You can explain what a page fault, a context switch and a TCP handshake are and when each hurts performance.",
+    "You can read an EXPLAIN plan and say why an index is or is not used.",
+    "Your tiny database survives a kill -9 during writes without losing acknowledged data."
+  ]
+}
