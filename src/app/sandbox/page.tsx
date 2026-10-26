@@ -16,6 +16,11 @@ const SANDBOXES = [
     title: "Rate limiter",
     body: "Compare fixed window, sliding window and token bucket on the same traffic and see the real peak rate.",
   },
+  {
+    href: "/sandbox/cache/",
+    title: "Cache eviction",
+    body: "Step through LRU, LFU and FIFO evictions and compare hit ratios against the optimal bound.",
+  },
 ];
 
 export default function SandboxIndex() {
