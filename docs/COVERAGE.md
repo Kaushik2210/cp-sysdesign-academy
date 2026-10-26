@@ -10,7 +10,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Code runner (Python/JS in browser) | Complete | Pyodide via CDN, JS in a Worker |
 | C++/Java execution | Partial | Needs `NEXT_PUBLIC_JUDGE0_URL` |
 | Problem judge, quizzes, SM-2 review queue | Complete | Hidden tests ship to the client |
-| Visualizers | Partial | 6 of the 9 spec topics done: binary search, sorting (bubble, insertion, merge, quick), BFS and DFS on a grid, Dijkstra, union-find, two pointers (plus sliding window). Missing: segment tree, knapsack, KMP. Dijkstra and union-find have no lesson on the site yet. Gallery at /visualizers/. |
+| Visualizers | Partial | 7 of the 9 spec topics done: binary search, sorting (bubble, insertion, merge, quick), BFS and DFS on a grid, Dijkstra, union-find, segment tree, two pointers (plus sliding window). Missing: knapsack, KMP. Dijkstra, union-find and the segment tree have no lesson on the site yet. Gallery at /visualizers/. |
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
