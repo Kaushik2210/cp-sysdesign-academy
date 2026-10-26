@@ -21,6 +21,11 @@ const SANDBOXES = [
     title: "Cache eviction",
     body: "Step through LRU, LFU and FIFO evictions and compare hit ratios against the optimal bound.",
   },
+  {
+    href: "/sandbox/load-balancer/",
+    title: "Load balancing",
+    body: "Compare round robin, least connections, power of two choices, weighted and hash-based policies on identical traffic.",
+  },
 ];
 
 export default function SandboxIndex() {
