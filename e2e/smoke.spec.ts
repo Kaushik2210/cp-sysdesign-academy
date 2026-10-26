@@ -605,3 +605,127 @@ test.describe("KMP visualizer", () => {
     await expect(page.getByText(/pattern may only use lowercase/)).toBeVisible();
   });
 });
+
+test.describe("interactive, maximalist UI", () => {
+  test("the home page playground sorts, shuffles and can be scrubbed", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    const bars = page.getByTestId("bar");
+    await expect(bars).toHaveCount(16);
+    const values = async () => (await bars.evaluateAll((els) => els.map((e) => Number((e as HTMLElement).dataset.value)))) as number[];
+    const before = await values();
+    await page.getByRole("button", { name: "Shuffle" }).click();
+    await expect.poll(async () => (await values()).join()).not.toBe(before.join());
+    await page.getByRole("button", { name: "Merge", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Merge", exact: true })).toHaveAttribute("aria-pressed", "true");
+    const scrub = page.getByRole("slider", { name: "Scrub steps" });
+    const max = (await scrub.getAttribute("max")) as string;
+    await scrub.fill(max);
+    await expect(page.getByText(/Sorted\./).first()).toBeVisible();
+    const done = await values();
+    expect(done).toEqual([...done].sort((a, b) => a - b));
+  });
+
+  test("the playground play button toggles and replays when finished", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    const scrub = page.getByRole("slider", { name: "Scrub steps" });
+    await scrub.fill((await scrub.getAttribute("max")) as string);
+    await page.getByRole("button", { name: "Replay" }).click();
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+    await page.getByRole("button", { name: "Pause" }).click();
+    await expect(page.getByRole("button", { name: "Play" })).toBeVisible();
+  });
+
+  test("the current section is marked in the main navigation", async ({ page }) => {
+    await page.goto("/visualizers/");
+    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Visualizers" })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Glossary" })).not.toHaveAttribute("aria-current", "page");
+  });
+
+  test("the visualizer gallery filters by category and by text", async ({ page }) => {
+    await page.goto("/visualizers/");
+    await expect(page.getByRole("status")).toContainText("Showing 14 of 14");
+    await page.getByRole("button", { name: /^Graphs/ }).click();
+    await expect(page.getByRole("status")).toContainText("Showing 3 of 14");
+    await expect(page.getByRole("link", { name: "Dijkstra's shortest paths" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Merge sort", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: /^All/ }).click();
+    await page.getByRole("searchbox", { name: /Filter visualizers/ }).fill("heap");
+    await expect(page.getByRole("status")).toContainText("Showing 1 of 14");
+    await page.getByRole("searchbox", { name: /Filter visualizers/ }).fill("zzzzzz");
+    await expect(page.getByText(/Nothing matches that filter/)).toBeVisible();
+  });
+
+  test("a gallery card is a single link to its visualizer", async ({ page }) => {
+    await page.goto("/visualizers/");
+    await page.getByRole("link", { name: "KMP string matching" }).click();
+    await expect(page).toHaveURL(/visualizers\/kmp\/$/);
+  });
+
+  test("the player has keyboard shortcuts and a scrubber", async ({ page }) => {
+    await page.goto("/visualizers/merge-sort/");
+    await page.waitForLoadState("networkidle");
+    const player = page.getByRole("region", { name: "Merge sort visualizer" });
+    await player.focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await expect(player.getByText(/Step 3\//)).toBeVisible();
+    await page.keyboard.press("ArrowLeft");
+    await expect(player.getByText(/Step 2\//)).toBeVisible();
+    await page.keyboard.press("Space");
+    await expect(player.getByRole("button", { name: "Pause" })).toBeVisible();
+    await page.keyboard.press("Space");
+    await expect(player.getByRole("button", { name: "Play" })).toBeVisible();
+    const scrub = player.getByRole("slider", { name: "Scrub through steps" });
+    await scrub.fill("5");
+    await expect(player.getByText(/Step 6\//)).toBeVisible();
+  });
+
+  test("typing in the input box does not trigger player shortcuts", async ({ page }) => {
+    await page.goto("/visualizers/merge-sort/");
+    await page.waitForLoadState("networkidle");
+    const box = page.getByRole("textbox").first();
+    await box.fill("3 1 2");
+    await box.press("ArrowRight");
+    await box.press("Space");
+    await expect(page.getByText(/Step 1\//)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Play" })).toBeVisible();
+  });
+
+  test("cards light up under the pointer", async ({ page }) => {
+    await page.goto("/");
+    const tile = page.getByRole("link", { name: /Algorithm visualizers/ }).first();
+    await tile.scrollIntoViewIfNeeded();
+    await tile.hover();
+    const mx = await tile.evaluate((el) => (el as HTMLElement).style.getPropertyValue("--mx"));
+    expect(mx).toMatch(/px$/);
+  });
+
+  test("marking a lesson complete celebrates with confetti", async ({ page }) => {
+    await page.goto("/cp/sorting-and-searching/sorting-for-problem-solving/");
+    await page.getByRole("button", { name: "Mark complete" }).click();
+    await expect(page.getByRole("button", { name: "Completed" })).toHaveAttribute("aria-pressed", "true");
+    const bits = await page.evaluate(() => document.querySelectorAll('[data-confetti] span').length);
+    expect(bits).toBeGreaterThan(10);
+  });
+});
+
+test.describe("reduced motion", () => {
+  test.use({ reducedMotion: "reduce" });
+
+  test("the playground does not autoplay and no confetti is fired", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("button", { name: "Play" })).toBeVisible();
+    await page.goto("/cp/sorting-and-searching/sorting-for-problem-solving/");
+    await page.getByRole("button", { name: "Mark complete" }).click();
+    await expect(page.getByRole("button", { name: "Completed" })).toBeVisible();
+    expect(await page.evaluate(() => document.querySelectorAll('[data-confetti]').length)).toBe(0);
+  });
+
+  test("animated numbers show their final value immediately", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("98");
+  });
+});
