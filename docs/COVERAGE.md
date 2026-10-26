@@ -21,7 +21,9 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Pattern library | Partial | 38 patterns; 8 point to planned lessons |
 | Template library | Partial | 9 tested templates (Python/Java run locally, C++ in CI); spec lists many more (segment tree, LCA, Dinic, FFT...) |
 | Glossary | Complete | 240 cross-linked system design terms (spec: 200+) |
-| Problem ladder, cheat sheets, interview playbook | Planned | |
+| Interview playbook | Complete | 5 lessons, 25-question bank across 4 kinds, scoring rubric |
+| Mock interview tool | Complete | Timer, phase prompts, rubric self-scoring and history; no AI grader, scores are self-reported |
+| Problem ladder, cheat sheets | Planned | |
 | PDF per module | Partial | print CSS only |
 
 ## Track 1: Competitive Programming
