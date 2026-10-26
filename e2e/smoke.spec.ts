@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/visualizers/segment-tree/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/visualizers/segment-tree/", "/visualizers/knapsack/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -562,5 +562,24 @@ test.describe("segment tree visualizer", () => {
     await expect(page.getByText(/query\(0, 3\) = 10, assembled from 1 stored node/)).toBeVisible();
     await page.getByRole("textbox").first().fill("1 2 3 4\nquery 3 0");
     await expect(page.getByText(/left end must not be after/)).toBeVisible();
+  });
+});
+
+test.describe("knapsack visualizer", () => {
+  test("fills the table, finds the optimum and traces the chosen items", async ({ page }) => {
+    await page.goto("/visualizers/knapsack/");
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("table", { name: "Knapsack table" })).toBeVisible();
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 400 && (await forward.isEnabled()); i++) await forward.click();
+    await expect(page.getByRole("cell", { name: /^item 4, capacity 10: 90/ })).toBeVisible();
+    await expect(page.getByLabel("Chosen items")).toContainText("2, 4");
+    await expect(page.getByText(/Take items 2, 4: total weight 7 of 10, total value 90/)).toBeVisible();
+  });
+  test("rejects a zero-weight item", async ({ page }) => {
+    await page.goto("/visualizers/knapsack/");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("textbox").first().fill("5\n0 4");
+    await expect(page.getByText(/weight must be at least 1/)).toBeVisible();
   });
 });
