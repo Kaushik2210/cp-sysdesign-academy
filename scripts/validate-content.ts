@@ -10,6 +10,7 @@ import { getTemplates } from "../src/lib/content/templates";
 import { getGlossary } from "../src/lib/content/glossary";
 import { getInsights } from "../src/lib/content/market";
 import { getRoadmap } from "../src/lib/content/roadmap";
+import { getQuestions, getRubric } from "../src/lib/content/questions";
 
 const only = process.argv[2]; // e.g. `cp/math-basics`
 const errors: string[] = [];
@@ -94,6 +95,15 @@ try {
       if (s.kind === "lesson" && !ids.has(s.ref)) errors.push(`roadmap "${phase.id}": unknown lesson "${s.ref}"`);
       if (s.kind === "page" && !routes.has(s.href)) errors.push(`roadmap "${phase.id}": unknown page "${s.href}"`);
     }
+  }
+} catch (e) {
+  errors.push(String(e instanceof Error ? e.message : e));
+}
+
+try {
+  getRubric();
+  for (const q of getQuestions()) {
+    for (const l of q.related) if (!ids.has(l)) errors.push(`question "${q.id}": unknown lesson "${l}"`);
   }
 } catch (e) {
   errors.push(String(e instanceof Error ? e.message : e));
