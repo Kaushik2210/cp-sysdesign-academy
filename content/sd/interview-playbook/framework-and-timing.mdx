@@ -1,0 +1,114 @@
+---
+title: The 45-Minute Framework
+track: sd
+module: interview-playbook
+order: 1
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/what-is-system-design/requirements-and-framework"]
+tags: [interview, framework, communication]
+type: lesson
+furtherReading:
+  - title: Hello Interview, system design guides
+    url: https://www.hellointerview.com/learn/system-design/in-a-hurry/introduction
+  - title: Designing Data-Intensive Applications (Kleppmann)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+A design interview is not an exam with one right answer. It is a short, collaborative engineering conversation, and the interviewer is deciding whether they would want to design a system with you. The strongest candidates are rarely the ones who know the most technologies. They are the ones who **control the conversation**: they clarify, size the problem, propose something simple, find its weak spots and improve it, while saying their reasoning aloud.
+
+A fixed framework helps because it frees your attention. When you do not have to decide what to do next, you can think about the actual problem.
+
+## The framework, with time boxes
+
+The seven steps from the earlier lesson, with a rough clock for a 45-minute interview:
+
+<Diagram kind="mermaid" caption="A rough clock for a 45-minute design round" code={`flowchart LR
+  A["1. Clarify<br/>0-5 min"] --> B["2. Estimate<br/>5-10"]
+  B --> C["3. API and data model<br/>10-17"]
+  C --> D["4. High-level design<br/>17-25"]
+  D --> E["5. Deep dives<br/>25-38"]
+  E --> F["6. Bottlenecks and failures<br/>38-43"]
+  F --> G["7. Summary<br/>43-45"]`} />
+
+The exact minutes matter less than the proportions: **spend about a third of the time on the high-level design plus the setup, and about a third on deep dives.** Candidates who spend 25 minutes on requirements run out of time before the interesting part, and candidates who start drawing boxes in minute one design the wrong system.
+
+### 1. Clarify (about 5 minutes)
+
+Ask questions that change the design. Good ones separate scale, behaviour and constraints:
+
+- **Scope:** "Which features are in scope for the next 40 minutes? I would start with X and Y and treat Z as out of scope. Is that right?"
+- **Users and scale:** "How many daily active users, and what is the read-to-write ratio?"
+- **Quality:** "What matters most: low latency, strong consistency or availability? Is stale data acceptable, and for how long?"
+- **Constraints:** "Any existing infrastructure, regions or compliance limits?"
+
+Write the agreed requirements on the board. They are your contract for the rest of the interview, and you can point back to them when defending a choice.
+
+<Callout type="tip" title="State your assumptions out loud">
+If the interviewer says "assume whatever you want", pick numbers and say them: "I will assume 10 million daily users and a 10 to 1 read-to-write ratio." Assumptions you state can be corrected; assumptions you hide cannot.
+</Callout>
+
+### 2. Estimate (about 5 minutes)
+
+Estimation exists to justify decisions, not to show off arithmetic. Compute only the numbers that will change your design.
+
+Worked example for a URL shortener with 100 million new URLs per month:
+
+- Writes: 100,000,000 / (30 days x 86,400 s) is about **40 writes per second** on average.
+- Reads at 10 to 1: about **400 reads per second**; assume peak is 3 to 5 times higher.
+- Storage: 100,000,000 x about 500 bytes is about **50 GB per month**, so roughly **600 GB per year**.
+
+What these numbers tell you: 400 reads per second fits on a single database, so you do not need heroics for throughput, but the dataset keeps growing, and read latency matters, so a cache is cheap insurance. That is the sentence the interviewer wants to hear: the number, then the decision it drives.
+
+### 3. API and data model (about 7 minutes)
+
+Define two or three core endpoints with their inputs and outputs, then the main entities and their keys. Choose the **access pattern first**: the store follows from how you read and write.
+
+```text
+POST /urls        { longUrl, expiresAt? } -> { shortId }
+GET  /{shortId}   -> 302 redirect to longUrl
+
+urls(shortId PK, longUrl, createdAt, expiresAt)
+```
+
+### 4. High-level design (about 8 minutes)
+
+Draw the **simplest thing that meets the requirements**: client, load balancer, stateless service, database. Walk the main request through it. Only then add components, and give each a reason:
+
+> "Reads dominate and URLs rarely change, so I will add a cache in front of the database."
+
+If you cannot say why a box exists, remove it.
+
+### 5. Deep dives (about 13 minutes)
+
+Let the interviewer steer, but offer the two or three places where the design is hardest: ID generation, hot keys, consistency, fan-out, storage layout. Go one level deeper than feels comfortable, with a concrete mechanism and its trade-off.
+
+### 6. Bottlenecks and failures (about 5 minutes)
+
+Walk the diagram asking "what happens when this dies, or gets ten times busier?" Name single points of failure, hot spots, and what you would monitor. This is where senior candidates separate themselves.
+
+### 7. Summary (about 2 minutes)
+
+Restate the design in three sentences, the main trade-off you accepted, and what you would do next with more time.
+
+## Pitfalls
+
+- **Silence.** Thinking silently for two minutes reads as being stuck. Narrate: "I am weighing X against Y because..."
+- **Tool name-dropping.** "Use Kafka" is not a design. "Use a queue so write spikes do not hit the database, which makes the system eventually consistent" is.
+- **Ignoring the interviewer's hints.** A question like "what if that node fails?" is a pointer toward something they want to see.
+- **Premature optimisation.** Sharding a 600 GB dataset at 40 writes per second is a design smell.
+
+## What would you choose and why?
+
+You have 5 minutes left and your design has no failure handling. Do you (a) add a replica and describe failover, (b) list the single points of failure and say how you would handle each, or (c) go deeper on the cache? Decide, then write the one sentence you would say.
+
+## Quiz
+
+<Quiz id="sd-pb-framework-1" tags={["interview", "framework"]} questions={[
+  { type: "mcq", q: "What is the main purpose of the estimation step in a design interview?", options: ["To show you can do arithmetic quickly", "To justify the design decisions that follow", "To fill time before drawing", "To find the exact number of servers"], answer: 1, explain: "Estimates matter only when they change a decision, for example whether one database is enough or a cache is cheap insurance." },
+  { type: "mcq", q: "The interviewer says 'assume whatever you want' about scale. What should you do?", options: ["Skip estimation entirely", "Pick concrete numbers, say them aloud and design for them", "Ask them to choose instead", "Assume the largest possible scale"], answer: 1, explain: "Stated assumptions can be corrected by the interviewer; hidden assumptions cannot." },
+  { type: "multi", q: "Which are good reasons to add a component to your high-level diagram?", options: ["It is commonly used in big companies", "It addresses a requirement or number you stated", "It removes a single point of failure you identified", "It makes the diagram look complete"], answer: [1, 2], explain: "Every box should answer a requirement, an estimate or a failure mode you can name." },
+  { type: "predict", q: "A service gets 100 million new records a month. About how many writes per second is that on average?", code: "100_000_000 / (30 * 86_400)", options: ["About 4", "About 40", "About 400", "About 4,000"], answer: 1, explain: "30 days is 2,592,000 seconds, and 100 million divided by that is about 38.6 writes per second." }
+]} />
