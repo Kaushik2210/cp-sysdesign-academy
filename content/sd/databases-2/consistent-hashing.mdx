@@ -161,6 +161,10 @@ The 1.9% result for one point per node is not "better". It means the new node ha
 
 You run a cache of 20 nodes and need to add 2 more during peak traffic. Under `mod N`, roughly what fraction of keys miss immediately? Under a ring with many virtual nodes? How would you warm the new nodes, and would you add them one at a time or together?
 
+## Try it
+
+Change the cluster yourself in the [consistent hashing sandbox](/sandbox/consistent-hashing/): add and remove nodes, vary the virtual nodes and compare with hash mod N.
+
 ## Quiz
 
 <Quiz id="sd-m07-consistent-hashing" tags={["consistent-hashing"]} questions={[
