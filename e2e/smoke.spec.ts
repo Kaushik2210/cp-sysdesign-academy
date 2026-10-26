@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/visualizers/segment-tree/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -540,5 +540,27 @@ test.describe("union-find visualizer", () => {
     await page.waitForLoadState("networkidle");
     await page.getByRole("textbox").first().fill("3\nunion 0 9");
     await expect(page.getByText(/numbered 0 to 2/)).toBeVisible();
+  });
+});
+
+test.describe("segment tree visualizer", () => {
+  test("answers range queries and updates a path", async ({ page }) => {
+    await page.goto("/visualizers/segment-tree/");
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByLabel("Array")).toContainText("[5, 3, 8, 6, 2, 7, 4, 1]");
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 300 && (await forward.isEnabled()); i++) await forward.click();
+    await expect(page.getByText(/All operations done/)).toBeVisible();
+    await expect(page.getByLabel("Array")).toContainText("[5, 3, 8, 10, 2, 7, 4, 1]");
+  });
+  test("shows a query result and rejects a reversed range", async ({ page }) => {
+    await page.goto("/visualizers/segment-tree/");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("textbox").first().fill("1 2 3 4\nquery 0 3");
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 2; i++) await forward.click();
+    await expect(page.getByText(/query\(0, 3\) = 10, assembled from 1 stored node/)).toBeVisible();
+    await page.getByRole("textbox").first().fill("1 2 3 4\nquery 3 0");
+    await expect(page.getByText(/left end must not be after/)).toBeVisible();
   });
 });
