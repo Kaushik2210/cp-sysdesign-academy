@@ -1,0 +1,83 @@
+---
+title: AI-Assisted Interview Rounds
+track: sd
+module: interview-playbook
+order: 4
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/interview-playbook/framework-and-timing"]
+tags: [interview, ai, coding]
+type: lesson
+furtherReading:
+  - title: Meta's AI-enabled coding interview, how to prepare (Hello Interview)
+    url: https://www.hellointerview.com/blog/meta-ai-enabled-coding
+  - title: Stack Overflow Developer Survey 2025, AI section
+    url: https://survey.stackoverflow.co/2025/ai
+---
+
+## Intuition
+
+Some companies now let you use an AI assistant during a coding interview. That does not make the interview easier. It changes what is being measured: not whether you can type a solution, but whether you can **direct, verify and explain** work done with a tool. The skill is the same one the job now needs.
+
+<Callout type="warning" title="Formats change quickly">
+What follows comes from candidate reports and secondary sources (see the [hiring market findings](/market/)), not from a company handbook. Companies differ and change formats often. Always ask your recruiter exactly what is allowed and which tools are provided, and never use an AI tool in a round where it is not permitted.
+</Callout>
+
+## What has been reported
+
+- **Meta** began rolling out an AI-enabled coding round in late 2025, according to candidate accounts. Candidates work in a multi-file project with an assistant available, and reports say it is assessed on the same competencies as a classic round: problem solving, code quality, verification and communication. A traditional algorithm round without AI is reported to remain alongside it.
+- **Google** was reported to be piloting an AI-assisted coding format for some junior and mid-level roles on select US teams, with more emphasis on reading, debugging and open-ended problems.
+- **Canva** announced that it expects candidates to use AI tools and redesigned its problems so a single prompt cannot solve them.
+
+The common thread is that the problems are larger and more ambiguous, because an assistant makes small problems trivial.
+
+## A workflow that scores well
+
+1. **Orient first.** Read the files and the failing tests before prompting anything. Say what you see.
+2. **State your plan aloud** before you ask the assistant for code: the approach, the data structure, the main edge cases.
+3. **Ask for small pieces.** "Write the function that parses a row" beats "solve the problem." Small pieces are easier to review and keep you in charge.
+4. **Review every suggestion** before accepting it. Read it, say what it does, and spot at least one risk.
+5. **Run the tests after each step.** Passing tests are your evidence; do not assume the output is correct.
+6. **Narrate the balance.** Explain what you are delegating and why, and what you are deliberately writing yourself.
+7. **Know when not to use it.** For a one-line change or a tricky invariant, typing it yourself is faster and shows control.
+
+## What interviewers tend to look for
+
+| Signal | Strong | Weak |
+| --- | --- | --- |
+| Problem solving | You decompose, choose the approach and use AI for implementation | You paste the whole prompt and accept the answer |
+| Verification | You test after each step and catch an AI mistake | You trust output that "looks right" |
+| Code quality | Small, readable functions you can explain | Large blocks you cannot walk through |
+| Communication | You narrate decisions and respond to questions | Long silences while prompting |
+
+## Why this matches the data
+
+Stack Overflow's 2025 survey found most developers use AI tools while more distrust their accuracy than trust it, and the 2026 results describe trust as conditional on being able to verify output. Interviews that reward verification are measuring what employers say they need.
+
+## Practise it
+
+Run this drill on 10 problems (it is also a step in the [roadmap](/roadmap/)):
+
+- Say your approach before prompting.
+- Ask for one small piece at a time.
+- Write down every mistake the assistant made and how you caught it.
+- Finish each session by explaining the final code aloud without looking at the assistant.
+
+## Pitfalls
+
+- **Prompting the entire problem.** It looks like you cannot solve it yourself.
+- **Accepting code you cannot explain.** Interviewers will ask you to walk through it.
+- **Over-reliance in a classic round.** Many loops still include a round with no AI, so keep your unaided skills sharp.
+- **Silence while the assistant works.** Keep narrating.
+
+## What would you choose and why?
+
+The assistant offers a 40-line solution that passes the visible tests. You have 20 minutes left. Do you (a) accept it and move on, (b) read it, test an edge case you suspect and then decide, or (c) discard it and write your own? What is the one sentence you tell the interviewer?
+
+## Quiz
+
+<Quiz id="sd-pb-ai-rounds-1" tags={["interview", "ai"]} questions={[
+  { type: "mcq", q: "What is the best first step in an AI-assisted coding round?", options: ["Paste the whole problem into the assistant", "Read the code and tests and state your plan", "Ask the interviewer to solve it", "Disable the assistant"], answer: 1, explain: "Orienting and stating a plan keeps you in charge and shows problem-solving ability before any code is generated." },
+  { type: "multi", q: "Which behaviours usually score well when using an assistant?", options: ["Asking for small, reviewable pieces", "Running tests after each change", "Accepting the first suggestion to save time", "Explaining what you delegated and why"], answer: [0, 1, 3], explain: "Small pieces, verification and narration show control. Accepting output unread signals the opposite." },
+  { type: "mcq", q: "Why should you confirm the format with your recruiter?", options: ["Formats and rules differ by company and change often", "AI is always forbidden", "It is only a formality", "Recruiters grade the interview"], answer: 0, explain: "Reports differ and formats evolve, so confirm which tools and rules apply before you prepare." }
+]} />
