@@ -1,0 +1,30 @@
+{
+  "id": "interview-readiness",
+  "order": 5,
+  "title": "Interview readiness, including AI-assisted rounds",
+  "goal": "Turn knowledge into performance: solve problems under time pressure, narrate your reasoning, run a system design conversation, and work with an AI assistant without handing it the thinking.",
+  "when": "Months 7 to 10",
+  "hoursPerWeek": 12,
+  "whyNow": ["meta-ai-enabled-coding", "google-ai-assisted-pilot", "canva-ai-allowed", "dsa-still-screens", "so-2026-conditional-trust"],
+  "steps": [
+    { "kind": "lesson", "ref": "cp/how-cp-works/practice-and-upsolving" },
+    { "kind": "lesson", "ref": "cp/how-cp-works/standard-cp-workflow" },
+    { "kind": "lesson", "ref": "cp/language-setup-fast-io/stress-testing" },
+    { "kind": "lesson", "ref": "cp/greedy/proofs-and-when-greedy-fails" },
+    { "kind": "lesson", "ref": "sd/estimation/mistakes-and-presenting" },
+    { "kind": "lesson", "ref": "sd/what-is-system-design/non-functional-tradeoffs" },
+    { "kind": "page", "title": "Algorithm templates", "href": "/templates/", "note": "Know these cold so you spend interview time on the problem, not on boilerplate." },
+    { "kind": "page", "title": "Hiring market findings", "href": "/market/", "note": "Re-read the interview section so you know the formats you may meet." },
+    { "kind": "external", "title": "Meta's AI-enabled coding interview: how to prepare (Hello Interview)", "url": "https://www.hellointerview.com/blog/meta-ai-enabled-coding", "type": "article", "note": "A detailed account of the phases and what interviewers look for. Formats change, so confirm with the recruiter." },
+    { "kind": "external", "title": "NeetCode roadmap", "url": "https://neetcode.io/roadmap", "type": "practice", "note": "A topic-ordered problem list for interview-style practice." },
+    { "kind": "external", "title": "interviewing.io", "url": "https://interviewing.io/", "type": "practice", "note": "Anonymous mock interviews with engineers." },
+    { "kind": "project", "title": "AI-collaboration drill", "brief": "Solve 10 problems with an AI assistant under three rules: say your approach aloud first, ask the AI for one small piece at a time, and review and test every suggestion before keeping it. Keep a log of what the AI got wrong.", "deliverable": "A written log of 10 sessions with the approach you chose, the AI's mistakes you caught and what you would do differently." },
+    { "kind": "project", "title": "Ten mock interviews", "brief": "Complete 10 timed mocks: 5 coding without AI, 3 system design and 2 AI-assisted coding. Record yourself, then review the recordings for silence, unclear reasoning and untested code.", "deliverable": "A table of the 10 mocks with the main weakness found in each and the fix you practised afterwards." }
+  ],
+  "exit": [
+    "You solve a new medium problem in 35 to 45 minutes while explaining your reasoning aloud.",
+    "You can run a 45-minute system design conversation from requirements to bottlenecks without prompts.",
+    "In an AI-assisted drill you state the plan before prompting and catch at least one AI error per session.",
+    "You can tell a 90-second story about a project: the problem, your decision, the trade-off and the result."
+  ]
+}
