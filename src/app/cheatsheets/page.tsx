@@ -11,6 +11,11 @@ const SHEETS = [
     title: "Numbers",
     body: "Latency scale, powers of two, common sizes, rules of thumb and estimators for traffic, storage and availability.",
   },
+  {
+    href: "/cheatsheets/tradeoffs/",
+    title: "Trade-offs",
+    body: "14 side-by-side comparisons: SQL vs NoSQL, queue vs stream, cache strategies, API styles, replication, sharding and more.",
+  },
 ];
 
 export default function CheatsheetsPage() {
