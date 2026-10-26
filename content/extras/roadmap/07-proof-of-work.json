@@ -1,0 +1,23 @@
+{
+  "id": "proof-of-work",
+  "order": 8,
+  "title": "Proof of work: projects, open source and internships",
+  "goal": "Create public evidence that you can ship. With few entry-level postings and many applicants, visible work, merged contributions and internships are what move a resume to the top of the pile.",
+  "when": "Months 4 to 18 (runs alongside the other phases)",
+  "hoursPerWeek": 6,
+  "whyNow": ["entry-share-q1-2026", "signalfire-entry-down", "handshake-competition", "juniors-who-ship", "deloitte-india-internships", "unstop-demand-vs-placement"],
+  "steps": [
+    { "kind": "external", "title": "First Contributions", "url": "https://github.com/firstcontributions/first-contributions", "type": "practice", "note": "Make your first pull request in a safe sandbox repository." },
+    { "kind": "external", "title": "Good First Issue", "url": "https://goodfirstissue.dev/", "type": "practice", "note": "Find beginner-friendly issues in active open-source projects." },
+    { "kind": "external", "title": "Build your own X (CodeCrafters list)", "url": "https://github.com/codecrafters-io/build-your-own-x", "type": "article", "note": "A catalogue of guided projects: databases, shells, interpreters, git, redis and more." },
+    { "kind": "project", "title": "Three merged open-source contributions", "brief": "Pick one active project whose language you know. Start with documentation or tests, then fix a labelled bug, then a small feature. Follow the contribution guide, respond to review comments and keep the pull requests small.", "deliverable": "Three merged pull requests with links, plus a note on what review feedback taught you." },
+    { "kind": "project", "title": "Ship two projects people can use", "brief": "Take two of your phase projects (for example the URL shortener and the evaluated RAG app) and make them real: deployed, documented, with a demo link, monitoring and a changelog. Ask two people to use them and record what confused them.", "deliverable": "Two deployed projects, each with a README that explains the problem, the design trade-offs and measured results." },
+    { "kind": "project", "title": "Write three technical posts", "brief": "Write up a design decision, a debugging story and something you measured. Show numbers and what you got wrong. Publish them where recruiters can find them.", "deliverable": "Three published posts linked from your GitHub profile and resume." },
+    { "kind": "project", "title": "Internship and referral sprint", "brief": "From your second or third year onward, build a list of 30 target teams, find a real person to message at each (alumni, open-source maintainers, contest peers) and ask for advice before asking for a job. Track replies and follow up.", "deliverable": "A tracker with outreach dates, replies and the conversations that led to interviews." }
+  ],
+  "exit": [
+    "Your GitHub profile shows merged contributions, two deployed projects and consistent activity over many months.",
+    "A recruiter can find three links (project, post, contribution) that prove you can do the job.",
+    "You have had at least five conversations with engineers about their work and have a referral path to your top targets."
+  ]
+}
