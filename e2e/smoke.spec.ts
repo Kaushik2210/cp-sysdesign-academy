@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -219,4 +219,26 @@ test("mock interview: timed round, rubric scoring, saved history", async ({ page
 
   await page.getByRole("button", { name: /Delete attempt/ }).click();
   await expect(page.getByRole("heading", { name: /Your history \(0\)/ })).toBeVisible();
+});
+test("numbers cheat sheet shows the latency scale and computes estimates", async ({ page }) => {
+  await page.goto("/cheatsheets/numbers/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: "Numbers cheat sheet" })).toBeVisible();
+  await expect(page.getByRole("table", { name: /latencies/ }).getByRole("row")).toHaveCount(14); // header + 13
+
+  // Defaults describe 100M requests/day: about 3,472 peak qps, 10 servers at 70% utilisation of 500 qps.
+  const result = (label: string) => page.locator("dt", { hasText: label }).locator("xpath=following-sibling::dd[1]");
+  await expect(result("Servers needed")).toHaveText("10");
+  await expect(result("Downtime allowed per year")).toHaveText("8.76 hours");
+
+  await page.getByLabel("Availability target (%)").fill("99.99");
+  await expect(result("Downtime allowed per year")).toHaveText("52.6 minutes");
+
+  await page.getByLabel(/Component availabilities/).fill("99, 99");
+  await expect(result("All components required (series)")).toHaveText("98.0100%");
+  await expect(result("Any one is enough (parallel)")).toHaveText("99.990000%");
+
+  // Garbage input never produces NaN.
+  await page.getByLabel("Requests per day").fill("abc");
+  await expect(page.getByText("NaN")).toHaveCount(0);
 });
