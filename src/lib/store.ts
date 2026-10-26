@@ -30,9 +30,12 @@ interface ProgressState {
   cards: Record<string, Card>;
   /** yyyy-mm-dd -> number of activity events (streak calendar) */
   activity: Record<string, number>;
+  /** roadmap step key -> ISO date ticked (see stepKey in lib/content/roadmap) */
+  roadmap: Record<string, string>;
   visit: (id: string) => void;
   toggleComplete: (id: string, title?: string) => void;
   toggleBookmark: (id: string) => void;
+  toggleRoadmap: (key: string) => void;
   setNote: (id: string, note: string) => void;
   recordProblem: (id: string, verdict: Verdict, tags: string[]) => void;
   recordQuiz: (id: string, result: QuizResult) => void;
@@ -57,6 +60,7 @@ export const useProgress = create<ProgressState>()(
       quizzes: {},
       cards: {},
       activity: {},
+      roadmap: {},
       visit: (id) => set({ lastVisited: id }),
       toggleComplete: (id, title) =>
         set((s) => {
@@ -86,6 +90,13 @@ export const useProgress = create<ProgressState>()(
             ? s.bookmarks.filter((b) => b !== id)
             : [...s.bookmarks, id],
         })),
+      toggleRoadmap: (key) =>
+        set((s) => {
+          const roadmap = { ...s.roadmap };
+          if (roadmap[key]) delete roadmap[key];
+          else roadmap[key] = new Date().toISOString();
+          return { roadmap, activity: roadmap[key] ? bump(s.activity) : s.activity };
+        }),
       setNote: (id, note) => set((s) => ({ notes: { ...s.notes, [id]: note } })),
       recordProblem: (id, verdict, tags) =>
         set((s) => {
@@ -114,10 +125,10 @@ export const useProgress = create<ProgressState>()(
             : s,
         ),
       exportJson: () => {
-        const { completed, lastVisited, bookmarks, notes, problems, quizzes, cards, activity } =
+        const { completed, lastVisited, bookmarks, notes, problems, quizzes, cards, activity, roadmap } =
           get();
         return JSON.stringify(
-          { version: 2, completed, lastVisited, bookmarks, notes, problems, quizzes, cards, activity },
+          { version: 2, completed, lastVisited, bookmarks, notes, problems, quizzes, cards, activity, roadmap },
           null,
           2,
         );
@@ -133,6 +144,7 @@ export const useProgress = create<ProgressState>()(
           quizzes: d.quizzes ?? {},
           cards: d.cards ?? {},
           activity: d.activity ?? {},
+          roadmap: d.roadmap ?? {},
         });
       },
     }),
