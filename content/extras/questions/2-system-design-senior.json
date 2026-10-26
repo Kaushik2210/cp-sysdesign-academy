@@ -1,0 +1,154 @@
+[
+  {
+    "id": "ride-matching",
+    "kind": "system-design",
+    "level": "senior",
+    "title": "Design a ride-hailing matching service",
+    "prompt": "Design the part of a ride-hailing app that tracks nearby drivers and matches riders to them.",
+    "clarify": ["How many drivers and riders per city and how often do drivers report location?", "What is the target time to match?", "Do we handle pricing and payments here or only matching?"],
+    "strongAnswer": [
+      "Recognises location updates are the dominant, write-heavy load and keeps the live positions in memory or a fast store, not a general database.",
+      "Uses a geospatial index (geohash, quadtree or S2 cells) so nearby-driver lookups touch only a few cells.",
+      "Describes matching: candidate search, ranking by distance or ETA, offering to a driver, handling timeouts and re-offering.",
+      "Ensures one driver is assigned to one rider using an atomic claim or short lease, so two riders never get the same driver.",
+      "Partitions by region or city, and discusses behaviour at cell boundaries.",
+      "Covers reliability: stale locations, drivers going offline and degraded matching under overload."
+    ],
+    "pitfalls": ["Storing every location ping in the main relational database.", "Scanning all drivers with a distance formula.", "No protection against double assignment."],
+    "minutes": 45,
+    "related": ["sd/databases-2/sharding-and-partitioning", "sd/databases-2/hot-keys-and-hot-partitions"]
+  },
+  {
+    "id": "file-sync",
+    "kind": "system-design",
+    "level": "senior",
+    "title": "Design a file storage and sync service",
+    "prompt": "Design a service like a cloud drive that stores files and keeps them in sync across a user's devices.",
+    "clarify": ["Maximum file size and total storage per user?", "Do we need sharing and version history?", "How do we handle conflicting edits from two devices?"],
+    "strongAnswer": [
+      "Splits files into chunks addressed by content hash, so only changed chunks upload and identical chunks are deduplicated.",
+      "Separates metadata (file tree, versions, chunk lists) in a database from chunk data in object storage.",
+      "Uses resumable, parallel chunk uploads, often via presigned URLs, so large files survive interruptions.",
+      "Notifies devices of changes through a persistent connection or long polling, and syncs by comparing versions.",
+      "Defines conflict handling, for example keeping both versions with a conflict marker.",
+      "Considers durability (replication across zones), encryption and garbage collection of unreferenced chunks."
+    ],
+    "pitfalls": ["Re-uploading whole files on any change.", "Putting file bytes in the metadata database.", "No story for conflicts or interrupted uploads."],
+    "minutes": 45,
+    "related": ["sd/storage/blob-stores", "sd/networking-and-apis/real-time-communication"]
+  },
+  {
+    "id": "ticket-booking",
+    "kind": "system-design",
+    "level": "senior",
+    "title": "Design a ticket booking system",
+    "prompt": "Design a system for booking seats for popular events, including sudden high-demand sales.",
+    "clarify": ["How many concurrent users hit a popular on-sale?", "How long may a user hold seats while paying?", "Is overselling ever acceptable?"],
+    "strongAnswer": [
+      "Treats double booking as the central correctness problem and enforces it in the database with a transactional update or optimistic version check on each seat.",
+      "Models seat states (available, held, sold) with a hold that expires automatically after a timeout.",
+      "Protects the system during spikes with a virtual waiting room or queue that admits users at a controlled rate.",
+      "Makes payment idempotent so retries never charge twice, and ties the hold to the payment outcome.",
+      "Caches read-heavy views such as event pages, but never uses a stale cache to decide seat availability.",
+      "Describes failure handling: expired holds, payment webhooks arriving late and reconciliation."
+    ],
+    "pitfalls": ["Checking availability in the application and writing later (race condition).", "Locks held across the whole payment flow.", "Letting a stampede reach the database directly."],
+    "minutes": 45,
+    "related": ["sd/databases-1/acid-and-transactions", "sd/scalability/load-shedding-and-bulkheads"]
+  },
+  {
+    "id": "key-value-store",
+    "kind": "system-design",
+    "level": "senior",
+    "title": "Design a distributed key-value store",
+    "prompt": "Design a highly available key-value store that scales horizontally, in the style of Dynamo.",
+    "clarify": ["What consistency does the application need: strong or eventual?", "What are the read and write latency targets and data size?", "How should the system behave during a network partition?"],
+    "strongAnswer": [
+      "Distributes keys with consistent hashing and virtual nodes so adding or removing nodes moves little data.",
+      "Replicates each key to N nodes, and uses quorum reads and writes (R + W greater than N) to tune consistency against latency.",
+      "Handles conflicting writes with versioning (vector clocks) or last-write-wins, and explains the data-loss risk of the latter.",
+      "Keeps writes available during failures using sloppy quorums and hinted handoff, then repairs replicas with read repair and anti-entropy.",
+      "Detects failures with gossip and heartbeats rather than a central coordinator.",
+      "Explains the storage engine at a high level (write-ahead log and sorted files) and compaction."
+    ],
+    "pitfalls": ["Hash-mod-N placement that reshuffles everything on resize.", "Claiming strong consistency and full availability together.", "A single metadata server as a bottleneck."],
+    "minutes": 45,
+    "related": ["sd/databases-2/consistent-hashing", "sd/databases-2/replication"]
+  },
+  {
+    "id": "payment-system",
+    "kind": "system-design",
+    "level": "senior",
+    "title": "Design a payment processing flow",
+    "prompt": "Design the backend that charges customers through an external payment provider and records the result reliably.",
+    "clarify": ["Which payment methods and providers, and what volume?", "Do we need refunds and partial captures?", "What must be true if the provider times out or calls us twice?"],
+    "strongAnswer": [
+      "Uses an idempotency key per payment so retries and duplicate requests never charge twice.",
+      "Models a payment as a state machine (created, authorised, captured, failed, refunded) with transitions stored durably.",
+      "Records money movements in an append-only, double-entry ledger so balances can be audited and reconciled.",
+      "Handles provider timeouts by treating the outcome as unknown and resolving it by querying the provider or via webhooks.",
+      "Processes webhooks idempotently and verifies their authenticity.",
+      "Reconciles daily against provider reports and alerts on mismatches."
+    ],
+    "pitfalls": ["Assuming a timeout means failure and retrying blindly.", "Updating balances in place with no history.", "Trusting webhooks without verification or deduplication."],
+    "minutes": 45,
+    "related": ["sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/databases-1/acid-and-transactions"]
+  },
+  {
+    "id": "video-streaming",
+    "kind": "system-design",
+    "level": "senior",
+    "title": "Design a video streaming platform",
+    "prompt": "Design a service where users upload videos and others stream them on any device and network.",
+    "clarify": ["How many uploads and views per day and what are the typical video lengths?", "Which devices and what quality range?", "Are live streams in scope?"],
+    "strongAnswer": [
+      "Separates the upload path from the playback path, since they have very different loads.",
+      "Uploads in chunks to object storage, then runs an asynchronous pipeline that splits and transcodes into multiple resolutions and bitrates.",
+      "Serves playback with adaptive bitrate streaming (HLS or DASH): short segments and a manifest so the player switches quality as bandwidth changes.",
+      "Delivers segments through a CDN, with popular content cached at the edge and cold content fetched from origin.",
+      "Stores metadata in a database and keeps heavy bytes out of it, and discusses thumbnails and search separately.",
+      "Plans for cost (storage tiers, egress) and for failures in the transcoding pipeline with retries."
+    ],
+    "pitfalls": ["Serving large files straight from application servers.", "Transcoding synchronously during upload.", "Ignoring that most traffic goes to a small set of popular videos."],
+    "minutes": 45,
+    "related": ["sd/networking-and-apis/cdn-and-api-design", "sd/storage/object-block-file"]
+  },
+  {
+    "id": "metrics-monitoring",
+    "kind": "system-design",
+    "level": "senior",
+    "title": "Design a metrics and monitoring system",
+    "prompt": "Design a system that collects metrics from thousands of servers, stores them, lets engineers query dashboards and triggers alerts.",
+    "clarify": ["How many metrics and how frequently are they reported?", "How long must data be retained and at what resolution?", "How quickly must an alert fire after a problem?"],
+    "strongAnswer": [
+      "Chooses between agents pushing metrics and a collector pulling them, with the trade-offs of each.",
+      "Buffers ingestion through a queue so spikes do not lose data, then writes to a time-series store optimised for append-heavy workloads.",
+      "Downsamples old data (for example keep per-minute averages for a year) to control storage cost.",
+      "Explains the alerting path: rules are evaluated on a schedule against recent data, with deduplication and routing.",
+      "Warns about high-cardinality labels and how they inflate storage and query cost.",
+      "Makes the monitoring system itself highly available, since it must work when everything else is failing."
+    ],
+    "pitfalls": ["Using a general relational database for time-series at scale.", "Keeping all raw data forever.", "Monitoring that fails with the systems it watches."],
+    "minutes": 45,
+    "related": ["sd/queues-and-streaming/stream-processing-basics", "sd/storage/data-lakes-warehouses"]
+  },
+  {
+    "id": "ai-chat-assistant",
+    "kind": "system-design",
+    "level": "senior",
+    "title": "Design an LLM-powered chat assistant (emerging topic)",
+    "prompt": "Design the backend for a chat assistant that answers questions over a company's documents using a hosted language model.",
+    "clarify": ["How many users and what are the latency and cost targets?", "How fresh must the documents be and how sensitive is the data?", "Do answers need citations, and must the system call tools?"],
+    "strongAnswer": [
+      "Streams tokens to the client (for example with server-sent events) so users see progress before the full answer is ready.",
+      "Uses retrieval: documents are chunked, embedded and stored in a vector index, and the most relevant chunks are added to the prompt, with citations.",
+      "Controls cost and latency with caching (including repeated prompts), model routing by task difficulty, and rate limits per user.",
+      "Stores conversation state with a bounded context window, summarising or truncating older turns.",
+      "Builds evaluation in from the start: a test set of questions with expected answers, regression checks on every change, and logging for review.",
+      "Addresses safety: access control on retrieved documents, defences against prompt injection and handling of sensitive data."
+    ],
+    "pitfalls": ["Sending whole documents instead of retrieving relevant chunks.", "No evaluation, so quality changes go unnoticed.", "Retrieving documents the asking user is not allowed to see."],
+    "minutes": 45,
+    "related": ["sd/caching/caching-strategies", "sd/scalability/rate-limiting-algorithms"]
+  }
+]
