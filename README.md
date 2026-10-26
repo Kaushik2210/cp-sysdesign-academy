@@ -16,6 +16,7 @@ Runs entirely in your browser: no backend, no sign-up, progress stays on your de
 - **Quizzes** (MCQ, multi-select, predict-the-output) and a **spaced-repetition review queue** (SM-2) built from completed lessons and missed questions.
 - **Visualizers** with play/pause/step/speed and highlighted pseudocode.
 - **Interactive diagrams**: click a component to see its role, failure modes and trade-offs.
+- **Cheat sheets**: a numbers sheet with estimators and 14 trade-off comparisons.
 - **Interview playbook and mock interviews**: a 45-minute framework, a 25-question bank and a timed, rubric-scored practice tool.
 - **Zero-to-elite roadmap** (10 phases, projects and checkpoints) backed by a sourced **hiring-market** page.
 - **Glossary** with 240 cross-linked system design terms.
