@@ -8,6 +8,7 @@ import { getAllProblems } from "../src/lib/content/problems";
 import { getPatterns } from "../src/lib/content/patterns";
 import { getTemplates } from "../src/lib/content/templates";
 import { getGlossary } from "../src/lib/content/glossary";
+import { getInsights } from "../src/lib/content/market";
 
 const only = process.argv[2]; // e.g. `cp/math-basics`
 const errors: string[] = [];
@@ -72,6 +73,12 @@ try {
     if (t.related.includes(t.id)) errors.push(`glossary "${t.id}": lists itself as related`);
     for (const l of t.lessons) if (!ids.has(l)) errors.push(`glossary "${t.id}": unknown lesson "${l}"`);
   }
+} catch (e) {
+  errors.push(String(e instanceof Error ? e.message : e));
+}
+
+try {
+  getInsights(); // schema + duplicate-id validation
 } catch (e) {
   errors.push(String(e instanceof Error ? e.message : e));
 }
