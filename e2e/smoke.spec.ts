@@ -141,3 +141,14 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
   await expect(link).toHaveAttribute("href", /hiringlab\.indeed\.com/);
   await expect(link).toHaveAttribute("target", "_blank");
 });
+test.describe("phone width", () => {
+  test.use({ viewport: { width: 375, height: 812 } });
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/cp/sorting-and-searching/binary-search/"]) {
+    test(`no horizontal page scroll on ${path}`, async ({ page }) => {
+      await page.goto(path);
+      await page.waitForLoadState("networkidle");
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+    });
+  }
+});
