@@ -119,4 +119,12 @@ export const VIZ_META: VizMeta[] = [
     complexity: "O(log n) per query and update",
     lessons: [],
   },
+  {
+    name: "knapsack",
+    title: "0/1 knapsack: filling the DP table",
+    category: "dp",
+    summary: "Each cell is the best value using the first i items at capacity w: either skip the item or take it and look back by its weight.",
+    complexity: "O(n * W)",
+    lessons: [],
+  },
 ];

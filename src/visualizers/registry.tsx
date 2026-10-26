@@ -20,6 +20,7 @@ import { BFS_GRID_CODE, DEFAULT_GRID, DFS_GRID_CODE, bfsGridSteps, dfsGridSteps,
 import { DEFAULT_GRAPH, DIJKSTRA_CODE, dijkstraSteps, type DijkstraFrame } from "./dijkstra";
 import { DEFAULT_DSU, DSU_CODE, dsuSteps, type DsuFrame } from "./dsu";
 import { DEFAULT_SEGTREE, SEGTREE_CODE, segtreeSteps, type SegFrame } from "./segtree";
+import { DEFAULT_KNAPSACK, KNAPSACK_CODE, knapsackSteps, type KnapsackFrame } from "./knapsack";
 import type { VisualizerDef } from "./types";
 
 function BinarySearchRender({ state: s }: { state: BSState }) {
@@ -359,6 +360,70 @@ function SegtreeRender({ state: s }: { state: SegFrame }) {
   );
 }
 
+/** The DP table. Cell borders encode roles (current, skip source, take source, traceback) and a letter in the corner repeats the role as text. */
+function KnapsackRender({ state: s }: { state: KnapsackFrame }) {
+  const same = (a: [number, number] | null, r: number, c: number) => a !== null && a[0] === r && a[1] === c;
+  const role = (r: number, c: number) => {
+    if (same(s.current, r, c)) return "now";
+    if (same(s.skip, r, c)) return "skip";
+    if (same(s.take, r, c)) return "take";
+    if (s.trace.some((p) => same(p, r, c))) return "path";
+    return "";
+  };
+  const style: Record<string, string> = {
+    now: "border-accent ring-2 ring-accent bg-accent/20",
+    skip: "border-dashed border-fg",
+    take: "border-emerald-500 border-2",
+    path: "border-emerald-500 bg-emerald-500/30",
+    "": "border-border",
+  };
+  const letter: Record<string, string> = { now: "", skip: "skip", take: "take", path: "" };
+  return (
+    <div>
+      <div className="overflow-x-auto">
+        <table aria-label="Knapsack table" className="border-separate border-spacing-0.5 text-center font-mono text-xs">
+          <thead>
+            <tr>
+              <th scope="col" className="pr-2 text-left font-normal text-muted-fg">
+                item  capacity
+              </th>
+              {s.table[0].map((_, w) => (
+                <th key={w} scope="col" className="w-9 font-normal text-muted-fg">
+                  {w}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {s.table.map((row, i) => (
+              <tr key={i}>
+                <th scope="row" className="whitespace-nowrap pr-2 text-left font-normal text-muted-fg">
+                  {i === 0 ? "none" : `#${i} (w${s.items[i - 1].weight}, v${s.items[i - 1].value})`}
+                </th>
+                {row.map((v, w) => {
+                  const r = role(i, w);
+                  return (
+                    <td key={w} aria-label={`item ${i}, capacity ${w}: ${v ?? "not computed"}${r ? `, ${r}` : ""}`} className={`relative h-8 w-9 rounded border ${style[r]}`}>
+                      {v ?? ""}
+                      {letter[r] && <span className="absolute -top-0.5 right-0.5 text-[8px] leading-none text-muted-fg">{letter[r]}</span>}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1 text-xs text-muted-fg">Solid blue = cell being filled. Dashed = the skip source (cell above). Green outline = the take source. Green fill = traceback route.</p>
+      {s.chosen.length > 0 && (
+        <p className="text-sm" aria-label="Chosen items">
+          Items taken so far: <span className="font-mono">{[...s.chosen].sort((a, b) => a - b).join(", ")}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 export const VISUALIZERS = {
   "binary-search": {
     title: "Binary search",
@@ -456,6 +521,14 @@ export const VISUALIZERS = {
     generate: segtreeSteps,
     Render: SegtreeRender,
   } satisfies VisualizerDef<SegFrame>,
+  knapsack: {
+    title: "0/1 knapsack: filling the DP table",
+    pseudocode: KNAPSACK_CODE,
+    defaultInput: DEFAULT_KNAPSACK,
+    inputHelp: "Line 1: capacity (1 to 12). Then one item per line: weight value (up to 6 items).",
+    generate: knapsackSteps,
+    Render: KnapsackRender,
+  } satisfies VisualizerDef<KnapsackFrame>,
 };
 
 export type VisualizerName = keyof typeof VISUALIZERS;
