@@ -13,6 +13,9 @@ export function Header() {
           CP &amp; SysDesign <span className="text-accent">Academy</span>
         </Link>
         <div className="ml-2 flex flex-wrap gap-x-4 gap-y-0 text-sm text-muted-fg">
+          <Link href="/roadmap/" className="inline-flex min-h-11 items-center font-medium text-fg hover:text-accent">
+            Roadmap
+          </Link>
           <Link href="/cp/" className="inline-flex min-h-11 items-center hover:text-fg">
             Competitive Programming
           </Link>
