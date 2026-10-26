@@ -15,6 +15,7 @@ import {
   type WindowState,
   type SortState,
 } from "./algorithms";
+import { INSERTION_SORT_CODE, MERGE_SORT_CODE, QUICK_SORT_CODE, insertionSortSteps, mergeSortSteps, quickSortSteps, type SortFrame } from "./sorting";
 import type { VisualizerDef } from "./types";
 
 function BinarySearchRender({ state: s }: { state: BSState }) {
@@ -79,6 +80,36 @@ function WindowRender({ state: s }: { state: WindowState }) {
     </div>
   );
 }
+/** Shared renderer for the comparison sorts: the array with marks, an optional lifted key, and merge buffers. */
+function SortFrameRender({ state: s }: { state: SortFrame }) {
+  return (
+    <div>
+      <ArrayView values={s.arr} marks={s.marks} />
+      {s.held !== null && (
+        <p className="text-sm">
+          Holding key = <b className="font-mono">{s.held}</b>
+        </p>
+      )}
+      {s.aux && (
+        <div className="mt-1 space-y-1 text-xs" aria-label="Merge buffers">
+          {([["left half", s.aux.left, s.aux.i], ["right half", s.aux.right, s.aux.j]] as const).map(([name, vals, pos]) => (
+            <div key={name} className="flex items-center gap-1">
+              <span className="w-16 text-muted-fg">{name}</span>
+              {vals.map((v, k) => (
+                <span
+                  key={k}
+                  className={`inline-flex h-7 min-w-7 items-center justify-center rounded border px-1 font-mono ${k < pos ? "border-border opacity-40" : k === pos ? "border-accent bg-accent/15" : "border-border"}`}
+                >
+                  {v}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 export const VISUALIZERS = {
   "binary-search": {
     title: "Binary search",
@@ -112,6 +143,30 @@ export const VISUALIZERS = {
     generate: slidingWindowSteps,
     Render: WindowRender,
   } satisfies VisualizerDef<WindowState>,
+  "insertion-sort": {
+    title: "Insertion sort",
+    pseudocode: INSERTION_SORT_CODE,
+    defaultInput: "5 2 4 6 1 3",
+    inputHelp: "Numbers separated by spaces (max 16).",
+    generate: insertionSortSteps,
+    Render: SortFrameRender,
+  } satisfies VisualizerDef<SortFrame>,
+  "merge-sort": {
+    title: "Merge sort",
+    pseudocode: MERGE_SORT_CODE,
+    defaultInput: "38 27 43 3 9 82 10",
+    inputHelp: "Numbers separated by spaces (max 16).",
+    generate: mergeSortSteps,
+    Render: SortFrameRender,
+  } satisfies VisualizerDef<SortFrame>,
+  "quick-sort": {
+    title: "Quick sort",
+    pseudocode: QUICK_SORT_CODE,
+    defaultInput: "8 3 7 1 9 2 6",
+    inputHelp: "Numbers separated by spaces (max 16).",
+    generate: quickSortSteps,
+    Render: SortFrameRender,
+  } satisfies VisualizerDef<SortFrame>,
 };
 
 export type VisualizerName = keyof typeof VISUALIZERS;
