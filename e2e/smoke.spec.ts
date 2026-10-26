@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -352,4 +352,32 @@ test("cache sandbox steps through evictions and compares policies", async ({ pag
   await page.getByLabel("Traffic").selectOption({ label: "Looping scan slightly bigger than the cache" });
   const lru = page.locator("li", { hasText: "LRU (least recently used)" }).filter({ hasText: "% hits" }).last();
   await expect(lru).toContainText("0.0% hits");
+});
+test("load balancer sandbox: least connections wins on heavy-tailed work and ties round robin on uniform work", async ({ page }) => {
+  await page.goto("/sandbox/load-balancer/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: "Load balancing" })).toBeVisible();
+
+  const table = page.getByRole("table", { name: /Load balancing policies compared/ });
+  const p99 = async (policy: RegExp) => {
+    const row = table.getByRole("row", { name: policy });
+    return Number((await row.getByRole("cell").nth(3).innerText()).split("\n")[0]);
+  };
+
+  // Defaults: 5 equal servers, 80% load, 10% of requests 20x more expensive.
+  await expect(table.getByRole("row").nth(1)).toContainText("Least connections");
+  expect(await p99(/Least connections/)).toBeLessThan(await p99(/Round robin/));
+
+  // Uniform request cost: even counts now mean even work, so round robin matches least connections.
+  await page.getByLabel(/20 times more expensive/).uncheck();
+  expect(await p99(/Round robin/)).toBeCloseTo(await p99(/Least connections/), 1);
+  expect(await p99(/Random/)).toBeGreaterThan(await p99(/Round robin/));
+
+  // One slow server: weighted round robin and least connections adapt, plain round robin does not.
+  await page.getByLabel(/20 times more expensive/).check();
+  await page.getByLabel("Server sizes").selectOption({ label: "One server at half speed" });
+  expect(await p99(/Weighted round robin/)).toBeLessThan((await p99(/Round robin/)) / 5);
+
+  await page.getByText("Least connections", { exact: true }).last().click();
+  await expect(page.getByText(/Sends each request to the server with the fewest requests in flight/)).toBeVisible();
 });
