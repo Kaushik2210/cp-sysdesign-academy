@@ -123,3 +123,21 @@ test("glossary searches, cross-links terms and deep-links from search", async ({
   await page.getByRole("option").filter({ hasText: "Quorum" }).first().getByRole("button").click();
   await expect(page).toHaveURL(/glossary\/#quorum/);
 });
+test("hiring market page shows sourced findings and filters by confidence", async ({ page }) => {
+  await page.goto("/market/");
+  await expect(page.getByRole("heading", { level: 1, name: /Hiring market/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Five takeaways/ })).toBeVisible();
+  const status = page.getByRole("status");
+  await expect(status).toContainText(/\d+ findings/);
+  const total = Number((await status.innerText()).match(/\d+/)![0]);
+
+  await page.getByRole("checkbox", { name: /only high-confidence/i }).check();
+  const strong = Number((await status.innerText()).match(/\d+/)![0]);
+  expect(strong).toBeGreaterThan(0);
+  expect(strong).toBeLessThan(total);
+  await expect(page.getByText("Low confidence")).toHaveCount(0);
+
+  const link = page.getByRole("link", { name: /Indeed Hiring Lab/ }).first();
+  await expect(link).toHaveAttribute("href", /hiringlab\.indeed\.com/);
+  await expect(link).toHaveAttribute("target", "_blank");
+});
