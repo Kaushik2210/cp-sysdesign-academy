@@ -1,0 +1,31 @@
+[
+  {
+    "id": "deloitte-india-ai-entry-roles",
+    "topic": "india",
+    "finding": "Deloitte India's 2026 campus survey reports that 35% of organisations say AI adoption is creating new entry-level roles or skill requirements (up from 21% the year before), and that 86% say AI or agentic AI is transforming their recruitment process.",
+    "figure": "35% (up from 21%); 86% use AI in hiring",
+    "implication": "Employers are screening with AI and want AI-literate graduates, so expect automated assessments and make your public work easy to find and verify.",
+    "source": { "name": "Deloitte India, Campus Workforce Trends 2026 press release", "url": "https://www.deloitte.com/in/en/about/press-room/india-s-campus-talent-landscape-pivots-to-skill-based-hiring-as-86-percent-of-employers-adopt-ai-in-recruitment--deloitte-india.html", "kind": "primary", "published": "2026-08-27" },
+    "confidence": "high",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "deloitte-india-internships",
+    "topic": "india",
+    "finding": "The same Deloitte India study says employers increasingly use internships as a predictor of long-term success, with 80% maintaining dedicated campus hiring teams and technology remaining students' most preferred sector for the fifth year.",
+    "implication": "Treat internships and pre-placement offers as the main entry route, and start applying in your second or third year.",
+    "source": { "name": "Deloitte India, Campus Workforce Trends 2026 press release", "url": "https://www.deloitte.com/in/en/about/press-room/india-s-campus-talent-landscape-pivots-to-skill-based-hiring-as-86-percent-of-employers-adopt-ai-in-recruitment--deloitte-india.html", "kind": "primary", "published": "2026-08-27" },
+    "confidence": "high",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "unstop-demand-vs-placement",
+    "topic": "india",
+    "finding": "A campus-hiring report from Unstop says 87.8% of companies were actively recruiting on campus, yet 84% of undergraduates remained unplaced, and that AI/ML skills appear in 60-70% of fresher job descriptions, including some non-technical roles.",
+    "figure": "87.8% recruiting vs 84% unplaced; AI/ML in 60-70% of fresher JDs",
+    "implication": "Demand exists but placement depends on demonstrable skill. AI/ML literacy is becoming a baseline expectation even outside AI roles.",
+    "source": { "name": "Unstop, The State of Campus Hiring in India 2026", "url": "https://unstop.com/blog/state-of-campus-hiring-india-report", "kind": "secondary" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  }
+]
