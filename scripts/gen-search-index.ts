@@ -154,6 +154,15 @@ docs.push({
   text: "Step through LRU, LFU and FIFO evictions and compare hit ratios on different traffic.",
 });
 
+docs.push({
+  id: "sandbox:load-balancer",
+  kind: "sandbox",
+  title: "Load balancer sandbox",
+  href: "/sandbox/load-balancer/",
+  tags: "sandbox simulator load balancing round robin least connections power of two choices ip hash",
+  text: "Compare round robin, least connections, power of two choices, weighted and hash-based load balancing on identical traffic.",
+});
+
 for (const s of getTradeoffSheets()) {
   docs.push({
     id: `cheatsheet:${s.id}`,
