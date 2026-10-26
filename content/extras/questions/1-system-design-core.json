@@ -1,0 +1,135 @@
+[
+  {
+    "id": "url-shortener",
+    "kind": "system-design",
+    "level": "junior",
+    "title": "Design a URL shortener",
+    "prompt": "Design a service that turns long URLs into short links and redirects visitors who open them.",
+    "clarify": ["How many new links per month and what is the read-to-write ratio?", "Do links expire, and can users choose custom aliases?", "Do we need click analytics, or only redirects?"],
+    "strongAnswer": [
+      "States scale first: for example 100 million links a month is about 40 writes per second and roughly 400 reads per second.",
+      "Generates unique short ids without collisions: a counter encoded in base 62, or random ids with a uniqueness check, and explains the trade-off.",
+      "Chooses a key-value or simple relational store keyed by short id, because access is by key only.",
+      "Puts a cache in front for reads, since links rarely change, and says what hit ratio it aims for.",
+      "Discusses redirect status codes: 301 is cacheable by browsers, 302 lets you count every click.",
+      "Covers expiry, abuse (malicious links) and what happens if the id generator fails."
+    ],
+    "pitfalls": ["Hashing the URL and ignoring collisions.", "A single counter that is a single point of failure.", "Sharding or microservices before any number justifies them."],
+    "minutes": 45,
+    "related": ["sd/what-is-system-design/design-framework-in-depth", "sd/caching/caching-strategies", "sd/estimation/qps-storage-bandwidth"]
+  },
+  {
+    "id": "rate-limiter-service",
+    "kind": "system-design",
+    "level": "mid",
+    "title": "Design a distributed rate limiter",
+    "prompt": "Design a rate limiting service that many API servers call to decide whether to accept or reject each request.",
+    "clarify": ["What are we limiting by: user, API key, IP or endpoint?", "Hard limit or tolerate small overshoot?", "If the limiter is unavailable, should requests be allowed (fail open) or blocked?"],
+    "strongAnswer": [
+      "Compares algorithms: fixed window, sliding window log, sliding window counter and token bucket, and picks one with a reason (token bucket allows bursts).",
+      "Keeps counters in a fast shared store such as Redis, with atomic updates (a script or atomic increment) to avoid race conditions between servers.",
+      "Describes the key design, for example limit:{apiKey}:{window}, and expiry so counters clean themselves up.",
+      "Returns standard responses: HTTP 429 with Retry-After and remaining-limit headers.",
+      "Discusses latency of the extra hop, local caching or approximate counting, and the fail-open versus fail-closed decision.",
+      "Handles hot keys, multiple regions and how limits are configured and changed."
+    ],
+    "pitfalls": ["Read-then-write counters that race across servers.", "Ignoring the burst-at-the-boundary problem of fixed windows.", "No plan for the limiter itself failing."],
+    "minutes": 45,
+    "related": ["sd/scalability/rate-limiting-algorithms", "sd/scalability/distributed-rate-limiting"]
+  },
+  {
+    "id": "chat-system",
+    "kind": "system-design",
+    "level": "mid",
+    "title": "Design a chat application",
+    "prompt": "Design a messaging service that supports one-to-one and group chat with delivery to online and offline users.",
+    "clarify": ["How many users and messages per second, and what is the maximum group size?", "Do we need message history, read receipts, presence and media?", "Is end-to-end encryption in scope?"],
+    "strongAnswer": [
+      "Uses persistent connections (WebSocket) through gateway servers for real-time delivery, with a registry of which gateway holds which user.",
+      "Gives every message a per-conversation sequence number so ordering is well defined, and explains why a global ordering is unnecessary.",
+      "Stores messages in a write-optimised store partitioned by conversation, with a separate path for media in object storage.",
+      "Handles offline users with a durable inbox and push notifications, and acknowledges delivery and read states.",
+      "Covers group fan-out and how to limit its cost for large groups.",
+      "Discusses presence at scale (heartbeats with coarse updates) and reconnection with message catch-up."
+    ],
+    "pitfalls": ["Polling instead of a push channel.", "Assuming messages arrive once and in order without acknowledgements.", "Storing media inside the message database."],
+    "minutes": 45,
+    "related": ["sd/networking-and-apis/real-time-communication", "sd/queues-and-streaming/why-queues"]
+  },
+  {
+    "id": "notification-system",
+    "kind": "system-design",
+    "level": "mid",
+    "title": "Design a notification system",
+    "prompt": "Design a system that sends push, email and SMS notifications triggered by events from many services.",
+    "clarify": ["Which channels and what volume per day, including peaks?", "Are some notifications urgent and others batchable?", "Do users control preferences and quiet hours?"],
+    "strongAnswer": [
+      "Accepts events through an API or queue and decouples producers from delivery with durable queues per channel.",
+      "Applies user preferences, templates and localisation in a processing stage before sending.",
+      "Uses third-party providers behind adapters, with retries and exponential backoff, and a dead-letter queue for permanent failures.",
+      "Prevents duplicates with an idempotency key per notification, since delivery is at-least-once.",
+      "Rate limits per user and per provider, and prioritises urgent messages over bulk ones.",
+      "Tracks delivery status and exposes metrics for failures and latency."
+    ],
+    "pitfalls": ["Sending synchronously from the request path.", "No duplicate protection when retrying.", "One shared queue where bulk traffic delays urgent messages."],
+    "minutes": 45,
+    "related": ["sd/queues-and-streaming/backpressure-retries-and-dlq", "sd/queues-and-streaming/delivery-semantics-and-idempotency"]
+  },
+  {
+    "id": "news-feed",
+    "kind": "system-design",
+    "level": "mid",
+    "title": "Design a social news feed",
+    "prompt": "Design the home feed for a social network where users see recent posts from the people they follow.",
+    "clarify": ["How many users, how many follow whom, and how often do people post and read?", "Is the feed chronological or ranked?", "How fresh must the feed be?"],
+    "strongAnswer": [
+      "Contrasts fan-out on write (precompute each follower's feed) with fan-out on read (assemble when requested) and the cost of each.",
+      "Proposes a hybrid: fan-out on write for most users, fan-out on read for accounts with huge follower counts.",
+      "Stores timelines as capped lists in a cache or fast store, with posts stored once and referenced by id.",
+      "Uses cursor-based pagination so the feed stays stable as new posts arrive.",
+      "Separates ranking from retrieval and explains where ranking would plug in.",
+      "Handles deleted posts, new follows and cold users with an empty cached feed."
+    ],
+    "pitfalls": ["Ignoring the celebrity problem.", "Offset pagination on a feed that changes.", "Storing full post bodies in every follower's timeline."],
+    "minutes": 45,
+    "related": ["sd/caching/why-cache", "sd/databases-2/hot-keys-and-hot-partitions"]
+  },
+  {
+    "id": "typeahead",
+    "kind": "system-design",
+    "level": "mid",
+    "title": "Design search autocomplete",
+    "prompt": "Design a typeahead service that suggests completions as the user types a search query.",
+    "clarify": ["What latency budget do we have per keystroke?", "How are suggestions ranked and how fresh must they be?", "Is personalisation in scope?"],
+    "strongAnswer": [
+      "Notes the budget is tens of milliseconds, so lookups must come from memory with results precomputed.",
+      "Uses a prefix structure such as a trie, or a key-value map from prefix to its top-k suggestions, rather than scanning queries.",
+      "Builds suggestion data offline from query logs and refreshes it periodically; real-time updates are a separate, smaller path.",
+      "Caches common prefixes at the edge and in the service, and debounces requests on the client.",
+      "Shards by prefix with awareness of skew (very common prefixes).",
+      "Filters unsafe or low-quality suggestions."
+    ],
+    "pitfalls": ["Querying a database with LIKE on every keystroke.", "Rebuilding the structure synchronously on every new query.", "Ignoring client-side debouncing and caching."],
+    "minutes": 45,
+    "related": ["sd/caching/why-cache", "sd/databases-2/sharding-and-partitioning"]
+  },
+  {
+    "id": "web-crawler",
+    "kind": "system-design",
+    "level": "mid",
+    "title": "Design a web crawler",
+    "prompt": "Design a crawler that discovers and downloads billions of web pages for a search index.",
+    "clarify": ["How many pages and how fresh must the index be?", "Which content types matter, and must we respect robots.txt?", "Do we only crawl, or also parse and extract links?"],
+    "strongAnswer": [
+      "Describes the loop: a URL frontier, fetchers, a parser that extracts links, and deduplication before re-queuing.",
+      "Builds the frontier with priorities and per-host politeness (rate limit and delay per domain) so sites are not overloaded.",
+      "Deduplicates URLs and page content using normalisation and hashing, with a Bloom filter or similar to save memory.",
+      "Respects robots.txt, caches DNS lookups and handles timeouts, redirects and crawler traps.",
+      "Distributes work by hashing hosts to workers so one host is handled by one worker.",
+      "Stores raw pages in object storage and metadata in a database, with re-crawl scheduling by change frequency."
+    ],
+    "pitfalls": ["A single queue with no politeness controls.", "Treating the URL string as the identity without normalisation.", "No protection against infinite link spaces."],
+    "minutes": 45,
+    "related": ["sd/queues-and-streaming/why-queues", "sd/storage/blob-stores"]
+  }
+]
