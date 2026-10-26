@@ -43,6 +43,7 @@ const routes = new Set<string>([
   "/sandbox/",
   "/sandbox/consistent-hashing/",
   "/sandbox/rate-limiter/",
+  "/sandbox/cache/",
   "/cheatsheets/",
   "/cheatsheets/numbers/",
   "/cheatsheets/tradeoffs/",
