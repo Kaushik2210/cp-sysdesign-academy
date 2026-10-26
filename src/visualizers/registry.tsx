@@ -21,6 +21,7 @@ import { DEFAULT_GRAPH, DIJKSTRA_CODE, dijkstraSteps, type DijkstraFrame } from 
 import { DEFAULT_DSU, DSU_CODE, dsuSteps, type DsuFrame } from "./dsu";
 import { DEFAULT_SEGTREE, SEGTREE_CODE, segtreeSteps, type SegFrame } from "./segtree";
 import { DEFAULT_KNAPSACK, KNAPSACK_CODE, knapsackSteps, type KnapsackFrame } from "./knapsack";
+import { DEFAULT_KMP, KMP_CODE, kmpSteps, type KmpFrame } from "./kmp";
 import type { VisualizerDef } from "./types";
 
 function BinarySearchRender({ state: s }: { state: BSState }) {
@@ -424,6 +425,86 @@ function KnapsackRender({ state: s }: { state: KnapsackFrame }) {
   );
 }
 
+/** Two aligned character rows with a verdict marker (= or ≠) between them, and the prefix-function table below. */
+function KmpRender({ state: s }: { state: KmpFrame }) {
+  const m = s.pattern.length;
+  const inFound = (c: number) => s.phase === "match" && s.found.some((st) => c >= st && c < st + m);
+  const cell = "inline-flex h-7 w-7 items-center justify-center rounded border font-mono text-sm";
+  const cols = Math.max(s.top.length, s.offset + m);
+  return (
+    <div>
+      <div className="overflow-x-auto pb-1">
+        <div className="w-max" role="group" aria-label={s.phase === "prefix" ? "Pattern compared with itself" : "Text and pattern"}>
+          <div className="mb-0.5 flex gap-0.5">
+            <span className="w-14 shrink-0 self-center text-xs text-muted-fg">{s.phase === "prefix" ? "pattern" : "text"}</span>
+            {Array.from({ length: cols }, (_, c) => (
+              <span
+                key={c}
+                className={`${cell} ${c >= s.top.length ? "border-transparent" : s.col === c ? "border-accent ring-2 ring-accent" : inFound(c) ? "border-emerald-500 bg-emerald-500/20" : "border-border"}`}
+              >
+                {s.top[c] ?? ""}
+              </span>
+            ))}
+          </div>
+          <div className="mb-0.5 flex gap-0.5">
+            <span className="w-14 shrink-0" />
+            {Array.from({ length: cols }, (_, c) => (
+              <span key={c} className="inline-flex h-4 w-7 items-center justify-center font-mono text-xs" aria-hidden="true">
+                {s.col === c && s.verdict ? (s.verdict === "equal" ? "=" : "≠") : ""}
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-0.5">
+            <span className="w-14 shrink-0 self-center text-xs text-muted-fg">pattern</span>
+            {Array.from({ length: cols }, (_, c) => {
+              const b = c - s.offset;
+              const present = b >= 0 && b < m;
+              return (
+                <span
+                  key={c}
+                  className={`${cell} ${!present ? "border-transparent" : s.col === c ? (s.verdict === "different" ? "border-dashed border-fg ring-2 ring-fg" : "border-emerald-500 ring-2 ring-emerald-500") : b < s.good ? "border-emerald-500 bg-emerald-500/20" : "border-border"}`}
+                >
+                  {present ? s.bottom[b] : ""}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-muted-fg">Blue ring = the pair being compared (= equal, ≠ different). Green = already matched, or a full occurrence in the text.</p>
+      <table aria-label="Prefix function" className="mt-2 border-separate border-spacing-0.5 text-center font-mono text-xs">
+        <tbody>
+          <tr>
+            <th scope="row" className="pr-2 text-left font-normal text-muted-fg">
+              pattern
+            </th>
+            {Array.from(s.pattern, (ch, i) => (
+              <td key={i} className="w-7 rounded border border-border">
+                {ch}
+              </td>
+            ))}
+          </tr>
+          <tr>
+            <th scope="row" className="pr-2 text-left font-normal text-muted-fg">
+              pi
+            </th>
+            {s.pi.map((v, i) => (
+              <td key={i} aria-label={`pi ${i}: ${v ?? "not computed"}`} className={`h-6 w-7 rounded border ${s.phase === "prefix" && s.col === i ? "border-accent ring-2 ring-accent" : "border-border"}`}>
+                {v ?? ""}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+      {s.found.length > 0 && (
+        <p className="mt-1 text-sm" aria-label="Matches">
+          Matches at: <span className="font-mono">{s.found.join(", ")}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 export const VISUALIZERS = {
   "binary-search": {
     title: "Binary search",
@@ -529,6 +610,14 @@ export const VISUALIZERS = {
     generate: knapsackSteps,
     Render: KnapsackRender,
   } satisfies VisualizerDef<KnapsackFrame>,
+  kmp: {
+    title: "KMP string matching",
+    pseudocode: KMP_CODE,
+    defaultInput: DEFAULT_KMP,
+    inputHelp: "Line 1: the text (up to 24 characters). Line 2: the pattern (up to 10). Lowercase letters and digits only.",
+    generate: kmpSteps,
+    Render: KmpRender,
+  } satisfies VisualizerDef<KmpFrame>,
 };
 
 export type VisualizerName = keyof typeof VISUALIZERS;

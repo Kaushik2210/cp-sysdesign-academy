@@ -127,4 +127,12 @@ export const VIZ_META: VizMeta[] = [
     complexity: "O(n * W)",
     lessons: [],
   },
+  {
+    name: "kmp",
+    title: "KMP string matching",
+    category: "strings",
+    summary: "Precompute, for each pattern prefix, its longest border; on a mismatch slide the pattern using that table instead of re-reading text.",
+    complexity: "O(n + m)",
+    lessons: [],
+  },
 ];
