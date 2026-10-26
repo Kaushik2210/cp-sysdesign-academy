@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { Bookmark, CheckCircle2 } from "lucide-react";
 import { useProgress } from "@/lib/store";
+import { fireConfetti } from "@/components/fx/confetti";
 import { cn } from "@/lib/utils";
 
 export function LessonActions({ id, title }: { id: string; title: string }) {
@@ -15,7 +16,13 @@ export function LessonActions({ id, title }: { id: string; title: string }) {
       <button
         type="button"
         aria-pressed={done}
-        onClick={() => toggleComplete(id, title)}
+        onClick={(e) => {
+          if (!done) {
+            const r = e.currentTarget.getBoundingClientRect();
+            fireConfetti({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+          }
+          toggleComplete(id, title);
+        }}
         className={cn(
           "inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted",
           done && "border-accent text-accent",
