@@ -158,6 +158,14 @@ for i in range(h):
 Set `dist[v]` (or a visited flag) when you **enqueue** `v`. If you mark on dequeue, the same node can be enqueued many times by different neighbours, so the queue can hold up to `E` entries instead of `V` (a real memory problem on dense graphs) and every duplicate is re-examined.
 </Callout>
 
+**Watch it run.** Step through BFS on a small maze. Cells are expanded in order of distance, and the numbers are the distances. Edit the grid (`#` is a wall) to try your own.
+
+<Visualizer name="bfs-grid" />
+
+For contrast, here is the same maze with a stack instead of a queue. It still finds a route, but it dives down one corridor first, so the route is usually longer than the shortest one.
+
+<Visualizer name="dfs-grid" />
+
 ### Multi-source BFS
 
 Put **all** sources into the queue at distance `0` before starting. The result is the distance to the *nearest* source for every node ("distance to the closest fire", "rotting oranges"). It is the same invariant: the initial queue is sorted (all zeros).
