@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -327,4 +327,29 @@ test("rate limiter sandbox reveals the fixed-window boundary flaw", async ({ pag
   await page.getByLabel("Traffic pattern").selectOption({ label: "One big burst, then quiet" });
   await page.getByText("Token bucket", { exact: true }).first().click();
   await expect(page.getByRole("img", { name: /Timeline of 30 requests/ })).toBeVisible();
+});
+test("cache sandbox steps through evictions and compares policies", async ({ page }) => {
+  await page.goto("/sandbox/cache/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: "Cache eviction" })).toBeVisible();
+
+  // Hand-checked: sequence A B C A D A E B A C with 3 slots -> LRU 3 hits, FIFO 2 hits.
+  const run = page.getByRole("button", { name: "Run to end" });
+  await run.click();
+  await expect(page.getByText(/Hits so far: 3 of 10 \(30%\)/)).toBeVisible();
+
+  await page.getByText("FIFO (first in, first out)", { exact: true }).first().click();
+  await run.click();
+  await expect(page.getByText(/Hits so far: 2 of 10 \(20%\)/)).toBeVisible();
+
+  // Stepping one access at a time reports the miss on D and what was evicted (FIFO evicts A).
+  await page.getByRole("button", { name: "Reset" }).click();
+  const step = page.getByRole("button", { name: /^Step/ });
+  for (let i = 0; i < 5; i++) await step.click();
+  await expect(page.getByText(/Accessed D: MISS and evicted A/)).toBeVisible();
+
+  // A loop slightly larger than the cache defeats LRU and FIFO entirely.
+  await page.getByLabel("Traffic").selectOption({ label: "Looping scan slightly bigger than the cache" });
+  const lru = page.locator("li", { hasText: "LRU (least recently used)" }).filter({ hasText: "% hits" }).last();
+  await expect(lru).toContainText("0.0% hits");
 });
