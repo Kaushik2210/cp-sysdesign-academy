@@ -1,0 +1,28 @@
+{
+  "id": "distributed-systems-depth",
+  "order": 7,
+  "title": "Distributed systems depth: consensus, replication and failure",
+  "goal": "Go beyond box-and-arrow diagrams: understand how replicated systems agree, fail and recover by reading the key papers and implementing a replicated store yourself.",
+  "when": "Months 10 to 16",
+  "hoursPerWeek": 10,
+  "whyNow": ["indeed-senior-ai-skew", "role-demand-vendor", "google-ai-generated-code"],
+  "steps": [
+    { "kind": "external", "title": "MIT 6.5840 (6.824) Distributed Systems", "url": "https://pdos.csail.mit.edu/6.824/", "type": "course", "note": "Lectures, readings and the famous Raft and key-value labs. Do the labs; reading alone is not enough." },
+    { "kind": "external", "title": "The Raft consensus algorithm", "url": "https://raft.github.io/", "type": "paper", "note": "The paper, an interactive visualisation and implementations to compare against." },
+    { "kind": "external", "title": "Dynamo: Amazon's Highly Available Key-value Store", "url": "https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf", "type": "paper", "note": "Quorums, vector clocks, sloppy quorums and anti-entropy in one readable paper." },
+    { "kind": "lesson", "ref": "sd/databases-2/read-replicas-and-failover" },
+    { "kind": "lesson", "ref": "sd/databases-2/hot-keys-and-hot-partitions" },
+    { "kind": "lesson", "ref": "sd/queues-and-streaming/kafka-rabbitmq-sqs" },
+    { "kind": "lesson", "ref": "sd/queues-and-streaming/stream-processing-basics" },
+    { "kind": "lesson", "ref": "sd/scalability/distributed-rate-limiting" },
+    { "kind": "lesson", "ref": "sd/scalability/load-shedding-and-bulkheads" },
+    { "kind": "page", "title": "Glossary: consensus, quorum, split brain, fencing token", "href": "/glossary/", "note": "Search these terms and follow the related links." },
+    { "kind": "project", "title": "A replicated key-value store that survives failures", "brief": "Implement a leader-based replicated store (the MIT labs are a good scaffold). Add a test harness that kills nodes, delays and drops messages, and checks that acknowledged writes are never lost and reads are linearizable where you promise it.", "deliverable": "A repository with the store, a fault-injection test suite and a short document explaining which guarantees you provide and which you do not." },
+    { "kind": "planned", "title": "Consensus, coordination, microservice patterns, search and security modules", "note": "SD modules 11 to 16 are not written on this site yet. The papers and course above cover the same ground in the meantime." }
+  ],
+  "exit": [
+    "You can explain how Raft elects a leader and why a committed entry cannot be lost.",
+    "You can say what CAP and PACELC predict for a given store and what that means for a feature you are designing.",
+    "Your fault-injection tests find at least one real bug in your own implementation, which you fix."
+  ]
+}
