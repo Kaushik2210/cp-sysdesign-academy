@@ -111,4 +111,12 @@ export const VIZ_META: VizMeta[] = [
     complexity: "O(alpha(n)) amortized per operation",
     lessons: [],
   },
+  {
+    name: "segment-tree",
+    title: "Segment tree: range sums and point updates",
+    category: "data-structures",
+    summary: "Store the sum of every dyadic range so any range query combines O(log n) stored nodes and a point update fixes one root-to-leaf path.",
+    complexity: "O(log n) per query and update",
+    lessons: [],
+  },
 ];

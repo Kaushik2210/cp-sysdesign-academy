@@ -19,6 +19,7 @@ import { INSERTION_SORT_CODE, MERGE_SORT_CODE, QUICK_SORT_CODE, insertionSortSte
 import { BFS_GRID_CODE, DEFAULT_GRID, DFS_GRID_CODE, bfsGridSteps, dfsGridSteps, type GridFrame } from "./grid";
 import { DEFAULT_GRAPH, DIJKSTRA_CODE, dijkstraSteps, type DijkstraFrame } from "./dijkstra";
 import { DEFAULT_DSU, DSU_CODE, dsuSteps, type DsuFrame } from "./dsu";
+import { DEFAULT_SEGTREE, SEGTREE_CODE, segtreeSteps, type SegFrame } from "./segtree";
 import type { VisualizerDef } from "./types";
 
 function BinarySearchRender({ state: s }: { state: BSState }) {
@@ -285,6 +286,79 @@ function DsuRender({ state: s }: { state: DsuFrame }) {
   );
 }
 
+/** Segment tree drawn as a binary tree. Each node shows its sum and range; status is also written as a text tag, not only colour. */
+function SegtreeRender({ state: s }: { state: SegFrame }) {
+  const n = s.values.length;
+  const ids: number[] = [];
+  s.lo.forEach((l, k) => l !== null && ids.push(k));
+  const depthOf = (k: number) => Math.floor(Math.log2(k));
+  const maxD = Math.max(...ids.map(depthOf));
+  const colW = 60;
+  const x = (k: number): number => {
+    const l = s.lo[k]!;
+    const r = s.hi[k]!;
+    if (l === r) return colW / 2 + l * colW;
+    return (x(2 * k) + x(2 * k + 1)) / 2;
+  };
+  const W = n * colW;
+  const H = (maxD + 1) * 62 + 8;
+  const tag = (k: number) => (s.visiting === k ? "now" : s.used.includes(k) ? "used" : s.skipped.includes(k) ? "skip" : s.updated.includes(k) ? "new" : "");
+  return (
+    <div>
+      <p className="mb-1 text-sm">
+        Operation: <b className="font-mono">{s.op}</b>
+        {s.answer !== null && (
+          <>
+            {" "}
+            · running total <b className="font-mono">{s.answer}</b>
+          </>
+        )}
+      </p>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Segment tree" style={{ width: W, minWidth: W }}>
+          {ids.map((k) => k > 1 && <line key={`e${k}`} x1={x(k >> 1)} y1={(depthOf(k >> 1)) * 62 + 30} x2={x(k)} y2={depthOf(k) * 62 + 6} stroke="hsl(var(--border))" strokeWidth={1.5} />)}
+          {ids.map((k) => {
+            const st = tag(k);
+            const cx = x(k);
+            const top = depthOf(k) * 62 + 6;
+            return (
+              <g key={k} opacity={st === "skip" ? 0.5 : 1}>
+                <title>{`range ${s.lo[k]} to ${s.hi[k]}, sum ${s.sum[k]}${st ? `, ${st}` : ""}`}</title>
+                <rect
+                  x={cx - 25}
+                  y={top}
+                  width={50}
+                  height={36}
+                  rx={7}
+                  fill={st === "used" ? "rgb(16 185 129 / 0.3)" : st === "new" ? "hsl(var(--accent) / 0.25)" : "hsl(var(--card))"}
+                  stroke={st === "now" ? "hsl(var(--accent))" : st === "used" ? "rgb(16 185 129)" : "hsl(var(--border))"}
+                  strokeWidth={st === "now" || st === "used" ? 3 : 1.5}
+                  strokeDasharray={st === "skip" ? "4 3" : undefined}
+                />
+                <text x={cx} y={top + 16} textAnchor="middle" fontSize="13" fontWeight="700" fill="hsl(var(--fg))">
+                  {s.sum[k]}
+                </text>
+                <text x={cx} y={top + 29} textAnchor="middle" fontSize="9" fill="hsl(var(--muted-fg))">
+                  {s.lo[k] === s.hi[k] ? `[${s.lo[k]}]` : `[${s.lo[k]}..${s.hi[k]}]`}
+                </text>
+                {st && (
+                  <text x={cx} y={top + 48} textAnchor="middle" fontSize="9" fontWeight="700" fill="hsl(var(--fg))">
+                    {st}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <p className="text-xs text-muted-fg">Each box: the sum of its range, and the range below. now = being examined, used = added to the answer, skip = no overlap, new = recomputed by an update.</p>
+      <p className="text-sm" aria-label="Array">
+        a = <span className="font-mono">[{s.values.join(", ")}]</span>
+      </p>
+    </div>
+  );
+}
+
 export const VISUALIZERS = {
   "binary-search": {
     title: "Binary search",
@@ -374,6 +448,14 @@ export const VISUALIZERS = {
     generate: dsuSteps,
     Render: DsuRender,
   } satisfies VisualizerDef<DsuFrame>,
+  "segment-tree": {
+    title: "Segment tree: range sums and point updates",
+    pseudocode: SEGTREE_CODE,
+    defaultInput: DEFAULT_SEGTREE,
+    inputHelp: "Line 1: up to 8 integers. Then one operation per line: query l r (inclusive sum) or update i value (positions start at 0, up to 12 operations).",
+    generate: segtreeSteps,
+    Render: SegtreeRender,
+  } satisfies VisualizerDef<SegFrame>,
 };
 
 export type VisualizerName = keyof typeof VISUALIZERS;
