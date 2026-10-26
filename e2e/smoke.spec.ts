@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -503,5 +503,23 @@ test.describe("grid search visualizers", () => {
     await page.goto("/cp/stacks-and-queues/queues-deques-bfs/");
     await expect(page.getByRole("region", { name: "BFS on a grid visualizer" })).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole("region", { name: "DFS on a grid visualizer" })).toBeVisible({ timeout: 15000 });
+  });
+});
+
+test.describe("dijkstra visualizer", () => {
+  test("computes the final distances and the shortest-path tree", async ({ page }) => {
+    await page.goto("/visualizers/dijkstra/");
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByLabel("Heap")).toContainText("(0,A)");
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 300 && (await forward.isEnabled()); i++) await forward.click();
+    await expect(page.getByLabel("Distances")).toContainText("A=0 B=3 C=1 D=4 E=7 F=8");
+    await expect(page.getByText(/Heap is empty/)).toBeVisible();
+  });
+  test("rejects negative weights with an explanation", async ({ page }) => {
+    await page.goto("/visualizers/dijkstra/");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("textbox").first().fill("A\nA B -1");
+    await expect(page.getByText(/non-negative/)).toBeVisible();
   });
 });
