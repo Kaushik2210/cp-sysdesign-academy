@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -279,4 +279,29 @@ test("global search deep-links to a trade-off sheet", async ({ page }) => {
   await page.getByRole("combobox", { name: "Search query" }).fill("queue vs event stream");
   await page.getByRole("option").first().getByRole("button").click();
   await expect(page).toHaveURL(/cheatsheets\/tradeoffs\/#queue-vs-stream/);
+});
+test("consistent hashing sandbox: only a fraction of keys move, far fewer than hash mod N", async ({ page }) => {
+  await page.goto("/sandbox/consistent-hashing/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: "Consistent hashing" })).toBeVisible();
+  await expect(page.getByRole("img", { name: /Hash ring with 4 nodes/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "Add a node" }).click();
+  await expect(page.getByRole("img", { name: /Hash ring with 5 nodes/ })).toBeVisible();
+  const text = await page.locator("#rs-change").locator("xpath=..").innerText();
+  const [ring, ideal] = [...text.matchAll(/moved\s+([\d.]+)%\s+of keys \(ideal about ([\d.]+)%/g)][0].slice(1).map(Number);
+  const mod = Number(text.match(/mod N would have moved\s+([\d.]+)%/)![1]);
+  expect(ideal).toBeCloseTo(20, 0); // 1 / 5
+  expect(ring).toBeGreaterThan(10);
+  expect(ring).toBeLessThan(32);
+  expect(mod).toBeGreaterThan(60); // hash mod N reshuffles most keys (theory: 80%)
+
+  await page.getByRole("button", { name: "Remove Node B" }).click();
+  await expect(page.getByRole("img", { name: /Hash ring with 4 nodes/ })).toBeVisible();
+
+  // Fewer virtual nodes means a lopsided ring.
+  await page.getByLabel("Virtual nodes per node").fill("1");
+  await expect(page.getByText(/Busiest node is [\d.]+x the average/)).toBeVisible();
+  await page.getByRole("button", { name: "Reset" }).click();
+  await expect(page.getByRole("img", { name: /Hash ring with 4 nodes/ })).toBeVisible();
 });
