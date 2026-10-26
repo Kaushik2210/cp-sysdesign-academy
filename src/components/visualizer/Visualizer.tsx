@@ -56,8 +56,8 @@ export function Visualizer({ name, input }: { name: VisualizerName; input?: stri
         </p>
       )}
       {step && (
-        <div className="mt-4 grid gap-4 md:grid-cols-[1fr_16rem]">
-          <div>
+        <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
+          <div className="min-w-0">
             <div className="min-h-24 overflow-x-auto">
               <def.Render state={step.state} />
             </div>
