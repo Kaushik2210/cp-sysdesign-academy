@@ -1,0 +1,85 @@
+---
+title: Project Stories and Behavioral Questions
+track: sd
+module: interview-playbook
+order: 5
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/interview-playbook/framework-and-timing"]
+tags: [interview, behavioral, projects]
+type: lesson
+furtherReading:
+  - title: Software Engineering at Google, the culture chapters
+    url: https://abseil.io/resources/swe-book
+---
+
+## Intuition
+
+Technical rounds decide whether you *can* do the work. Behavioral and project conversations decide whether people want to work with you and whether your experience is real. Interviewers are testing **specificity**: can you describe a decision, the alternatives, the numbers and what you learned? Vague stories sound invented; concrete ones sound lived.
+
+## The 90-second project story
+
+Build one story per project you list on a resume. Use six beats:
+
+1. **Context:** what the project was and who it was for, in one sentence.
+2. **Problem:** the hard part, with a number if possible ("p99 latency was 900 ms").
+3. **Decision:** what you chose and the alternatives you rejected.
+4. **Trade-off:** what you gave up, using the five-part sentence from the trade-offs lesson.
+5. **Result:** a measured outcome ("p99 dropped to 140 ms").
+6. **Lesson:** what you would do differently.
+
+Practise until each story takes about 90 seconds. Then prepare a 5-minute version for the deeper follow-ups, because a good interviewer will ask about your design in detail.
+
+<Callout type="tip" title="Numbers make stories believable">
+"It got faster" is forgettable. "Adding an index on user_id cut the query from 800 ms to 12 ms, and I confirmed it with EXPLAIN" is memorable and checkable.
+</Callout>
+
+## STAR, used lightly
+
+STAR (Situation, Task, Action, Result) is a useful checklist, but recited rigidly it sounds scripted. Use it as a safety net: make sure you covered what **you** did (Action) and what happened (Result), not just what the team did.
+
+## Build a story matrix
+
+Most behavioral questions fall into a few themes. Prepare 5 or 6 stories and map each to several themes, so you are never starting from zero:
+
+| Theme | Typical question | A good story shows |
+| --- | --- | --- |
+| Ambiguity | "Tell me about a vague project." | You clarified goals and made a decision with incomplete information |
+| Failure | "Tell me about a mistake." | Ownership, the root cause and a fix that prevents repeats |
+| Conflict | "A disagreement with a teammate." | Listening, data-driven resolution, respect |
+| Technical decision | "A hard design choice." | Alternatives, trade-offs and a measured result |
+| Leadership | "A time you led without authority." | Initiative, communication, helping others succeed |
+| Learning | "Something you taught yourself quickly." | A method, a deadline and what you shipped |
+
+## Talking about AI in your workflow
+
+Interviewers increasingly ask how you use AI tools. A good answer is specific and shows judgement:
+
+- Say **what you delegate** (boilerplate, test scaffolding, unfamiliar syntax) and **what you keep** (design, tricky invariants, review).
+- Say **how you verify**: tests, reading the diff, running it, checking against documentation.
+- Give **one example** of an AI mistake you caught.
+
+Avoid both extremes: "I do not use it" and "it writes everything for me."
+
+## Questions to ask them
+
+Prepare three real questions. They show curiosity and help you decide whether you want the job: "How does the team decide what to build next?", "What does a good first 90 days look like?", "How are incidents handled and reviewed?"
+
+## Pitfalls
+
+- **We instead of I.** Credit the team, but say clearly what you did.
+- **Blame.** Describing a failure by blaming others ends the story badly.
+- **Rambling.** If a story runs beyond two minutes, you have too much context and too little decision.
+- **No result.** Always end with an outcome and a lesson, even if the outcome was a failure.
+
+## What would you choose and why?
+
+You have a side project that is not impressive, and a group project where you did most of the work but the outcome was average. Which do you lead with in an interview, and which beats of the story would you emphasise?
+
+## Quiz
+
+<Quiz id="sd-pb-stories-1" tags={["interview", "behavioral"]} questions={[
+  { type: "mcq", q: "What do interviewers mostly test with behavioral and project questions?", options: ["Memory of dates", "Specificity and ownership of real decisions", "Fluency in buzzwords", "Length of employment"], answer: 1, explain: "Concrete decisions, alternatives, numbers and lessons make a story credible and show what you personally did." },
+  { type: "multi", q: "Which belong in a 90-second project story?", options: ["The problem with a number", "The alternatives you rejected", "A measured result", "A list of every tool used"], answer: [0, 1, 2], explain: "Focus on the problem, decision, trade-off, result and lesson, not a tool inventory." },
+  { type: "mcq", q: "How should you answer 'how do you use AI in your work'?", options: ["Say you avoid it entirely", "Say it writes all your code", "Describe what you delegate, how you verify and one mistake you caught", "Refuse to discuss tools"], answer: 2, explain: "A specific, balanced answer shows judgement and the verification habit employers value." }
+]} />
