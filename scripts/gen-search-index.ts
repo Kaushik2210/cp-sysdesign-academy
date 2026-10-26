@@ -145,6 +145,15 @@ docs.push({
   text: "Compare fixed window, sliding window and token bucket rate limiting on the same traffic.",
 });
 
+docs.push({
+  id: "sandbox:cache",
+  kind: "sandbox",
+  title: "Cache eviction sandbox",
+  href: "/sandbox/cache/",
+  tags: "sandbox simulator cache eviction lru lfu fifo hit ratio",
+  text: "Step through LRU, LFU and FIFO evictions and compare hit ratios on different traffic.",
+});
+
 for (const s of getTradeoffSheets()) {
   docs.push({
     id: `cheatsheet:${s.id}`,
