@@ -95,4 +95,12 @@ export const VIZ_META: VizMeta[] = [
     complexity: "O(rows x cols)",
     lessons: ["cp/stacks-and-queues/queues-deques-bfs"],
   },
+  {
+    name: "dijkstra",
+    title: "Dijkstra's shortest paths",
+    category: "graphs",
+    summary: "Repeatedly finalise the closest unfinished node using a min-heap and relax its edges; works because weights are never negative.",
+    complexity: "O((V + E) log V)",
+    lessons: [],
+  },
 ];

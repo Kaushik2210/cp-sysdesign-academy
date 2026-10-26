@@ -17,6 +17,7 @@ import {
 } from "./algorithms";
 import { INSERTION_SORT_CODE, MERGE_SORT_CODE, QUICK_SORT_CODE, insertionSortSteps, mergeSortSteps, quickSortSteps, type SortFrame } from "./sorting";
 import { BFS_GRID_CODE, DEFAULT_GRID, DFS_GRID_CODE, bfsGridSteps, dfsGridSteps, type GridFrame } from "./grid";
+import { DEFAULT_GRAPH, DIJKSTRA_CODE, dijkstraSteps, type DijkstraFrame } from "./dijkstra";
 import type { VisualizerDef } from "./types";
 
 function BinarySearchRender({ state: s }: { state: BSState }) {
@@ -156,6 +157,71 @@ function GridRender({ state: s }: { state: GridFrame }) {
   );
 }
 
+/** Weighted graph on a circle. Status is conveyed by fill, outline style and text, never by colour alone. */
+function DijkstraRender({ state: s }: { state: DijkstraFrame }) {
+  const W = 360;
+  const H = 250;
+  const R = 92;
+  const pos = s.nodes.map((_, i) => {
+    const a = (2 * Math.PI * i) / s.nodes.length - Math.PI / 2;
+    return { x: W / 2 + R * 1.45 * Math.cos(a), y: H / 2 + R * Math.sin(a) };
+  });
+  const tree = new Set(s.treeEdge.filter((e): e is number => e !== null));
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Weighted graph" className="max-w-full" style={{ width: W }}>
+        {s.edges.map((e, i) => {
+          const a = pos[e.u];
+          const b = pos[e.v];
+          const active = s.relaxing?.edge === i;
+          return (
+            <g key={i}>
+              <line
+                x1={a.x}
+                y1={a.y}
+                x2={b.x}
+                y2={b.y}
+                stroke={active ? "hsl(var(--accent))" : tree.has(i) ? "rgb(16 185 129)" : "hsl(var(--border))"}
+                strokeWidth={active || tree.has(i) ? 3 : 1.5}
+                strokeDasharray={active && !s.relaxing?.improved ? "5 4" : undefined}
+              />
+              <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 - 4} textAnchor="middle" fontSize="11" fill="hsl(var(--fg))" stroke="hsl(var(--card))" strokeWidth="3" paintOrder="stroke">
+                {e.w}
+              </text>
+            </g>
+          );
+        })}
+        {s.nodes.map((name, i) => (
+          <g key={name}>
+            <circle
+              cx={pos[i].x}
+              cy={pos[i].y}
+              r={17}
+              fill={s.done[i] ? "rgb(16 185 129 / 0.25)" : "hsl(var(--card))"}
+              stroke={s.current === i ? "hsl(var(--accent))" : s.done[i] ? "rgb(16 185 129)" : "hsl(var(--border))"}
+              strokeWidth={s.current === i ? 4 : 2}
+            />
+            <text x={pos[i].x} y={pos[i].y - 1} textAnchor="middle" fontSize="12" fontWeight="700" fill="hsl(var(--fg))">
+              {name}
+            </text>
+            <text x={pos[i].x} y={pos[i].y + 11} textAnchor="middle" fontSize="10" fill="hsl(var(--muted-fg))">
+              {s.dist[i] === null ? "∞" : s.dist[i]}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <p className="text-xs text-muted-fg">Number inside a node = best known distance (∞ = unknown). Filled green = final. Thick edges = shortest-path tree so far. Dashed = tried, no improvement.</p>
+      <p className="mt-1 text-sm" aria-label="Heap">
+        Heap (smallest first):{" "}
+        <span className="font-mono">{s.heap.length ? s.heap.map(([d, v]) => `(${d},${s.nodes[v]})`).join(" ") : "empty"}</span>
+      </p>
+      <p className="text-sm" aria-label="Distances">
+        Distances: <span className="font-mono">{s.nodes.map((n, i) => `${n}=${s.dist[i] ?? "∞"}`).join("  ")}</span>
+      </p>
+    </div>
+  );
+}
+
 export const VISUALIZERS = {
   "binary-search": {
     title: "Binary search",
@@ -229,6 +295,14 @@ export const VISUALIZERS = {
     generate: dfsGridSteps,
     Render: GridRender,
   } satisfies VisualizerDef<GridFrame>,
+  dijkstra: {
+    title: "Dijkstra's shortest paths",
+    pseudocode: DIJKSTRA_CODE,
+    defaultInput: DEFAULT_GRAPH,
+    inputHelp: "Line 1: the source node. Then one edge per line as: u v weight (undirected, weight 0 to 99, up to 8 nodes and 16 edges).",
+    generate: dijkstraSteps,
+    Render: DijkstraRender,
+  } satisfies VisualizerDef<DijkstraFrame>,
 };
 
 export type VisualizerName = keyof typeof VISUALIZERS;
