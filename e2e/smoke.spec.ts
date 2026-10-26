@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -521,5 +521,24 @@ test.describe("dijkstra visualizer", () => {
     await page.waitForLoadState("networkidle");
     await page.getByRole("textbox").first().fill("A\nA B -1");
     await expect(page.getByText(/non-negative/)).toBeVisible();
+  });
+});
+
+test.describe("union-find visualizer", () => {
+  test("merges sets, compresses a path and shows the parent array", async ({ page }) => {
+    await page.goto("/visualizers/dsu/");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("textbox").first().fill("4\nunion 0 1\nunion 2 3\nunion 0 2\nfind 3");
+    await expect(page.getByLabel("Parent array")).toContainText("[0, 1, 2, 3]");
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 200 && (await forward.isEnabled()); i++) await forward.click();
+    await expect(page.getByText(/Done: 1 set remain/)).toBeVisible();
+    await expect(page.getByLabel("Parent array")).toContainText("[0, 0, 0, 0]");
+  });
+  test("explains an invalid operation", async ({ page }) => {
+    await page.goto("/visualizers/dsu/");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("textbox").first().fill("3\nunion 0 9");
+    await expect(page.getByText(/numbered 0 to 2/)).toBeVisible();
   });
 });
