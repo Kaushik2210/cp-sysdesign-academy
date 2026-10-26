@@ -18,6 +18,7 @@ import {
 import { INSERTION_SORT_CODE, MERGE_SORT_CODE, QUICK_SORT_CODE, insertionSortSteps, mergeSortSteps, quickSortSteps, type SortFrame } from "./sorting";
 import { BFS_GRID_CODE, DEFAULT_GRID, DFS_GRID_CODE, bfsGridSteps, dfsGridSteps, type GridFrame } from "./grid";
 import { DEFAULT_GRAPH, DIJKSTRA_CODE, dijkstraSteps, type DijkstraFrame } from "./dijkstra";
+import { DEFAULT_DSU, DSU_CODE, dsuSteps, type DsuFrame } from "./dsu";
 import type { VisualizerDef } from "./types";
 
 function BinarySearchRender({ state: s }: { state: BSState }) {
@@ -222,6 +223,68 @@ function DijkstraRender({ state: s }: { state: DijkstraFrame }) {
   );
 }
 
+/** Union-find as a forest: roots have a heavier outline and show their set size; highlighted nodes are on the path being walked. */
+function DsuRender({ state: s }: { state: DsuFrame }) {
+  const n = s.parent.length;
+  const kids: number[][] = Array.from({ length: n }, () => []);
+  s.parent.forEach((p, i) => p !== i && kids[p].push(i));
+  const x: number[] = Array(n).fill(0);
+  const d: number[] = Array(n).fill(0);
+  let leaf = 0;
+  const place = (v: number, depth: number): void => {
+    d[v] = depth;
+    if (kids[v].length === 0) x[v] = leaf++;
+    else {
+      kids[v].forEach((c) => place(c, depth + 1));
+      x[v] = kids[v].reduce((sum, c) => sum + x[c], 0) / kids[v].length;
+    }
+  };
+  s.parent.forEach((p, i) => p === i && place(i, 0));
+  const gap = 38;
+  const maxD = Math.max(...d);
+  const W = Math.max(leaf, 1) * gap + 8;
+  const H = (maxD + 1) * 54 + 24;
+  const cx = (v: number) => 4 + gap / 2 + x[v] * gap;
+  const cy = (v: number) => 20 + d[v] * 54;
+  const act = new Set(s.active);
+  return (
+    <div>
+      <p className="mb-1 text-sm">
+        Operation: <b className="font-mono">{s.op}</b>
+      </p>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Union-find forest" style={{ width: W, minWidth: W }}>
+          {s.parent.map((p, i) => p !== i && <line key={`e${i}`} x1={cx(p)} y1={cy(p)} x2={cx(i)} y2={cy(i)} stroke="hsl(var(--border))" strokeWidth={2} />)}
+          {s.parent.map((p, i) => (
+            <g key={i}>
+              <circle
+                cx={cx(i)}
+                cy={cy(i)}
+                r={15}
+                fill={s.root === i ? "rgb(16 185 129 / 0.25)" : act.has(i) ? "hsl(var(--accent) / 0.2)" : "hsl(var(--card))"}
+                stroke={act.has(i) ? "hsl(var(--accent))" : p === i ? "hsl(var(--fg))" : "hsl(var(--border))"}
+                strokeWidth={p === i || act.has(i) ? 3 : 1.5}
+              />
+              <text x={cx(i)} y={cy(i) + 4} textAnchor="middle" fontSize="12" fontWeight="700" fill="hsl(var(--fg))">
+                {i}
+              </text>
+              {p === i && (
+                <text x={cx(i) + 18} y={cy(i) - 12} fontSize="9" fill="hsl(var(--muted-fg))">
+                  size {s.size[i]}
+                </text>
+              )}
+            </g>
+          ))}
+        </svg>
+      </div>
+      <p className="text-xs text-muted-fg">Thick dark outline = root (with its set size). Blue outline = on the path being walked. Green fill = the root just found.</p>
+      <p className="text-sm" aria-label="Parent array">
+        parent = <span className="font-mono">[{s.parent.join(", ")}]</span>
+      </p>
+    </div>
+  );
+}
+
 export const VISUALIZERS = {
   "binary-search": {
     title: "Binary search",
@@ -303,6 +366,14 @@ export const VISUALIZERS = {
     generate: dijkstraSteps,
     Render: DijkstraRender,
   } satisfies VisualizerDef<DijkstraFrame>,
+  dsu: {
+    title: "Union-find (disjoint set union)",
+    pseudocode: DSU_CODE,
+    defaultInput: DEFAULT_DSU,
+    inputHelp: "Line 1: n elements (1 to 10). Then one operation per line: union a b, or find a (elements are 0 to n-1, up to 20 operations).",
+    generate: dsuSteps,
+    Render: DsuRender,
+  } satisfies VisualizerDef<DsuFrame>,
 };
 
 export type VisualizerName = keyof typeof VISUALIZERS;

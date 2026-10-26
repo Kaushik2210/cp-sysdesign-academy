@@ -103,4 +103,12 @@ export const VIZ_META: VizMeta[] = [
     complexity: "O((V + E) log V)",
     lessons: [],
   },
+  {
+    name: "dsu",
+    title: "Union-find (disjoint set union)",
+    category: "data-structures",
+    summary: "Keep sets as trees: find walks to the root and flattens the path, union hangs the smaller tree under the larger.",
+    complexity: "O(alpha(n)) amortized per operation",
+    lessons: [],
+  },
 ];
