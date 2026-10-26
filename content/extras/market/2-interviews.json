@@ -1,0 +1,38 @@
+[
+  {
+    "id": "meta-ai-enabled-coding",
+    "topic": "interviews",
+    "finding": "Meta began rolling out an AI-enabled coding interview in October 2025 in which candidates work with an AI assistant. Reports describe a larger, multi-phase task graded on the same competencies as a traditional round: problem solving, code quality, verification and communication. A classic algorithm round remains alongside it.",
+    "implication": "Practise both: solve algorithm problems unaided, and practise steering an AI assistant while explaining your reasoning, testing every suggestion, and keeping control of the design.",
+    "source": { "name": "Hello Interview, Meta's AI-Enabled Coding Interview", "url": "https://www.hellointerview.com/blog/meta-ai-enabled-coding", "kind": "secondary" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "google-ai-assisted-pilot",
+    "topic": "interviews",
+    "finding": "Google was reported (from an internal document) to be piloting an interview format where candidates for some junior and mid-level US roles use an approved AI assistant, with more emphasis on code comprehension, debugging and open-ended engineering problems than on pure algorithm puzzles.",
+    "implication": "Add code-reading, debugging and ambiguous-problem practice to your routine; do not prepare only by memorising solution patterns.",
+    "source": { "name": "University of Miami Career Center summary of Business Insider reporting", "url": "https://customcareer.miami.edu/blog/2026/05/14/googles-ai-assisted-coding-interview-2026-guide/", "kind": "secondary", "published": "2026-05-14" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "canva-ai-allowed",
+    "topic": "interviews",
+    "finding": "Canva announced in 2025 that it expects backend, frontend and machine learning candidates to use AI tools in technical interviews and redesigned its questions to be more ambiguous and realistic, so a single prompt cannot solve them.",
+    "implication": "Expect problems that reward requirement clarification, iteration and judgement, which are the same skills system design practises.",
+    "source": { "name": "University of Miami Career Center, citing Canva's engineering blog", "url": "https://customcareer.miami.edu/blog/2026/05/14/googles-ai-assisted-coding-interview-2026-guide/", "kind": "secondary", "published": "2026-05-14" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "dsa-still-screens",
+    "topic": "interviews",
+    "finding": "Practitioner commentary is mixed: large companies and competitive tiers still use data-structures-and-algorithms rounds, while many teams lean more on design, low-level design and practical coding, with design questions increasingly touching LLM integration. This evidence is anecdotal.",
+    "implication": "Keep algorithmic fluency as the base layer, but do not stop there. Add system design, low-level design and applied AI to the plan.",
+    "source": { "name": "r/leetcode discussion, 2026 interview prep", "url": "https://www.reddit.com/r/leetcode/comments/1q06zz6/2026_interview_prep/", "kind": "secondary" },
+    "confidence": "low",
+    "retrieved": "2026-10-26"
+  }
+]
