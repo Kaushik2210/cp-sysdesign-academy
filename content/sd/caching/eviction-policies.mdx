@@ -191,6 +191,10 @@ On a *static* skewed distribution frequency wins clearly, and LRU beats FIFO by 
 
 A photo service caches thumbnails (about 5 KB each). A viral post makes 200 photos 100 times more popular for an hour, then nobody cares. A nightly job also scans the whole photo table. Which policy or policies would you choose, and what would you do about the nightly scan?
 
+## Try it
+
+Step through evictions and compare hit ratios in the [cache eviction sandbox](/sandbox/cache/): LRU, LFU and FIFO against the offline optimum, including the looping-scan case that defeats LRU.
+
 ## Quiz
 
 <Quiz id="sd-m06-eviction" tags={["eviction", "lru"]} questions={[
