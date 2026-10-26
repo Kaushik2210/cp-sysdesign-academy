@@ -161,6 +161,10 @@ Limits can be per user id, API key, IP address, tenant, endpoint, or a combinati
 
 Your public API serves mobile apps that wake up and sync in short bursts of 20 requests, then go quiet for minutes. Average allowed rate should be 5 requests per second per key. Which algorithm and parameters would you choose, and what would you tell customers in the 429 response?
 
+## Try it
+
+See the differences on real traffic in the [rate limiter sandbox](/sandbox/rate-limiter/): fixed window lets double the limit through at a boundary, the exact log does not, and the token bucket absorbs bursts.
+
 ## Quiz
 
 <Quiz id="sd-m10-rate-limit-algorithms" tags={["rate-limiting"]} questions={[
