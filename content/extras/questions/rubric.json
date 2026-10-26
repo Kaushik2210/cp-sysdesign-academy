@@ -1,0 +1,42 @@
+{
+  "anchors": {
+    "1": "Not shown: missing, wrong, or you needed the interviewer to supply it.",
+    "2": "Partial: mentioned, but shallow, unjustified or only after a hint.",
+    "3": "Solid: correct and reasonably complete, with minor gaps you could explain.",
+    "4": "Excellent: precise and justified with numbers and trade-offs, and you raised the edge cases yourself."
+  },
+  "dimensions": {
+    "system-design": [
+      { "id": "requirements", "label": "Requirements and scoping", "good": "You agreed on scope, scale and quality goals before designing, and wrote them down." },
+      { "id": "estimation", "label": "Estimation", "good": "You computed only the numbers that change decisions and said what each implies." },
+      { "id": "api-data", "label": "API and data model", "good": "You defined core endpoints and chose storage from the access patterns." },
+      { "id": "high-level", "label": "High-level design", "good": "You started simple, justified every component and walked the main request end to end." },
+      { "id": "deep-dive", "label": "Deep dive", "good": "You went one level deeper on the hardest parts with concrete mechanisms." },
+      { "id": "tradeoffs", "label": "Trade-offs", "good": "You named alternatives, the criterion, the cost and what would change your mind." },
+      { "id": "reliability", "label": "Failure and reliability", "good": "You asked what happens when each part fails or becomes ten times busier." },
+      { "id": "communication", "label": "Communication", "good": "You narrated your reasoning, used the board well and adapted to hints." }
+    ],
+    "low-level-design": [
+      { "id": "requirements", "label": "Requirements and scope", "good": "You clarified use cases, actors and constraints before writing classes." },
+      { "id": "object-model", "label": "Object model", "good": "Your classes and relationships map cleanly to the domain with clear responsibilities." },
+      { "id": "patterns", "label": "Patterns and principles", "good": "You applied SOLID and a pattern only where it solved a real extension problem." },
+      { "id": "code-quality", "label": "Code quality and tests", "good": "Your code is readable and you identified how to test the key behaviours." },
+      { "id": "extensibility", "label": "Extensibility and concurrency", "good": "You showed how new requirements fit and handled concurrent access where relevant." },
+      { "id": "communication", "label": "Communication", "good": "You explained design choices as you made them and responded to hints." }
+    ],
+    "ai-coding": [
+      { "id": "problem-solving", "label": "Problem solving", "good": "You chose the approach yourself and used the assistant for implementation." },
+      { "id": "verification", "label": "Verification", "good": "You tested each step and caught mistakes in the assistant's output." },
+      { "id": "code-quality", "label": "Code quality", "good": "You kept functions small and could explain every line you accepted." },
+      { "id": "collaboration", "label": "Collaboration with the tool", "good": "You asked for small, specific pieces and knew when to type it yourself." },
+      { "id": "communication", "label": "Communication", "good": "You narrated what you delegated, why, and what you were checking." }
+    ],
+    "behavioral": [
+      { "id": "specificity", "label": "Specificity", "good": "You described a real situation with concrete details and numbers." },
+      { "id": "ownership", "label": "Ownership", "good": "It is clear what you personally decided and did, not just the team." },
+      { "id": "impact", "label": "Impact", "good": "You ended with a measured outcome and why it mattered." },
+      { "id": "reflection", "label": "Reflection", "good": "You named what you would do differently and what you learned." },
+      { "id": "communication", "label": "Communication", "good": "The story was clear, well structured and about 90 seconds to two minutes." }
+    ]
+  }
+}
