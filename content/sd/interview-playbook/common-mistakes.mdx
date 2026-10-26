@@ -1,0 +1,65 @@
+---
+title: Common Mistakes and How to Recover
+track: sd
+module: interview-playbook
+order: 3
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/interview-playbook/framework-and-timing"]
+tags: [interview, mistakes, communication]
+type: lesson
+furtherReading:
+  - title: The System Design Primer
+    url: https://github.com/donnemartin/system-design-primer
+---
+
+## Intuition
+
+Most failed design interviews are not failed by missing knowledge. They fail because of a handful of **repeatable behaviours** that hide the knowledge the candidate has. The good news is that these are habits, and habits can be trained.
+
+## The ten most common mistakes
+
+| # | What it looks like | Why it hurts | Fix |
+| --- | --- | --- | --- |
+| 1 | Starting to draw before asking anything | You design the wrong system | Spend the first five minutes on scope, scale and quality goals |
+| 2 | Asking twenty questions and never designing | You run out of time before the substance | Ask the few questions that change the design, then state assumptions |
+| 3 | Skipping or faking numbers | Decisions look arbitrary | Do back-of-envelope maths and say what it implies |
+| 4 | Jumping to microservices, Kafka and sharding | Over-engineering is a red flag | Start with the simplest design; name the trigger for each upgrade |
+| 5 | Naming technologies without reasons | Sounds memorised | Say the problem each box solves |
+| 6 | Never mentioning failure | Misses a core engineering concern | Walk each component asking what happens when it dies |
+| 7 | One option, no alternatives | Hides your judgement | Use the five-part trade-off sentence |
+| 8 | Silent thinking | The interviewer cannot help or assess | Narrate: "I am weighing A against B because..." |
+| 9 | Defending a choice after a hint | Looks rigid | Treat pushback as new information and update openly |
+| 10 | Running out of time with no summary | Leaves a weak last impression | Reserve two minutes to restate the design and its main trade-off |
+
+## Mistakes that look like strengths
+
+- **Impressive buzzwords.** "Event sourcing with CQRS" sounds advanced, but if you cannot explain what problem it solves here and what it costs, it counts against you.
+- **Perfectionism.** A design with every edge case handled but no high-level picture is harder to follow than a simple one with two honest deep dives.
+- **Covering everything.** Depth beats breadth. Pick the two or three hardest parts and go one level deeper.
+
+## Recovering when you are stuck
+
+Getting stuck is normal. What the interviewer sees is how you handle it.
+
+1. **Say it.** "I am not sure how to handle X yet. Let me think it through."
+2. **Simplify.** Solve a smaller version first: one server, one user, no failures.
+3. **Use the requirements.** Return to the stated goals: "We said p99 under 200 ms, so which option keeps us there?"
+4. **Reason from first principles** rather than recalling a named pattern: what must be true for this to work?
+5. **Ask a focused question** if truly blocked: "Would you like me to prioritise consistency or availability for this path?" This is allowed and often welcomed.
+
+<Callout type="tip" title="A wrong turn, caught early, is a strength">
+Saying "wait, that breaks our ordering guarantee, let me revisit" shows you check your own work. Interviewers see that as seniority, not weakness.
+</Callout>
+
+## What would you choose and why?
+
+You realise at minute 30 that the database you chose cannot handle the write volume you estimated. Do you (a) keep going and hope they do not notice, (b) stop, say what you got wrong and propose the fix, or (c) restart the design? Write the sentence you would say.
+
+## Quiz
+
+<Quiz id="sd-pb-mistakes-1" tags={["interview", "mistakes"]} questions={[
+  { type: "mcq", q: "You notice in the middle of the interview that an earlier choice contradicts your requirements. What is the strongest move?", options: ["Continue and hope it goes unnoticed", "Say so, explain the problem and revise the design", "Restart from scratch silently", "Blame the requirements"], answer: 1, explain: "Catching and correcting your own error demonstrates judgement and honesty." },
+  { type: "multi", q: "Which are signs of over-engineering in a design interview?", options: ["Sharding a dataset that fits on one machine", "Adding a queue because writes spike", "Introducing microservices before any scale estimate", "Using a cache with a stated hit-ratio goal"], answer: [0, 2], explain: "Upgrades should follow a number or requirement. A queue for spikes and a cache with a goal both have reasons." },
+  { type: "mcq", q: "You are truly blocked on one component. What is an acceptable move?", options: ["Stay silent until you think of it", "Ask a focused question about priorities or constraints", "Change the topic without saying why", "Claim it is out of scope"], answer: 1, explain: "A targeted question about constraints shows you know what information would unblock you." }
+]} />
