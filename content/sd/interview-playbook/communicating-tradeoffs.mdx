@@ -1,0 +1,82 @@
+---
+title: Communicating Trade-offs
+track: sd
+module: interview-playbook
+order: 2
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/interview-playbook/framework-and-timing"]
+tags: [interview, trade-offs, communication]
+type: lesson
+furtherReading:
+  - title: Designing Data-Intensive Applications, chapter 1 (reliable, scalable, maintainable systems)
+    url: https://dataintensive.net/
+  - title: Architecture decision records (Michael Nygard)
+    url: https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions
+---
+
+## Intuition
+
+Every design choice gives something up. A cache speeds reads and adds stale data. Sharding scales writes and complicates queries. Interviewers rarely care which option you pick; they care that you **know what you are paying**. A choice stated without its cost sounds like a guess. A choice stated with its cost sounds like engineering.
+
+## A five-part sentence
+
+Use the same structure every time, so it becomes automatic:
+
+1. **Decision:** what you choose.
+2. **Alternative:** what you considered instead.
+3. **Criterion:** the requirement that decides between them.
+4. **Cost:** what you are giving up.
+5. **Trigger:** what would make you change your mind.
+
+> "I will use a relational database for orders, not a document store, because we need multi-row transactions for payments (criterion). The cost is harder horizontal scaling, which I would address with read replicas first and sharding by customer id only if writes outgrow one primary (trigger)."
+
+That is 45 seconds and answers the question the interviewer was about to ask.
+
+## Anchor trade-offs to numbers and requirements
+
+Vague trade-offs sound like memorised lists. Tie them to your own estimates:
+
+- "At 400 reads per second the database is not the bottleneck, so I would not add a cache for throughput. I would add one only to cut p99 read latency."
+- "A 10 ms cross-region round trip is fine for the feed but not for the checkout flow, so the feed can read from a nearby replica while checkout stays on the primary."
+
+<Callout type="pitfall" title="Trade-offs without a criterion">
+"Redis is fast but costs more" is true of almost everything and decides nothing. Always name the requirement that tips the scale: latency target, consistency need, budget, team skill.
+</Callout>
+
+## Common trade-off axes
+
+<TradeOffs caption="Axes that come up in almost every design" rows={[
+  { option: "Consistency vs availability", pros: "Strong consistency gives simple reasoning", cons: "Under partition, strongly consistent systems may refuse requests", chooseWhen: "Money, inventory and identity need consistency; feeds and counters can tolerate staleness" },
+  { option: "Latency vs throughput", pros: "Batching raises throughput per resource", cons: "Batching adds waiting time for each item", chooseWhen: "Interactive paths favour latency; offline pipelines favour throughput" },
+  { option: "Read cost vs write cost", pros: "Pre-computing (fan-out on write) makes reads cheap", cons: "Writes become heavier and storage grows", chooseWhen: "Read-heavy products with predictable access patterns" },
+  { option: "Simplicity vs scale", pros: "One database and a few services are easy to run", cons: "Eventually hits a vertical limit", chooseWhen: "Start simple, name the trigger for the next step" }
+]} />
+
+## Practise out loud
+
+Pick a decision and answer in the five-part form, speaking, timed to under a minute. Try these:
+
+- Queue between the API and a slow downstream service, or call it synchronously?
+- Store shopping carts in a database or in a cache with a persistence layer?
+- Generate IDs with a database sequence, UUIDs or a time-ordered ID service?
+
+If you cannot name a cost for your choice, you have not understood the choice yet.
+
+## Pitfalls
+
+- **Presenting one option.** If you never mention an alternative, the interviewer will, and you will be reacting.
+- **Defending instead of listening.** If the interviewer pushes back, treat it as new information. "Good point, that changes the trade-off, so I would..." is a strong answer.
+- **Hedging everything.** "It depends" is only useful followed by "on X, and in this case X is Y, so I choose Z."
+
+## What would you choose and why?
+
+A chat product can deliver messages through long-lived WebSocket connections or through push notifications plus polling. Name the criterion you would use to choose, the cost of your pick and what would make you switch.
+
+## Quiz
+
+<Quiz id="sd-pb-tradeoffs-1" tags={["interview", "trade-offs"]} questions={[
+  { type: "mcq", q: "Which element makes a trade-off statement sound like engineering rather than a guess?", options: ["Naming a popular technology", "Naming the criterion and the cost you accept", "Speaking confidently", "Listing every alternative"], answer: 1, explain: "A criterion tied to a requirement plus a stated cost shows you know why you are choosing and what you give up." },
+  { type: "multi", q: "Which belong in the five-part trade-off sentence?", options: ["The decision", "The alternative you rejected", "A trigger that would change your mind", "The name of the company that uses it"], answer: [0, 1, 2], explain: "Decision, alternative, criterion, cost and trigger. Where else it is used is not a reason." },
+  { type: "mcq", q: "The interviewer disagrees with your cache choice. What is the best response?", options: ["Repeat your reasoning more firmly", "Treat it as new information and reconsider the trade-off aloud", "Drop the cache immediately", "Change the subject"], answer: 1, explain: "Pushback is usually a signal to explore a different constraint; show you can update your reasoning." }
+]} />
