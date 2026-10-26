@@ -13,7 +13,7 @@ import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
   id: string;
-  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap" | "question" | "cheatsheet";
+  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap" | "question" | "cheatsheet" | "sandbox";
   title: string;
   href: string;
   tags: string;
@@ -126,6 +126,15 @@ for (const q of getQuestions()) {
     text: q.prompt,
   });
 }
+
+docs.push({
+  id: "sandbox:consistent-hashing",
+  kind: "sandbox",
+  title: "Consistent hashing sandbox",
+  href: "/sandbox/consistent-hashing/",
+  tags: "sandbox simulator consistent hashing ring virtual nodes sharding",
+  text: "Add and remove nodes on a hash ring and see which keys move compared with hash mod N.",
+});
 
 for (const s of getTradeoffSheets()) {
   docs.push({
