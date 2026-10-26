@@ -1,0 +1,86 @@
+[
+  {
+    "id": "api-styles",
+    "title": "API styles: REST, GraphQL, gRPC",
+    "summary": "Pick the style that fits your clients: public web and mobile apps, flexible data needs, or fast internal service calls.",
+    "options": [{ "id": "rest", "name": "REST" }, { "id": "graphql", "name": "GraphQL" }, { "id": "grpc", "name": "gRPC" }],
+    "rows": [
+      { "dimension": "Model", "values": { "rest": "Resources addressed by URL and manipulated with HTTP methods", "graphql": "Clients query a typed schema and ask for exactly the fields they need", "grpc": "Remote procedure calls defined in a schema (Protocol Buffers)" } },
+      { "dimension": "Payload", "values": { "rest": "Usually JSON, human readable", "graphql": "JSON shaped by the query", "grpc": "Compact binary" } },
+      { "dimension": "Over- and under-fetching", "values": { "rest": "Common: fixed responses per endpoint", "graphql": "Avoided by design", "grpc": "Defined by each method's messages" } },
+      { "dimension": "Caching", "values": { "rest": "Easy with HTTP caching and CDNs", "graphql": "Harder: usually one POST endpoint, needs custom caching", "grpc": "Not HTTP-cache friendly" } },
+      { "dimension": "Streaming", "values": { "rest": "Limited (SSE or polling)", "graphql": "Subscriptions, depending on implementation", "grpc": "Built-in client, server and bidirectional streams" } },
+      { "dimension": "Browser support", "values": { "rest": "Excellent", "graphql": "Excellent", "grpc": "Needs a proxy such as gRPC-Web" } }
+    ],
+    "choose": {
+      "rest": ["Public APIs, simple CRUD and anything benefiting from HTTP caching.", "You want the broadest tooling and easiest adoption."],
+      "graphql": ["Many client types need different slices of related data.", "You want to reduce round trips for complex screens."],
+      "grpc": ["Internal service-to-service calls needing low latency and strict contracts.", "You need streaming or polyglot services with generated clients."]
+    },
+    "watchOut": ["GraphQL can hide expensive queries: add depth, cost and rate limits.", "Do not expose gRPC directly to browsers without a gateway."],
+    "tags": ["apis", "networking"],
+    "lessons": ["sd/networking-and-apis/api-styles-rest-graphql-grpc"]
+  },
+  {
+    "id": "realtime-transports",
+    "title": "Real-time updates: long polling, SSE, WebSocket",
+    "summary": "Choose how the server delivers new data to clients without them asking every second.",
+    "options": [{ "id": "long-poll", "name": "Long polling" }, { "id": "sse", "name": "Server-Sent Events" }, { "id": "ws", "name": "WebSocket" }],
+    "rows": [
+      { "dimension": "Direction", "values": { "long-poll": "Server to client, one response per request", "sse": "Server to client only", "ws": "Both directions" } },
+      { "dimension": "Connection", "values": { "long-poll": "A new HTTP request after each response", "sse": "One long-lived HTTP stream", "ws": "One persistent upgraded connection" } },
+      { "dimension": "Infrastructure fit", "values": { "long-poll": "Works through almost any proxy and load balancer", "sse": "Plain HTTP; usually proxy friendly", "ws": "Needs proxy and load balancer support and sticky routing" } },
+      { "dimension": "Overhead", "values": { "long-poll": "Highest: repeated request headers", "sse": "Low", "ws": "Lowest per message" } },
+      { "dimension": "Reconnection", "values": { "long-poll": "Natural: just ask again", "sse": "Built in with last event id", "ws": "You implement it" } }
+    ],
+    "choose": {
+      "long-poll": ["You need compatibility with restrictive networks.", "Updates are infrequent and a simple fallback is enough."],
+      "sse": ["Updates flow one way, such as feeds, notifications or progress.", "You want simple, resilient streaming over HTTP."],
+      "ws": ["You need low-latency two-way messaging such as chat or collaboration.", "Message rate is high."]
+    },
+    "watchOut": ["Persistent connections make deployments and scaling stateful: plan connection draining and a message backplane.", "Always handle reconnection and missed messages."],
+    "tags": ["networking", "real-time"],
+    "lessons": ["sd/networking-and-apis/real-time-communication"]
+  },
+  {
+    "id": "monolith-vs-microservices",
+    "title": "Monolith vs microservices",
+    "summary": "Decide how to split your system into deployable units, trading team autonomy against operational complexity.",
+    "options": [{ "id": "monolith", "name": "Monolith" }, { "id": "micro", "name": "Microservices" }],
+    "rows": [
+      { "dimension": "Deployment", "values": { "monolith": "One unit, deployed together", "micro": "Many independent units deployed separately" } },
+      { "dimension": "Development speed early on", "values": { "monolith": "Fast: one codebase, simple local setup", "micro": "Slower: service boundaries, contracts and infrastructure first" } },
+      { "dimension": "Scaling", "values": { "monolith": "Scale the whole application together", "micro": "Scale each service independently" } },
+      { "dimension": "Failure isolation", "values": { "monolith": "A bug or overload can take down everything", "micro": "Faults can be contained, but cascades across calls are possible" } },
+      { "dimension": "Data and consistency", "values": { "monolith": "One database and transactions are easy", "micro": "Data owned per service; cross-service work needs sagas or eventual consistency" } },
+      { "dimension": "Operational cost", "values": { "monolith": "Low", "micro": "High: discovery, tracing, versioning, many pipelines" } }
+    ],
+    "choose": {
+      "monolith": ["A small team and an evolving product where boundaries are not yet clear.", "You want speed and simplicity until a real pain appears."],
+      "micro": ["Many teams need to ship independently.", "Parts of the system have very different scaling or reliability needs."]
+    },
+    "watchOut": ["A distributed monolith: services so coupled they must deploy together.", "A well-structured modular monolith is often the best starting point."],
+    "tags": ["architecture"],
+    "lessons": ["sd/what-is-system-design/non-functional-tradeoffs"]
+  },
+  {
+    "id": "sync-vs-async",
+    "title": "Synchronous calls vs asynchronous messaging",
+    "summary": "Decide whether a request waits for downstream work or hands it off through a queue.",
+    "options": [{ "id": "sync", "name": "Synchronous call" }, { "id": "async", "name": "Asynchronous (queue or event)" }],
+    "rows": [
+      { "dimension": "Caller experience", "values": { "sync": "Waits for the result, simple to reason about", "async": "Gets an acknowledgement; the result arrives later" } },
+      { "dimension": "Coupling", "values": { "sync": "Caller depends on the callee being up and fast", "async": "Loosely coupled in time; producer and consumer fail independently" } },
+      { "dimension": "Load spikes", "values": { "sync": "Spikes hit the downstream service directly", "async": "A queue absorbs bursts and smooths the load" } },
+      { "dimension": "Failure handling", "values": { "sync": "Timeouts, retries and circuit breakers", "async": "Retries, dead-letter queues and idempotent consumers" } },
+      { "dimension": "Consistency", "values": { "sync": "Easier to keep consistent", "async": "Eventually consistent; ordering and duplicates need care" } }
+    ],
+    "choose": {
+      "sync": ["The user needs the result immediately to continue.", "The work is quick and the dependency is reliable."],
+      "async": ["The work is slow, bursty or can happen after responding.", "You want producers isolated from consumer outages."]
+    },
+    "watchOut": ["Retrying synchronous calls without backoff and jitter can amplify an outage.", "Async still needs idempotency: messages can be delivered more than once."],
+    "tags": ["messaging", "architecture"],
+    "lessons": ["sd/queues-and-streaming/why-queues", "sd/queues-and-streaming/backpressure-retries-and-dlq"]
+  }
+]
