@@ -11,6 +11,11 @@ const SANDBOXES = [
     title: "Consistent hashing",
     body: "Add and remove nodes on a hash ring and see which keys move, compared with hash mod N.",
   },
+  {
+    href: "/sandbox/rate-limiter/",
+    title: "Rate limiter",
+    body: "Compare fixed window, sliding window and token bucket on the same traffic and see the real peak rate.",
+  },
 ];
 
 export default function SandboxIndex() {
