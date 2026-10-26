@@ -1,0 +1,46 @@
+{
+  "latency": [
+    { "id": "l1", "operation": "L1 cache reference", "ns": 1, "range": "about 1 ns" },
+    { "id": "branch", "operation": "Branch misprediction", "ns": 3, "range": "a few ns" },
+    { "id": "l2", "operation": "L2 cache reference", "ns": 5, "range": "roughly 4 to 15 ns" },
+    { "id": "mutex", "operation": "Mutex lock/unlock (uncontended)", "ns": 25, "range": "tens of ns" },
+    { "id": "memory", "operation": "Main memory reference", "ns": 100, "range": "about 100 ns" },
+    { "id": "compress", "operation": "Compress 1 KB with a fast compressor", "ns": 3000, "range": "a few microseconds" },
+    { "id": "send-1kb", "operation": "Send 1 KB over a 1 Gbps network", "ns": 10000, "range": "about 10 microseconds" },
+    { "id": "ssd-random", "operation": "Random read from an SSD", "ns": 100000, "range": "tens to a few hundred microseconds", "note": "Use about 100 microseconds." },
+    { "id": "dc-rtt", "operation": "Round trip within one datacenter", "ns": 500000, "range": "about 0.5 ms" },
+    { "id": "ssd-1mb", "operation": "Read 1 MB sequentially from SSD", "ns": 500000, "range": "roughly 0.2 to 1 ms" },
+    { "id": "disk-seek", "operation": "Spinning-disk seek", "ns": 7500000, "range": "about 5 to 10 ms" },
+    { "id": "disk-1mb", "operation": "Read 1 MB sequentially from spinning disk", "ns": 12500000, "range": "roughly 5 to 20 ms" },
+    { "id": "continent-rtt", "operation": "Round trip across continents", "ns": 125000000, "range": "about 100 to 150 ms" }
+  ],
+  "powers": [
+    { "exp": 8, "use": "256 values: one byte" },
+    { "exp": 10, "use": "1,024: about a thousand (a kilobyte in binary units)" },
+    { "exp": 16, "use": "65,536: unsigned 16-bit integer, number of network ports" },
+    { "exp": 20, "use": "about a million (a megabyte in binary units)" },
+    { "exp": 30, "use": "about a billion (a gigabyte in binary units)" },
+    { "exp": 32, "use": "about 4.3 billion: size of the IPv4 address space, unsigned 32-bit integer" },
+    { "exp": 40, "use": "about a trillion (a terabyte in binary units)" },
+    { "exp": 53, "use": "about 9 quadrillion: largest range of integers a JavaScript number holds exactly" },
+    { "exp": 64, "use": "about 1.8 x 10^19: unsigned 64-bit integer (signed maximum is 2^63 - 1)" }
+  ],
+  "sizes": [
+    { "item": "ASCII character", "size": "1 byte", "note": "UTF-8 uses 1 to 4 bytes per character." },
+    { "item": "32-bit integer", "size": "4 bytes" },
+    { "item": "64-bit integer or timestamp", "size": "8 bytes" },
+    { "item": "UUID", "size": "16 bytes binary, 36 characters as text" },
+    { "item": "IPv4 / IPv6 address", "size": "4 bytes / 16 bytes" },
+    { "item": "Typical database row for a small record", "size": "100 bytes to 1 KB", "note": "Indexes and overhead add to this." },
+    { "item": "Compressed web photo", "size": "about 100 KB to a few MB", "note": "Depends heavily on resolution and format." },
+    { "item": "A minute of compressed HD video", "size": "tens of MB", "note": "Roughly a few megabits per second; varies by codec and quality." }
+  ],
+  "rules": [
+    { "rule": "1 million events per day is about 12 per second.", "why": "A day has 86,400 seconds, so divide by about 10^5 and adjust. Scale linearly from there." },
+    { "rule": "Peak traffic is commonly 2 to 5 times the daily average.", "why": "Traffic is not uniform. State your peak factor and design for peak, not average." },
+    { "rule": "Plan servers at around 60 to 70 percent utilisation at peak.", "why": "Headroom absorbs bursts, failures and deploys. Running at 100 percent leaves no room for any of them." },
+    { "rule": "Replicate important data 3 times unless you can justify less.", "why": "Three copies tolerate a failure while another is being repaired. Multiply raw storage by the replication factor." },
+    { "rule": "Memory is far faster than disk, and the network is far slower than memory.", "why": "One datacenter round trip costs about as much as several thousand memory references, so avoid chatty calls." },
+    { "rule": "Each extra nine of availability cuts the allowed downtime by 10 times.", "why": "99.9 percent allows about 8.8 hours a year, 99.99 percent about 53 minutes, 99.999 percent about 5 minutes." }
+  ]
+}
