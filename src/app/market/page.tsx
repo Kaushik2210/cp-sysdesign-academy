@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getInsights, TOPIC_TITLE, TOPICS } from "@/lib/content/market";
 import { MarketView } from "@/components/layout/MarketView";
 
@@ -66,6 +67,14 @@ export default function MarketPage() {
           ))}
         </ol>
       </section>
+
+      <p className="mt-6 rounded-xl border border-accent/50 p-4 text-sm">
+        Want the plan these findings point to? See the{" "}
+        <Link href="/roadmap/" className="font-medium text-accent underline">
+          zero-to-elite roadmap
+        </Link>
+        : ten phases, each with the findings that justify it.
+      </p>
 
       <MarketView topics={topics} />
 
