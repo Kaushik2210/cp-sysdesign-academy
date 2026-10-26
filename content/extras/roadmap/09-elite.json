@@ -1,0 +1,28 @@
+{
+  "id": "elite",
+  "order": 10,
+  "title": "Elite: production judgement, reliability and leadership",
+  "goal": "Move from implementing tasks to owning outcomes: design for failure, run systems in production, review and direct AI-generated code, write decisions down, and raise the people around you. This stage takes years and mostly happens on the job.",
+  "when": "Months 14 to 36 and beyond",
+  "hoursPerWeek": 8,
+  "whyNow": ["google-ai-generated-code", "so-2026-conditional-trust", "so-2025-ai-usage-trust", "role-demand-vendor", "indeed-senior-ai-skew"],
+  "steps": [
+    { "kind": "external", "title": "Site Reliability Engineering (Google SRE book)", "url": "https://sre.google/sre-book/table-of-contents/", "type": "book", "note": "Free. Start with service level objectives, monitoring, incident response and postmortem culture." },
+    { "kind": "external", "title": "Software Engineering at Google", "url": "https://abseil.io/resources/swe-book", "type": "book", "note": "How a large organisation handles code review, testing, dependencies and change at scale." },
+    { "kind": "external", "title": "The Staff Engineer's Path and staffeng.com", "url": "https://staffeng.com/book", "type": "book", "note": "What senior technical leadership actually involves beyond coding." },
+    { "kind": "lesson", "ref": "sd/scalability/capacity-planning" },
+    { "kind": "lesson", "ref": "sd/storage/durability-backups-tiering" },
+    { "kind": "lesson", "ref": "sd/what-is-system-design/non-functional-tradeoffs" },
+    { "kind": "project", "title": "Write a design document and get it reviewed", "brief": "For a real system you work on or a serious personal project, write a design doc with goals, non-goals, alternatives considered, risks and a rollout plan. Ask two experienced engineers to review it and revise it.", "deliverable": "A reviewed design document and a short note on the biggest change the review caused." },
+    { "kind": "project", "title": "Run a game day and publish a blameless postmortem", "brief": "Inject real failures into one of your deployed services (kill an instance, add latency, fill a disk) while watching dashboards. Write a postmortem covering the timeline, impact, causes and concrete follow-ups, and fix at least two of them.", "deliverable": "A published postmortem with the dashboards you used and the fixes you merged." },
+    { "kind": "project", "title": "Become the reviewer of AI-written code", "brief": "For a month, use an AI assistant for most implementation but write the tests and the design yourself, and review every change as if a stranger wrote it. Track defects the AI introduced and the checks that caught them.", "deliverable": "A checklist of the review habits and tests that caught real defects, shared with your team or community." },
+    { "kind": "project", "title": "Mentor two people one level behind you", "brief": "Teaching exposes gaps faster than anything else. Pair on their problems, review their designs and write down what you explain repeatedly as notes or lessons.", "deliverable": "Two people you have helped reach a concrete milestone, plus the notes you produced." },
+    { "kind": "planned", "title": "Observability, security and multi-region reliability modules", "note": "SD modules 15 and 16 are not written on this site yet. The SRE book above covers observability, SLOs and incident response in depth." }
+  ],
+  "exit": [
+    "Teams ask you to review designs because your questions find real risks.",
+    "You can quantify an availability target, derive an error budget and decide what to do when it is spent.",
+    "You have led at least one project from design document through rollout to postmortem.",
+    "You choose a specialisation (infrastructure, applied AI, security or product engineering) and have visible depth in it."
+  ]
+}
