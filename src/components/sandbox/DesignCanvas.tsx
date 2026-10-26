@@ -45,6 +45,7 @@ export default function DesignCanvas() {
   const [selected, setSelected] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string[]>([]);
   const [counter, setCounter] = useState(1);
+  const [layoutKey, setLayoutKey] = useState(0); // remounting the canvas makes it fit the new nodes into view
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
@@ -64,6 +65,7 @@ export default function DesignCanvas() {
     setEdges(toEdges(g));
     setSelected(null);
     setHighlight([]);
+    setLayoutKey((k) => k + 1);
   };
 
   const add = (kind: Kind) => {
@@ -127,6 +129,7 @@ export default function DesignCanvas() {
 
         <div className="h-[28rem] overflow-hidden rounded-xl border border-border" data-testid="canvas">
           <ReactFlow
+            key={layoutKey}
             nodes={shownNodes}
             edges={edges}
             onNodesChange={onNodesChange}
