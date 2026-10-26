@@ -1,0 +1,39 @@
+{
+  "id": "backend-system-design",
+  "order": 4,
+  "title": "Backend engineering and system design core",
+  "goal": "Design and build services that scale: APIs, caching, load balancing, replication, sharding, queues and rate limiting, and be able to justify each choice with numbers and trade-offs.",
+  "when": "Months 5 to 10",
+  "hoursPerWeek": 10,
+  "whyNow": ["so-2026-conditional-trust", "role-demand-vendor", "indeed-senior-ai-skew", "canva-ai-allowed"],
+  "steps": [
+    { "kind": "lesson", "ref": "sd/what-is-system-design/requirements-and-framework" },
+    { "kind": "lesson", "ref": "sd/what-is-system-design/design-framework-in-depth" },
+    { "kind": "lesson", "ref": "sd/estimation/qps-storage-bandwidth" },
+    { "kind": "lesson", "ref": "sd/networking-and-apis/api-styles-rest-graphql-grpc" },
+    { "kind": "lesson", "ref": "sd/load-balancing/load-balancer-basics" },
+    { "kind": "lesson", "ref": "sd/load-balancing/balancing-algorithms" },
+    { "kind": "lesson", "ref": "sd/caching/why-cache" },
+    { "kind": "lesson", "ref": "sd/caching/caching-strategies" },
+    { "kind": "lesson", "ref": "sd/caching/invalidation-and-stampedes" },
+    { "kind": "lesson", "ref": "sd/databases-2/replication" },
+    { "kind": "lesson", "ref": "sd/databases-2/sharding-and-partitioning" },
+    { "kind": "lesson", "ref": "sd/databases-2/consistent-hashing" },
+    { "kind": "lesson", "ref": "sd/queues-and-streaming/why-queues" },
+    { "kind": "lesson", "ref": "sd/queues-and-streaming/delivery-semantics-and-idempotency" },
+    { "kind": "lesson", "ref": "sd/scalability/rate-limiting-algorithms" },
+    { "kind": "lesson", "ref": "sd/scalability/scaling-stateless-autoscaling" },
+    { "kind": "lesson", "ref": "sd/scalability/capacity-planning" },
+    { "kind": "external", "title": "Designing Data-Intensive Applications (Martin Kleppmann)", "url": "https://dataintensive.net/", "type": "book", "note": "Read chapters 1 to 9 alongside the lessons. It is the best single book on this subject." },
+    { "kind": "external", "title": "The System Design Primer", "url": "https://github.com/donnemartin/system-design-primer", "type": "article", "note": "Free reference with diagrams and practice questions." },
+    { "kind": "external", "title": "The Twelve-Factor App", "url": "https://12factor.net/", "type": "article", "note": "Short and practical rules for deployable services." },
+    { "kind": "page", "title": "Glossary", "href": "/glossary/", "note": "240 terms, cross-linked to the lessons." },
+    { "kind": "project", "title": "Design, build and load-test a URL shortener", "brief": "Write a one-page design doc first (requirements, estimates, API, data model, trade-offs). Build it with a database, a cache and rate limiting, deploy it, and load test it with a tool such as k6 or wrk. Record the p50 and p99 latency before and after the cache.", "deliverable": "A deployed service, a design doc in the repository and a results table showing how the cache changed latency and throughput." },
+    { "kind": "planned", "title": "Case studies: chat, feed, video, maps, payments, and low-level design", "note": "SD modules 17 to 28 are not written on this site yet. Practise them with the System Design Primer and DDIA examples, and sketch your own designs on paper first." }
+  ],
+  "exit": [
+    "You can run the full framework (clarify, estimate, API, data model, high-level design, deep dive, bottlenecks) on an unfamiliar problem in 45 minutes.",
+    "You can state at least two alternatives for every component you choose and why you rejected them.",
+    "Your deployed project has a design doc and measured numbers, not just a working demo."
+  ]
+}
