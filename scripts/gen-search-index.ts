@@ -8,6 +8,7 @@ import { getGlossary } from "../src/lib/content/glossary";
 import { getInsights } from "../src/lib/content/market";
 import { getRoadmap } from "../src/lib/content/roadmap";
 import { getQuestions } from "../src/lib/content/questions";
+import { getTradeoffSheets } from "../src/lib/content/tradeoffs";
 import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
@@ -123,6 +124,17 @@ for (const q of getQuestions()) {
     href: "/mock/",
     tags: ["interview", "mock", q.kind, q.level].join(" "),
     text: q.prompt,
+  });
+}
+
+for (const s of getTradeoffSheets()) {
+  docs.push({
+    id: `cheatsheet:${s.id}`,
+    kind: "cheatsheet",
+    title: s.title,
+    href: `/cheatsheets/tradeoffs/#${s.id}`,
+    tags: ["cheatsheet", "trade-offs", ...s.tags].join(" "),
+    text: `${s.summary} ${s.options.map((o) => o.name).join(" ")}`,
   });
 }
 
