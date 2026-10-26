@@ -7,11 +7,12 @@ import { getTemplates } from "../src/lib/content/templates";
 import { getGlossary } from "../src/lib/content/glossary";
 import { getInsights } from "../src/lib/content/market";
 import { getRoadmap } from "../src/lib/content/roadmap";
+import { getQuestions } from "../src/lib/content/questions";
 import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
   id: string;
-  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap";
+  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap" | "question";
   title: string;
   href: string;
   tags: string;
@@ -111,6 +112,17 @@ for (const p of getRoadmap()) {
     href: `/roadmap/#${p.id}`,
     tags: "roadmap plan learning path",
     text: `${p.goal} ${p.when}`,
+  });
+}
+
+for (const q of getQuestions()) {
+  docs.push({
+    id: `question:${q.id}`,
+    kind: "question",
+    title: q.title,
+    href: "/mock/",
+    tags: ["interview", "mock", q.kind, q.level].join(" "),
+    text: q.prompt,
   });
 }
 
