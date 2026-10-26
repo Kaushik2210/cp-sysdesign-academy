@@ -11,6 +11,11 @@
   --accent: 243 75% 50%;
   --accent-fg: 0 0% 100%;
   --card: 0 0% 100%;
+  --hot: 316 80% 44%;
+  --cool: 195 90% 32%;
+  --sun: 28 92% 38%;
+  --leaf: 152 70% 28%;
+  --glow: 0.18;
 }
 
 .dark {
@@ -22,6 +27,11 @@
   --accent: 239 84% 74%;
   --accent-fg: 224 24% 8%;
   --card: 224 22% 11%;
+  --hot: 316 90% 68%;
+  --cool: 190 95% 62%;
+  --sun: 38 96% 64%;
+  --leaf: 152 75% 56%;
+  --glow: 0.35;
 }
 
 body {
@@ -38,8 +48,112 @@ body {
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- Maximalist layer: aurora, grid, gradient text, glow ---------- */
+body {
+  position: relative;
+  overflow-x: clip;
+}
+/* Slowly drifting colour wash behind everything. Pure decoration: pointer-events none, hidden in print. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 35% at 15% 10%, hsl(var(--accent) / var(--glow)), transparent 70%),
+    radial-gradient(35% 30% at 85% 20%, hsl(var(--hot) / var(--glow)), transparent 70%),
+    radial-gradient(40% 35% at 70% 85%, hsl(var(--cool) / var(--glow)), transparent 70%),
+    radial-gradient(30% 30% at 10% 80%, hsl(var(--sun) / calc(var(--glow) * 0.7)), transparent 70%);
+  animation: aurora-drift 26s ease-in-out infinite alternate;
+}
+/* Faint engineering-paper grid over the wash. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(hsl(var(--fg) / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--fg) / 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse at 50% 0%, black 20%, transparent 75%);
+}
+@keyframes aurora-drift {
+  from { transform: translate3d(-3%, -2%, 0) scale(1); }
+  to { transform: translate3d(3%, 3%, 0) scale(1.12); }
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sheen {
+  from { background-position: 0% 50%; }
+  to { background-position: 200% 50%; }
+}
+.text-gradient {
+  background: linear-gradient(95deg, hsl(var(--accent)), hsl(var(--hot)) 35%, hsl(var(--sun)) 65%, hsl(var(--cool)));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: sheen 9s linear infinite;
+}
+.bg-gradient-brand {
+  background: linear-gradient(120deg, hsl(var(--accent)), hsl(var(--hot)));
+}
+.ring-glow {
+  box-shadow: 0 0 0 1px hsl(var(--accent) / 0.5), 0 10px 40px -10px hsl(var(--accent) / 0.55);
+}
+/* Cards that light up under the pointer. --mx/--my are set by SpotlightCard. */
+.spotlight {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 50%), hsl(var(--tint, var(--accent)) / 0.28), transparent 65%);
+}
+.spotlight:hover::before,
+.spotlight:focus-within::before {
+  opacity: 1;
+}
+.spotlight:hover,
+.spotlight:focus-within {
+  border-color: hsl(var(--tint, var(--accent)) / 0.8);
+  box-shadow: 0 12px 40px -14px hsl(var(--tint, var(--accent)) / 0.6);
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 40s linear infinite;
+}
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+@media print {
+  body::before,
+  body::after {
+    display: none !important;
   }
 }
 

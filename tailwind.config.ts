@@ -15,6 +15,10 @@ const config = {
         accent: "hsl(var(--accent))",
         "accent-fg": "hsl(var(--accent-fg))",
         card: "hsl(var(--card))",
+        hot: "hsl(var(--hot))",
+        cool: "hsl(var(--cool))",
+        sun: "hsl(var(--sun))",
+        leaf: "hsl(var(--leaf))",
       },
       fontFamily: {
         sans: ["system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
