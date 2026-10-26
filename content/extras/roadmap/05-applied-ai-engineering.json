@@ -1,0 +1,28 @@
+{
+  "id": "applied-ai-engineering",
+  "order": 6,
+  "title": "Applied AI engineering: build and evaluate LLM systems",
+  "goal": "Learn to build products on top of language models: prompting and structured output, retrieval, tool use and agents, and above all how to evaluate and secure them, because the data shows verification is the scarce skill.",
+  "when": "Months 8 to 13",
+  "hoursPerWeek": 10,
+  "whyNow": ["indeed-senior-ai-skew", "deloitte-skill-premiums", "deloitte-india-ai-entry-roles", "unstop-demand-vs-placement", "so-2025-ai-usage-trust", "so-2026-python-js-ai"],
+  "steps": [
+    { "kind": "external", "title": "Hugging Face LLM Course", "url": "https://huggingface.co/learn/llm-course", "type": "course", "note": "Transformers, tokenization, fine-tuning and the ecosystem, hands-on." },
+    { "kind": "external", "title": "Neural Networks: Zero to Hero (Andrej Karpathy)", "url": "https://karpathy.ai/zero-to-hero.html", "type": "video", "note": "Build a small language model from scratch to understand what the APIs hide." },
+    { "kind": "external", "title": "AI Engineering (Chip Huyen)", "url": "https://www.oreilly.com/library/view/ai-engineering/9781098166298/", "type": "book", "note": "Evaluation, RAG, agents and production concerns; the most practical overview of the discipline." },
+    { "kind": "external", "title": "Building effective agents (Anthropic)", "url": "https://www.anthropic.com/engineering/building-effective-agents", "type": "article", "note": "Patterns for workflows and agents, and when simpler solutions are better." },
+    { "kind": "external", "title": "OWASP Top 10 for LLM applications", "url": "https://genai.owasp.org/llm-top-10/", "type": "docs", "note": "Prompt injection, data leakage and other risks you must design against." },
+    { "kind": "lesson", "ref": "sd/databases-1/indexes-and-query-plans" },
+    { "kind": "lesson", "ref": "sd/caching/caching-strategies" },
+    { "kind": "lesson", "ref": "sd/queues-and-streaming/backpressure-retries-and-dlq" },
+    { "kind": "project", "title": "A retrieval-augmented app with an evaluation harness", "brief": "Build a question-answering app over a document set you choose. Write at least 50 test questions with expected answers, measure retrieval and answer quality separately, change one thing at a time (chunking, embeddings, prompts) and record the effect.", "deliverable": "A repository with the app, the evaluation set, a script that prints scores and a README table showing which changes helped." },
+    { "kind": "project", "title": "A tool-using agent with guardrails", "brief": "Build an agent that calls two or three real tools, with input validation, a step limit, timeouts, retries with backoff and logging of every tool call. Test it against adversarial inputs from the OWASP list.", "deliverable": "A repository with the agent, a test suite of failure and attack cases, and a short write-up of what broke and how you fixed it." },
+    { "kind": "planned", "title": "LLM system design and ML system design lessons", "note": "SD module 26 (feature stores, serving, A/B testing) and LLM-specific design are not written on this site yet. Use the books above and design the two projects as if for production: latency, cost, caching, queueing and failure modes." }
+  ],
+  "exit": [
+    "You can explain how retrieval, prompting and evaluation each affect answer quality, with measurements from your own project.",
+    "Your evaluation harness catches a regression you introduced on purpose.",
+    "You can describe three ways your agent can fail or be attacked and the mitigation for each.",
+    "You use AI tools daily for implementation but can say what you verified and how."
+  ]
+}
