@@ -1,0 +1,105 @@
+[
+  {
+    "id": "cache-write-strategies",
+    "title": "Cache strategies: cache-aside, write-through, write-back",
+    "summary": "Choose how data moves between your application, the cache and the database on reads and writes.",
+    "options": [{ "id": "aside", "name": "Cache-aside" }, { "id": "through", "name": "Write-through" }, { "id": "back", "name": "Write-back (write-behind)" }],
+    "rows": [
+      { "dimension": "Read path", "values": { "aside": "App checks the cache, loads from the database on a miss and fills the cache", "through": "Reads hit a cache that is kept current by writes", "back": "Reads hit the cache, which may hold newer data than the database" } },
+      { "dimension": "Write path", "values": { "aside": "Write to the database, then invalidate or update the cache entry", "through": "Write to the cache and the database together, synchronously", "back": "Write to the cache and flush to the database later" } },
+      { "dimension": "Write latency", "values": { "aside": "Database speed", "through": "Slower: waits for both", "back": "Fastest: acknowledged from memory" } },
+      { "dimension": "Staleness and consistency", "values": { "aside": "Brief staleness between write and invalidation", "through": "Cache and database stay consistent", "back": "Database lags the cache" } },
+      { "dimension": "Durability risk", "values": { "aside": "None added", "through": "None added", "back": "Data not yet flushed is lost if the cache fails" } },
+      { "dimension": "Complexity", "values": { "aside": "Low and widely used", "through": "Moderate", "back": "High: batching, ordering and failure handling" } }
+    ],
+    "choose": {
+      "aside": ["Read-heavy data where occasional staleness is acceptable.", "You want a simple default that survives cache failures."],
+      "through": ["Reads must see recent writes and consistency matters.", "Write volume is modest."],
+      "back": ["Write-heavy workloads where you can accept a small loss window.", "You can buffer and batch updates safely."]
+    },
+    "watchOut": ["Cache stampede when a hot key expires: coalesce requests or jitter TTLs.", "Invalidation is the hard part: define who owns it before you add the cache."],
+    "tags": ["caching"],
+    "lessons": ["sd/caching/caching-strategies", "sd/caching/invalidation-and-stampedes"]
+  },
+  {
+    "id": "scaling-up-vs-out",
+    "title": "Vertical vs horizontal scaling",
+    "summary": "Decide whether to make one machine bigger or add more machines.",
+    "options": [{ "id": "vertical", "name": "Vertical (scale up)" }, { "id": "horizontal", "name": "Horizontal (scale out)" }],
+    "rows": [
+      { "dimension": "How", "values": { "vertical": "Bigger CPU, memory and disk on one machine", "horizontal": "More machines behind a load balancer or partitioning scheme" } },
+      { "dimension": "Ceiling", "values": { "vertical": "Hardware limits and rising price per unit of capacity", "horizontal": "Much higher, limited by coordination overhead" } },
+      { "dimension": "Failure", "values": { "vertical": "Single point of failure unless replicated", "horizontal": "Survives losing nodes if designed for it" } },
+      { "dimension": "Application changes", "values": { "vertical": "Usually none", "horizontal": "Stateless services, shared state outside instances, data partitioning" } },
+      { "dimension": "Operational cost", "values": { "vertical": "Simple to run", "horizontal": "More moving parts: deployment, service discovery, monitoring" } }
+    ],
+    "choose": {
+      "vertical": ["You are early and load fits one machine comfortably.", "Simplicity matters more than headroom right now."],
+      "horizontal": ["You need fault tolerance or growth beyond one machine.", "Workload splits cleanly across independent requests or partitions."]
+    },
+    "watchOut": ["Scaling out stateful services without a plan for session and data locality.", "Premature distribution: a single well-tuned node often takes you surprisingly far."],
+    "tags": ["scalability"],
+    "lessons": ["sd/scalability/scaling-stateless-autoscaling", "sd/scalability/capacity-planning"]
+  },
+  {
+    "id": "l4-vs-l7",
+    "title": "Layer 4 vs layer 7 load balancing",
+    "summary": "Choose whether the load balancer routes on connection details or understands the application protocol.",
+    "options": [{ "id": "l4", "name": "Layer 4 (transport)" }, { "id": "l7", "name": "Layer 7 (application)" }],
+    "rows": [
+      { "dimension": "What it sees", "values": { "l4": "IP addresses and ports", "l7": "HTTP method, path, headers, cookies" } },
+      { "dimension": "Routing options", "values": { "l4": "Spread connections across backends", "l7": "Route by URL, host or header; canary and A/B routing" } },
+      { "dimension": "Performance", "values": { "l4": "Very fast and cheap: no payload inspection", "l7": "More CPU and latency per request" } },
+      { "dimension": "TLS", "values": { "l4": "Usually passes encrypted traffic through", "l7": "Often terminates TLS to inspect and route" } },
+      { "dimension": "Extra features", "values": { "l4": "Minimal", "l7": "Caching, compression, auth, rate limiting, request rewriting" } }
+    ],
+    "choose": {
+      "l4": ["You need maximum throughput or non-HTTP protocols.", "Simple distribution across identical backends is enough."],
+      "l7": ["You route by path or host, or run several services behind one address.", "You want the balancer to enforce auth or rate limits."]
+    },
+    "watchOut": ["A single load balancer is itself a single point of failure: run redundant pairs.", "Sticky sessions hide state in the balancer: prefer stateless services."],
+    "tags": ["load-balancing"],
+    "lessons": ["sd/load-balancing/load-balancer-basics", "sd/load-balancing/balancing-algorithms"]
+  },
+  {
+    "id": "rate-limit-algorithms",
+    "title": "Rate limiting: fixed window, sliding window, token bucket",
+    "summary": "Choose an algorithm by how it treats bursts, accuracy and memory.",
+    "options": [{ "id": "fixed", "name": "Fixed window counter" }, { "id": "sliding", "name": "Sliding window counter" }, { "id": "bucket", "name": "Token bucket" }],
+    "rows": [
+      { "dimension": "Idea", "values": { "fixed": "Count requests per fixed time interval", "sliding": "Weight the previous window's count by how much it overlaps the current one", "bucket": "Tokens refill at a steady rate; each request spends one" } },
+      { "dimension": "Burst behaviour", "values": { "fixed": "A burst of up to twice the limit can straddle a window boundary", "sliding": "Smooths the boundary effect; approximate", "bucket": "Allows bursts up to the bucket size, then the steady rate" } },
+      { "dimension": "Accuracy", "values": { "fixed": "Coarse", "sliding": "Close to exact", "bucket": "Exact for its own definition" } },
+      { "dimension": "Memory per key", "values": { "fixed": "One counter", "sliding": "Two counters", "bucket": "A token count and a timestamp" } },
+      { "dimension": "Implementation", "values": { "fixed": "Simplest", "sliding": "Simple", "bucket": "Simple, needs atomic refill-and-spend" } }
+    ],
+    "choose": {
+      "fixed": ["A rough limit is enough and simplicity wins.", "Boundary bursts are harmless."],
+      "sliding": ["You want a smooth limit without storing every request time.", "Boundary bursts would hurt a backend."],
+      "bucket": ["Short bursts are fine but the average rate must be bounded.", "You want intuitive burst and rate parameters."]
+    },
+    "watchOut": ["Read-then-write counters race across servers: use atomic operations.", "Decide fail-open or fail-closed for when the limiter store is down."],
+    "tags": ["rate-limiting", "scalability"],
+    "lessons": ["sd/scalability/rate-limiting-algorithms", "sd/scalability/distributed-rate-limiting"]
+  },
+  {
+    "id": "feed-fanout",
+    "title": "News feed: fan-out on write vs on read",
+    "summary": "Choose whether to precompute each user's feed when a post is created or assemble it when the feed is requested.",
+    "options": [{ "id": "write", "name": "Fan-out on write (push)" }, { "id": "read", "name": "Fan-out on read (pull)" }],
+    "rows": [
+      { "dimension": "When work happens", "values": { "write": "At post time: copy the post id into each follower's feed", "read": "At read time: gather recent posts from everyone the user follows" } },
+      { "dimension": "Read latency", "values": { "write": "Very low: the feed is ready", "read": "Higher: many lookups and a merge" } },
+      { "dimension": "Write cost", "values": { "write": "High for users with many followers", "read": "Low: store the post once" } },
+      { "dimension": "Storage", "values": { "write": "Larger: feed entries per follower", "read": "Smaller" } },
+      { "dimension": "Freshness", "values": { "write": "Slight delay while fan-out completes", "read": "Always current" } }
+    ],
+    "choose": {
+      "write": ["Most users follow a moderate number of accounts and reads vastly outnumber posts.", "Feed read latency is the top priority."],
+      "read": ["A few accounts have huge audiences, so push would be too expensive.", "Storage and write amplification must stay small."]
+    },
+    "watchOut": ["The celebrity problem: use a hybrid that pushes for normal accounts and pulls for very large ones.", "Offset pagination breaks on a moving feed: use cursors."],
+    "tags": ["feeds", "caching"],
+    "lessons": ["sd/caching/why-cache", "sd/databases-2/hot-keys-and-hot-partitions"]
+  }
+]
