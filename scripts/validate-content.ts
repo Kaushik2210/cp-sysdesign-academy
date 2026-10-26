@@ -9,6 +9,7 @@ import { getPatterns } from "../src/lib/content/patterns";
 import { getTemplates } from "../src/lib/content/templates";
 import { getGlossary } from "../src/lib/content/glossary";
 import { getInsights } from "../src/lib/content/market";
+import { getRoadmap } from "../src/lib/content/roadmap";
 
 const only = process.argv[2]; // e.g. `cp/math-basics`
 const errors: string[] = [];
@@ -80,6 +81,19 @@ try {
 
 try {
   getInsights(); // schema + duplicate-id validation
+} catch (e) {
+  errors.push(String(e instanceof Error ? e.message : e));
+}
+
+try {
+  const insightIds = new Set(getInsights().map((i) => i.id));
+  for (const phase of getRoadmap()) {
+    for (const w of phase.whyNow) if (!insightIds.has(w)) errors.push(`roadmap "${phase.id}": unknown market insight "${w}"`);
+    for (const s of phase.steps) {
+      if (s.kind === "lesson" && !ids.has(s.ref)) errors.push(`roadmap "${phase.id}": unknown lesson "${s.ref}"`);
+      if (s.kind === "page" && !routes.has(s.href)) errors.push(`roadmap "${phase.id}": unknown page "${s.href}"`);
+    }
+  }
 } catch (e) {
   errors.push(String(e instanceof Error ? e.message : e));
 }
