@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { newCard, review, toDay, type Card, type Grade } from "./srs/sm2";
+import type { MockAttempt } from "./mock";
 
 export type Verdict = "AC" | "WA" | "TLE" | "RE";
 
@@ -32,10 +33,14 @@ interface ProgressState {
   activity: Record<string, number>;
   /** roadmap step key -> ISO date ticked (see stepKey in lib/content/roadmap) */
   roadmap: Record<string, string>;
+  /** completed mock interviews, newest last */
+  mocks: MockAttempt[];
   visit: (id: string) => void;
   toggleComplete: (id: string, title?: string) => void;
   toggleBookmark: (id: string) => void;
   toggleRoadmap: (key: string) => void;
+  addMock: (attempt: MockAttempt) => void;
+  deleteMock: (id: string) => void;
   setNote: (id: string, note: string) => void;
   recordProblem: (id: string, verdict: Verdict, tags: string[]) => void;
   recordQuiz: (id: string, result: QuizResult) => void;
@@ -61,6 +66,7 @@ export const useProgress = create<ProgressState>()(
       cards: {},
       activity: {},
       roadmap: {},
+      mocks: [],
       visit: (id) => set({ lastVisited: id }),
       toggleComplete: (id, title) =>
         set((s) => {
@@ -97,6 +103,8 @@ export const useProgress = create<ProgressState>()(
           else roadmap[key] = new Date().toISOString();
           return { roadmap, activity: roadmap[key] ? bump(s.activity) : s.activity };
         }),
+      addMock: (attempt) => set((s) => ({ mocks: [...s.mocks, attempt], activity: bump(s.activity) })),
+      deleteMock: (id) => set((s) => ({ mocks: s.mocks.filter((m) => m.id !== id) })),
       setNote: (id, note) => set((s) => ({ notes: { ...s.notes, [id]: note } })),
       recordProblem: (id, verdict, tags) =>
         set((s) => {
@@ -125,10 +133,10 @@ export const useProgress = create<ProgressState>()(
             : s,
         ),
       exportJson: () => {
-        const { completed, lastVisited, bookmarks, notes, problems, quizzes, cards, activity, roadmap } =
+        const { completed, lastVisited, bookmarks, notes, problems, quizzes, cards, activity, roadmap, mocks } =
           get();
         return JSON.stringify(
-          { version: 2, completed, lastVisited, bookmarks, notes, problems, quizzes, cards, activity, roadmap },
+          { version: 2, completed, lastVisited, bookmarks, notes, problems, quizzes, cards, activity, roadmap, mocks },
           null,
           2,
         );
@@ -145,6 +153,7 @@ export const useProgress = create<ProgressState>()(
           cards: d.cards ?? {},
           activity: d.activity ?? {},
           roadmap: d.roadmap ?? {},
+          mocks: d.mocks ?? [],
         });
       },
     }),
