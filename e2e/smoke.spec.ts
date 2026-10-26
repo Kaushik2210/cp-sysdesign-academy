@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/visualizers/segment-tree/", "/visualizers/knapsack/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/visualizers/segment-tree/", "/visualizers/knapsack/", "/visualizers/kmp/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -581,5 +581,27 @@ test.describe("knapsack visualizer", () => {
     await page.waitForLoadState("networkidle");
     await page.getByRole("textbox").first().fill("5\n0 4");
     await expect(page.getByText(/weight must be at least 1/)).toBeVisible();
+  });
+});
+
+test.describe("KMP visualizer", () => {
+  test("builds the prefix function and finds every occurrence, including overlaps", async ({ page }) => {
+    await page.goto("/visualizers/kmp/");
+    await page.waitForLoadState("networkidle");
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 400 && (await forward.isEnabled()); i++) await forward.click();
+    await expect(page.getByLabel("Matches")).toContainText("0, 7, 9");
+    await expect(page.getByRole("cell", { name: "pi 5: 4" })).toBeVisible();
+    await expect(page.getByText(/the pattern occurs at positions 0, 7, 9/)).toBeVisible();
+  });
+  test("matches a pattern equal to the text and rejects bad input", async ({ page }) => {
+    await page.goto("/visualizers/kmp/");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("textbox").first().fill("aabaac\naabaac");
+    const forward = page.getByRole("button", { name: "Step forward" });
+    for (let i = 0; i < 400 && (await forward.isEnabled()); i++) await forward.click();
+    await expect(page.getByLabel("Matches")).toContainText("0");
+    await page.getByRole("textbox").first().fill("abc\nB");
+    await expect(page.getByText(/pattern may only use lowercase/)).toBeVisible();
   });
 });
