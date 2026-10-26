@@ -152,3 +152,36 @@ test.describe("phone width", () => {
     });
   }
 });
+test("roadmap shows ten phases, tracks progress and syncs with lesson completion", async ({ page }) => {
+  await page.goto("/roadmap/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: /Zero to elite/ })).toBeVisible();
+  await expect(page.getByRole("table", { name: /Roadmap phases/ }).getByRole("row")).toHaveCount(11); // header + 10 phases
+
+  const overall = page.getByRole("progressbar", { name: "Overall roadmap progress" });
+  const before = Number(await overall.getAttribute("aria-valuenow"));
+
+  // A self-reported step persists across reloads and moves overall progress.
+  const first = page.locator("#foundations").getByRole("checkbox").first();
+  await first.check();
+  await expect(first).toBeChecked();
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+  await expect(page.locator("#foundations").getByRole("checkbox").first()).toBeChecked();
+  expect(Number(await overall.getAttribute("aria-valuenow"))).toBeGreaterThan(before);
+
+  // A lesson step is backed by real lesson completion.
+  const lessonBox = page.locator("#foundations").getByRole("checkbox").nth(4); // first lesson in the phase
+  await lessonBox.check();
+  await page.goto("/cp/how-cp-works/verdicts-and-contests/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("button", { name: /completed/i })).toBeVisible();
+});
+
+test("roadmap external resources open safely in a new tab", async ({ page }) => {
+  await page.goto("/roadmap/");
+  await page.locator("#problem-solving summary").click(); // phases other than the first start collapsed
+  const link = page.getByRole("link", { name: /Competitive Programmer's Handbook/ }).first();
+  await expect(link).toHaveAttribute("target", "_blank");
+  await expect(link).toHaveAttribute("rel", /noopener/);
+});
