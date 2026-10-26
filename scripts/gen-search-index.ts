@@ -9,11 +9,12 @@ import { getInsights } from "../src/lib/content/market";
 import { getRoadmap } from "../src/lib/content/roadmap";
 import { getQuestions } from "../src/lib/content/questions";
 import { getTradeoffSheets } from "../src/lib/content/tradeoffs";
+import { VIZ_META } from "../src/visualizers/meta";
 import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
   id: string;
-  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap" | "question" | "cheatsheet" | "sandbox";
+  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market" | "roadmap" | "question" | "cheatsheet" | "sandbox" | "visualizer";
   title: string;
   href: string;
   tags: string;
@@ -171,6 +172,17 @@ docs.push({
   tags: "sandbox design canvas architecture diagram review single point of failure cache replica",
   text: "Draw a system architecture and get automated feedback on single points of failure, missing caches and unsafe wiring.",
 });
+
+for (const m of VIZ_META) {
+  docs.push({
+    id: `visualizer:${m.name}`,
+    kind: "visualizer",
+    title: `${m.title} visualizer`,
+    href: `/visualizers/${m.name}/`,
+    tags: ["visualizer", "animation", m.category, m.name].join(" "),
+    text: `${m.summary} ${m.complexity}`,
+  });
+}
 
 for (const s of getTradeoffSheets()) {
   docs.push({
