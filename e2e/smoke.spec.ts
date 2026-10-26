@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -241,4 +241,42 @@ test("numbers cheat sheet shows the latency scale and computes estimates", async
   // Garbage input never produces NaN.
   await page.getByLabel("Requests per day").fill("abc");
   await expect(page.getByText("NaN")).toHaveCount(0);
+});
+test("trade-off sheets compare options, filter by search and topic, and link to lessons", async ({ page }) => {
+  await page.goto("/cheatsheets/tradeoffs/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: "Trade-off cheat sheets" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText(/14 of 14 sheets/);
+
+  // Each sheet is a real comparison table with one column per option.
+  const sql = page.locator("#sql-vs-nosql");
+  await expect(sql.getByRole("columnheader", { name: "Relational (SQL)" })).toBeVisible();
+  await expect(sql.getByRole("columnheader", { name: /NoSQL/ })).toBeVisible();
+  await expect(sql.getByRole("heading", { name: /Choose Relational \(SQL\) when/ })).toBeVisible();
+
+  const cache = page.locator("#cache-write-strategies");
+  await expect(cache.getByRole("columnheader")).toHaveCount(4); // dimension + 3 options
+
+  await page.getByRole("searchbox", { name: "Find a comparison" }).fill("websocket");
+  await expect(page.getByRole("status")).toContainText(/1 of 14/);
+  await expect(page.locator("#realtime-transports")).toBeVisible();
+  await expect(page.locator("#sql-vs-nosql")).toHaveCount(0);
+
+  await page.getByRole("searchbox", { name: "Find a comparison" }).fill("");
+  await page.getByRole("button", { name: "caching", exact: true }).click();
+  await expect(page.locator("#cache-write-strategies")).toBeVisible();
+  await expect(page.locator("#sql-vs-nosql")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "All", exact: true }).click();
+  await page.locator("#api-styles").getByRole("link", { name: /REST, GraphQL/ }).click();
+  await expect(page).toHaveURL(/api-styles-rest-graphql-grpc/);
+});
+
+test("global search deep-links to a trade-off sheet", async ({ page }) => {
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  await page.keyboard.press("Control+k");
+  await page.getByRole("combobox", { name: "Search query" }).fill("queue vs event stream");
+  await page.getByRole("option").first().getByRole("button").click();
+  await expect(page).toHaveURL(/cheatsheets\/tradeoffs\/#queue-vs-stream/);
 });
