@@ -14,7 +14,7 @@ Runs entirely in your browser: no backend, no sign-up, progress stays on your de
 - **Run code in the page**: Python (Pyodide) and JavaScript in Web Workers with a time limit; C++/Java via an optional Judge0 runner.
 - **Judged problems**: AC / WA / TLE / RE verdicts, progressive hints, an editorial that unlocks on demand, a complexity self-check.
 - **Quizzes** (MCQ, multi-select, predict-the-output) and a **spaced-repetition review queue** (SM-2) built from completed lessons and missed questions.
-- **Visualizers** with play/pause/step/speed and highlighted pseudocode.
+- **Visualizers** (14: searching, sorting, grid BFS/DFS, Dijkstra, union-find, segment tree, knapsack, KMP, windows) with play/pause/step/speed, editable input and highlighted pseudocode.
 - **Interactive diagrams**: click a component to see its role, failure modes and trade-offs.
 - **Interactive sandboxes**: consistent-hashing ring, rate limiter, cache eviction, load balancer and a design canvas with automated review.
 - **Cheat sheets**: a numbers sheet with estimators and 14 trade-off comparisons.
@@ -73,7 +73,7 @@ docs/      PLAN, DECISIONS, COVERAGE, AUTHORING
 
 ## Roadmap
 
-See [`docs/COVERAGE.md`](docs/COVERAGE.md) for module-by-module status. Planned: the remaining CP levels 2-3, SD case studies and LLD, template library, pattern library, problem ladder, more visualizers, and the design canvas sandbox.
+See [`docs/COVERAGE.md`](docs/COVERAGE.md) for module-by-module status. Planned: the remaining CP levels 2-3, SD case studies and LLD, template library, pattern library, problem ladder, and lessons for the visualizers that have none yet (Dijkstra, union-find, segment tree, knapsack, KMP).
 
 ## Contributing
 
