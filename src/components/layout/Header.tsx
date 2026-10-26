@@ -7,37 +7,37 @@ export function Header() {
     <header className="sticky top-0 z-30 border-b border-border bg-bg/90 backdrop-blur">
       <nav
         aria-label="Main"
-        className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6"
+        className="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-1 sm:px-6"
       >
         <Link href="/" className="font-semibold tracking-tight">
           CP &amp; SysDesign <span className="text-accent">Academy</span>
         </Link>
-        <div className="ml-2 flex gap-4 text-sm text-muted-fg">
-          <Link href="/cp/" className="hover:text-fg">
+        <div className="ml-2 flex flex-wrap gap-x-4 gap-y-0 text-sm text-muted-fg">
+          <Link href="/cp/" className="inline-flex min-h-11 items-center hover:text-fg">
             Competitive Programming
           </Link>
-          <Link href="/sd/" className="hover:text-fg">
+          <Link href="/sd/" className="inline-flex min-h-11 items-center hover:text-fg">
             System Design
           </Link>
-          <Link href="/patterns/" className="hover:text-fg">
+          <Link href="/patterns/" className="inline-flex min-h-11 items-center hover:text-fg">
             Patterns
           </Link>
-          <Link href="/templates/" className="hover:text-fg">
+          <Link href="/templates/" className="inline-flex min-h-11 items-center hover:text-fg">
             Templates
           </Link>
-          <Link href="/glossary/" className="hover:text-fg">
+          <Link href="/glossary/" className="inline-flex min-h-11 items-center hover:text-fg">
             Glossary
           </Link>
-          <Link href="/market/" className="hover:text-fg">
+          <Link href="/market/" className="inline-flex min-h-11 items-center hover:text-fg">
             Market
           </Link>
-          <Link href="/paths/" className="hover:text-fg">
+          <Link href="/paths/" className="inline-flex min-h-11 items-center hover:text-fg">
             Paths
           </Link>
-          <Link href="/review/" className="hover:text-fg">
+          <Link href="/review/" className="inline-flex min-h-11 items-center hover:text-fg">
             Review
           </Link>
-          <Link href="/dashboard/" className="hover:text-fg">
+          <Link href="/dashboard/" className="inline-flex min-h-11 items-center hover:text-fg">
             Dashboard
           </Link>
         </div>
