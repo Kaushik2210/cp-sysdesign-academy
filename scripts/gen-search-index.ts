@@ -163,6 +163,15 @@ docs.push({
   text: "Compare round robin, least connections, power of two choices, weighted and hash-based load balancing on identical traffic.",
 });
 
+docs.push({
+  id: "sandbox:design-canvas",
+  kind: "sandbox",
+  title: "Design canvas",
+  href: "/sandbox/design-canvas/",
+  tags: "sandbox design canvas architecture diagram review single point of failure cache replica",
+  text: "Draw a system architecture and get automated feedback on single points of failure, missing caches and unsafe wiring.",
+});
+
 for (const s of getTradeoffSheets()) {
   docs.push({
     id: `cheatsheet:${s.id}`,
