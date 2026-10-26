@@ -1,0 +1,81 @@
+[
+  {
+    "id": "indeed-rebound",
+    "topic": "demand",
+    "finding": "Software development postings on Indeed in the US rose roughly 15% over the year to mid-2026 while postings overall fell about 7%, yet they were still about 27.5% below their pre-pandemic level.",
+    "figure": "+15% year on year, still 27.5% below Feb 2020",
+    "implication": "Demand is recovering from a low base rather than booming, so expect a selective market and plan for a longer search than in 2021.",
+    "source": { "name": "Indeed Hiring Lab, \"AI and Job Postings: From Destruction to Creation?\"", "url": "https://hiringlab.indeed.com/2026/07/08/ai-and-job-postings-from-destruction-to-creation/", "kind": "primary", "published": "2026-07-08" },
+    "confidence": "high",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "indeed-senior-ai-skew",
+    "topic": "demand",
+    "finding": "Indeed found that most of the recent rise in software postings came from senior roles (71% of the increase) and from jobs that mention AI in the title (37% of the increase).",
+    "figure": "71% senior, 37% AI-titled",
+    "implication": "The recovery rewards experience and AI fluency. Early-career candidates must close the gap with visible proof of work and AI-assisted engineering skill.",
+    "source": { "name": "Indeed Hiring Lab, \"AI and Job Postings: From Destruction to Creation?\"", "url": "https://hiringlab.indeed.com/2026/07/08/ai-and-job-postings-from-destruction-to-creation/", "kind": "primary", "published": "2026-07-08" },
+    "confidence": "high",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "indeed-index-oct-2026",
+    "topic": "demand",
+    "finding": "Indeed's US software development postings index (February 2020 = 100) was reported at 78.3 on 2 October 2026, up from 64.3 a year earlier and from a low of 61.1 in May 2025.",
+    "figure": "index 78.3 (Oct 2026) vs 61.1 low (May 2025)",
+    "implication": "Five straight quarters of recovery suggest conditions are improving, but still about a fifth below the pre-pandemic baseline.",
+    "source": { "name": "Rockstar Developer University, citing Indeed Hiring Lab data via FRED", "url": "https://rockstardeveloperuniversity.com/entry-level-software-engineer-job-market-statistics/", "kind": "secondary", "published": "2026-10-08" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "entry-share-q1-2026",
+    "topic": "entry-level",
+    "finding": "Only about 4.5% of US software development postings in the first quarter of 2026 were entry-level, the smallest share of any sector Indeed measured, while senior roles made up roughly 69%.",
+    "figure": "4.5% entry-level, 69.3% senior",
+    "implication": "Few postings are aimed at beginners, so a polished resume alone will not stand out. Build evidence (shipped projects, contest results, open-source work) before applying widely.",
+    "source": { "name": "Rockstar Developer University, citing Indeed Hiring Lab", "url": "https://rockstardeveloperuniversity.com/entry-level-software-engineer-job-market-statistics/", "kind": "secondary", "published": "2026-10-08" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "signalfire-entry-down",
+    "topic": "entry-level",
+    "finding": "Entry-level hiring at major tech employers was reported to be about 65% below its 2019 level, with AI taking on much of the small, well-defined work that once trained juniors.",
+    "figure": "about -65% vs 2019",
+    "implication": "Do not count on being trained on trivial tickets. Learn to own larger pieces end to end and to verify AI-generated code.",
+    "source": { "name": "Rockstar Developer University, citing SignalFire", "url": "https://rockstardeveloperuniversity.com/entry-level-software-engineer-job-market-statistics/", "kind": "secondary", "published": "2026-10-08" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "handshake-competition",
+    "topic": "entry-level",
+    "finding": "Handshake reported that postings aimed at the Class of 2026 fell below 2020 levels and that applications per job were up about 26% year on year by August 2025.",
+    "figure": "+26% applications per job",
+    "implication": "Competition per opening is high, which makes referrals, internships and public proof of work worth more than volume applications.",
+    "source": { "name": "Rockstar Developer University, citing Handshake", "url": "https://rockstardeveloperuniversity.com/entry-level-software-engineer-job-market-statistics/", "kind": "secondary", "published": "2026-10-08" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "layoffs-2026",
+    "topic": "entry-level",
+    "finding": "Layoffs.fyi had counted more than 126,000 tech layoffs by mid-August 2026, already above the roughly 122,600 it counted in all of 2025.",
+    "figure": "126,000+ by mid-Aug 2026",
+    "implication": "More experienced engineers are on the market too, so juniors compete with them for some roles. Differentiate with specialisation rather than generic skills.",
+    "source": { "name": "Rockstar Developer University, citing Layoffs.fyi", "url": "https://rockstardeveloperuniversity.com/entry-level-software-engineer-job-market-statistics/", "kind": "secondary", "published": "2026-10-08" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "juniors-who-ship",
+    "topic": "entry-level",
+    "finding": "Commentary on the 2026 market notes that firms still hiring juniors tend to favour people who already ship software, contribute to open source, or bring a specialisation.",
+    "implication": "Treat shipped projects and open-source contributions as part of the curriculum, not an afterthought.",
+    "source": { "name": "Articuler.AI, Software Engineer Job Market 2026", "url": "https://www.articuler.ai/resources/learn/software-engineer-job-market/", "kind": "secondary" },
+    "confidence": "low",
+    "retrieved": "2026-10-26"
+  }
+]
