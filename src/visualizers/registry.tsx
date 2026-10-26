@@ -16,6 +16,7 @@ import {
   type SortState,
 } from "./algorithms";
 import { INSERTION_SORT_CODE, MERGE_SORT_CODE, QUICK_SORT_CODE, insertionSortSteps, mergeSortSteps, quickSortSteps, type SortFrame } from "./sorting";
+import { BFS_GRID_CODE, DEFAULT_GRID, DFS_GRID_CODE, bfsGridSteps, dfsGridSteps, type GridFrame } from "./grid";
 import type { VisualizerDef } from "./types";
 
 function BinarySearchRender({ state: s }: { state: BSState }) {
@@ -110,6 +111,51 @@ function SortFrameRender({ state: s }: { state: SortFrame }) {
     </div>
   );
 }
+/** Grid search renderer shared by BFS and DFS: cell colours show status, numbers show distance/depth, and the pending list is listed below. */
+function GridRender({ state: s }: { state: GridFrame }) {
+  const onPath = new Set(s.path.map((c) => c.join(",")));
+  const cellClass = (r: number, c: number) => {
+    const ch = s.map[r][c];
+    if (ch === "#") return "border-border bg-fg/30";
+    if (onPath.has(`${r},${c}`)) return "border-emerald-500 bg-emerald-500/40";
+    if (s.current && s.current[0] === r && s.current[1] === c) return "border-accent bg-accent/50 ring-2 ring-accent";
+    if (s.status[r][c] === "done") return "border-border bg-accent/20";
+    if (s.status[r][c] === "frontier") return "border-accent bg-transparent";
+    return "border-border bg-transparent";
+  };
+  const label = (r: number, c: number) => {
+    const ch = s.map[r][c];
+    const kind = ch === "#" ? "wall" : ch === "S" ? "start" : ch === "E" ? "end" : s.status[r][c];
+    return `row ${r + 1}, column ${c + 1}, ${kind}${s.dist[r][c] !== null ? `, ${s.dist[r][c]}` : ""}`;
+  };
+  const word = s.frontierKind === "queue" ? "Queue (front first)" : "Stack (top first)";
+  return (
+    <div>
+      <div role="grid" aria-label="Search grid" className="inline-grid gap-0.5" style={{ gridTemplateColumns: `repeat(${s.map[0].length}, 2rem)` }}>
+        {s.map.map((row, r) =>
+          Array.from(row, (ch, c) => (
+            <div
+              key={`${r}-${c}`}
+              role="gridcell"
+              aria-label={label(r, c)}
+              className={`flex h-8 w-8 items-center justify-center rounded border font-mono text-[11px] ${cellClass(r, c)}`}
+            >
+              {ch === "S" || ch === "E" ? <b>{ch}</b> : s.dist[r][c] !== null && ch !== "#" ? s.dist[r][c] : ""}
+            </div>
+          )),
+        )}
+      </div>
+      <p className="mt-2 text-xs text-muted-fg">
+        Outlined = waiting, shaded = expanded, strong = current, green = route found. Numbers are {s.frontierKind === "queue" ? "distance from S" : "depth along the route"}.
+      </p>
+      <p className="mt-1 text-sm" aria-label="Pending cells">
+        {word}:{" "}
+        <span className="font-mono">{s.frontier.length ? s.frontier.map((c) => `(${c[0]},${c[1]})`).join(" ") : "empty"}</span>
+      </p>
+    </div>
+  );
+}
+
 export const VISUALIZERS = {
   "binary-search": {
     title: "Binary search",
@@ -167,6 +213,22 @@ export const VISUALIZERS = {
     generate: quickSortSteps,
     Render: SortFrameRender,
   } satisfies VisualizerDef<SortFrame>,
+  "bfs-grid": {
+    title: "BFS on a grid",
+    pseudocode: BFS_GRID_CODE,
+    defaultInput: DEFAULT_GRID,
+    inputHelp: "A grid of . (open), # (wall), S (start), E (end); up to 10 rows and 14 columns.",
+    generate: bfsGridSteps,
+    Render: GridRender,
+  } satisfies VisualizerDef<GridFrame>,
+  "dfs-grid": {
+    title: "DFS on a grid",
+    pseudocode: DFS_GRID_CODE,
+    defaultInput: DEFAULT_GRID,
+    inputHelp: "A grid of . (open), # (wall), S (start), E (end); up to 10 rows and 14 columns.",
+    generate: dfsGridSteps,
+    Render: GridRender,
+  } satisfies VisualizerDef<GridFrame>,
 };
 
 export type VisualizerName = keyof typeof VISUALIZERS;

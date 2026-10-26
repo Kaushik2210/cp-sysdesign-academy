@@ -79,4 +79,20 @@ export const VIZ_META: VizMeta[] = [
     complexity: "O(n)",
     lessons: ["cp/arrays-and-windows/sliding-window"],
   },
+  {
+    name: "bfs-grid",
+    title: "BFS on a grid",
+    category: "graphs",
+    summary: "Explore a maze layer by layer with a queue; the first time E is popped, the route is a shortest one.",
+    complexity: "O(rows x cols)",
+    lessons: ["cp/stacks-and-queues/queues-deques-bfs"],
+  },
+  {
+    name: "dfs-grid",
+    title: "DFS on a grid",
+    category: "graphs",
+    summary: "Explore a maze by committing to one direction with a stack and backing up at dead ends; finds a route but not necessarily the shortest.",
+    complexity: "O(rows x cols)",
+    lessons: ["cp/stacks-and-queues/queues-deques-bfs"],
+  },
 ];
