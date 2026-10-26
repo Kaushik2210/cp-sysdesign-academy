@@ -136,6 +136,15 @@ docs.push({
   text: "Add and remove nodes on a hash ring and see which keys move compared with hash mod N.",
 });
 
+docs.push({
+  id: "sandbox:rate-limiter",
+  kind: "sandbox",
+  title: "Rate limiter sandbox",
+  href: "/sandbox/rate-limiter/",
+  tags: "sandbox simulator rate limiting token bucket fixed window sliding window",
+  text: "Compare fixed window, sliding window and token bucket rate limiting on the same traffic.",
+});
+
 for (const s of getTradeoffSheets()) {
   docs.push({
     id: `cheatsheet:${s.id}`,
