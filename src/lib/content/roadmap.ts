@@ -55,9 +55,17 @@ export function getRoadmap(): Phase[] {
     if (orders.has(p.order)) throw new Error(`Duplicate roadmap phase order ${p.order}`);
     ids.add(p.id);
     orders.add(p.order);
+    const keys = new Set<string>();
+    for (const s of p.steps) {
+      if (s.kind === "lesson") continue; // lessons are tracked by lesson id
+      const key = stepKey(p.id, s.title);
+      if (keys.has(key)) throw new Error(`Duplicate step title in roadmap phase "${p.id}": "${s.title}"`);
+      keys.add(key);
+    }
   }
   return phases.sort((a, b) => a.order - b.order);
 }
 
-/** Stable key for progress tracking: survives reordering of other phases. */
-export const stepKey = (phaseId: string, index: number) => `${phaseId}:${index}`;
+/** Stable key for progress tracking. Derived from the step title, so inserting or reordering steps never shifts saved ticks. */
+export const stepKey = (phaseId: string, title: string) =>
+  `${phaseId}:${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;

@@ -24,12 +24,12 @@ export default function RoadmapPage() {
       const i = insights.get(id);
       return i ? [{ id, label: i.source.name.split(/[,:(]/)[0].trim(), href: `/market/#${i.topic}` }] : [];
     }),
-    steps: p.steps.flatMap((s, index): StepView[] => {
-      const key = stepKey(p.id, index);
+    steps: p.steps.flatMap((s): StepView[] => {
       if (s.kind === "lesson") {
         const l = lessons.get(s.ref);
-        return l ? [{ key, kind: "lesson", title: l.title, href: l.href, lessonId: l.id }] : [];
+        return l ? [{ key: l.id, kind: "lesson", title: l.title, href: l.href, lessonId: l.id }] : [];
       }
+      const key = stepKey(p.id, s.title);
       if (s.kind === "page") return [{ key, kind: "page", title: s.title, href: s.href, note: s.note }];
       if (s.kind === "external") return [{ key, kind: "external", title: s.title, url: s.url, type: s.type, note: s.note }];
       if (s.kind === "project") return [{ key, kind: "project", title: s.title, brief: s.brief, deliverable: s.deliverable }];

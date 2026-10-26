@@ -27,7 +27,8 @@ describe("phaseSchema", () => {
     expect(phaseSchema.safeParse({ ...phase, steps: [phase.steps[0], { ...phase.steps[1], url: "nope" }, phase.steps[2]] }).success).toBe(false);
     expect(phaseSchema.safeParse({ ...phase, steps: phase.steps.slice(0, 2) }).success).toBe(false);
   });
-  it("builds stable progress keys", () => {
-    expect(stepKey("foundations", 2)).toBe("foundations:2");
+  it("builds progress keys from the title, so reordering never shifts them", () => {
+    expect(stepKey("foundations", "Ship a command-line tool")).toBe("foundations:ship-a-command-line-tool");
+    expect(stepKey("foundations", "  CS50x: Intro!  ")).toBe("foundations:cs50x-intro");
   });
 });
