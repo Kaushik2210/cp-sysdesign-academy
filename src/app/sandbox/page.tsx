@@ -26,6 +26,11 @@ const SANDBOXES = [
     title: "Load balancing",
     body: "Compare round robin, least connections, power of two choices, weighted and hash-based policies on identical traffic.",
   },
+  {
+    href: "/sandbox/design-canvas/",
+    title: "Design canvas",
+    body: "Draw an architecture and get automated feedback on single points of failure, missing caches and unsafe wiring.",
+  },
 ];
 
 export default function SandboxIndex() {
