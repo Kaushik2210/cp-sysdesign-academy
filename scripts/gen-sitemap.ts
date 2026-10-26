@@ -7,7 +7,7 @@ import { getTemplates } from "../src/lib/content/templates";
 const site = (process.env.SITE_URL ?? "https://example.github.io").replace(/\/$/, "");
 const base = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const lessons = getAllLessons();
-const paths = ["/", "/cp/", "/sd/", "/dashboard/", "/review/", "/paths/", "/patterns/", "/templates/", "/glossary/", "/market/", "/roadmap/", "/mock/", "/sandbox/", "/sandbox/consistent-hashing/", "/cheatsheets/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", ...getTemplates().map((t) => `/templates/${t.slug}/`), ...lessons.map((l) => l.href)];
+const paths = ["/", "/cp/", "/sd/", "/dashboard/", "/review/", "/paths/", "/patterns/", "/templates/", "/glossary/", "/market/", "/roadmap/", "/mock/", "/sandbox/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/cheatsheets/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", ...getTemplates().map((t) => `/templates/${t.slug}/`), ...lessons.map((l) => l.href)];
 
 const xml =
   `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
