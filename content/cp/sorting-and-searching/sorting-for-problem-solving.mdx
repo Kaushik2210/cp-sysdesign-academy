@@ -106,6 +106,23 @@ print(sum(e - s for s, e in merged))   # total covered length
 
 <Complexity time="O(n log n)" space="O(n)" note="dominated by the sort; the scan is linear" />
 
+## Watch the classic sorts run
+
+You will mostly call a library sort, but seeing the three classic algorithms side by side explains their costs. Edit the numbers, press play, and watch the highlighted pseudocode line.
+
+**Insertion sort** grows a sorted prefix, shifting larger elements right to make room. It is quadratic in the worst case but fast on nearly sorted input.
+
+<Visualizer name="insertion-sort" />
+
+**Merge sort** splits, sorts each half and merges. The merge buffers show how two sorted halves combine in linear time, giving O(n log n) overall.
+
+<Visualizer name="merge-sort" />
+
+**Quick sort** partitions around a pivot, which fixes the pivot in its final place. It is O(n log n) on average but quadratic if pivots are always extreme, which is why libraries randomise or use hybrids.
+
+<Visualizer name="quick-sort" />
+
+All of these are on the [visualizers page](/visualizers/) with the other algorithms.
 ## Why O(n log n)? A lower bound
 
 Any algorithm that sorts by **comparing pairs** must distinguish `n!` possible input orders. Each comparison has two outcomes, so after `k` comparisons it can tell apart at most `2^k` cases. Therefore `2^k >= n!`, which gives `k >= log2(n!)`. Since `n! >= (n/2)^(n/2)`, we get `log2(n!) >= (n/2) log2(n/2)`, which is `Ω(n log n)`. Merge sort and heap sort meet this bound, so `O(n log n)` is optimal for comparison sorting.
