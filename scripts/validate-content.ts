@@ -45,6 +45,7 @@ const routes = new Set<string>([
   "/sandbox/rate-limiter/",
   "/sandbox/cache/",
   "/sandbox/load-balancer/",
+  "/sandbox/design-canvas/",
   "/cheatsheets/",
   "/cheatsheets/numbers/",
   "/cheatsheets/tradeoffs/",
