@@ -1,0 +1,188 @@
+[
+  {
+    "id": "lld-parking-lot",
+    "kind": "low-level-design",
+    "level": "junior",
+    "title": "Design a parking lot",
+    "prompt": "Design the classes for a multi-level parking lot that parks vehicles of different sizes and charges for time parked.",
+    "clarify": ["Which vehicle types and spot sizes exist, and can a small vehicle use a large spot?", "How is pricing computed (per hour, tiers, per vehicle type)?", "Do we need to handle multiple entrances and exits concurrently?"],
+    "strongAnswer": [
+      "Identifies the core entities: ParkingLot, Level, Spot, Vehicle, Ticket and a pricing component.",
+      "Separates responsibilities: spot allocation, ticketing and fee calculation are different concerns.",
+      "Uses a Strategy for pricing and for spot-selection rules, so new rules do not change existing classes.",
+      "Models spot size compatibility explicitly rather than with scattered conditionals.",
+      "Handles concurrency: two cars must not get the same spot, so allocation is atomic.",
+      "Describes how to test fee calculation and allocation in isolation."
+    ],
+    "pitfalls": ["One giant class that does everything.", "Switch statements on vehicle type everywhere.", "Ignoring concurrent entrances."],
+    "minutes": 45,
+    "related": ["sd/interview-playbook/framework-and-timing"]
+  },
+  {
+    "id": "lld-lru-cache",
+    "kind": "low-level-design",
+    "level": "mid",
+    "title": "Design an LRU cache",
+    "prompt": "Implement a fixed-capacity cache that evicts the least recently used entry, with get and put in constant time.",
+    "clarify": ["What happens when capacity is reached and on update of an existing key?", "Must it be thread-safe?", "Do entries need expiry as well?"],
+    "strongAnswer": [
+      "Combines a hash map with a doubly linked list so lookup and reordering are both O(1).",
+      "On get, moves the node to the front; on put, inserts at the front and evicts from the tail when over capacity.",
+      "Handles updates of existing keys and capacity edge cases such as capacity one.",
+      "Explains how to make it thread-safe (a lock, or sharded locks) and the throughput trade-off.",
+      "Mentions extensions: time-based expiry, other eviction policies behind an interface.",
+      "Lists tests: ordering after gets, eviction order, updates and capacity limits."
+    ],
+    "pitfalls": ["Using only a list or only a map and getting O(n) operations.", "Forgetting to refresh recency on get.", "Ignoring thread safety when asked."],
+    "minutes": 30,
+    "related": ["sd/caching/eviction-policies"]
+  },
+  {
+    "id": "lld-elevator",
+    "kind": "low-level-design",
+    "level": "mid",
+    "title": "Design an elevator system",
+    "prompt": "Design the control logic for a building with several elevators that serves requests from floors and from inside the cars.",
+    "clarify": ["How many elevators and floors, and is there a peak-hour pattern?", "What scheduling goal matters: waiting time, energy or fairness?", "Do we handle emergencies and out-of-service cars?"],
+    "strongAnswer": [
+      "Models Elevator, Request (hall call and car call), Direction and a central Dispatcher.",
+      "Represents each elevator as a state machine (idle, moving up, moving down, doors open).",
+      "Chooses a scheduling approach such as serving requests in the current direction first, and assigns hall calls to the best elevator using a cost function.",
+      "Keeps scheduling behind a Strategy interface so policies can change.",
+      "Handles edge cases: requests arriving while moving, the same floor requested twice and a failed car.",
+      "Discusses how to simulate and test the dispatcher deterministically."
+    ],
+    "pitfalls": ["Handling every request in arrival order.", "Mixing hardware control and scheduling logic.", "No model of direction."],
+    "minutes": 45,
+    "related": ["sd/interview-playbook/framework-and-timing"]
+  },
+  {
+    "id": "lld-rate-limiter-class",
+    "kind": "low-level-design",
+    "level": "mid",
+    "title": "Design a rate limiter class",
+    "prompt": "Write a rate limiter component for a single server that allows at most N requests per user per time window, designed so the algorithm can change.",
+    "clarify": ["Which algorithm and what happens on rejection?", "Per user, per key or global?", "Must it be thread-safe and how many users are there?"],
+    "strongAnswer": [
+      "Defines a small interface such as allow(key) and implements token bucket and sliding window behind it (Strategy).",
+      "Tracks state per key in a map with cleanup for idle keys so memory does not grow without bound.",
+      "Computes token refill lazily from elapsed time instead of using a background thread.",
+      "Makes the clock injectable so tests are deterministic.",
+      "Handles concurrency with per-key locking or atomic operations rather than one global lock.",
+      "Explains how it would extend to a distributed store."
+    ],
+    "pitfalls": ["Using real time inside the class, which makes tests flaky.", "One global lock that serialises all users.", "Never evicting state for idle keys."],
+    "minutes": 30,
+    "related": ["sd/scalability/rate-limiting-algorithms"]
+  },
+  {
+    "id": "ai-coding-bugfix",
+    "kind": "ai-coding",
+    "level": "mid",
+    "title": "Fix failing tests in an unfamiliar codebase with an assistant",
+    "prompt": "You are given a small multi-file project with several failing tests and an AI assistant. Get the tests passing and explain your changes.",
+    "clarify": ["Which tests should I start with and may I run them freely?", "Which files may I change?", "Is the assistant allowed for all tasks or only some?"],
+    "strongAnswer": [
+      "Reads the test names and failures first and builds a mental model of the code before prompting.",
+      "States a hypothesis for each failure and checks it, instead of asking the assistant to fix everything.",
+      "Uses the assistant for small, specific help (explain this function, draft a test) and reviews each answer.",
+      "Runs the tests after every change and keeps changes minimal and explained.",
+      "Notices and corrects at least one wrong suggestion and says so.",
+      "Finishes by summarising the root causes and what remains risky."
+    ],
+    "pitfalls": ["Pasting all failures and applying the answer unread.", "Changing many files before running a test.", "Staying silent while prompting."],
+    "minutes": 45,
+    "related": ["sd/interview-playbook/ai-assisted-rounds"]
+  },
+  {
+    "id": "ai-coding-extend-feature",
+    "kind": "ai-coding",
+    "level": "mid",
+    "title": "Extend an existing feature in stages with an assistant",
+    "prompt": "You are given a working program and asked to add features in three stages (for example new rules, then new cases, then performance), with an assistant available.",
+    "clarify": ["What are the exact requirements for each stage?", "Are there performance targets?", "Should earlier behaviour remain unchanged?"],
+    "strongAnswer": [
+      "Plans the data structure and approach for each stage before generating code.",
+      "Delegates boilerplate and test generation but writes or closely reviews the core logic.",
+      "Adds tests first for new behaviour and confirms existing tests still pass.",
+      "Notices when a naive suggestion is too slow and explains the complexity problem.",
+      "Keeps functions small so each piece can be reviewed and explained.",
+      "Explains clearly what was delegated and why."
+    ],
+    "pitfalls": ["Letting the assistant restructure the whole program.", "Not rechecking earlier stages after later changes.", "Accepting an O(n squared) approach without checking constraints."],
+    "minutes": 45,
+    "related": ["sd/interview-playbook/ai-assisted-rounds", "cp/complexity-analysis/estimating-from-constraints"]
+  },
+  {
+    "id": "behavioral-failure",
+    "kind": "behavioral",
+    "level": "junior",
+    "title": "Tell me about a mistake or failure",
+    "prompt": "Tell me about a time something you built or decided did not work out. What happened and what did you do?",
+    "clarify": ["Is a personal or academic project acceptable?", "How much detail should I give about the technical cause?"],
+    "strongAnswer": [
+      "Picks a real failure with stakes, not a disguised strength.",
+      "Explains the context and what you expected to happen.",
+      "Owns the decision and the root cause without blaming others.",
+      "Describes what you did to fix it and to reduce the chance of repeating it.",
+      "States a concrete lesson and, if possible, a later example where you applied it."
+    ],
+    "pitfalls": ["Choosing a trivial or fake weakness.", "Blaming teammates or tools.", "Ending without a lesson."],
+    "minutes": 15,
+    "related": ["sd/interview-playbook/project-stories-and-behavioral"]
+  },
+  {
+    "id": "behavioral-disagreement",
+    "kind": "behavioral",
+    "level": "mid",
+    "title": "Tell me about a technical disagreement",
+    "prompt": "Describe a time you disagreed with a teammate about a technical decision. How was it resolved?",
+    "clarify": ["Should the example be recent?", "May I describe a decision where I turned out to be wrong?"],
+    "strongAnswer": [
+      "Explains both positions fairly, including the strongest argument for the other side.",
+      "Describes how you gathered evidence (a benchmark, a prototype, a written comparison) instead of arguing opinions.",
+      "Shows respect and listening, and how the decision was finally made.",
+      "States the outcome, whether you were right, and how the relationship was afterwards.",
+      "Reflects on what you would do differently."
+    ],
+    "pitfalls": ["Painting the other person as unreasonable.", "No evidence, only persistence.", "A story where you simply won."],
+    "minutes": 15,
+    "related": ["sd/interview-playbook/communicating-tradeoffs"]
+  },
+  {
+    "id": "behavioral-ambiguity",
+    "kind": "behavioral",
+    "level": "mid",
+    "title": "Tell me about a vague or ambiguous project",
+    "prompt": "Tell me about a project where the requirements were unclear. How did you make progress?",
+    "clarify": ["Does it matter if the project was small?", "Should I focus on the technical or the organisational side?"],
+    "strongAnswer": [
+      "Describes what was ambiguous and the cost of getting it wrong.",
+      "Shows how you reduced ambiguity: questions to stakeholders, a small prototype or a written assumptions list.",
+      "Explains how you made decisions with incomplete information and what you deferred.",
+      "Gives the outcome with a measurable result.",
+      "Reflects on how you would clarify earlier next time."
+    ],
+    "pitfalls": ["Waiting passively for clarity.", "Building everything before checking assumptions.", "A story without a result."],
+    "minutes": 15,
+    "related": ["sd/what-is-system-design/requirements-and-framework"]
+  },
+  {
+    "id": "behavioral-ai-workflow",
+    "kind": "behavioral",
+    "level": "mid",
+    "title": "How do you use AI tools in your work?",
+    "prompt": "Describe how you use AI coding tools in a typical project, and give an example of where they got something wrong.",
+    "clarify": ["Which tools am I allowed to talk about?", "Should I focus on coding, testing or design?"],
+    "strongAnswer": [
+      "Says what is delegated (boilerplate, test scaffolding, unfamiliar syntax) and what is kept (design, tricky logic, review).",
+      "Explains the verification habit: reading the diff, running tests and checking against documentation.",
+      "Gives a specific example of an AI mistake, how it was caught and what it cost.",
+      "Shows awareness of limits such as security, licensing and confidential data.",
+      "Avoids both extremes: not using it at all, or trusting it blindly."
+    ],
+    "pitfalls": ["Claiming it writes all your code.", "Claiming you never use it.", "No concrete example."],
+    "minutes": 15,
+    "related": ["sd/interview-playbook/ai-assisted-rounds", "sd/interview-playbook/project-stories-and-behavioral"]
+  }
+]
