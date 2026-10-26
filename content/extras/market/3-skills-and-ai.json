@@ -1,0 +1,61 @@
+[
+  {
+    "id": "so-2025-ai-usage-trust",
+    "topic": "skills",
+    "finding": "In Stack Overflow's 2025 survey 84% of respondents used or planned to use AI tools (up from 76%) and about half of professional developers used them daily, yet more developers distrusted the accuracy of AI output (46%) than trusted it (33%).",
+    "figure": "84% use or plan to use; 46% distrust vs 33% trust",
+    "implication": "AI use is now the baseline, so it will not differentiate you. The scarce skill is judging, testing and correcting AI output, which needs solid fundamentals.",
+    "source": { "name": "Stack Overflow Developer Survey 2025, AI section", "url": "https://survey.stackoverflow.co/2025/ai", "kind": "primary", "published": "2025-07" },
+    "confidence": "high",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "so-2026-conditional-trust",
+    "topic": "skills",
+    "finding": "Stack Overflow's 2026 survey reports that about two thirds of developers use coding assistants or agents, that trust is conditional (nearly half trust AI when they can verify the result, only 6.6% for important decisions), and that AI is rated more useful for implementation (74%) than for team communication (45%) or design (50%).",
+    "figure": "66% use assistants; 6.6% trust it for important decisions",
+    "implication": "Design, communication and verification are the human edge. Invest in system design, written design docs and test-driven habits.",
+    "source": { "name": "Stack Overflow, 2026 Developer Survey press release", "url": "https://stackoverflow.co/company/press/archive/stack-overflow-annual-developer-survey-ai-trust-conditional", "kind": "primary", "published": "2026" },
+    "confidence": "high",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "so-2026-python-js-ai",
+    "topic": "skills",
+    "finding": "Among developers using AI tools, Python (39%) and JavaScript (38%) were the languages most often used with AI, ahead of HTML/CSS and SQL, according to the 2026 survey.",
+    "figure": "Python 39%, JavaScript 38%, SQL 30%",
+    "implication": "Python and JavaScript/TypeScript plus SQL are the safest working languages for AI-era projects, alongside the language you use for algorithms.",
+    "source": { "name": "Stack Overflow, 2026 Developer Survey press release", "url": "https://stackoverflow.co/company/press/archive/stack-overflow-annual-developer-survey-ai-trust-conditional", "kind": "primary", "published": "2026" },
+    "confidence": "high",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "google-ai-generated-code",
+    "topic": "skills",
+    "finding": "Google's CEO said in April 2026 that about 75% of new code at Google is AI-generated and then approved by engineers, up from about 50% the previous autumn.",
+    "figure": "about 75% of new code",
+    "implication": "Reviewing, approving and architecting code is becoming a bigger share of the job than typing it. Practise code review and reading unfamiliar code.",
+    "source": { "name": "University of Miami Career Center, citing Fast Company", "url": "https://customcareer.miami.edu/blog/2026/05/14/googles-ai-assisted-coding-interview-2026-guide/", "kind": "secondary", "published": "2026-05-14" },
+    "confidence": "medium",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "deloitte-skill-premiums",
+    "topic": "skills",
+    "finding": "Deloitte India's 2026 campus study found pay premiums of about 20-25% for AI and data skills (AI development, cybersecurity, data science) and about 10-15% for analytical thinking and problem solving.",
+    "figure": "20-25% for AI and data; 10-15% for problem solving",
+    "implication": "Algorithmic problem solving is still paid for, but AI and data skills carry a bigger premium. Combine both rather than choosing one.",
+    "source": { "name": "Deloitte India, Campus Workforce Trends 2026 press release", "url": "https://www.deloitte.com/in/en/about/press-room/india-s-campus-talent-landscape-pivots-to-skill-based-hiring-as-86-percent-of-employers-adopt-ai-in-recruitment--deloitte-india.html", "kind": "primary", "published": "2026-08-27" },
+    "confidence": "high",
+    "retrieved": "2026-10-26"
+  },
+  {
+    "id": "role-demand-vendor",
+    "topic": "skills",
+    "finding": "A recruiter's 2026 round-up lists AI engineer, platform engineer, DevSecOps, staff engineer and cloud/distributed-systems backend engineer among the most in-demand software roles, and says generalist backend engineers without cloud depth face more competition.",
+    "implication": "Backend plus distributed systems plus applied AI is a coherent specialisation, which this plan builds toward. Treat the ranking itself as a vendor opinion.",
+    "source": { "name": "Primis, The 5 Most In-Demand Software Engineering Roles Right Now", "url": "https://primis-talent.com/blog/2026/06/the-5-most-in-demand-software-engineering-roles-right-now", "kind": "secondary", "published": "2026-06" },
+    "confidence": "low",
+    "retrieved": "2026-10-26"
+  }
+]
