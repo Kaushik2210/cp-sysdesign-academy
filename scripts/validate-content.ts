@@ -11,6 +11,7 @@ import { getGlossary } from "../src/lib/content/glossary";
 import { getInsights } from "../src/lib/content/market";
 import { getRoadmap } from "../src/lib/content/roadmap";
 import { getQuestions, getRubric } from "../src/lib/content/questions";
+import { getTradeoffSheets } from "../src/lib/content/tradeoffs";
 
 const only = process.argv[2]; // e.g. `cp/math-basics`
 const errors: string[] = [];
@@ -41,6 +42,7 @@ const routes = new Set<string>([
   "/mock/",
   "/cheatsheets/",
   "/cheatsheets/numbers/",
+  "/cheatsheets/tradeoffs/",
   ...getTemplates().map((t) => `/templates/${t.slug}/`),
   ...pathSlugs.map((s) => `/paths/${s}/`),
   ...lessons.map((l) => l.href),
@@ -107,6 +109,14 @@ try {
   getRubric();
   for (const q of getQuestions()) {
     for (const l of q.related) if (!ids.has(l)) errors.push(`question "${q.id}": unknown lesson "${l}"`);
+  }
+} catch (e) {
+  errors.push(String(e instanceof Error ? e.message : e));
+}
+
+try {
+  for (const s of getTradeoffSheets()) {
+    for (const l of s.lessons) if (!ids.has(l)) errors.push(`trade-off sheet "${s.id}": unknown lesson "${l}"`);
   }
 } catch (e) {
   errors.push(String(e instanceof Error ? e.message : e));
