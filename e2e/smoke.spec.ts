@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -304,4 +304,27 @@ test("consistent hashing sandbox: only a fraction of keys move, far fewer than h
   await expect(page.getByText(/Busiest node is [\d.]+x the average/)).toBeVisible();
   await page.getByRole("button", { name: "Reset" }).click();
   await expect(page.getByRole("img", { name: /Hash ring with 4 nodes/ })).toBeVisible();
+});
+test("rate limiter sandbox reveals the fixed-window boundary flaw", async ({ page }) => {
+  await page.goto("/sandbox/rate-limiter/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: "Rate limiter" })).toBeVisible();
+
+  // Default: fixed window, limit 10, bursts either side of a boundary.
+  const peak = page.locator("dt", { hasText: /Most requests accepted/ }).locator("xpath=following-sibling::dd[1]");
+  await expect(peak).toContainText("20");
+  await expect(peak).toContainText("exceeds the limit by 10");
+
+  const row = (name: string) => page.getByRole("row", { name: new RegExp(name) });
+  await expect(row("Fixed window counter")).toContainText("(over)");
+  await expect(row("Sliding window log")).not.toContainText("(over)");
+
+  // The exact sliding log holds the limit on the same traffic.
+  await page.getByText("Sliding window log (exact)", { exact: true }).first().click();
+  await expect(peak).toContainText("within the limit");
+
+  // Token bucket absorbs one burst up to its size.
+  await page.getByLabel("Traffic pattern").selectOption({ label: "One big burst, then quiet" });
+  await page.getByText("Token bucket", { exact: true }).first().click();
+  await expect(page.getByRole("img", { name: /Timeline of 30 requests/ })).toBeVisible();
 });
