@@ -5,11 +5,12 @@ import { getAllProblems } from "../src/lib/content/problems";
 import { getPatterns } from "../src/lib/content/patterns";
 import { getTemplates } from "../src/lib/content/templates";
 import { getGlossary } from "../src/lib/content/glossary";
+import { getInsights } from "../src/lib/content/market";
 import { extractHeadings } from "../src/lib/content/toc";
 
 export interface SearchDoc {
   id: string;
-  kind: "lesson" | "problem" | "glossary" | "template" | "pattern";
+  kind: "lesson" | "problem" | "glossary" | "template" | "pattern" | "market";
   title: string;
   href: string;
   tags: string;
@@ -87,6 +88,17 @@ for (const term of getGlossary()) {
     href: `/glossary/#${term.id}`,
     tags: ["glossary", ...term.aliases].join(" "),
     text: term.definition,
+  });
+}
+
+for (const i of getInsights()) {
+  docs.push({
+    id: `market:${i.id}`,
+    kind: "market",
+    title: i.source.name,
+    href: `/market/#${i.topic}`,
+    tags: ["hiring", "market", i.topic].join(" "),
+    text: `${i.finding} ${i.implication}`,
   });
 }
 
