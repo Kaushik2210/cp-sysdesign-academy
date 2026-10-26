@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -380,4 +380,42 @@ test("load balancer sandbox: least connections wins on heavy-tailed work and tie
 
   await page.getByText("Least connections", { exact: true }).last().click();
   await expect(page.getByText(/Sends each request to the server with the fewest requests in flight/)).toBeVisible();
+});
+test("design canvas reviews an architecture and updates as you edit it", async ({ page }) => {
+  await page.goto("/sandbox/design-canvas/");
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { level: 1, name: "Design canvas" })).toBeVisible();
+  await expect(page.locator(".react-flow__node")).toHaveCount(3);
+
+  // The naive design: client, one app instance, one database.
+  const score = page.getByTestId("score");
+  await expect(score).toHaveText("56");
+  await expect(page.getByText("App servers run as a single instance")).toBeVisible();
+  await expect(page.getByText("Database has no replica")).toBeVisible();
+  await expect(page.getByText("Every read goes to the database")).toBeVisible();
+
+  // The robust reference design has nothing to flag.
+  await page.getByRole("button", { name: "A robust design" }).click();
+  await expect(page.locator(".react-flow__node")).toHaveCount(12);
+  await expect(score).toHaveText("100");
+  await expect(page.getByText("No issues found by this checklist.")).toBeVisible();
+
+  // Wire a client straight to the database using the keyboard-accessible editor.
+  await page.locator("#dc-from").selectOption({ label: "Client (client)" });
+  await page.locator("#dc-to").selectOption({ label: "Database (db)" });
+  await page.getByRole("button", { name: "Add connection" }).click();
+  await expect(page.getByText("A client talks to the database directly")).toBeVisible();
+  expect(Number(await score.innerText())).toBeLessThan(100);
+
+  // Removing the connection clears the finding again.
+  await page.getByRole("button", { name: /Remove connection from Client to Database/ }).click();
+  await expect(page.getByText("A client talks to the database directly")).toHaveCount(0);
+  await expect(score).toHaveText("100");
+
+  // Reducing app instances to one introduces a single point of failure.
+  await page.getByRole("button", { name: /^App servers x3$/ }).click();
+  await page.getByRole("button", { name: "Fewer instances" }).click();
+  await page.getByRole("button", { name: "Fewer instances" }).click();
+  await expect(page.getByText("App servers run as a single instance")).toBeVisible();
+  await expect(score).toHaveText("85");
 });
