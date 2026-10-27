@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useProgress } from "@/lib/store";
+import { fireConfetti } from "@/components/fx/confetti";
 import { cn } from "@/lib/utils";
 
 export type QuizQuestion =
@@ -33,7 +34,8 @@ export function Quiz({ id, tags = [], questions }: { id: string; tags?: string[]
     );
   };
 
-  const submit = () => {
+  const submit = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
     let correct = 0;
     questions.forEach((q, i) => {
       if (sameSet(picked[i], answerOf(q))) correct++;
@@ -48,13 +50,16 @@ export function Quiz({ id, tags = [], questions }: { id: string; tags?: string[]
     });
     recordQuiz(id, { correct, total: questions.length, tags });
     setSubmitted(true);
+    if (correct === questions.length) fireConfetti({ x: r.left + r.width / 2, y: r.top }, 48);
   };
 
   const score = questions.filter((q, i) => sameSet(picked[i], answerOf(q))).length;
 
   return (
-    <section aria-label="Quiz" className="not-prose my-8 rounded-xl border border-border bg-card p-4">
-      <h3 className="mb-3 text-lg font-semibold">Quiz</h3>
+    <section aria-label="Quiz" className="not-prose my-8 rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-sm">
+      <h3 className="mb-4 text-xl font-extrabold tracking-tight">
+        <span className="text-gradient">Quiz</span>
+      </h3>
       <ol className="space-y-6">
         {questions.map((q, qi) => {
           const ans = answerOf(q);
@@ -77,12 +82,15 @@ export function Quiz({ id, tags = [], questions }: { id: string; tags?: string[]
                       aria-checked={on}
                       onClick={() => toggle(qi, oi)}
                       className={cn(
-                        "block w-full rounded border border-border px-3 py-1.5 text-left text-sm hover:bg-muted",
-                        on && "border-accent bg-muted",
-                        submitted && ans.includes(oi) && "border-emerald-500",
-                        submitted && on && !ans.includes(oi) && "border-red-500",
+                        "flex min-h-11 w-full items-center gap-2 rounded-xl border border-border bg-bg/50 px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:bg-muted",
+                        on && "border-accent bg-accent/10 shadow-[inset_4px_0_0_hsl(var(--accent))]",
+                        submitted && ans.includes(oi) && "border-emerald-500 bg-emerald-500/10",
+                        submitted && on && !ans.includes(oi) && "border-red-500 bg-red-500/10",
                       )}
                     >
+                      <span aria-hidden="true" className="w-4 shrink-0 text-center font-bold">
+                        {submitted && ans.includes(oi) ? "✓" : submitted && on ? "✗" : ""}
+                      </span>
                       {o}
                     </button>
                   );
@@ -100,13 +108,13 @@ export function Quiz({ id, tags = [], questions }: { id: string; tags?: string[]
       </ol>
       <div className="mt-4 flex items-center gap-3">
         {!submitted ? (
-          <button type="button" onClick={submit} className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg">
+          <button type="button" onClick={submit} className="min-h-11 rounded-full bg-gradient-brand px-6 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl">
             Check answers
           </button>
         ) : (
           <>
-            <p className="text-sm font-medium" role="status">
-              Score: {score}/{questions.length}
+            <p className="text-lg font-black" role="status">
+              Score: <span className="text-gradient">{score}/{questions.length}</span>
             </p>
             <button
               type="button"
@@ -114,7 +122,7 @@ export function Quiz({ id, tags = [], questions }: { id: string; tags?: string[]
                 setPicked(questions.map(() => []));
                 setSubmitted(false);
               }}
-              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
+              className="min-h-11 rounded-full border border-border bg-card/70 px-5 text-sm font-medium transition hover:-translate-y-0.5 hover:bg-muted"
             >
               Try again
             </button>
