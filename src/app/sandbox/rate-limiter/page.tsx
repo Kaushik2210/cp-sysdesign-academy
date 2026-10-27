@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { RateLimiterSandbox } from "@/components/sandbox/RateLimiterSandbox";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Rate limiter sandbox",
@@ -14,7 +15,7 @@ export default function RateLimiterPage() {
           Sandboxes
         </Link>
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">Rate limiter</h1>
+      <PageTitle>Rate limiter</PageTitle>
       <p className="mt-1 max-w-3xl text-muted-fg">
         Pick an algorithm and a traffic pattern, and see which requests are allowed and what the backend actually
         received. The lessons on{" "}
