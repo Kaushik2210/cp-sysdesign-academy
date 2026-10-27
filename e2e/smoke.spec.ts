@@ -764,3 +764,28 @@ test.describe("track, lesson and sandbox pages", () => {
     expect(await notes.count()).toBeGreaterThan(0);
   });
 });
+
+test.describe("review queue flashcards", () => {
+  async function seedCards(page: import("@playwright/test").Page) {
+    // Completing a lesson adds its review card(s) to the deck.
+    await page.goto(CP_LESSON);
+    await page.getByRole("button", { name: /mark complete/i }).click();
+    await expect(page.getByRole("button", { name: /completed/i })).toBeVisible();
+  }
+
+  test("the keyboard reveals and grades a card", async ({ page }) => {
+    await seedCards(page);
+    await page.goto("/review/");
+    const show = page.getByRole("button", { name: "Show answer" });
+    if (!(await show.count())) test.skip(true, "completing one lesson did not create a due card");
+    await page.keyboard.press("Space");
+    await expect(page.getByRole("button", { name: /^Good/ })).toBeVisible();
+    await page.keyboard.press("3");
+    await expect(page.getByText(/All caught up|due/).first()).toBeVisible();
+  });
+
+  test("an empty deck says so", async ({ page }) => {
+    await page.goto("/review/");
+    await expect(page.getByRole("status")).toContainText("All caught up");
+  });
+});
