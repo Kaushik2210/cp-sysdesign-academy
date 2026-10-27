@@ -28,8 +28,8 @@ export interface RubricView {
 
 type Stage = "setup" | "running" | "review" | "saved";
 
-const btn = "inline-flex min-h-11 items-center gap-1.5 rounded-md border border-border px-4 text-sm hover:bg-muted disabled:opacity-50";
-const primary = "inline-flex min-h-11 items-center gap-1.5 rounded-md bg-accent px-4 text-sm font-medium text-accent-fg disabled:opacity-50";
+const btn = "inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border bg-card/70 px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:bg-muted disabled:opacity-50 disabled:hover:translate-y-0";
+const primary = "inline-flex min-h-11 items-center gap-1.5 rounded-full bg-gradient-brand px-5 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl disabled:opacity-50 disabled:hover:translate-y-0";
 
 /** Timed mock interview with phase prompts, rubric self-scoring and a history of attempts. */
 export function MockInterview({
@@ -135,7 +135,7 @@ export function MockInterview({
   return (
     <div className="mt-6">
       {stage === "setup" && (
-        <section aria-labelledby="setup-h" className="rounded-xl border border-border bg-card p-4">
+        <section aria-labelledby="setup-h" className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-sm">
           <h2 id="setup-h" className="text-lg font-semibold">
             Start a mock interview
           </h2>
@@ -171,7 +171,7 @@ export function MockInterview({
       )}
 
       {stage === "running" && question && phase && (
-        <section aria-labelledby="run-h" className="rounded-xl border border-border bg-card p-4">
+        <section aria-labelledby="run-h" className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-sm">
           <p className="text-xs uppercase tracking-wide text-muted-fg">
             {kindTitles[question.kind]} · {question.level} · {question.minutes} min
           </p>
@@ -181,13 +181,13 @@ export function MockInterview({
           <p className="mt-2">{question.prompt}</p>
 
           <div className="mt-4 flex flex-wrap items-center gap-4">
-            <div role="timer" aria-label="Time elapsed" className="font-mono text-3xl font-bold tabular-nums">
+            <div role="timer" aria-label="Time elapsed" className={cn("font-mono text-5xl font-black tabular-nums", phase === "overtime" ? "animate-pulse text-red-500" : "text-gradient")}>
               {formatClock(elapsed)}
               <span className="ml-2 text-sm font-normal text-muted-fg">/ {formatClock(total)}</span>
             </div>
             <div className="min-w-0 flex-1">
-              <div role="progressbar" aria-label="Interview time used" aria-valuenow={Math.min(100, Math.round((elapsed / total) * 100))} aria-valuemin={0} aria-valuemax={100} className="h-2 overflow-hidden rounded bg-muted">
-                <div className={cn("h-full", phase === "overtime" ? "bg-red-500" : "bg-accent")} style={{ width: `${Math.min(100, (elapsed / total) * 100)}%` }} />
+              <div role="progressbar" aria-label="Interview time used" aria-valuenow={Math.min(100, Math.round((elapsed / total) * 100))} aria-valuemin={0} aria-valuemax={100} className="h-3 overflow-hidden rounded-full bg-muted">
+                <div className={cn("h-full rounded-full transition-[width] duration-1000 ease-linear", phase === "overtime" ? "bg-red-500" : "bg-gradient-to-r from-accent via-hot to-sun")} style={{ width: `${Math.min(100, (elapsed / total) * 100)}%` }} />
               </div>
             </div>
           </div>
@@ -206,7 +206,7 @@ export function MockInterview({
 
           <ol className="mt-3 flex flex-wrap gap-1 text-xs" aria-label="Phases">
             {PHASES[question.kind].map((p) => (
-              <li key={p.id} className={cn("rounded border border-border px-2 py-1", phase !== "overtime" && phase.id === p.id && "border-accent font-semibold text-accent")} aria-current={phase !== "overtime" && phase.id === p.id ? "step" : undefined}>
+              <li key={p.id} className={cn("rounded-full border border-border px-3 py-1 transition", phase !== "overtime" && phase.id === p.id && "border-transparent bg-gradient-brand font-semibold text-white shadow-md")} aria-current={phase !== "overtime" && phase.id === p.id ? "step" : undefined}>
                 {p.label}
               </li>
             ))}
@@ -237,7 +237,7 @@ export function MockInterview({
       )}
 
       {stage === "review" && question && (
-        <section aria-labelledby="rev-h" className="space-y-5 rounded-xl border border-border bg-card p-4">
+        <section aria-labelledby="rev-h" className="space-y-5 rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-sm">
           <div>
             <h2 id="rev-h" className="text-xl font-bold">
               Review: {question.title}
@@ -323,7 +323,7 @@ export function MockInterview({
       )}
 
       {stage === "saved" && question && (
-        <section aria-labelledby="saved-h" className="rounded-xl border border-border bg-card p-4">
+        <section aria-labelledby="saved-h" className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-sm">
           <h2 id="saved-h" className="text-lg font-semibold">
             Saved
           </h2>
