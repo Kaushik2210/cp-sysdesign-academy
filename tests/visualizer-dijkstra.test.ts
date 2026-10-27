@@ -89,7 +89,8 @@ describe("dijkstraSteps", () => {
   it("zero-weight edges and a disconnected source work", () => {
     expect(last(dijkstraSteps("A\nA B 0\nB C 0")).state.dist).toEqual([0, 0, 0]);
     const f = last(dijkstraSteps("A\nB C 1\nA D 2")).state;
-    expect(f.nodes).toEqual(["B", "C", "A", "D"]); // numbered by first appearance\n    expect(f.dist).toEqual([null, null, 0, 2]);
+    expect(f.nodes).toEqual(["B", "C", "A", "D"]); // numbered by first appearance
+    expect(f.dist).toEqual([null, null, 0, 2]);
     expect(last(dijkstraSteps("A\nB C 1\nA D 2")).note).toMatch(/cannot be reached/);
   });
 });
