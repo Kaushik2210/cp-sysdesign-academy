@@ -25,6 +25,8 @@ export interface PhaseView {
   exit: { key: string; text: string }[];
 }
 
+const PHASE_TINT = ["leaf", "cool", "accent", "hot", "sun"];
+
 const KIND_LABEL: Record<string, string> = {
   lesson: "Lesson",
   page: "Tool",
@@ -50,15 +52,15 @@ export function RoadmapView({ phases }: { phases: PhaseView[] }) {
 
   return (
     <div className="mt-6">
-      <div className="rounded-xl border border-border bg-card p-4">
+      <div className="rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-sm">
         <div className="flex justify-between text-sm">
           <span className="font-medium">Overall progress</span>
           <span className="text-muted-fg">
             {doneAll}/{all.length} steps · {pct}%
           </span>
         </div>
-        <div role="progressbar" aria-label="Overall roadmap progress" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="mt-2 h-2 overflow-hidden rounded bg-muted">
-          <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+        <div role="progressbar" aria-label="Overall roadmap progress" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="mt-2 h-3 overflow-hidden rounded-full bg-muted">
+          <div className="h-full rounded-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-700" style={{ width: `${pct}%` }} />
         </div>
       </div>
 
@@ -68,12 +70,16 @@ export function RoadmapView({ phases }: { phases: PhaseView[] }) {
           const done = mounted ? steps.filter(isDone).length : 0;
           return (
             <li key={p.id}>
-              <details id={p.id} className="group rounded-xl border border-border bg-card" open={p.order === 1}>
+              <details id={p.id} className="group rounded-2xl border border-border bg-card/80 transition-shadow open:shadow-lg hover:border-accent/60" open={p.order === 1}>
                 <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 p-4">
-                  <span className="rounded-full bg-accent px-2.5 py-0.5 text-sm font-semibold text-accent-fg">{p.order}</span>
+                  <span aria-hidden="true" className="grid h-8 w-8 place-items-center rounded-xl text-sm font-black text-white shadow-md" style={{ background: `linear-gradient(135deg, hsl(var(--${PHASE_TINT[(p.order - 1) % PHASE_TINT.length]})), hsl(var(--accent)))` }}>{p.order}</span>
+                  <span className="sr-only">Phase {p.order}:</span>
                   <span className="font-semibold">{p.title}</span>
                   <span className="ml-auto text-sm text-muted-fg">
                     {p.when} · ~{p.hoursPerWeek} h/week · {done}/{steps.length}
+                  </span>
+                  <span aria-hidden="true" className="basis-full overflow-hidden rounded-full bg-muted sm:ml-11">
+                    <span className="block h-1 rounded-full bg-gradient-to-r from-accent to-hot transition-[width] duration-700" style={{ width: `${steps.length ? (done / steps.length) * 100 : 0}%` }} />
                   </span>
                 </summary>
 
@@ -101,7 +107,7 @@ export function RoadmapView({ phases }: { phases: PhaseView[] }) {
                           <input
                             type="checkbox"
                             id={`step-${s.key}`}
-                            className="mt-1.5 h-5 w-5 shrink-0"
+                            className="mt-1.5 h-5 w-5 shrink-0 accent-[hsl(var(--hot))]"
                             checked={mounted && isDone(s)}
                             onChange={() => (s.kind === "lesson" ? toggleComplete(s.lessonId, s.title) : toggleRoadmap(s.key))}
                           />
@@ -148,7 +154,7 @@ export function RoadmapView({ phases }: { phases: PhaseView[] }) {
                     <ul className="space-y-1">
                       {p.exit.map((e) => (
                         <li key={e.key} className="flex gap-3 text-sm">
-                          <input type="checkbox" id={`exit-${e.key}`} className="mt-1 h-5 w-5 shrink-0" checked={mounted && !!ticked[e.key]} onChange={() => toggleRoadmap(e.key)} />
+                          <input type="checkbox" id={`exit-${e.key}`} className="mt-1 h-5 w-5 shrink-0 accent-[hsl(var(--hot))]" checked={mounted && !!ticked[e.key]} onChange={() => toggleRoadmap(e.key)} />
                           <label htmlFor={`exit-${e.key}`}>{e.text}</label>
                         </li>
                       ))}
