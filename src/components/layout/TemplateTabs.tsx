@@ -47,8 +47,8 @@ export function TemplateTabs({ langs }: { langs: TemplateLang[] }) {
               tabIndex={i === active ? 0 : -1}
               onClick={() => setActive(i)}
               className={cn(
-                "-mb-px min-h-11 border-b-2 px-3 text-sm",
-                i === active ? "border-accent font-medium text-accent" : "border-transparent text-muted-fg hover:text-fg",
+                "-mb-px min-h-11 border-b-[3px] px-4 text-sm transition-colors",
+                i === active ? "border-hot font-bold text-fg" : "border-transparent text-muted-fg hover:border-border hover:text-fg",
               )}
             >
               {l.label}
@@ -58,7 +58,7 @@ export function TemplateTabs({ langs }: { langs: TemplateLang[] }) {
         <button
           type="button"
           onClick={copy}
-          className="mb-1 inline-flex min-h-11 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-muted"
+          className="mb-1 inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border bg-card/70 px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:bg-muted"
         >
           {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
           <span aria-live="polite">{copied ? "Copied" : "Copy code"}</span>
