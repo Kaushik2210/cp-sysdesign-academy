@@ -1,0 +1,206 @@
+---
+title: Shortest Paths with Dijkstra
+track: cp
+module: graphs
+order: 1
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/stacks-and-queues/queues-deques-bfs, cp/greedy/greedy-with-heaps]
+tags: [graph, shortest-path, dijkstra, heap]
+type: lesson
+problems: [m11-cheapest-route]
+furtherReading:
+  - title: cp-algorithms, Dijkstra's algorithm
+    url: https://cp-algorithms.com/graph/dijkstra.html
+  - title: CSES Problem Set, Shortest Routes I
+    url: https://cses.fi/problemset/task/1671
+  - title: Codeforces EDU
+    url: https://codeforces.com/edu/courses
+---
+
+## Intuition
+
+[BFS](/cp/stacks-and-queues/queues-deques-bfs/) finds the route with the fewest roads. Real roads have lengths. You want the route with the smallest *total length*, and the route with the fewest roads can be much longer.
+
+Picture water spreading from the source. It reaches the nearest junction first, then the next nearest, and so on. Dijkstra simulates exactly that: always **finish the closest unfinished node next**. The key fact is that when every length is positive, nobody can reach that node faster later, because any other route would have to pass through a node that is at least as far away.
+
+## Definition
+
+Let `dist[v]` be the best known distance from the source `s` to `v` (infinity at first, `0` for `s`). A **relaxation** of an edge `u -> v` of weight `w` is:
+
+```text
+if dist[u] + w < dist[v]:  dist[v] = dist[u] + w
+```
+
+Dijkstra keeps a min-heap of `(distance, node)` pairs.
+
+1. Push `(0, s)`.
+2. Pop the smallest pair `(d, u)`. If `d > dist[u]`, it is a stale entry; skip it.
+3. Otherwise `u` is **final**. Relax every edge out of `u`, pushing each improved `(dist[v], v)`.
+4. Repeat until the heap is empty.
+
+With a binary heap the cost is `O((V + E) log V)`.
+
+## Why it is correct
+
+**Invariant.** Every node popped with `d == dist[u]` already has its true shortest distance.
+
+Suppose `u` is the first node popped with a wrong (too large) distance. The true shortest path to `u` leaves the set of finished nodes through some edge `x -> y`, where `x` is finished and `y` is not. When `x` was finished, `y` was relaxed, so `dist[y]` is at most the true distance to `y`. Since weights are positive, the true distance to `y` is less than the true distance to `u`, so `y` would have been popped before `u`. That contradicts the choice of `u`.
+
+The proof needs `w >= 0`. With a negative edge, a node that looked finished can still be improved later.
+
+## Example, step by step
+
+Pick the source, step through the pops, and watch `dist`: it only ever decreases, and a node never improves once it has been finalised.
+
+<Visualizer name="dijkstra" />
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import heapq
+
+def dijkstra(adj, s):
+    INF = float("inf")
+    dist = [INF] * len(adj)
+    dist[s] = 0
+    pq = [(0, s)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if d > dist[u]:
+            continue                    # stale entry
+        for v, w in adj[u]:
+            if d + w < dist[v]:
+                dist[v] = d + w
+                heapq.heappush(pq, (dist[v], v))
+    return dist
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> dijkstra(const vector<vector<pair<int,long long>>>& adj, int s) {
+    const long long INF = LLONG_MAX / 4;
+    vector<long long> dist(adj.size(), INF);
+    priority_queue<pair<long long,int>, vector<pair<long long,int>>, greater<>> pq;
+    dist[s] = 0;
+    pq.push({0, s});
+    while (!pq.empty()) {
+        auto [d, u] = pq.top(); pq.pop();
+        if (d > dist[u]) continue;      // stale entry
+        for (auto [v, w] : adj[u])
+            if (d + w < dist[v]) { dist[v] = d + w; pq.push({dist[v], v}); }
+    }
+    return dist;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] dijkstra(List<long[]>[] adj, int s) {
+    long INF = Long.MAX_VALUE / 4;
+    long[] dist = new long[adj.length];
+    Arrays.fill(dist, INF);
+    dist[s] = 0;
+    PriorityQueue<long[]> pq = new PriorityQueue<>((a, b) -> Long.compare(a[0], b[0]));
+    pq.add(new long[]{0, s});
+    while (!pq.isEmpty()) {
+        long[] top = pq.poll();
+        int u = (int) top[1];
+        if (top[0] > dist[u]) continue; // stale entry
+        for (long[] e : adj[u]) {
+            int v = (int) e[0];
+            if (top[0] + e[1] < dist[v]) { dist[v] = top[0] + e[1]; pq.add(new long[]{dist[v], v}); }
+        }
+    }
+    return dist;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, and compare with plain BFS, which counts roads and not cost:
+
+<CodeRunner language="python" code={`import heapq
+from collections import deque
+
+# node: [(neighbour, weight), ...]
+adj = {
+    0: [(1, 4), (2, 1)],
+    1: [(4, 1)],
+    2: [(1, 2), (3, 7)],
+    3: [(4, 1)],
+    4: [],
+}
+
+def dijkstra(s):
+    dist = {u: float("inf") for u in adj}
+    dist[s] = 0
+    pq = [(0, s)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if d > dist[u]:
+            continue
+        for v, w in adj[u]:
+            if d + w < dist[v]:
+                dist[v] = d + w
+                heapq.heappush(pq, (dist[v], v))
+    return dist
+
+def bfs_edges(s):
+    hops = {s: 0}
+    q = deque([s])
+    while q:
+        u = q.popleft()
+        for v, _ in adj[u]:
+            if v not in hops:
+                hops[v] = hops[u] + 1
+                q.append(v)
+    return hops
+
+print("cheapest cost:", dijkstra(0))
+print("fewest roads: ", bfs_edges(0))
+`} />
+
+Node 1 is reached in one road (cost 4), but also through `0 -> 2 -> 1` (two roads, cost 3). BFS prefers the first; Dijkstra finds the cheaper second route.
+
+### Recovering the path
+
+Store `parent[v] = u` whenever you *improve* `dist[v]`. Follow parents back from the target and reverse the list.
+
+## Pitfalls
+
+1. **Negative edges.** Dijkstra silently returns wrong answers. Use Bellman-Ford (`O(VE)`) instead.
+2. **Integer overflow.** Distances reach `n * maxW`. Use 64-bit integers and an infinity like `LLONG_MAX / 4`, so `INF + w` cannot overflow.
+3. **Forgetting the stale-entry check.** Without `if d > dist[u]: continue` the answers stay correct, but a node can be expanded many times, which can turn `O(E log V)` into `O(E^2)` on adversarial inputs.
+4. **BFS or a plain queue on weighted edges.** BFS counts edges. Only 0/1 weights allow the [0-1 BFS](/cp/stacks-and-queues/queues-deques-bfs/) deque trick.
+5. **Dense graphs.** With `E` close to `V^2`, an array-based `O(V^2)` Dijkstra (scan for the minimum) beats the heap version.
+6. **Slow input.** Read everything at once with `sys.stdin.read().split()` in Python.
+
+## Practice
+
+<Problem id="m11-cheapest-route" />
+
+## Problem ladder
+
+- [Shortest Routes I](https://cses.fi/problemset/task/1671) (CSES): single-source shortest paths, the plain template.
+- [Flight Discount](https://cses.fi/problemset/task/1195) (CSES): Dijkstra on a state graph (node, whether the discount is used).
+- [Network Delay Time](https://leetcode.com/problems/network-delay-time/) (LeetCode, medium): the largest shortest distance.
+- [Path With Minimum Effort](https://leetcode.com/problems/path-with-minimum-effort/) (LeetCode, medium): Dijkstra where a path costs its largest edge instead of the sum.
+- [Dijkstra?](https://codeforces.com/problemset/problem/20/C) (Codeforces 20C, rating about 1900): shortest path with reconstruction.
+
+## Quiz
+
+<Quiz id="cp-m11-dijkstra" tags={["dijkstra", "graph"]} questions={[
+  { type: "mcq", q: "Why does Dijkstra's algorithm require non-negative edge weights?", options: ["The heap cannot store negative numbers", "A node popped from the heap is final only if no later path can be shorter, which fails with negative edges", "Negative weights make the graph disconnected", "It would run in exponential time"], answer: 1, explain: "Finality of a popped node relies on every other path being at least as long. A negative edge later in a path can shorten it." },
+  { type: "multi", q: "Which statements about the stale-entry check `if d > dist[u]: continue` are true?", options: ["It avoids re-expanding a node whose distance already improved", "Without it the answers become wrong", "The heap can contain several entries for one node", "It makes every pop O(1)"], answer: [0, 2], explain: "We push duplicates instead of decreasing a key, so stale entries exist. Skipping them is an optimisation, and the answers stay correct without it." },
+  { type: "predict", q: "With edges 0->1 (5), 0->2 (1) and 2->1 (1), what is dist[1] from source 0?", code: "adj = {0: [(1, 5), (2, 1)], 1: [], 2: [(1, 1)]}", options: ["5", "2", "1", "6"], answer: 1, explain: "The route 0 -> 2 -> 1 costs 1 + 1 = 2, cheaper than the direct edge of 5." },
+  { type: "mcq", q: "What is the running time with a binary heap on a graph with V nodes and E edges?", options: ["O(V + E)", "O((V + E) log V)", "O(V^2 E)", "O(E log E) only for trees"], answer: 1, explain: "Each edge can cause one push of O(log) cost, and each node is expanded once." }
+]} />
