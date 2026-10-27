@@ -1,0 +1,1 @@
+{ "title": "String Matching", "level": "Level 2: Core Algorithms", "order": 14, "summary": "Finding patterns in text in linear time with the prefix function and KMP, and what the prefix function tells you beyond matching." }

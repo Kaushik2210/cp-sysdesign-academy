@@ -1,0 +1,208 @@
+---
+title: KMP and the Prefix Function
+track: cp
+module: string-matching
+order: 1
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/hashing/string-hashing, cp/stacks-and-queues/amortized-analysis]
+tags: [strings, kmp, prefix-function, border, pattern-matching]
+type: lesson
+problems: [m14-find-occurrences]
+furtherReading:
+  - title: cp-algorithms, Prefix function and the Knuth-Morris-Pratt algorithm
+    url: https://cp-algorithms.com/string/prefix-function.html
+  - title: CSES Problem Set, String Matching
+    url: https://cses.fi/problemset/task/1753
+  - title: Codeforces EDU, Z-function and prefix function
+    url: https://codeforces.com/edu/courses
+---
+
+## Intuition
+
+To find a pattern `p` in a text `s`, the naive way tries every start position and compares character by character. On `s = aaaa...a` (100000 letters) and `p = aaaa...ab`, almost every comparison matches before the final failure, so the cost is `|s| * |p|`.
+
+The waste is that after a mismatch you throw away what you learned. Say you matched `abab` and then the next letter breaks the match. You know the last four text characters are `abab`, so you also know the text ends in `ab`, which is a prefix of the pattern. You can keep going *from there* instead of restarting.
+
+KMP formalises that: after a mismatch, fall back to the longest prefix of the pattern that is still consistent with the text, and **never move the text pointer backwards**.
+
+## Definition
+
+A **border** of a string is a non-empty proper prefix that is also a suffix. For `abacaba` the borders are `a` and `aba`.
+
+The **prefix function** `pi[i]` is the length of the longest border of `p[0..i]`.
+
+| p | a | b | a | c | a | b | a |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| pi | 0 | 0 | 1 | 0 | 1 | 2 | 3 |
+
+**Building `pi`.** To compute `pi[i]`, start from the border of the previous prefix, `k = pi[i-1]`. If `p[i] == p[k]`, the border extends: `k + 1`. Otherwise try the next shorter border, `k = pi[k-1]`, until it matches or `k` reaches `0`.
+
+**Matching.** Run the same loop over the text, keeping `k`, the number of pattern characters currently matched. On a mismatch set `k = pi[k-1]`. When `k` equals `|p|` you have an occurrence, and the same fall-back (`k = pi[k-1]`) continues to find overlapping ones.
+
+## Why it is linear
+
+`k` increases by at most one per text character. Each fall-back decreases `k`, and `k` never goes below zero, so the total number of fall-backs is at most the total number of increases, which is at most `|s|`. The same argument shows building `pi` is `O(|p|)`. This is the [amortized](/cp/stacks-and-queues/amortized-analysis/) argument again: a loop inside a loop whose total work is bounded by a potential.
+
+## Example, step by step
+
+Step through the prefix table, then the scan. Watch the pattern slide along without the text pointer moving back.
+
+<Visualizer name="kmp" />
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def prefix_function(p):
+    pi = [0] * len(p)
+    for i in range(1, len(p)):
+        k = pi[i - 1]
+        while k and p[i] != p[k]:
+            k = pi[k - 1]
+        if p[i] == p[k]:
+            k += 1
+        pi[i] = k
+    return pi
+
+def find_all(s, p):
+    pi, k, res = prefix_function(p), 0, []
+    for i, c in enumerate(s):
+        while k and (k == len(p) or c != p[k]):
+            k = pi[k - 1]
+        if c == p[k]:
+            k += 1
+        if k == len(p):
+            res.append(i - len(p) + 1)
+    return res
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> prefix_function(const string& p) {
+    vector<int> pi(p.size(), 0);
+    for (int i = 1; i < (int)p.size(); i++) {
+        int k = pi[i - 1];
+        while (k > 0 && p[i] != p[k]) k = pi[k - 1];
+        if (p[i] == p[k]) k++;
+        pi[i] = k;
+    }
+    return pi;
+}
+vector<int> find_all(const string& s, const string& p) {
+    auto pi = prefix_function(p);
+    vector<int> res;
+    int k = 0, m = p.size();
+    for (int i = 0; i < (int)s.size(); i++) {
+        while (k > 0 && (k == m || s[i] != p[k])) k = pi[k - 1];
+        if (s[i] == p[k]) k++;
+        if (k == m) res.push_back(i - m + 1);
+    }
+    return res;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] prefixFunction(String p) {
+    int[] pi = new int[p.length()];
+    for (int i = 1; i < p.length(); i++) {
+        int k = pi[i - 1];
+        while (k > 0 && p.charAt(i) != p.charAt(k)) k = pi[k - 1];
+        if (p.charAt(i) == p.charAt(k)) k++;
+        pi[i] = k;
+    }
+    return pi;
+}
+List<Integer> findAll(String s, String p) {
+    int[] pi = prefixFunction(p);
+    List<Integer> res = new ArrayList<>();
+    int k = 0, m = p.length();
+    for (int i = 0; i < s.length(); i++) {
+        while (k > 0 && (k == m || s.charAt(i) != p.charAt(k))) k = pi[k - 1];
+        if (s.charAt(i) == p.charAt(k)) k++;
+        if (k == m) res.add(i - m + 1);
+    }
+    return res;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it and compare with a naive search:
+
+<CodeRunner language="python" code={`def prefix_function(p):
+    pi = [0] * len(p)
+    for i in range(1, len(p)):
+        k = pi[i - 1]
+        while k and p[i] != p[k]:
+            k = pi[k - 1]
+        if p[i] == p[k]:
+            k += 1
+        pi[i] = k
+    return pi
+
+def find_all(s, p):
+    pi, k, res = prefix_function(p), 0, []
+    for i, c in enumerate(s):
+        while k and (k == len(p) or c != p[k]):
+            k = pi[k - 1]
+        if c == p[k]:
+            k += 1
+        if k == len(p):
+            res.append(i - len(p) + 1)
+    return res
+
+def naive(s, p):
+    return [i for i in range(len(s) - len(p) + 1) if s[i:i + len(p)] == p]
+
+print("pi of abacaba:", prefix_function("abacaba"))
+for s, p in [("abracadabra", "abra"), ("aaaa", "aa"), ("ababababc", "abab"), ("hello", "xyz")]:
+    print(s, p, find_all(s, p), find_all(s, p) == naive(s, p))
+`} />
+
+## What else the prefix function gives you
+
+1. **Smallest period.** With `n = |p|`, if `pi[n-1] > 0` and `n % (n - pi[n-1]) == 0`, the string is a repetition of its first `n - pi[n-1]` characters; otherwise it is not made of repeated copies of a shorter block.
+2. **Count of each prefix's occurrences.** Counting how often every prefix appears as a substring comes from walking the `pi` chains.
+3. **Matching with a separator.** Compute `pi` of `p + "#" + s`; every position where the value equals `|p|` ends an occurrence. It is a compact variant that needs a character absent from both strings.
+4. **Automaton.** Precomputing the next state for every letter gives a DFA that never loops on a mismatch, at the cost of `O(|p| * alphabet)` memory.
+
+Compare with [string hashing](/cp/hashing/string-hashing/): hashing is shorter to write and handles "equal substring queries" in `O(1)`, but it is probabilistic. KMP is deterministic and the better tool when only a single pattern is searched.
+
+## Pitfalls
+
+1. **Forgetting the `k == len(p)` check** before comparing `c != p[k]`, which reads past the end of the pattern or loses overlapping matches.
+2. **Resetting `k` to `0` on mismatch** instead of `pi[k-1]`. That is the naive algorithm in disguise, and it is wrong for patterns like `aab`.
+3. **Off-by-one in indexes:** `pi[k-1]`, not `pi[k]`. `pi` is indexed by the end of the prefix.
+4. **Not deciding what an empty pattern means.** Handle it explicitly if it can occur.
+5. **Concatenating without a separator** (`p + s`). A match can spill across the join, and `pi` values can exceed `|p|`.
+6. **Using `str.find` in a loop for all occurrences.** The cost can be `O(|s| * |p|)` on repetitive input.
+
+## Practice
+
+<Problem id="m14-find-occurrences" />
+
+## Problem ladder
+
+- [String Matching](https://cses.fi/problemset/task/1753) (CSES): count occurrences, exactly this lesson.
+- [Finding Borders](https://cses.fi/problemset/task/1732) (CSES): all borders of a string via the prefix function.
+- [Find the Index of the First Occurrence in a String](https://leetcode.com/problems/find-the-index-of-the-first-occurrence-in-a-string/) (LeetCode, easy): the single-match version.
+- [Repeated Substring Pattern](https://leetcode.com/problems/repeated-substring-pattern/) (LeetCode, easy): the period formula.
+- [Prefixes and Suffixes](https://codeforces.com/problemset/problem/432/D) (Codeforces 432D, rating about 1700): counting occurrences of every border.
+
+## Quiz
+
+<Quiz id="cp-m14-kmp" tags={["strings", "kmp"]} questions={[
+  { type: "mcq", q: "What does pi[i] store in the prefix function?", options: ["The position of the first mismatch", "The length of the longest proper prefix of p[0..i] that is also its suffix", "The number of times p[i] occurs earlier", "The hash of the prefix"], answer: 1, explain: "It is the longest border of the prefix ending at i, which tells KMP how far to fall back." },
+  { type: "predict", q: "What is the prefix function of this pattern?", code: "p = 'aabaa'", options: ["[0, 1, 0, 1, 2]", "[0, 0, 1, 0, 1]", "[0, 1, 2, 0, 1]", "[0, 1, 0, 1, 1]"], answer: 0, explain: "a: 0. aa: border a gives 1. aab: 0. aaba: border a gives 1. aabaa: border aa gives 2." },
+  { type: "multi", q: "Which statements about KMP are true?", options: ["The text pointer never moves backwards", "The total running time is O(|s| + |p|)", "It can miss overlapping occurrences", "On a mismatch it falls back using pi[k-1]"], answer: [0, 1, 3], explain: "The fall-back via pi also continues after a full match, so overlapping occurrences are found." },
+  { type: "mcq", q: "For a string of length n whose prefix function ends in pi[n-1], when is the string made of repeated copies of a shorter block?", options: ["When pi[n-1] == 0", "When n % (n - pi[n-1]) == 0 and pi[n-1] > 0", "When pi[n-1] == n", "Never; the prefix function cannot tell"], answer: 1, explain: "n - pi[n-1] is the smallest candidate period. It is a full period only if it divides n, and a nonzero border is needed." }
+]} />
