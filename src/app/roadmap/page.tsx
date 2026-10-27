@@ -54,7 +54,7 @@ export default function RoadmapPage() {
       </p>
 
       <section aria-labelledby="timeline" className="mt-8">
-        <h2 id="timeline" className="text-xl font-bold">
+        <h2 id="timeline" className="text-2xl font-extrabold tracking-tight">
           Timeline
         </h2>
         <div className="mt-2 overflow-x-auto">
@@ -70,7 +70,7 @@ export default function RoadmapPage() {
             </thead>
             <tbody>
               {phases.map((p) => (
-                <tr key={p.id} className="border-b border-border">
+                <tr key={p.id} className="border-b border-border transition-colors hover:bg-accent/10">
                   <td className="p-2">{p.order}</td>
                   <th scope="row" className="p-2 text-left font-medium">
                     <a href={`#${p.id}`} className="text-accent underline">
