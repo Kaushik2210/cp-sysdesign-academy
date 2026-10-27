@@ -37,7 +37,7 @@ export function MarketView({ topics }: { topics: { id: string; title: string; in
   return (
     <div className="mt-6">
       <label className="flex min-h-11 items-center gap-2 text-sm">
-        <input type="checkbox" checked={strongOnly} onChange={(e) => setStrongOnly(e.target.checked)} className="h-4 w-4" />
+        <input type="checkbox" checked={strongOnly} onChange={(e) => setStrongOnly(e.target.checked)} className="h-5 w-5 accent-[hsl(var(--hot))]" />
         Show only high-confidence findings (primary data)
       </label>
       <p role="status" className="mt-1 text-sm text-muted-fg">
@@ -46,7 +46,7 @@ export function MarketView({ topics }: { topics: { id: string; title: string; in
 
       <nav aria-label="Jump to topic" className="mt-3 flex flex-wrap gap-2">
         {shown.map((t) => (
-          <a key={t.id} href={`#${t.id}`} className="inline-flex min-h-11 items-center rounded-full border border-border px-3 text-sm hover:bg-muted">
+          <a key={t.id} href={`#${t.id}`} className="inline-flex min-h-11 items-center rounded-full border border-border bg-card/70 px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:border-transparent hover:bg-gradient-brand hover:text-white">
             {t.title}
           </a>
         ))}
@@ -54,13 +54,13 @@ export function MarketView({ topics }: { topics: { id: string; title: string; in
 
       {shown.map((t) => (
         <section key={t.id} id={t.id} aria-labelledby={`${t.id}-h`} className="mt-10 scroll-mt-20">
-          <h2 id={`${t.id}-h`} className="text-xl font-bold">
+          <h2 id={`${t.id}-h`} className="flex items-center gap-3 text-2xl font-extrabold tracking-tight before:h-6 before:w-1.5 before:rounded-full before:bg-gradient-to-b before:from-accent before:to-hot before:content-['']">
             {t.title}
           </h2>
           <ul className="mt-3 space-y-4">
             {t.insights.map((i) => (
               <li key={i.id}>
-                <article className="rounded-xl border border-border bg-card p-4">
+                <article className="rounded-2xl border border-border bg-card/80 p-5 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-cool/70 hover:shadow-[0_12px_32px_-14px_hsl(var(--cool))]">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className={cn("rounded-full border px-2 py-0.5", CONFIDENCE_STYLE[i.confidence])}>{CONFIDENCE_LABEL[i.confidence]}</span>
                     <span className="rounded-full border border-border px-2 py-0.5 text-muted-fg">{i.source.kind === "primary" ? "Primary data" : "Reported by a third party"}</span>
