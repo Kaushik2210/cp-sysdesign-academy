@@ -4,6 +4,7 @@ import { getAllLessons } from "@/lib/content/loader";
 import { getTemplates } from "@/lib/content/templates";
 import { MdxBase } from "@/components/mdx/MdxBase";
 import { TemplateTabs } from "@/components/layout/TemplateTabs";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const dynamicParams = false;
 
@@ -31,7 +32,7 @@ export default async function TemplatePage({ params }: { params: Promise<{ slug:
           Templates
         </Link>
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">{t.title}</h1>
+      <PageTitle>{t.title}</PageTitle>
       <p className="mt-2">{t.summary}</p>
       <p className="mt-2 text-sm text-muted-fg">
         Complexity: <code>{t.complexity}</code> · {t.tags.join(", ")}
