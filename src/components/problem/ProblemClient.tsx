@@ -75,14 +75,14 @@ export function ProblemClient(p: ProblemClientProps) {
   };
 
   return (
-    <section aria-label={`Problem: ${p.title}`} className="not-prose my-8 rounded-xl border border-border bg-card">
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border p-4">
-        <h3 className="text-lg font-semibold">{p.title}</h3>
-        <span className="text-xs text-muted-fg">rating ~{p.rating}</span>
-        {result?.solved && <span className="text-xs font-medium text-emerald-500">solved</span>}
+    <section aria-label={`Problem: ${p.title}`} className="not-prose my-8 overflow-hidden rounded-3xl border border-border bg-card/80 shadow-xl ring-glow backdrop-blur-sm">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border bg-gradient-to-r from-accent/5 to-hot/5 p-4">
+        <h3 className="text-gradient text-xl font-black tracking-tight">{p.title}</h3>
+        <span className="rounded-full bg-gradient-to-r from-accent/20 to-hot/20 px-2.5 py-0.5 text-xs font-semibold">rating ~{p.rating}</span>
+        {result?.solved && <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">✓ solved</span>}
         <span className="ml-auto flex gap-1">
           {p.tags.map((t) => (
-            <span key={t} className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-fg">
+            <span key={t} className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-fg">
               {t}
             </span>
           ))}
@@ -105,9 +105,9 @@ export function ProblemClient(p: ProblemClientProps) {
             <div key={i} className="text-sm">
               <p className="font-semibold">Example {i + 1}</p>
               <p className="text-xs text-muted-fg">Input</p>
-              <pre className="rounded border border-border bg-bg p-2 font-mono text-xs">{e.input}</pre>
+              <pre className="rounded-xl border border-border bg-bg p-2 font-mono text-xs">{e.input}</pre>
               <p className="text-xs text-muted-fg">Output</p>
-              <pre className="rounded border border-border bg-bg p-2 font-mono text-xs">{e.output}</pre>
+              <pre className="rounded-xl border border-border bg-bg p-2 font-mono text-xs">{e.output}</pre>
             </div>
           ))}
         </div>
@@ -117,7 +117,7 @@ export function ProblemClient(p: ProblemClientProps) {
             aria-label="Language"
             value={lang}
             onChange={(e) => setLang(e.target.value as Language)}
-            className="rounded border border-border bg-bg px-2 py-1 text-sm"
+            className="min-h-11 rounded-full border border-border bg-bg px-4 text-sm focus-visible:border-accent"
           >
             {langs.map((l) => (
               <option key={l} value={l}>
@@ -126,10 +126,10 @@ export function ProblemClient(p: ProblemClientProps) {
               </option>
             ))}
           </select>
-          <button type="button" disabled={busy} onClick={runSamples} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-60">
+          <button type="button" disabled={busy} onClick={runSamples} className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:border-accent hover:bg-muted disabled:opacity-60">
             <Play size={14} aria-hidden /> Run samples
           </button>
-          <button type="button" disabled={busy} onClick={submit} className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:opacity-60">
+          <button type="button" disabled={busy} onClick={submit} className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-gradient-brand px-5 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl disabled:opacity-60">
             <Send size={14} aria-hidden /> {busy ? "Judging…" : `Submit (${p.tests.length} tests)`}
           </button>
         </div>
@@ -147,8 +147,8 @@ export function ProblemClient(p: ProblemClientProps) {
             </ul>
           )}
           {report && (
-            <div className={cn("rounded-md p-3 text-sm", VERDICT_STYLE[report.verdict])} role="status">
-              <p className="font-semibold">
+            <div className={cn("animate-[pop-in_0.3s_ease-out] rounded-2xl p-4 text-sm", VERDICT_STYLE[report.verdict])} role="status">
+              <p className="text-base font-bold">
                 Verdict: {report.verdict} ({report.passed}/{report.total} tests passed)
               </p>
               {report.firstFail !== undefined && (() => {
@@ -185,7 +185,7 @@ export function ProblemClient(p: ProblemClientProps) {
             ))}
           </ol>
           {hints < 3 && (
-            <button type="button" onClick={() => setHints(hints + 1)} className="mt-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted">
+            <button type="button" onClick={() => setHints(hints + 1)} className="mt-1 min-h-11 rounded-full border border-border px-4 text-xs font-medium transition hover:-translate-y-0.5 hover:border-accent hover:bg-muted">
               Reveal hint {hints + 1}
             </button>
           )}
@@ -201,7 +201,7 @@ export function ProblemClient(p: ProblemClientProps) {
                 type="button"
                 aria-pressed={guess === c}
                 onClick={() => setGuess(c)}
-                className={cn("rounded border border-border px-2 py-1 text-xs hover:bg-muted", guess === c && "border-accent text-accent")}
+                className={cn("min-h-11 rounded-full border border-border px-3 text-xs font-medium transition hover:-translate-y-0.5 hover:bg-muted", guess === c && "border-accent bg-accent/10 text-accent")}
               >
                 {c}
               </button>
@@ -216,7 +216,7 @@ export function ProblemClient(p: ProblemClientProps) {
 
         <div>
           {showEditorial ? (
-            <div className="prose prose-sm max-w-none rounded-md border border-border p-3 dark:prose-invert">
+            <div className="prose prose-sm max-w-none rounded-2xl border border-border bg-bg/60 p-4 dark:prose-invert">
               <h4>Editorial</h4>
               {p.editorial}
             </div>
@@ -224,7 +224,7 @@ export function ProblemClient(p: ProblemClientProps) {
             <button
               type="button"
               onClick={() => setShowEditorial(true)}
-              className="inline-flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm hover:bg-muted"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:border-accent hover:bg-muted"
             >
               <Lock size={14} aria-hidden />
               {attempted ? "Show editorial" : "Show editorial anyway (try a submission first)"}
