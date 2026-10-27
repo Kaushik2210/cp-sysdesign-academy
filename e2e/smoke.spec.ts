@@ -143,7 +143,7 @@ test("hiring market page shows sourced findings and filters by confidence", asyn
 });
 test.describe("phone width", () => {
   test.use({ viewport: { width: 375, height: 812 } });
-  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/visualizers/segment-tree/", "/visualizers/knapsack/", "/visualizers/kmp/", "/cp/sorting-and-searching/binary-search/"]) {
+  for (const path of ["/", "/market/", "/glossary/", "/templates/", "/patterns/", "/roadmap/", "/mock/", "/cheatsheets/numbers/", "/cheatsheets/tradeoffs/", "/sandbox/consistent-hashing/", "/sandbox/rate-limiter/", "/sandbox/cache/", "/sandbox/load-balancer/", "/sandbox/design-canvas/", "/sandbox/", "/cp/", "/sd/", "/visualizers/merge-sort/", "/visualizers/bfs-grid/", "/visualizers/dijkstra/", "/visualizers/dsu/", "/visualizers/segment-tree/", "/visualizers/knapsack/", "/visualizers/kmp/", "/cp/sorting-and-searching/binary-search/"]) {
     test(`no horizontal page scroll on ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
@@ -727,5 +727,40 @@ test.describe("reduced motion", () => {
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("region", { name: "Stats" })).toContainText("98");
+  });
+});
+
+test.describe("track, lesson and sandbox pages", () => {
+  test("a module card shows progress after a lesson is completed", async ({ page }) => {
+    await page.goto(CP_LESSON);
+    await page.getByRole("button", { name: /mark complete/i }).click();
+    await expect(page.getByRole("button", { name: /completed/i })).toBeVisible();
+    await page.goto("/cp/");
+    const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
+    await expect(bar).toBeVisible();
+    await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 48 lessons");
+  });
+
+  test("the lesson table of contents highlights the section being read", async ({ page }) => {
+    await page.goto(CP_LESSON);
+    await page.waitForLoadState("networkidle");
+    const toc = page.getByRole("navigation", { name: "On this page" });
+    const links = toc.getByRole("link");
+    const second = links.nth(2);
+    await second.click();
+    await expect(toc.locator("a[aria-current='location']")).toHaveCount(1);
+  });
+
+  test("sandbox cards are single links", async ({ page }) => {
+    await page.goto("/sandbox/");
+    await page.getByRole("link", { name: "Cache eviction" }).click();
+    await expect(page).toHaveURL(/sandbox\/cache\/$/);
+  });
+
+  test("callouts are announced as notes and keep their title", async ({ page }) => {
+    await page.goto("/cp/sorting-and-searching/binary-search/");
+    const notes = page.getByRole("note");
+    expect(await notes.count()).toBeGreaterThan(0);
   });
 });
