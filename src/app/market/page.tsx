@@ -54,16 +54,22 @@ export default function MarketPage() {
       </p>
 
       <section aria-labelledby="takeaways" className="mt-8">
-        <h2 id="takeaways" className="text-xl font-bold">
+        <h2 id="takeaways" className="text-2xl font-extrabold tracking-tight">
           Five takeaways <span className="text-sm font-normal text-muted-fg">(our interpretation of the findings below)</span>
         </h2>
         <ol className="mt-3 space-y-3">
           {TAKEAWAYS.map((t, i) => (
-            <li key={t.title} className="rounded-xl border border-border bg-card p-4">
-              <p className="font-semibold">
-                {i + 1}. {t.title}
-              </p>
-              <p className="mt-1 text-sm">{t.body}</p>
+            <li key={t.title} className="flex gap-4 rounded-2xl border border-border bg-card/80 p-5 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-hot/70">
+              <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-brand text-sm font-black text-white shadow-md">
+                {i + 1}
+              </span>
+              <div>
+                <p className="font-bold">
+                  <span className="sr-only">{i + 1}. </span>
+                  {t.title}
+                </p>
+                <p className="mt-1 text-sm">{t.body}</p>
+              </div>
             </li>
           ))}
         </ol>
