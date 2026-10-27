@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LoadBalancerSandbox } from "@/components/sandbox/LoadBalancerSandbox";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Load balancer sandbox",
@@ -14,7 +15,7 @@ export default function LoadBalancerPage() {
           Sandboxes
         </Link>
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">Load balancing</h1>
+      <PageTitle>Load balancing</PageTitle>
       <p className="mt-1 max-w-3xl text-muted-fg">
         Spreading requests evenly is not the same as spreading work evenly. Change the load, the server sizes and the
         cost mix and see which policy keeps latency low. The lesson on{" "}
