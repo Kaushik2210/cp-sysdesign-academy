@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useProgress } from "@/lib/store";
 import { dueCards } from "@/lib/srs/sm2";

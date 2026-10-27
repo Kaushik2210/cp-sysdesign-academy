@@ -8,7 +8,10 @@ const rootOf = (parent: number[], x: number) => {
 };
 const depth = (parent: number[], x: number) => {
   let d = 0;
-  while (parent[x] !== x) (x = parent[x]), d++;
+  while (parent[x] !== x) {
+    x = parent[x];
+    d++;
+  }
   return d;
 };
 
