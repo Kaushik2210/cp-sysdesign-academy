@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+﻿import { expect, test } from "@playwright/test";
 
 const CP_LESSON = "/cp/sorting-and-searching/binary-search/";
 
@@ -726,7 +726,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("98");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("103");
   });
 });
 
