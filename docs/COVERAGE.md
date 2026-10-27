@@ -10,11 +10,11 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Code runner (Python/JS in browser) | Complete | Pyodide via CDN, JS in a Worker |
 | C++/Java execution | Partial | Needs `NEXT_PUBLIC_JUDGE0_URL` |
 | Problem judge, quizzes, SM-2 review queue | Complete | Hidden tests ship to the client |
-| Visualizers | Complete (14 visualizers) | All 9 spec topics done: binary search, sorting (bubble, insertion, merge, quick), BFS and DFS on a grid, Dijkstra, union-find, segment tree, 0/1 knapsack, KMP, two pointers (plus sliding window). Dijkstra, union-find, the segment tree, knapsack and KMP have no lesson on the site yet. Gallery at /visualizers/. |
+| Visualizers | Complete (14 visualizers) | All 9 spec topics done: binary search, sorting (bubble, insertion, merge, quick), BFS and DFS on a grid, Dijkstra, union-find, segment tree, 0/1 knapsack, KMP, two pointers (plus sliding window). Every visualizer is linked from a lesson. Gallery at /visualizers/. |
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 138 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 143 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -42,7 +42,11 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 8 Hashing | Complete (5) | 5 |
 | 9 Recursion and bitmasks | Complete (5) | 5 |
 | 10 Greedy | Complete (5) | 5 |
-| 11-26 (Levels 2-3) | Planned | 0 |
+| 11 Graphs: shortest paths and connectivity | Partial (2 lessons: Dijkstra, union-find) | 2 |
+| 12 Range queries and segment trees | Partial (1 lesson; no lazy propagation, Fenwick tree or sparse table yet) | 1 |
+| 13 Dynamic programming | Partial (1 lesson: 0/1 knapsack only) | 1 |
+| 14 String matching | Partial (1 lesson: KMP only; no Z-function or suffix structures) | 1 |
+| 15-26 (Levels 2-3) | Planned | 0 |
 
 ## Track 2: System Design
 

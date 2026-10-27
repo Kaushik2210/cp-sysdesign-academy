@@ -73,7 +73,7 @@ docs/      PLAN, DECISIONS, COVERAGE, AUTHORING
 
 ## Roadmap
 
-See [`docs/COVERAGE.md`](docs/COVERAGE.md) for module-by-module status. Planned: the remaining CP levels 2-3, SD case studies and LLD, template library, pattern library, problem ladder, and lessons for the visualizers that have none yet (Dijkstra, union-find, segment tree, knapsack, KMP).
+See [`docs/COVERAGE.md`](docs/COVERAGE.md) for module-by-module status. Planned: the remaining CP levels 2-3, SD case studies and LLD, template library, pattern library and problem ladder.
 
 ## Contributing
 
