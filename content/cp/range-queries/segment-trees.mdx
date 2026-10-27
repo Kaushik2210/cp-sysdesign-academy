@@ -1,0 +1,223 @@
+---
+title: Segment Trees
+track: cp
+module: range-queries
+order: 1
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/arrays-and-windows/prefix-sums, cp/complexity-analysis/recurrences-and-master-theorem]
+tags: [segment-tree, range-query, data-structure, point-update]
+type: lesson
+problems: [m12-sum-and-set]
+furtherReading:
+  - title: cp-algorithms, Segment Tree
+    url: https://cp-algorithms.com/data_structures/segment_tree.html
+  - title: CSES Problem Set, Dynamic Range Sum Queries
+    url: https://cses.fi/problemset/task/1648
+  - title: Codeforces EDU, Segment Tree
+    url: https://codeforces.com/edu/courses
+---
+
+## Intuition
+
+A [prefix-sum](/cp/arrays-and-windows/prefix-sums/) array answers "sum of `a[l..r]`" in `O(1)`, but a single change `a[i] = v` ruins every prefix after `i`, so an update costs `O(n)`. Recomputing the sum for every query costs `O(n)` per query. When queries and updates are mixed and `n`, `q` are around `10^5`, both are too slow.
+
+The compromise is to pre-compute **sums of blocks** with sizes that line up like a binary tree: blocks of 1, then 2, then 4, and so on. Any range is a union of only about `2 log n` such blocks, and changing one element affects only the `log n` blocks above it.
+
+## Definition
+
+A **segment tree** is a binary tree where each node stores the answer (here the sum) for a range of the array, and its two children split that range in half. Leaves are single elements.
+
+- **Query** `[l, r]`: collect the stored values of `O(log n)` nodes whose ranges exactly cover `[l, r]`.
+- **Update** `a[i] = v`: change the leaf, then recompute each ancestor from its two children.
+- Build: `O(n)`. Query and update: `O(log n)`. Memory: `2n` with the layout below.
+
+The merge operation only needs to be **associative** (sum, min, max, gcd, xor, matrix product). For a sum, the order of the two children does not matter, but for something like string concatenation it does.
+
+## Example, step by step
+
+Query a range and look at which nodes light up; update a leaf and watch only its ancestors change.
+
+<Visualizer name="segment-tree" />
+
+## Code: the bottom-up layout
+
+Store the leaves at positions `n .. 2n-1` and let node `i` have children `2i` and `2i+1`. No recursion, no `4n` array, and it works for any `n`, not only powers of two.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+n = len(a)
+t = [0] * (2 * n)
+for i in range(n):
+    t[n + i] = a[i]
+for i in range(n - 1, 0, -1):
+    t[i] = t[2 * i] + t[2 * i + 1]
+
+def update(i, v):                  # a[i] = v, 0-based
+    i += n
+    t[i] = v
+    while i > 1:
+        i >>= 1
+        t[i] = t[2 * i] + t[2 * i + 1]
+
+def query(l, r):                   # sum of a[l:r], half-open
+    s = 0
+    l += n
+    r += n
+    while l < r:
+        if l & 1:
+            s += t[l]
+            l += 1
+        if r & 1:
+            r -= 1
+            s += t[r]
+        l >>= 1
+        r >>= 1
+    return s
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int n; vector<long long> t;        // size 2n
+void build(const vector<long long>& a) {
+    n = a.size(); t.assign(2 * n, 0);
+    for (int i = 0; i < n; i++) t[n + i] = a[i];
+    for (int i = n - 1; i >= 1; i--) t[i] = t[2 * i] + t[2 * i + 1];
+}
+void update(int i, long long v) {  // 0-based
+    for (t[i += n] = v; i > 1; i >>= 1) t[i >> 1] = t[i] + t[i ^ 1];
+}
+long long query(int l, int r) {    // [l, r)
+    long long s = 0;
+    for (l += n, r += n; l < r; l >>= 1, r >>= 1) {
+        if (l & 1) s += t[l++];
+        if (r & 1) s += t[--r];
+    }
+    return s;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int n; long[] t;                   // size 2n
+void build(long[] a) {
+    n = a.length; t = new long[2 * n];
+    for (int i = 0; i < n; i++) t[n + i] = a[i];
+    for (int i = n - 1; i >= 1; i--) t[i] = t[2 * i] + t[2 * i + 1];
+}
+void update(int i, long v) {       // 0-based
+    for (t[i += n] = v; i > 1; i >>= 1) t[i >> 1] = t[i] + t[i ^ 1];
+}
+long query(int l, int r) {         // [l, r)
+    long s = 0;
+    for (l += n, r += n; l < r; l >>= 1, r >>= 1) {
+        if ((l & 1) == 1) s += t[l++];
+        if ((r & 1) == 1) s += t[--r];
+    }
+    return s;
+}
+```
+
+</Tab>
+</Tabs>
+
+Check it against a brute-force sum:
+
+<CodeRunner language="python" code={`import random
+
+a = [5, 3, 8, 1, 9, 2, 7]
+n = len(a)
+t = [0] * (2 * n)
+for i in range(n):
+    t[n + i] = a[i]
+for i in range(n - 1, 0, -1):
+    t[i] = t[2 * i] + t[2 * i + 1]
+
+def update(i, v):
+    i += n
+    t[i] = v
+    while i > 1:
+        i >>= 1
+        t[i] = t[2 * i] + t[2 * i + 1]
+
+def query(l, r):
+    s = 0
+    l += n
+    r += n
+    while l < r:
+        if l & 1:
+            s += t[l]
+            l += 1
+        if r & 1:
+            r -= 1
+            s += t[r]
+        l >>= 1
+        r >>= 1
+    return s
+
+print("sum a[1:5]:", query(1, 5))
+update(3, 10)
+a[3] = 10
+print("after a[3] = 10:", query(1, 5))
+
+random.seed(1)
+for _ in range(1000):
+    if random.random() < 0.5:
+        i, v = random.randrange(n), random.randint(-9, 9)
+        a[i] = v
+        update(i, v)
+    else:
+        l = random.randrange(n)
+        r = random.randint(l + 1, n)
+        assert query(l, r) == sum(a[l:r])
+print("1000 random operations agree with brute force")
+`} />
+
+## Choosing the structure
+
+| need | use |
+| --- | --- |
+| static array, range sum | prefix sums |
+| point updates and range sum | segment tree (or a Fenwick tree) |
+| range min/max/gcd with point updates | segment tree |
+| range update (add to a whole range) and queries | segment tree with lazy propagation (a later topic) |
+
+<Callout type="tip" title="Know the half-open convention">
+The bottom-up query above takes `[l, r)`. Convert `1`-based inclusive `[x, y]` to `l = x - 1`, `r = y`. Mixing conventions is the most common source of off-by-one errors.
+</Callout>
+
+## Pitfalls
+
+1. **Mixing inclusive and half-open ranges** in the same solution.
+2. **Overflow.** A sum of `2·10^5` values up to `10^9` needs 64-bit integers.
+3. **Non-commutative merges with the bottom-up loop.** It combines left and right pieces in the wrong order for operations like concatenation or matrix product. Keep left and right accumulators separately, or use the recursive version.
+4. **Non-power-of-two `n` with a recursive tree and a too-small array.** Allocate `4n` for the recursive layout.
+5. **Rebuilding the tree on each update.** An update touches only `log n` nodes.
+6. **Using a segment tree where prefix sums suffice.** No updates means no need for it.
+
+## Practice
+
+<Problem id="m12-sum-and-set" />
+
+## Problem ladder
+
+- [Dynamic Range Sum Queries](https://cses.fi/problemset/task/1648) (CSES): exactly this lesson's pattern.
+- [Dynamic Range Minimum Queries](https://cses.fi/problemset/task/1649) (CSES): same tree with `min` as the merge.
+- [Range Sum Query - Mutable](https://leetcode.com/problems/range-sum-query-mutable/) (LeetCode, medium): the interview version.
+- [Count of Smaller Numbers After Self](https://leetcode.com/problems/count-of-smaller-numbers-after-self/) (LeetCode, hard): a tree over values instead of positions.
+- [Segment Tree for the Sum](https://codeforces.com/edu/course/2/lesson/4) (Codeforces EDU): graded exercises, then lazy propagation.
+
+## Quiz
+
+<Quiz id="cp-m12-segment-tree" tags={["segment-tree", "range-query"]} questions={[
+  { type: "mcq", q: "What are the costs of a range query and a point update in a segment tree over n elements?", options: ["O(1) and O(n)", "O(log n) and O(log n)", "O(n) and O(1)", "O(sqrt n) and O(log n)"], answer: 1, explain: "A range splits into O(log n) stored nodes, and an update recomputes only the O(log n) ancestors of one leaf." },
+  { type: "multi", q: "Which statements are true?", options: ["The merge operation must be associative", "A segment tree needs a power-of-two n in the bottom-up layout", "The same tree shape can answer range minimum if the merge is min", "A single update may change O(n) nodes"], answer: [0, 2], explain: "Associativity lets any grouping of pieces give the same answer. The bottom-up layout works for any n, and an update changes only log n nodes." },
+  { type: "predict", q: "With the bottom-up layout and n = 4 (leaves at indices 4 to 7), which node is the parent of leaf index 6?", code: "n = 4\nleaf = n + 2\nprint(leaf // 2)", options: ["2", "3", "4", "6"], answer: 1, explain: "Leaf 6 is divided by 2 to get its parent, 3, whose children are 6 and 7." },
+  { type: "mcq", q: "When are prefix sums a better choice than a segment tree?", options: ["Whenever updates are frequent", "When the array never changes and you only need range sums", "When you need the range maximum", "When n is tiny and queries are rare"], answer: 1, explain: "Without updates, prefix sums answer each query in O(1) with O(n) setup, so the tree adds only overhead." }
+]} />

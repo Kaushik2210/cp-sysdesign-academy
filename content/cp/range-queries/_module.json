@@ -1,0 +1,1 @@
+{ "title": "Range Queries and Segment Trees", "level": "Level 2: Core Algorithms", "order": 12, "summary": "Answering range questions under updates with a segment tree, and how to choose between prefix sums and a segment tree." }
