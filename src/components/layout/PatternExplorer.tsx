@@ -32,7 +32,7 @@ export function PatternExplorer({ patterns }: { patterns: PatternView[] }) {
   }, [patterns, query, tag]);
 
   const chip =
-    "min-h-11 rounded-full border border-border px-3 text-sm hover:bg-muted";
+    "min-h-11 rounded-full border border-border bg-card/70 px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:bg-muted";
 
   return (
     <div className="mt-6">
@@ -45,15 +45,15 @@ export function PatternExplorer({ patterns }: { patterns: PatternView[] }) {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="e.g. range sum queries, shortest path, subsets"
-        className="mt-1 min-h-11 w-full rounded-lg border border-border bg-bg px-3"
+        className="mt-1 min-h-12 w-full rounded-full border border-border bg-card/70 px-5 shadow-sm backdrop-blur focus:border-accent focus:shadow-lg"
       />
 
       <div role="group" aria-label="Filter by topic" className="mt-3 flex flex-wrap gap-2">
-        <button type="button" aria-pressed={tag === null} onClick={() => setTag(null)} className={cn(chip, tag === null && "border-accent text-accent")}>
+        <button type="button" aria-pressed={tag === null} onClick={() => setTag(null)} className={cn(chip, tag === null && "border-transparent bg-gradient-brand text-white shadow-md")}>
           All
         </button>
         {tags.map((t) => (
-          <button key={t} type="button" aria-pressed={tag === t} onClick={() => setTag(tag === t ? null : t)} className={cn(chip, tag === t && "border-accent text-accent")}>
+          <button key={t} type="button" aria-pressed={tag === t} onClick={() => setTag(tag === t ? null : t)} className={cn(chip, tag === t && "border-transparent bg-gradient-brand text-white shadow-md")}>
             {t}
           </button>
         ))}
@@ -66,10 +66,10 @@ export function PatternExplorer({ patterns }: { patterns: PatternView[] }) {
       <ul className="mt-2 space-y-3">
         {shown.map((p) => (
           <li key={p.id}>
-            <article className="rounded-xl border border-border bg-card p-4">
-              <p className="text-sm text-muted-fg">When you see</p>
+            <article className="rounded-2xl border border-border bg-card/80 p-5 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-leaf/70 hover:shadow-[0_12px_32px_-14px_hsl(var(--leaf))]">
+              <p className="text-xs font-bold uppercase tracking-widest text-leaf">When you see</p>
               <p className="font-medium">{p.signal}</p>
-              <h2 className="mt-3 text-lg font-semibold">
+              <h2 className="mt-3 text-xl font-extrabold tracking-tight">
                 <span aria-hidden>→ </span>
                 {p.technique}
                 <span className="ml-2 rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-normal">{p.complexity}</span>
