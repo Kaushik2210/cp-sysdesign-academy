@@ -4,6 +4,7 @@ import { getAllLessons } from "@/lib/content/loader";
 import { VIZ_CATEGORY_TITLE, VIZ_META } from "@/visualizers/meta";
 import { Visualizer } from "@/components/visualizer/Visualizer";
 import type { VisualizerName } from "@/visualizers/registry";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const dynamicParams = false;
 
@@ -34,7 +35,7 @@ export default async function VisualizerPage({ params }: { params: Promise<{ nam
         </Link>{" "}
         / {VIZ_CATEGORY_TITLE[meta.category]}
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">{meta.title}</h1>
+      <PageTitle>{meta.title}</PageTitle>
       <p className="mt-2">{meta.summary}</p>
       <p className="mt-1 text-sm text-muted-fg">
         Time complexity: <code>{meta.complexity}</code>
