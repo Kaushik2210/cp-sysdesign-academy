@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useProgress } from "@/lib/store";
 import { dueCards } from "@/lib/srs/sm2";
 import { computeAchievements, currentStreak, longestStreak, weakestTopics } from "@/lib/achievements";
+import { Spotlight } from "@/components/fx/Spotlight";
 import { cn } from "@/lib/utils";
 
 interface Mod {
@@ -36,9 +37,10 @@ function StreakCalendar({ activity }: { activity: Record<string, number> }) {
           title={`${c.day}: ${c.n} activities`}
           className={cn(
             "h-3 w-3 rounded-sm bg-muted",
-            c.n > 0 && "bg-accent/40",
-            c.n > 2 && "bg-accent/70",
-            c.n > 5 && "bg-accent",
+            "transition-transform hover:scale-150",
+            c.n > 0 && "bg-hot/35",
+            c.n > 2 && "bg-hot/65",
+            c.n > 5 && "bg-hot",
           )}
         />
       ))}
@@ -70,43 +72,43 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
     URL.revokeObjectURL(url);
   };
 
-  const stat = "rounded-xl border border-border bg-card p-4";
+  const num = (tint: string) => ({ color: `hsl(var(--${tint}))` });
   return (
-    <div className="mt-6 space-y-8">
+    <div className="mt-6 space-y-10">
       <section aria-label="Summary" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className={stat}>
-          <div className="text-2xl font-bold">
+        <Spotlight tint="accent" tilt={5} className="p-4">
+          <div className="text-3xl font-black" style={num("accent")}>
             {Object.keys(completed).length}/{all.length}
           </div>
           <div className="text-sm text-muted-fg">lessons done</div>
-        </div>
-        <div className={stat}>
-          <div className="text-2xl font-bold">{solved}</div>
+        </Spotlight>
+        <Spotlight tint="leaf" tilt={5} className="p-4">
+          <div className="text-3xl font-black" style={num("leaf")}>{solved}</div>
           <div className="text-sm text-muted-fg">problems solved</div>
-        </div>
-        <div className={stat}>
-          <div className="text-2xl font-bold">
-            {currentStreak(state.activity)} <span className="text-sm font-normal">best {longestStreak(state.activity)}</span>
+        </Spotlight>
+        <Spotlight tint="sun" tilt={5} className="p-4">
+          <div className="text-3xl font-black" style={num("sun")}>
+            {currentStreak(state.activity)} <span className="text-sm font-normal text-muted-fg">best {longestStreak(state.activity)}</span>
           </div>
           <div className="text-sm text-muted-fg">day streak</div>
-        </div>
-        <Link href="/review/" className={cn(stat, "hover:border-accent")}>
-          <div className="text-2xl font-bold">{due}</div>
+        </Spotlight>
+        <Spotlight href="/review/" tint="hot" tilt={5} className="block p-4">
+          <div className="text-3xl font-black" style={num("hot")}>{due}</div>
           <div className="text-sm text-muted-fg">cards to review</div>
-        </Link>
+        </Spotlight>
       </section>
 
       <p className="text-muted-fg">About {Math.round(remaining / 60)} h of lesson material left.</p>
 
       <section aria-labelledby="cal">
-        <h2 id="cal" className="mb-2 text-lg font-semibold">
+        <h2 id="cal" className="mb-3 text-xl font-extrabold tracking-tight">
           Activity
         </h2>
         <StreakCalendar activity={state.activity} />
       </section>
 
       <section aria-labelledby="prog">
-        <h2 id="prog" className="mb-2 text-lg font-semibold">
+        <h2 id="prog" className="mb-3 text-xl font-extrabold tracking-tight">
           Progress by module
         </h2>
         <ul className="space-y-3">
@@ -123,8 +125,11 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
                     {done}/{m.lessons.length}
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded bg-muted">
-                  <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+                <div className="h-2.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full transition-[width] duration-700"
+                    style={{ width: `${pct}%`, background: m.track === "cp" ? "linear-gradient(90deg, hsl(var(--accent)), hsl(var(--hot)))" : "linear-gradient(90deg, hsl(var(--cool)), hsl(var(--leaf)))" }}
+                  />
                 </div>
               </li>
             );
@@ -133,7 +138,7 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
       </section>
 
       <section aria-labelledby="weak">
-        <h2 id="weak" className="mb-2 text-lg font-semibold">
+        <h2 id="weak" className="mb-3 text-xl font-extrabold tracking-tight">
           Weakest topics
         </h2>
         {weak.length === 0 ? (
@@ -153,14 +158,14 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
       </section>
 
       <section aria-labelledby="ach">
-        <h2 id="ach" className="mb-2 text-lg font-semibold">
+        <h2 id="ach" className="mb-3 text-xl font-extrabold tracking-tight">
           Achievements
         </h2>
         <ul className="grid gap-2 sm:grid-cols-3">
           {achievements.map((a) => (
             <li
               key={a.id}
-              className={cn("rounded-lg border border-border p-3 text-sm", a.earned ? "border-accent" : "opacity-60")}
+              className={cn("rounded-xl border border-border p-3 text-sm transition", a.earned ? "border-sun bg-sun/10 shadow-[0_6px_24px_-10px_hsl(var(--sun))]" : "opacity-60")}
             >
               <p className="font-medium">
                 {a.earned ? "★ " : "☆ "}
@@ -173,10 +178,10 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
       </section>
 
       <div className="flex gap-2">
-        <button type="button" onClick={download} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
+        <button type="button" onClick={download} className="min-h-11 rounded-full border border-border bg-card/70 px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:bg-muted">
           Export progress
         </button>
-        <button type="button" onClick={() => fileRef.current?.click()} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted">
+        <button type="button" onClick={() => fileRef.current?.click()} className="min-h-11 rounded-full border border-border bg-card/70 px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:bg-muted">
           Import progress
         </button>
         <input
