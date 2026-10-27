@@ -739,7 +739,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 48 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 53 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -813,5 +813,28 @@ test.describe("quiz feedback", () => {
     await expect(quiz.getByText("✗")).toBeVisible();
     await expect(quiz.getByText("✓").first()).toBeVisible();
     expect(await page.evaluate(() => document.querySelectorAll("[data-confetti]").length)).toBe(0);
+  });
+});
+
+test.describe("visualizer lessons", () => {
+  const LESSONS: [string, string, string][] = [
+    ["/cp/graphs/dijkstra-shortest-paths/", "Shortest Paths with Dijkstra", "Cheapest Route"],
+    ["/cp/graphs/union-find/", "Union-Find", "Same Group?"],
+    ["/cp/range-queries/segment-trees/", "Segment Trees", "Sums With Updates"],
+    ["/cp/dynamic-programming/knapsack/", "The 0/1 Knapsack", "Packing the Budget"],
+    ["/cp/string-matching/kmp/", "KMP and the Prefix Function", "Find the Pattern"],
+  ];
+  for (const [path, title, problem] of LESSONS) {
+    test(`${title} embeds its visualizer and a practice problem`, async ({ page }) => {
+      await page.goto(path);
+      await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+      await expect(page.getByRole("region", { name: `Problem: ${problem}` })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
+    });
+  }
+
+  test("a visualizer page links back to its lesson", async ({ page }) => {
+    await page.goto("/visualizers/dijkstra/");
+    await expect(page.getByRole("link", { name: /Shortest Paths with Dijkstra/ })).toBeVisible();
   });
 });
