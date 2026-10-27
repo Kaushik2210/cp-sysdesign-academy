@@ -1,0 +1,97 @@
+{
+  "id": "m13-packing-budget",
+  "title": "Packing the Budget",
+  "source": {
+    "name": "Original exercise; classic technique (0/1 knapsack)"
+  },
+  "rating": 1300,
+  "tags": [
+    "dp",
+    "knapsack"
+  ],
+  "statement": "A shop has `n` distinct items. Item `i` costs `w` and brings value `v`. You have a budget of `W` and may buy each item at most once. Find the largest total value you can buy without spending more than `W`.\n\n**Input.** First line: `n` and `W`. Then `n` lines `w v`.\n\n**Output.** The maximum total value.",
+  "constraints": [
+    "1 ≤ n ≤ 100, 0 ≤ W ≤ 5000 in this browser version (the idea scales to n·W around 10^7 to 10^8)",
+    "1 ≤ w ≤ 10^4, 1 ≤ v ≤ 10^9 (totals can exceed 32 bits)"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "4 10\n5 10\n4 40\n6 30\n3 50\n",
+      "output": "90\n",
+      "hidden": false
+    },
+    {
+      "input": "2 5\n6 100\n7 200\n",
+      "output": "0\n",
+      "hidden": false
+    },
+    {
+      "input": "1 0\n1 5\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "3 7\n3 4\n3 4\n3 4\n",
+      "output": "8\n",
+      "hidden": true
+    },
+    {
+      "input": "3 50\n10 60\n20 100\n30 120\n",
+      "output": "220\n",
+      "hidden": true
+    },
+    {
+      "input": "11 34\n6 42\n4 43\n3 9\n5 37\n15 45\n4 38\n12 1\n5 2\n3 26\n4 5\n15 19\n",
+      "output": "205\n",
+      "hidden": true
+    },
+    {
+      "input": "11 27\n10 26\n1 31\n8 23\n3 40\n14 33\n3 34\n11 7\n15 43\n5 30\n8 42\n2 21\n",
+      "output": "198\n",
+      "hidden": true
+    },
+    {
+      "input": "8 10\n14 25\n10 34\n3 8\n12 46\n10 36\n15 45\n3 5\n14 29\n",
+      "output": "36\n",
+      "hidden": true
+    },
+    {
+      "input": "8 31\n7 48\n10 17\n11 27\n12 3\n11 37\n8 12\n12 34\n4 7\n",
+      "output": "119\n",
+      "hidden": true
+    },
+    {
+      "input": "100 5000\n199 883150\n521 253458\n224 261769\n571 426853\n369 223823\n750 928037\n221 714927\n416 945212\n372 482049\n17 32567\n278 6694\n331 439717\n154 578971\n640 965313\n591 438492\n188 582297\n36 862461\n214 364482\n151 338454\n304 530921\n744 544305\n147 529830\n693 375790\n497 176023\n37 422193\n696 133984\n437 990179\n417 486036\n182 837559\n357 536833\n199 171240\n60 973587\n139 665854\n672 39477\n511 678307\n116 718600\n388 441750\n400 30441\n754 309431\n695 821793\n147 956407\n540 429163\n502 756218\n539 631365\n497 912108\n299 986200\n7 27648\n781 993277\n720 131796\n374 814891\n703 574788\n93 186514\n184 968178\n704 551832\n70 594803\n548 787158\n102 937842\n168 877369\n395 712577\n301 633814\n348 503008\n41 991968\n643 146190\n181 467972\n493 347696\n485 464046\n341 764233\n390 480024\n753 870745\n462 335653\n495 985525\n492 799465\n541 29404\n698 266041\n750 428641\n591 517047\n8 265404\n66 721934\n707 756394\n597 973374\n430 444434\n719 794282\n624 599017\n573 271601\n531 277625\n14 173695\n399 669410\n586 414812\n145 209063\n330 251981\n409 378165\n699 401702\n11 500541\n60 120856\n195 616008\n106 890405\n52 218301\n756 875666\n569 141878\n725 931046\n",
+      "output": "22112433\n",
+      "hidden": true
+    },
+    {
+      "input": "100 5000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n1 1000000000\n",
+      "output": "100000000000\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Taking the item with the best value per cost first fails: try W = 50 with items (10, 60), (20, 100), (30, 120).",
+    "Define dp[c] as the best value with total weight at most c. For one item (w, v) either skip it or take it and look back w cells.",
+    "Process capacities from W down to w for each item, so a cell you read still reflects the state before this item (each item is used once). Going upwards would let an item be used repeatedly."
+  ],
+  "editorial": "Let `dp[c]` be the best value achievable with total weight at most `c` using the items seen so far. For a new item `(w, v)`, `dp[c] = max(dp[c], dp[c - w] + v)`. Iterating `c` from `W` down to `w` keeps `dp[c - w]` from the previous item layer, which enforces the 0/1 rule; iterating upwards would reuse the item (unbounded knapsack). The table has `n` rows and `W + 1` columns, so time is `O(nW)`, and a single row suffices for the answer. Greedy by ratio is wrong and brute force over `2^n` subsets is too slow. `W` appears in the running time, so this is pseudo-polynomial: fine for `W = 5000`, hopeless for `W = 10^18`.",
+  "complexity": {
+    "time": "O(n^2)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn, W = int(data[0]), int(data[1])\n# items start at data[2]: w v\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0], W = tok[1];\n// items start at tok[2]: w v\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        // read n W, then n items w v\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read n W, then n items w v\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn, W = int(data[0]), int(data[1])\ndp = [0] * (W + 1)            # dp[c] = best value with total weight at most c\nfor i in range(n):\n    w, v = int(data[2 + 2 * i]), int(data[3 + 2 * i])\n    for c in range(W, w - 1, -1):   # downwards: each item is used at most once\n        if dp[c - w] + v > dp[c]:\n            dp[c] = dp[c - w] + v\nprint(dp[W])\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0], W = tok[1];\nconst dp = new Array(W + 1).fill(0);\nfor (let i = 0; i < n; i++) {\n  const w = tok[2 + 2 * i], v = tok[3 + 2 * i];\n  for (let c = W; c >= w; c--) if (dp[c - w] + v > dp[c]) dp[c] = dp[c - w] + v;\n}\nconsole.log(dp[W]);\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int n = sc.nextInt(), W = sc.nextInt();\n        long[] dp = new long[W + 1];\n        for (int i = 0; i < n; i++) {\n            int w = sc.nextInt();\n            long v = sc.nextLong();\n            for (int c = W; c >= w; c--) dp[c] = Math.max(dp[c], dp[c - w] + v);\n        }\n        System.out.println(dp[W]);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n, W;\n    scanf(\"%d %d\", &n, &W);\n    vector<long long> dp(W + 1, 0);\n    for (int i = 0; i < n; i++) {\n        int w;\n        long long v;\n        scanf(\"%d %lld\", &w, &v);\n        for (int c = W; c >= w; c--) dp[c] = max(dp[c], dp[c - w] + v);\n    }\n    printf(\"%lld\\n\", dp[W]);\n    return 0;\n}\n"
+  }
+}
