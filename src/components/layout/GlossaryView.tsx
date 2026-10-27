@@ -48,7 +48,7 @@ export function GlossaryView({ terms }: { terms: TermView[] }) {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="e.g. quorum, idempotent, p99"
-        className="mt-1 min-h-11 w-full rounded-lg border border-border bg-bg px-3"
+        className="mt-1 min-h-12 w-full rounded-full border border-border bg-card/70 px-5 text-base shadow-sm backdrop-blur focus:border-accent focus:shadow-lg"
       />
       <p role="status" className="mt-3 text-sm text-muted-fg">
         {shown.length} of {terms.length} terms
@@ -59,7 +59,7 @@ export function GlossaryView({ terms }: { terms: TermView[] }) {
           <a
             key={letter}
             href={`#letter-${letter}`}
-            className="inline-flex h-11 min-w-11 items-center justify-center rounded-md border border-border text-sm hover:bg-muted"
+            className="inline-flex h-11 min-w-11 items-center justify-center rounded-full border border-border bg-card/70 text-sm font-semibold transition hover:-translate-y-0.5 hover:border-transparent hover:bg-gradient-brand hover:text-white"
           >
             {letter}
           </a>
@@ -68,12 +68,12 @@ export function GlossaryView({ terms }: { terms: TermView[] }) {
 
       {groups.map(([letter, items]) => (
         <section key={letter} aria-labelledby={`letter-${letter}`} className="mt-8">
-          <h2 id={`letter-${letter}`} className="scroll-mt-20 border-b border-border pb-1 text-xl font-bold">
+          <h2 id={`letter-${letter}`} className="scroll-mt-24 border-b border-border pb-1 text-3xl font-black text-gradient">
             {letter}
           </h2>
           <dl className="mt-2 space-y-5">
             {items.map((t) => (
-              <div key={t.id} id={t.id} className="scroll-mt-20 rounded-lg p-2 target:bg-muted target:ring-2 target:ring-accent">
+              <div key={t.id} id={t.id} className="scroll-mt-24 rounded-xl p-3 transition hover:bg-muted/60 target:bg-hot/10 target:ring-2 target:ring-hot">
                 <dt className="font-semibold">
                   {t.term}
                   {t.aliases.length > 0 && (
