@@ -39,12 +39,12 @@ export function RateLimiterSandbox() {
   const boundaries = Array.from({ length: 3 }, (_, i) => (i + 1) * windowS * 1000);
   const base = H / 2;
 
-  const btn = "inline-flex min-h-11 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-muted";
+  const btn = "inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:border-accent hover:bg-muted";
 
   return (
     <div className="mt-6 space-y-6">
-      <section aria-labelledby="rl-controls" className="rounded-xl border border-border bg-card p-4">
-        <h2 id="rl-controls" className="font-semibold">
+      <section aria-labelledby="rl-controls" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
+        <h2 id="rl-controls" className="text-base font-extrabold tracking-tight">
           Setup
         </h2>
         <fieldset className="mt-3">
@@ -72,7 +72,7 @@ export function RateLimiterSandbox() {
             <label htmlFor="rl-window" className="block text-sm font-medium">
               Window length
             </label>
-            <select id="rl-window" value={windowS} onChange={(e) => setWindowS(Number(e.target.value))} className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-2">
+            <select id="rl-window" value={windowS} onChange={(e) => setWindowS(Number(e.target.value))} className="mt-1 min-h-11 w-full rounded-xl border border-border bg-bg focus-visible:border-accent px-2">
               {WINDOWS.map((w) => (
                 <option key={w} value={w}>
                   {w} {w === 1 ? "second" : "seconds"}
@@ -84,7 +84,7 @@ export function RateLimiterSandbox() {
             <label htmlFor="rl-pattern" className="block text-sm font-medium">
               Traffic pattern
             </label>
-            <select id="rl-pattern" value={pattern} onChange={(e) => setPattern(e.target.value as Pattern)} className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg px-2">
+            <select id="rl-pattern" value={pattern} onChange={(e) => setPattern(e.target.value as Pattern)} className="mt-1 min-h-11 w-full rounded-xl border border-border bg-bg focus-visible:border-accent px-2">
               {PATTERNS.map((p) => (
                 <option key={p} value={p}>
                   {PATTERN_LABEL[p]}
@@ -100,8 +100,8 @@ export function RateLimiterSandbox() {
         )}
       </section>
 
-      <section aria-labelledby="rl-chart" className="rounded-xl border border-border bg-card p-4">
-        <h2 id="rl-chart" className="font-semibold">
+      <section aria-labelledby="rl-chart" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
+        <h2 id="rl-chart" className="text-base font-extrabold tracking-tight">
           What happened ({ALGORITHM_LABEL[algo]})
         </h2>
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Timeline of ${trace.length} requests over ${durationMs / 1000} seconds: ${r.allowed} allowed and ${r.rejected} rejected.`} className="mt-2 w-full">
@@ -162,8 +162,8 @@ export function RateLimiterSandbox() {
         </dl>
       </section>
 
-      <section aria-labelledby="rl-compare" className="rounded-xl border border-border bg-card p-4">
-        <h2 id="rl-compare" className="font-semibold">
+      <section aria-labelledby="rl-compare" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
+        <h2 id="rl-compare" className="text-base font-extrabold tracking-tight">
           Same traffic, every algorithm
         </h2>
         <div className="mt-2 overflow-x-auto">
