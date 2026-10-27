@@ -1,6 +1,7 @@
 import { getAllLessons } from "@/lib/content/loader";
 import { getGlossary } from "@/lib/content/glossary";
 import { GlossaryView } from "@/components/layout/GlossaryView";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Glossary",
@@ -21,7 +22,7 @@ export default function GlossaryPage() {
   }));
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <h1 className="text-3xl font-bold tracking-tight">Glossary</h1>
+      <PageTitle>Glossary</PageTitle>
       <p className="mt-1 text-muted-fg">
         {terms.length} system design terms in plain language. Each entry links to related terms and to the lessons that
         cover it in depth.
