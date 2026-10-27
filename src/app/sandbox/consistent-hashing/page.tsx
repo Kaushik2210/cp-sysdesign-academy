@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { RingSandbox } from "@/components/sandbox/RingSandbox";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Consistent hashing sandbox",
@@ -14,7 +15,7 @@ export default function RingPage() {
           Sandboxes
         </Link>
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">Consistent hashing</h1>
+      <PageTitle>Consistent hashing</PageTitle>
       <p className="mt-1 max-w-3xl text-muted-fg">
         Keys and nodes are hashed onto the same ring. Each key belongs to the first node point clockwise from it, and
         every node appears at many points (virtual nodes) so load evens out. Change the cluster and watch how little
