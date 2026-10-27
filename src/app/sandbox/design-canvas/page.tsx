@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { DesignCanvasLoader } from "@/components/sandbox/DesignCanvasLoader";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Design canvas",
@@ -14,7 +15,7 @@ export default function DesignCanvasPage() {
           Sandboxes
         </Link>
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">Design canvas</h1>
+      <PageTitle>Design canvas</PageTitle>
       <p className="mt-1 max-w-3xl text-muted-fg">
         Sketch an architecture, then see what a reviewer would flag. Drag components onto the canvas, connect them by
         dragging from one box to another (or use the list below the canvas), and set how many instances each one runs.
