@@ -35,7 +35,7 @@ const toNodes = (g: Graph): CanvasNode[] =>
   }));
 const toEdges = (g: Graph): Edge[] => g.edges.map((e) => ({ id: `${e.from}->${e.to}`, source: e.from, target: e.to, markerEnd: { type: MarkerType.ArrowClosed } }));
 
-const btn = "inline-flex min-h-11 items-center gap-1.5 rounded-md border border-border px-3 text-sm hover:bg-muted disabled:opacity-50";
+const btn = "inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:border-accent hover:bg-muted disabled:opacity-50";
 
 /** Drag components onto a canvas, connect them, and get automated review feedback. */
 export default function DesignCanvas() {
@@ -102,7 +102,7 @@ export default function DesignCanvas() {
   return (
     <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_22rem]">
       <div className="space-y-4">
-        <section aria-labelledby="dc-palette" className="rounded-xl border border-border bg-card p-3">
+        <section aria-labelledby="dc-palette" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-3">
           <h2 id="dc-palette" className="text-sm font-semibold">
             Add components
           </h2>
@@ -146,8 +146,8 @@ export default function DesignCanvas() {
           </ReactFlow>
         </div>
 
-        <section aria-labelledby="dc-manage" className="rounded-xl border border-border bg-card p-4">
-          <h2 id="dc-manage" className="font-semibold">
+        <section aria-labelledby="dc-manage" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
+          <h2 id="dc-manage" className="text-base font-extrabold tracking-tight">
             Components and connections
           </h2>
           <p className="mt-1 text-xs text-muted-fg">This list does everything the canvas does, without dragging, so it works with a keyboard or screen reader.</p>
@@ -187,7 +187,7 @@ export default function DesignCanvas() {
               <label htmlFor="dc-from" className="block text-xs font-medium">
                 From
               </label>
-              <select id="dc-from" value={from} onChange={(e) => setFrom(e.target.value)} className="min-h-11 rounded-md border border-border bg-bg px-2">
+              <select id="dc-from" value={from} onChange={(e) => setFrom(e.target.value)} className="min-h-11 rounded-xl border border-border bg-bg focus-visible:border-accent px-2">
                 <option value="">Choose</option>
                 {nodes.map((n) => (
                   <option key={n.id} value={n.id}>
@@ -200,7 +200,7 @@ export default function DesignCanvas() {
               <label htmlFor="dc-to" className="block text-xs font-medium">
                 To
               </label>
-              <select id="dc-to" value={to} onChange={(e) => setTo(e.target.value)} className="min-h-11 rounded-md border border-border bg-bg px-2">
+              <select id="dc-to" value={to} onChange={(e) => setTo(e.target.value)} className="min-h-11 rounded-xl border border-border bg-bg focus-visible:border-accent px-2">
                 <option value="">Choose</option>
                 {nodes.map((n) => (
                   <option key={n.id} value={n.id}>
@@ -230,8 +230,8 @@ export default function DesignCanvas() {
       </div>
 
       <aside aria-labelledby="dc-review" className="space-y-4">
-        <section className="rounded-xl border border-border bg-card p-4">
-          <h2 id="dc-review" className="font-semibold">
+        <section className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
+          <h2 id="dc-review" className="text-base font-extrabold tracking-tight">
             Design review
           </h2>
           <div className="mt-2 flex items-baseline gap-2">
@@ -241,13 +241,13 @@ export default function DesignCanvas() {
             <span className="text-sm text-muted-fg">/ 100</span>
           </div>
           <div role="progressbar" aria-label="Design score" aria-valuenow={analysis.score} aria-valuemin={0} aria-valuemax={100} className="mt-1 h-2 overflow-hidden rounded bg-muted">
-            <div className="h-full bg-accent" style={{ width: `${analysis.score}%` }} />
+            <div className="h-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-500" style={{ width: `${analysis.score}%` }} />
           </div>
           <p className="mt-2 text-xs text-muted-fg">An automated checklist of common problems, not a verdict. A real review also weighs your requirements and scale.</p>
         </section>
 
         {analysis.strengths.length > 0 && (
-          <section className="rounded-xl border border-border bg-card p-4">
+          <section className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
             <h3 className="text-sm font-semibold">What is working</h3>
             <ul className="mt-1 list-disc pl-5 text-sm">
               {analysis.strengths.map((s) => (
@@ -257,7 +257,7 @@ export default function DesignCanvas() {
           </section>
         )}
 
-        <section aria-labelledby="dc-findings" className="rounded-xl border border-border bg-card p-4">
+        <section aria-labelledby="dc-findings" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
           <h3 id="dc-findings" className="text-sm font-semibold">
             Findings ({analysis.findings.filter((f) => f.severity !== "info").length} issues)
           </h3>
