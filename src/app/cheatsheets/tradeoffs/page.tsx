@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getAllLessons } from "@/lib/content/loader";
 import { getTradeoffSheets } from "@/lib/content/tradeoffs";
 import { TradeoffSheets } from "@/components/layout/TradeoffSheets";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Trade-off cheat sheets",
@@ -25,7 +26,7 @@ export default function TradeoffsPage() {
           Cheat sheets
         </Link>
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">Trade-off cheat sheets</h1>
+      <PageTitle>Trade-off cheat sheets</PageTitle>
       <p className="mt-1 text-muted-fg">
         {sheets.length} common design decisions compared side by side. Nothing here is universally right: use each
         sheet to name what you are paying for a choice, then state the requirement that justifies it. Print the page
