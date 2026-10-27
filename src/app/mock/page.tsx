@@ -1,6 +1,7 @@
 import { getAllLessons } from "@/lib/content/loader";
 import { KIND_TITLE, getQuestions, getRubric } from "@/lib/content/questions";
 import { MockInterview, type QuestionView } from "@/components/layout/MockInterview";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Mock interviews",
@@ -20,7 +21,7 @@ export default function MockPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <h1 className="text-3xl font-bold tracking-tight">Mock interviews</h1>
+      <PageTitle>Mock interviews</PageTitle>
       <p className="mt-1 text-muted-fg">
         {questions.length} questions. Get a random one, work through it out loud against a countdown that prompts you
         for each phase, then reveal what a strong answer covers and score yourself against the rubric. Your history
