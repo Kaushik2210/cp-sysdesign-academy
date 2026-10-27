@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Spotlight, type Tint } from "@/components/fx/Spotlight";
 import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
@@ -19,20 +20,24 @@ const SHEETS = [
   },
 ];
 
+const TINTS: Tint[] = ["sun", "cool", "hot", "leaf"];
+
 export default function CheatsheetsPage() {
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
       <PageTitle>Cheat sheets</PageTitle>
       <p className="mt-1 text-muted-fg">Quick references for design interviews and real design reviews.</p>
       <ul className="mt-6 grid gap-4 sm:grid-cols-2">
-        {SHEETS.map((s) => (
-          <li key={s.href} className="rounded-xl border border-border bg-card p-4">
-            <h2 className="font-semibold">
-              <Link href={s.href} className="hover:text-accent">
-                {s.title}
-              </Link>
-            </h2>
-            <p className="mt-1 text-sm text-muted-fg">{s.body}</p>
+        {SHEETS.map((s, i) => (
+          <li key={s.href}>
+            <Spotlight tint={TINTS[i % TINTS.length]} className="h-full p-5">
+              <h2 className="text-xl font-extrabold tracking-tight">
+                <Link href={s.href} className="after:absolute after:inset-0 after:content-['']">
+                  {s.title}
+                </Link>
+              </h2>
+              <p className="mt-1 text-sm text-muted-fg">{s.body}</p>
+            </Spotlight>
           </li>
         ))}
       </ul>
