@@ -35,7 +35,7 @@ export function Sidebar({ modules, currentId }: { modules: SidebarModule[]; curr
           aria-label="Track progress"
           className="h-1.5 overflow-hidden rounded bg-muted"
         >
-          <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+          <div className="h-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-700" style={{ width: `${pct}%` }} />
         </div>
       </div>
       <ul className="space-y-1">
@@ -56,7 +56,7 @@ export function Sidebar({ modules, currentId }: { modules: SidebarModule[]; curr
                         aria-current={l.id === currentId ? "page" : undefined}
                         className={cn(
                           "flex items-center gap-2 rounded px-2 py-1 hover:bg-muted",
-                          l.id === currentId && "bg-muted font-medium text-accent",
+                          l.id === currentId && "bg-gradient-to-r from-accent/20 to-hot/10 font-semibold text-fg shadow-[inset_3px_0_0_hsl(var(--hot))]",
                         )}
                       >
                         <span

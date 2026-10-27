@@ -7,6 +7,9 @@ import { TRACK_META, TRACKS, type Track } from "@/lib/content/schema";
 import { Mdx } from "@/components/mdx/Mdx";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { LessonActions, LessonNotes } from "@/components/layout/LessonActions";
+import { TocSpy } from "@/components/layout/TocSpy";
+
+const DIFFICULTY_TINT: Record<string, string> = { beginner: "leaf", easy: "cool", medium: "sun", hard: "hot", expert: "accent" };
 
 type Params = { track: string; module: string; lesson: string };
 
@@ -60,9 +63,13 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
         </nav>
         <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">{lesson.title}</h1>
-            <p className="mt-1 text-sm text-muted-fg">
-              {lesson.difficulty} · ~{lesson.estMinutes} min · {lesson.type}
+            <h1 className="text-3xl font-black tracking-tight sm:text-4xl">{lesson.title}</h1>
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
+              <span className="rounded-full px-2.5 py-1 text-white" style={{ background: `hsl(var(--${DIFFICULTY_TINT[lesson.difficulty] ?? "accent"}))` }}>
+                {lesson.difficulty}
+              </span>
+              <span className="rounded-full border border-border bg-card/70 px-2.5 py-1">~{lesson.estMinutes} min</span>
+              <span className="rounded-full border border-border bg-card/70 px-2.5 py-1">{lesson.type}</span>
             </p>
           </div>
           <LessonActions id={lesson.id} title={lesson.title} />
@@ -91,32 +98,21 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
 
         <nav aria-label="Lesson navigation" className="no-print mt-10 flex justify-between gap-4">
           {prev ? (
-            <Link href={prev.href} className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted">
+            <Link href={prev.href} className="inline-flex min-h-11 items-center gap-1 rounded-full border border-border bg-card/70 px-4 text-sm font-medium transition hover:-translate-x-0.5 hover:border-hot hover:bg-muted">
               <ChevronLeft size={16} aria-hidden /> {prev.title}
             </Link>
           ) : (
             <span />
           )}
           {next && (
-            <Link href={next.href} className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted">
+            <Link href={next.href} className="inline-flex min-h-11 items-center gap-1 rounded-full bg-gradient-brand px-4 text-sm font-semibold text-white shadow-lg transition hover:translate-x-0.5 hover:shadow-xl">
               {next.title} <ChevronRight size={16} aria-hidden />
             </Link>
           )}
         </nav>
       </main>
 
-      <nav aria-label="On this page" className="no-print hidden text-sm xl:block xl:sticky xl:top-20 xl:self-start">
-        <p className="mb-2 font-semibold">On this page</p>
-        <ul className="space-y-1 border-l border-border">
-          {headings.map((h) => (
-            <li key={h.id} className={h.depth === 3 ? "pl-6" : "pl-3"}>
-              <a href={`#${h.id}`} className="text-muted-fg hover:text-fg">
-                {h.text}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      <TocSpy headings={headings} />
     </div>
   );
 }

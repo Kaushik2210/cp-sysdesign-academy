@@ -183,6 +183,16 @@ code[data-theme*=" "] span {
 .prose a {
   @apply text-accent;
 }
+.prose h2,
+.prose h3 {
+  scroll-margin-top: 6rem;
+}
+/* Section headings get a gradient rule on the left. */
+.prose h2 {
+  border-left: 5px solid;
+  border-image: linear-gradient(to bottom, hsl(var(--accent)), hsl(var(--hot))) 1;
+  padding-left: 0.75rem;
+}
 
 @media print {
   header,
