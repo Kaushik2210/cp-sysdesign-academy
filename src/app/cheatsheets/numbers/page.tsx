@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getNumbersSheet } from "@/lib/content/numbers";
 import { formatDuration } from "@/lib/numbers";
 import { NumbersCalculators } from "@/components/layout/NumbersCalculators";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Numbers cheat sheet",
@@ -24,7 +25,7 @@ export default function NumbersPage() {
           Cheat sheets
         </Link>
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">Numbers cheat sheet</h1>
+      <PageTitle>Numbers cheat sheet</PageTitle>
       <p className="mt-1 text-muted-fg">
         The figures you reach for in every back-of-envelope estimate. Use them to compare kinds of operations and to
         sanity-check a design, never to promise a latency. The lessons in the{" "}
