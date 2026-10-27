@@ -32,7 +32,7 @@ export function TradeoffSheets({ sheets }: { sheets: SheetView[] }) {
     });
   }, [sheets, query, tag]);
 
-  const chip = "min-h-11 rounded-full border border-border px-3 text-sm hover:bg-muted";
+  const chip = "min-h-11 rounded-full border border-border bg-card/70 px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:bg-muted";
 
   return (
     <div className="mt-6">
@@ -46,14 +46,14 @@ export function TradeoffSheets({ sheets }: { sheets: SheetView[] }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="e.g. cache, queue, consistency, REST"
-          className="mt-1 min-h-11 w-full rounded-lg border border-border bg-bg px-3"
+          className="mt-1 min-h-12 w-full rounded-full border border-border bg-card/70 px-5 shadow-sm backdrop-blur focus:border-accent focus:shadow-lg"
         />
         <div role="group" aria-label="Filter by topic" className="mt-3 flex flex-wrap gap-2">
-          <button type="button" aria-pressed={tag === null} onClick={() => setTag(null)} className={cn(chip, tag === null && "border-accent text-accent")}>
+          <button type="button" aria-pressed={tag === null} onClick={() => setTag(null)} className={cn(chip, tag === null && "border-transparent bg-gradient-brand text-white shadow-md")}>
             All
           </button>
           {tags.map((t) => (
-            <button key={t} type="button" aria-pressed={tag === t} onClick={() => setTag(tag === t ? null : t)} className={cn(chip, tag === t && "border-accent text-accent")}>
+            <button key={t} type="button" aria-pressed={tag === t} onClick={() => setTag(tag === t ? null : t)} className={cn(chip, tag === t && "border-transparent bg-gradient-brand text-white shadow-md")}>
               {t}
             </button>
           ))}
@@ -72,7 +72,7 @@ export function TradeoffSheets({ sheets }: { sheets: SheetView[] }) {
 
       {shown.map((s) => (
         <section key={s.id} id={s.id} aria-labelledby={`${s.id}-h`} className="mt-10 scroll-mt-20 break-inside-avoid">
-          <h2 id={`${s.id}-h`} className="text-xl font-bold">
+          <h2 id={`${s.id}-h`} className="text-2xl font-extrabold tracking-tight">
             {s.title}
           </h2>
           <p className="mt-1 text-sm text-muted-fg">{s.summary}</p>
@@ -94,7 +94,7 @@ export function TradeoffSheets({ sheets }: { sheets: SheetView[] }) {
               </thead>
               <tbody>
                 {s.rows.map((r) => (
-                  <tr key={r.dimension} className="border-b border-border align-top">
+                  <tr key={r.dimension} className="border-b border-border align-top transition-colors hover:bg-accent/10">
                     <th scope="row" className="p-2 text-left font-medium">
                       {r.dimension}
                     </th>
@@ -111,7 +111,7 @@ export function TradeoffSheets({ sheets }: { sheets: SheetView[] }) {
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {s.options.map((o) => (
-              <div key={o.id} className="rounded-lg border border-border p-3">
+              <div key={o.id} className="rounded-xl border border-border bg-card/70 p-4 transition hover:-translate-y-0.5 hover:border-leaf/70">
                 <h3 className="text-sm font-semibold">Choose {o.name} when</h3>
                 <ul className="mt-1 list-disc pl-5 text-sm">
                   {s.choose[o.id].map((c) => (
@@ -122,8 +122,8 @@ export function TradeoffSheets({ sheets }: { sheets: SheetView[] }) {
             ))}
           </div>
 
-          <div className="mt-3 rounded-lg bg-muted p-3 text-sm">
-            <p className="font-semibold">Watch out</p>
+          <div className="mt-3 rounded-xl border border-l-[6px] border-sun/60 bg-sun/10 p-3 text-sm">
+            <p className="font-bold">Watch out</p>
             <ul className="mt-1 list-disc pl-5">
               {s.watchOut.map((w) => (
                 <li key={w}>{w}</li>
