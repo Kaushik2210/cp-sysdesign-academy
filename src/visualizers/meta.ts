@@ -101,7 +101,7 @@ export const VIZ_META: VizMeta[] = [
     category: "graphs",
     summary: "Repeatedly finalise the closest unfinished node using a min-heap and relax its edges; works because weights are never negative.",
     complexity: "O((V + E) log V)",
-    lessons: [],
+    lessons: ["cp/graphs/dijkstra-shortest-paths"],
   },
   {
     name: "dsu",
@@ -109,7 +109,7 @@ export const VIZ_META: VizMeta[] = [
     category: "data-structures",
     summary: "Keep sets as trees: find walks to the root and flattens the path, union hangs the smaller tree under the larger.",
     complexity: "O(alpha(n)) amortized per operation",
-    lessons: [],
+    lessons: ["cp/graphs/union-find"],
   },
   {
     name: "segment-tree",
@@ -117,7 +117,7 @@ export const VIZ_META: VizMeta[] = [
     category: "data-structures",
     summary: "Store the sum of every dyadic range so any range query combines O(log n) stored nodes and a point update fixes one root-to-leaf path.",
     complexity: "O(log n) per query and update",
-    lessons: [],
+    lessons: ["cp/range-queries/segment-trees"],
   },
   {
     name: "knapsack",
@@ -125,7 +125,7 @@ export const VIZ_META: VizMeta[] = [
     category: "dp",
     summary: "Each cell is the best value using the first i items at capacity w: either skip the item or take it and look back by its weight.",
     complexity: "O(n * W)",
-    lessons: [],
+    lessons: ["cp/dynamic-programming/knapsack"],
   },
   {
     name: "kmp",
@@ -133,6 +133,6 @@ export const VIZ_META: VizMeta[] = [
     category: "strings",
     summary: "Precompute, for each pattern prefix, its longest border; on a mismatch slide the pattern using that table instead of re-reading text.",
     complexity: "O(n + m)",
-    lessons: [],
+    lessons: ["cp/string-matching/kmp"],
   },
 ];
