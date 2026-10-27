@@ -1,5 +1,6 @@
 import { getTemplates } from "@/lib/content/templates";
 import { TemplateIndex } from "@/components/layout/TemplateIndex";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Algorithm templates",
@@ -10,7 +11,7 @@ export default function TemplatesPage() {
   const templates = getTemplates().map(({ slug, title, summary, complexity, tags }) => ({ slug, title, summary, complexity, tags }));
   return (
     <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
-      <h1 className="text-3xl font-bold tracking-tight">Algorithm templates</h1>
+      <PageTitle>Algorithm templates</PageTitle>
       <p className="mt-1 text-muted-fg">
         Copy-paste-ready C++, Python and Java. Each template is a complete program that passes its test cases in all
         three languages, so you can trust it in a contest.
