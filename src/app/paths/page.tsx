@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getPaths } from "@/lib/content/paths";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = { title: "Learning paths" };
 
@@ -7,7 +8,7 @@ export default function PathsPage() {
   const paths = getPaths();
   return (
     <main className="mx-auto max-w-4xl px-4 py-10 sm:px-6">
-      <h1 className="text-3xl font-bold tracking-tight">Learning paths</h1>
+      <PageTitle>Learning paths</PageTitle>
       <p className="mt-1 text-muted-fg">
         Each path turns the curriculum into a daily checklist. Paths grow automatically as new lessons are published.
       </p>
