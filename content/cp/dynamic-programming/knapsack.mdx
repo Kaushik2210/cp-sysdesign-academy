@@ -1,0 +1,165 @@
+---
+title: The 0/1 Knapsack
+track: cp
+module: dynamic-programming
+order: 1
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/recursion-and-bitmasks/backtracking, cp/greedy/proofs-and-when-greedy-fails]
+tags: [dp, knapsack, subset, tabulation]
+type: lesson
+problems: [m13-packing-budget]
+furtherReading:
+  - title: cp-algorithms, Knapsack problem
+    url: https://cp-algorithms.com/dynamic_programming/knapsack.html
+  - title: CSES Problem Set, Book Shop
+    url: https://cses.fi/problemset/task/1158
+  - title: AtCoder Educational DP Contest, Knapsack 1
+    url: https://atcoder.jp/contests/dp/tasks/dp_d
+---
+
+## Intuition
+
+You have a budget `W` and `n` items, each with a cost and a value, and you may take each item at most once. Which items maximise the total value?
+
+Greedy fails. With `W = 50` and items `(cost, value) = (10, 60), (20, 100), (30, 120)`, taking the best ratio first picks the first two (value 160), but the best is the last two (value 220).
+
+The brute force tries all `2^n` subsets. The saving comes from noticing that many subsets lead to the **same situation**: the same items left to consider and the same money left. Remember the best answer for each such situation instead of recomputing it. That is dynamic programming.
+
+## Definition
+
+Let `dp[i][c]` be the best total value using only the **first `i` items** with total cost at most `c`.
+
+For item `i` with cost `w` and value `v`, there are two choices:
+
+```text
+skip it:  dp[i-1][c]
+take it:  dp[i-1][c - w] + v        (only if w <= c)
+
+dp[i][c] = max(skip, take)
+dp[0][c] = 0 for every c
+```
+
+The answer is `dp[n][W]`. There are `n * (W + 1)` states and each costs `O(1)`, so the time is `O(nW)`.
+
+This is **pseudo-polynomial**: the running time depends on the *value* of `W`, not on how many digits it has. With `W = 10^18` the table cannot exist.
+
+## Example, step by step
+
+Step through the table and see how each cell is either copied from the row above (skip) or built from a cell `w` columns to the left in the row above (take).
+
+<Visualizer name="knapsack" />
+
+## Code
+
+The row for item `i` only reads the row for item `i - 1`, so one array is enough, provided you update it **from high capacity to low**. Going downwards guarantees `dp[c - w]` has not yet been changed by the current item.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+dp = [0] * (W + 1)
+for w, v in items:
+    for c in range(W, w - 1, -1):      # downwards: each item once
+        dp[c] = max(dp[c], dp[c - w] + v)
+print(dp[W])
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> dp(W + 1, 0);
+for (auto [w, v] : items)
+    for (int c = W; c >= w; c--)       // downwards: each item once
+        dp[c] = max(dp[c], dp[c - w] + v);
+cout << dp[W];
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] dp = new long[W + 1];
+for (int[] it : items)                  // it[0] = cost, it[1] = value
+    for (int c = W; c >= it[0]; c--)    // downwards: each item once
+        dp[c] = Math.max(dp[c], dp[c - it[0]] + it[1]);
+System.out.println(dp[W]);
+```
+
+</Tab>
+</Tabs>
+
+Run it, check it against brute force, and see what happens when the loop runs upwards:
+
+<CodeRunner language="python" code={`from itertools import combinations
+
+items = [(10, 60), (20, 100), (30, 120)]   # (cost, value)
+W = 50
+
+def knapsack(items, W, upwards=False):
+    dp = [0] * (W + 1)
+    for w, v in items:
+        order = range(w, W + 1) if upwards else range(W, w - 1, -1)
+        for c in order:
+            dp[c] = max(dp[c], dp[c - w] + v)
+    return dp[W]
+
+def brute(items, W):
+    best = 0
+    for k in range(len(items) + 1):
+        for comb in combinations(items, k):
+            if sum(w for w, _ in comb) <= W:
+                best = max(best, sum(v for _, v in comb))
+    return best
+
+print("dp (downwards):", knapsack(items, W))
+print("brute force:   ", brute(items, W))
+print("loop upwards:  ", knapsack([(10, 60)], 50, upwards=True), "(one item reused 5 times)")
+`} />
+
+The upwards loop is not a bug in the code; it solves a different problem, the **unbounded knapsack**, where every item has unlimited copies.
+
+### Recovering which items you took
+
+Keep the full 2D table `dp[i][c]`. Start at `(n, W)`. If `dp[i][c] != dp[i-1][c]` then item `i` was taken: record it and move to `(i-1, c - w)`. Otherwise move to `(i-1, c)`. The 1D trick saves memory but loses this information.
+
+## Related problems
+
+| twist | change |
+| --- | --- |
+| cost is huge but values are small | swap roles: `dp[value] = min cost` |
+| can the exact budget be filled? | boolean `dp[c]`, or a `bitset` shifted by `w` |
+| unlimited copies | loop capacities upwards |
+| at most `k` copies | binary-split the count into powers of two |
+| value is the same as cost | subset sum |
+
+## Pitfalls
+
+1. **Looping upwards in the 1D array**, which silently reuses items.
+2. **Greedy by value/cost ratio.** It is optimal only for the fractional knapsack.
+3. **`dp[c - w]` with `c < w`.** The loop bound `c >= w` prevents a negative index (in Python, a negative index would silently wrap).
+4. **Overflow.** Values up to `10^9` summed over many items need 64-bit integers.
+5. **Initialising with `-INF` versus `0`.** `dp[c] = 0` means "weight at most `c`". Use `-INF` for all but `dp[0]` only if you need weight *exactly* `c`.
+6. **Treating `W` as small when it is not.** If `W` can be `10^9`, this DP is unusable; look for the other dimension (values) or a different method.
+
+## Practice
+
+<Problem id="m13-packing-budget" />
+
+## Problem ladder
+
+- [Book Shop](https://cses.fi/problemset/task/1158) (CSES): exactly the 0/1 knapsack.
+- [Money Sums](https://cses.fi/problemset/task/1745) (CSES): which totals are reachable (boolean version).
+- [Partition Equal Subset Sum](https://leetcode.com/problems/partition-equal-subset-sum/) (LeetCode, medium): subset sum to half the total.
+- [Target Sum](https://leetcode.com/problems/target-sum/) (LeetCode, medium): count subsets with a given sum.
+- [Knapsack 2](https://atcoder.jp/contests/dp/tasks/dp_e) (AtCoder DP Contest E): large `W`, small values, swap the roles.
+
+## Quiz
+
+<Quiz id="cp-m13-knapsack" tags={["dp", "knapsack"]} questions={[
+  { type: "mcq", q: "In the 1D 0/1 knapsack, why must the capacity loop run from high to low?", options: ["To make the code faster", "So dp[c - w] still holds the value from before the current item, so the item is used at most once", "Because arrays are stored backwards", "To avoid integer overflow"], answer: 1, explain: "Going upwards would let dp[c - w] already include the current item, which allows taking it several times." },
+  { type: "multi", q: "Which statements are true about the 0/1 knapsack DP?", options: ["It runs in O(nW)", "Choosing items by best value/cost ratio is always optimal", "The answer is dp[W] when dp[c] means best value with weight at most c", "It is polynomial in the number of digits of W"], answer: [0, 2], explain: "The DP is pseudo-polynomial: it depends on the numeric value of W. Ratio-greedy only solves the fractional version." },
+  { type: "predict", q: "What does this print?", code: "items = [(2, 3), (3, 4)]\nW = 5\ndp = [0] * (W + 1)\nfor w, v in items:\n    for c in range(W, w - 1, -1):\n        dp[c] = max(dp[c], dp[c - w] + v)\nprint(dp[W])", options: ["4", "7", "6", "3"], answer: 1, explain: "Both items fit together (cost 2 + 3 = 5), giving value 3 + 4 = 7." },
+  { type: "mcq", q: "Costs go up to 10^9 but there are only 100 items with values up to 100. What is a sensible approach?", options: ["Table indexed by cost", "Table indexed by total value, storing the minimum cost", "Brute force over all subsets", "Greedy by ratio"], answer: 1, explain: "Total value is at most 100 * 100 = 10^4, so dp[value] = minimum cost is small even though costs are large." }
+]} />
