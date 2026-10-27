@@ -1,6 +1,7 @@
 import { getAllLessons } from "@/lib/content/loader";
 import { getPatterns } from "@/lib/content/patterns";
 import { PatternExplorer } from "@/components/layout/PatternExplorer";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Pattern library",
@@ -18,7 +19,7 @@ export default function PatternsPage() {
   }));
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <h1 className="text-3xl font-bold tracking-tight">Pattern library</h1>
+      <PageTitle>Pattern library</PageTitle>
       <p className="mt-1 text-muted-fg">
         A cheat sheet that maps what you notice in a problem (the signal) to the technique that usually solves it. It
         points you toward an idea; always check the constraints and prove the approach before coding.
