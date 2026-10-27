@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CacheSandbox } from "@/components/sandbox/CacheSandbox";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Cache eviction sandbox",
@@ -14,7 +15,7 @@ export default function CachePage() {
           Sandboxes
         </Link>
       </nav>
-      <h1 className="text-3xl font-bold tracking-tight">Cache eviction</h1>
+      <PageTitle>Cache eviction</PageTitle>
       <p className="mt-1 max-w-3xl text-muted-fg">
         A full cache must throw something out. Step through small examples to see exactly what each policy evicts, then
         compare them on thousands of accesses. The lesson on{" "}
