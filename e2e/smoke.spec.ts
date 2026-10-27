@@ -789,3 +789,29 @@ test.describe("review queue flashcards", () => {
     await expect(page.getByRole("status")).toContainText("All caught up");
   });
 });
+
+test.describe("quiz feedback", () => {
+  test("a perfect score shows markers and celebrates", async ({ page }) => {
+    await page.goto("/cp/sorting-and-searching/sorting-for-problem-solving/");
+    const quiz = page.getByRole("region", { name: "Quiz" });
+    await quiz.getByRole("radio", { name: "The end (-1)" }).click();
+    await quiz.getByRole("checkbox", { name: /^Any comparison sort needs Omega/ }).click();
+    await quiz.getByRole("checkbox", { name: /^Counting sort runs in/ }).click();
+    await quiz.getByRole("checkbox", { name: /^A stable sort keeps equal/ }).click();
+    await quiz.getByRole("radio", { name: "bdac" }).click();
+    await quiz.getByRole("radio", { name: /^It does not compare elements/ }).click();
+    await quiz.getByRole("button", { name: "Check answers" }).click();
+    await expect(quiz.getByText("Score:")).toContainText("4/4");
+    expect(await page.evaluate(() => document.querySelectorAll("[data-confetti] span").length)).toBeGreaterThan(10);
+  });
+
+  test("a wrong answer shows a cross and no confetti", async ({ page }) => {
+    await page.goto("/cp/sorting-and-searching/sorting-for-problem-solving/");
+    const quiz = page.getByRole("region", { name: "Quiz" });
+    await quiz.getByRole("radio", { name: "The start (+1)" }).click();
+    await quiz.getByRole("button", { name: "Check answers" }).click();
+    await expect(quiz.getByText("✗")).toBeVisible();
+    await expect(quiz.getByText("✓").first()).toBeVisible();
+    expect(await page.evaluate(() => document.querySelectorAll("[data-confetti]").length)).toBe(0);
+  });
+});
