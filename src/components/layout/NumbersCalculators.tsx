@@ -34,14 +34,14 @@ function Field({ id, label, value, onChange, hint }: { id: string; label: string
 
 function Result({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md bg-muted p-3">
+    <div className="rounded-xl bg-muted p-3">
       <dt className="text-xs text-muted-fg">{label}</dt>
-      <dd className="font-mono text-lg font-semibold">{value}</dd>
+      <dd className="font-mono text-xl font-bold text-gradient">{value}</dd>
     </div>
   );
 }
 
-const card = "rounded-xl border border-border bg-card p-4";
+const card = "rounded-2xl border border-border bg-card/80 p-5 shadow-sm backdrop-blur-sm transition-shadow focus-within:border-accent focus-within:shadow-[0_12px_32px_-14px_hsl(var(--accent))]";
 
 /** Four small estimators that mirror the maths in the estimation lessons. */
 export function NumbersCalculators() {
