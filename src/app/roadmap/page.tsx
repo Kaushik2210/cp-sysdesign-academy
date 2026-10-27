@@ -3,6 +3,7 @@ import { getAllLessons } from "@/lib/content/loader";
 import { getInsights } from "@/lib/content/market";
 import { getRoadmap, stepKey } from "@/lib/content/roadmap";
 import { RoadmapView, type PhaseView, type StepView } from "@/components/layout/RoadmapView";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Zero-to-elite roadmap",
@@ -42,7 +43,7 @@ export default function RoadmapPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <h1 className="text-3xl font-bold tracking-tight">Zero to elite: the roadmap</h1>
+      <PageTitle>Zero to elite: the roadmap</PageTitle>
       <p className="mt-2 text-muted-fg">
         {phases.length} phases and {stepCount} steps, ordered by what the{" "}
         <Link href="/market/" className="text-accent underline">
