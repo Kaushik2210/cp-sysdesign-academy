@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getInsights, TOPIC_TITLE, TOPICS } from "@/lib/content/market";
 import { MarketView } from "@/components/layout/MarketView";
+import { PageTitle } from "@/components/fx/PageTitle";
 
 export const metadata = {
   title: "Hiring market",
@@ -46,7 +47,7 @@ export default function MarketPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <h1 className="text-3xl font-bold tracking-tight">Hiring market: what the data says</h1>
+      <PageTitle>Hiring market: what the data says</PageTitle>
       <p className="mt-1 text-muted-fg">
         {insights.length} sourced findings, last checked {checked}. Use them to decide what to learn and in what order,
         not as a prediction of your own outcome.
