@@ -1,0 +1,197 @@
+---
+title: Topological Sort and DAGs
+track: cp
+module: graphs
+order: 4
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/stacks-and-queues/queues-deques-bfs, cp/greedy/greedy-with-heaps]
+tags: [graph, topological-sort, dag, kahn, cycle-detection]
+type: lesson
+problems: [m11-course-order]
+furtherReading:
+  - title: cp-algorithms, Topological sorting
+    url: https://cp-algorithms.com/graph/topological-sort.html
+  - title: CSES Problem Set, Course Schedule
+    url: https://cses.fi/problemset/task/1679
+  - title: CSES Problem Set, Longest Flight Route
+    url: https://cses.fi/problemset/task/1680
+---
+
+## Intuition
+
+Courses have prerequisites: you cannot take Algorithms before Data Structures. A **topological order** is a way to line everything up so that every prerequisite comes before the thing that needs it. Build systems, spreadsheets and package installers all do this.
+
+When can it fail? Only when the rules form a **cycle**: A needs B, B needs C and C needs A. Then nobody can go first.
+
+## Definition
+
+Model each rule "`a` before `b`" as a directed edge `a -> b`. A **topological order** lists all vertices so that every edge points from earlier to later. One exists exactly when the graph is a **DAG** (directed acyclic graph).
+
+### Kahn's algorithm
+
+1. Count the **in-degree** (number of incoming edges) of every vertex.
+2. Put every vertex with in-degree `0` in a queue: nothing blocks them.
+3. Pop a vertex, append it to the answer, and for each outgoing edge `u -> v` decrease `indeg[v]`. If it reaches `0`, push `v`.
+4. If the answer holds fewer than `n` vertices, the leftover vertices are on or behind a cycle: no order exists.
+
+Time `O(n + m)`.
+
+If a heap replaces the plain queue, you always take the **smallest** available vertex and the result is the **lexicographically smallest** topological order, at cost `O((n + m) log n)`. This is what the practice problem asks for.
+
+### The DFS alternative
+
+Run a depth-first search and append a vertex **after** all of its descendants are finished. Reversing that list gives a topological order. A cycle shows up as an edge to a vertex that is still "in progress". Kahn's version is usually simpler and avoids recursion limits.
+
+## Why it works
+
+A vertex with in-degree `0` among the remaining vertices has no unplaced prerequisite, so putting it next never breaks a rule. Removing it only helps others. If at some point every remaining vertex has in-degree at least `1`, follow incoming edges backwards: with finitely many vertices you must revisit one, which is a cycle.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from collections import deque
+
+def topo_order(n, edges):            # vertices 1..n, edges (a, b): a before b
+    adj = [[] for _ in range(n + 1)]
+    indeg = [0] * (n + 1)
+    for a, b in edges:
+        adj[a].append(b)
+        indeg[b] += 1
+    q = deque(v for v in range(1, n + 1) if indeg[v] == 0)
+    order = []
+    while q:
+        u = q.popleft()
+        order.append(u)
+        for v in adj[u]:
+            indeg[v] -= 1
+            if indeg[v] == 0:
+                q.append(v)
+    return order if len(order) == n else None      # None: cycle
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> topo_order(int n, const vector<pair<int,int>>& edges) {
+    vector<vector<int>> adj(n + 1);
+    vector<int> indeg(n + 1, 0), order;
+    for (auto [a, b] : edges) { adj[a].push_back(b); indeg[b]++; }
+    queue<int> q;
+    for (int v = 1; v <= n; v++) if (indeg[v] == 0) q.push(v);
+    while (!q.empty()) {
+        int u = q.front(); q.pop();
+        order.push_back(u);
+        for (int v : adj[u]) if (--indeg[v] == 0) q.push(v);
+    }
+    if ((int)order.size() != n) order.clear();     // empty result: cycle
+    return order;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+List<Integer> topoOrder(int n, int[][] edges) {   // edges {a, b}: a before b
+    List<Integer>[] adj = new List[n + 1];
+    for (int i = 0; i <= n; i++) adj[i] = new ArrayList<>();
+    int[] indeg = new int[n + 1];
+    for (int[] e : edges) { adj[e[0]].add(e[1]); indeg[e[1]]++; }
+    Deque<Integer> q = new ArrayDeque<>();
+    for (int v = 1; v <= n; v++) if (indeg[v] == 0) q.add(v);
+    List<Integer> order = new ArrayList<>();
+    while (!q.isEmpty()) {
+        int u = q.poll();
+        order.add(u);
+        for (int v : adj[u]) if (--indeg[v] == 0) q.add(v);
+    }
+    return order.size() == n ? order : null;       // null: cycle
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it on a course plan, then on one with a cycle, and use the order for dynamic programming on the DAG (the longest chain of courses):
+
+<CodeRunner language="python" code={`import heapq
+
+def topo_smallest(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    indeg = [0] * (n + 1)
+    for a, b in edges:
+        adj[a].append(b)
+        indeg[b] += 1
+    heap = [v for v in range(1, n + 1) if indeg[v] == 0]
+    heapq.heapify(heap)
+    order = []
+    while heap:
+        u = heapq.heappop(heap)
+        order.append(u)
+        for v in adj[u]:
+            indeg[v] -= 1
+            if indeg[v] == 0:
+                heapq.heappush(heap, v)
+    return order if len(order) == n else None
+
+edges = [(1, 2), (1, 3), (3, 2), (2, 4)]
+order = topo_smallest(4, edges)
+print("smallest order:", order)
+print("with a cycle:  ", topo_smallest(3, [(1, 2), (2, 3), (3, 1)]))
+
+# DP on the DAG: longest chain of courses, processed in topological order
+longest = {v: 1 for v in order}
+adj = {}
+for a, b in edges:
+    adj.setdefault(a, []).append(b)
+for u in order:
+    for v in adj.get(u, []):
+        longest[v] = max(longest[v], longest[u] + 1)
+print("longest chain:", max(longest.values()))
+`} />
+
+## What topological order is used for
+
+1. **Scheduling with prerequisites**, build orders, package installation.
+2. **Cycle detection** in a directed graph: no full order means a cycle.
+3. **Dynamic programming on a DAG:** process vertices in topological order so every predecessor is final before you use it (longest path, number of paths, shortest path with negative edges in `O(n + m)`).
+4. **Counting paths** from a source to every vertex in a DAG.
+
+<Callout type="tip" title="Shortest paths on a DAG need no heap">
+On a DAG, relax the edges in topological order. Each vertex is final when you reach it, so you get shortest (or longest) paths in `O(n + m)`, even with negative weights.
+</Callout>
+
+## Pitfalls
+
+1. **Ignoring the cycle check.** Always compare the order's length with `n`.
+2. **Using a plain queue when the problem wants the lexicographically smallest order.** A min-heap is required.
+3. **Starting only from vertex `1`.** The sources are all vertices with in-degree `0`.
+4. **Confusing direction.** "`a` before `b`" is the edge `a -> b`; reversing it gives the reversed order.
+5. **Decreasing in-degree once per neighbour instead of once per edge.** With repeated edges, count and decrement per edge, as the adjacency lists do.
+6. **Recursive DFS on a path of `10^5` vertices.** It overflows the recursion limit in Python; prefer Kahn's algorithm or an explicit stack.
+
+## Practice
+
+<Problem id="m11-course-order" />
+
+## Problem ladder
+
+- [Course Schedule](https://cses.fi/problemset/task/1679) (CSES): exactly this lesson.
+- [Longest Flight Route](https://cses.fi/problemset/task/1680) (CSES): longest path on a DAG with reconstruction.
+- [Course Schedule II](https://leetcode.com/problems/course-schedule-ii/) (LeetCode, medium): output any valid order.
+- [Alien Dictionary](https://leetcode.com/problems/alien-dictionary/) (LeetCode, hard): derive the edges from sorted words, then sort.
+- [Sequence Reconstruction](https://leetcode.com/problems/sequence-reconstruction/) (LeetCode, medium): is the topological order unique?
+
+## Quiz
+
+<Quiz id="cp-m11-toposort" tags={["topological-sort", "dag"]} questions={[
+  { type: "mcq", q: "When does a topological order of a directed graph exist?", options: ["When the graph is connected", "When the graph has no directed cycle", "When every vertex has in-degree at most 1", "When the graph is a tree"], answer: 1, explain: "A topological order exists exactly for directed acyclic graphs." },
+  { type: "multi", q: "Which statements about Kahn's algorithm are true?", options: ["It starts from all vertices with in-degree 0", "If fewer than n vertices are output, the graph has a cycle", "Replacing the queue by a min-heap gives the lexicographically smallest order", "It needs a recursive DFS"], answer: [0, 1, 2], explain: "Kahn's algorithm is iterative; the heap variant always takes the smallest available vertex." },
+  { type: "predict", q: "What order does Kahn's algorithm with a min-heap give for edges 2->1 and 3->1 on vertices 1, 2, 3?", code: "n = 3\nedges = [(2, 1), (3, 1)]", options: ["1 2 3", "2 3 1", "3 2 1", "2 1 3"], answer: 1, explain: "Vertices 2 and 3 have in-degree 0; the smaller (2) goes first, then 3, which frees vertex 1." },
+  { type: "mcq", q: "In what order should you relax edges to find longest paths in a DAG?", options: ["Sorted by weight", "Following a topological order of the vertices", "Reverse alphabetical order", "Any order, repeating until nothing changes"], answer: 1, explain: "In topological order every vertex is final before its outgoing edges are relaxed, so one pass suffices." }
+]} />
