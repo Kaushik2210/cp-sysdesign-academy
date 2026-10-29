@@ -1,0 +1,190 @@
+---
+title: Longest Increasing Subsequence
+track: cp
+module: dynamic-programming
+order: 2
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack, cp/sorting-and-searching/binary-search]
+tags: [dp, lis, binary-search, subsequence]
+type: lesson
+problems: [m13-longest-rise]
+furtherReading:
+  - title: cp-algorithms, Longest increasing subsequence
+    url: https://cp-algorithms.com/sequences/longest_increasing_subsequence.html
+  - title: CSES Problem Set, Increasing Subsequence
+    url: https://cses.fi/problemset/task/1145
+  - title: AtCoder Educational DP Contest
+    url: https://atcoder.jp/contests/dp
+---
+
+## Intuition
+
+A **subsequence** keeps elements in their original order but may skip some. In `10 9 2 5 3 7 101 18` one increasing subsequence is `2 5 7 101`. The question: how long can an increasing subsequence be?
+
+Trying every subsequence is `2^n`. The useful observation: whether you can extend a subsequence depends only on **its last element** and **its length**. Two subsequences of the same length ending in different values are not equal: the one ending in the smaller value is more flexible, because anything that can follow the larger one can also follow the smaller one.
+
+## Definition and the O(n²) DP
+
+Let `dp[i]` be the length of the longest strictly increasing subsequence that **ends at position `i`**.
+
+```text
+dp[i] = 1 + max(dp[j])  over all j < i with a[j] < a[i]    (or 1 if there is none)
+answer = max(dp[i])
+```
+
+There are `n` states and each looks at up to `n` predecessors, so `O(n^2)`. That is fine for `n` up to a few thousand.
+
+## The O(n log n) idea
+
+Instead keep, for every length `k`, the **smallest possible last value** of an increasing subsequence of length `k`. Call it `tails[k]`.
+
+1. `tails` is always **strictly increasing**. A subsequence of length `k + 1` contains one of length `k` that ends in something smaller.
+2. For a new element `x`, find the first position `k` with `tails[k] >= x`:
+   - if there is one, replace it with `x` (a smaller ending for that length, so strictly better);
+   - if there is none, `x` is larger than everything and extends the longest run: append it.
+3. The answer is `len(tails)`.
+
+Binary search finds `k` in `O(log n)`, so the total is `O(n log n)`.
+
+<Callout type="pitfall" title="tails is not the subsequence">
+`tails` has the right *length*, but its contents can mix elements that do not form a real subsequence together. For `2 5 3 7`, `tails` ends as `[2, 3, 7]` and that is a real rise here, but in general only the length is guaranteed. To print an actual subsequence, store for each element the index of its predecessor and walk back from the last one.
+</Callout>
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from bisect import bisect_left
+
+def lis(a):
+    tails = []
+    for x in a:
+        k = bisect_left(tails, x)       # first tails[k] >= x
+        if k == len(tails):
+            tails.append(x)
+        else:
+            tails[k] = x
+    return len(tails)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int lis(const vector<long long>& a) {
+    vector<long long> tails;
+    for (long long x : a) {
+        auto it = lower_bound(tails.begin(), tails.end(), x);   // first >= x
+        if (it == tails.end()) tails.push_back(x);
+        else *it = x;
+    }
+    return tails.size();
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int lis(long[] a) {
+    long[] tails = new long[a.length];
+    int len = 0;
+    for (long x : a) {
+        int lo = 0, hi = len;
+        while (lo < hi) {                       // first tails[k] >= x
+            int mid = (lo + hi) >>> 1;
+            if (tails[mid] < x) lo = mid + 1; else hi = mid;
+        }
+        tails[lo] = x;
+        if (lo == len) len++;
+    }
+    return len;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, compare with the quadratic DP, and see the strict versus non-decreasing difference:
+
+<CodeRunner language="python" code={`import random
+from bisect import bisect_left, bisect_right
+
+def lis_fast(a, strict=True):
+    find = bisect_left if strict else bisect_right
+    tails = []
+    for x in a:
+        k = find(tails, x)
+        if k == len(tails):
+            tails.append(x)
+        else:
+            tails[k] = x
+    return len(tails)
+
+def lis_dp(a):
+    dp = [1] * len(a)
+    for i in range(len(a)):
+        for j in range(i):
+            if a[j] < a[i]:
+                dp[i] = max(dp[i], dp[j] + 1)
+    return max(dp)
+
+print(lis_fast([10, 9, 2, 5, 3, 7, 101, 18]))
+
+random.seed(3)
+for _ in range(500):
+    a = [random.randint(-10, 10) for _ in range(random.randint(1, 25))]
+    assert lis_fast(a) == lis_dp(a)
+print("500 random arrays agree with the O(n^2) DP")
+
+a = [3, 3, 3, 3]
+print("strict:", lis_fast(a), " non-decreasing:", lis_fast(a, strict=False))
+`} />
+
+## Why bisect_left and not bisect_right
+
+With `bisect_left`, an element equal to a value already in `tails` **replaces** it, so equal values never extend a run: the result is the **strictly** increasing length. With `bisect_right`, an equal element goes after its twin and extends the run: that computes the **non-decreasing** length. Pick based on whether the statement says "increasing" or "non-decreasing".
+
+## Variations worth knowing
+
+| problem | idea |
+| --- | --- |
+| longest non-decreasing subsequence | `bisect_right` |
+| longest decreasing | negate the values, or reverse |
+| number of distinct LIS | needs the `O(n log n)` DP with a Fenwick tree |
+| minimum deletions to make sorted | `n - LIS` |
+| minimum number of increasing runs to cover the array | equals the length of the longest strictly decreasing subsequence (Dilworth) |
+| LIS of two sequences (LCIS) | different DP; not this lesson |
+
+## Pitfalls
+
+1. **Mixing up strict and non-decreasing**, which flips `bisect_left` and `bisect_right`.
+2. **Printing `tails` as if it were the subsequence.** Track predecessors instead.
+3. **Resetting at the first decrease.** That finds the longest *contiguous* rise, a different and easier problem.
+4. **Quadratic DP at `n = 2·10^5`.** It fits only up to a few thousand elements.
+5. **Overflow or `int` parsing of large values.** Values up to `10^9` fit in 32 bits; differences might not.
+6. **Binary searching a list that is not sorted.** `tails` stays sorted only if you replace the first value `>= x`, never an arbitrary one.
+
+## Practice
+
+<Problem id="m13-longest-rise" />
+
+## Problem ladder
+
+- [Increasing Subsequence](https://cses.fi/problemset/task/1145) (CSES): the plain `O(n log n)` version.
+- [Longest Increasing Subsequence](https://leetcode.com/problems/longest-increasing-subsequence/) (LeetCode, medium): the interview version.
+- [Russian Doll Envelopes](https://leetcode.com/problems/russian-doll-envelopes/) (LeetCode, hard): sort one dimension, then LIS on the other.
+- [Number of Longest Increasing Subsequence](https://leetcode.com/problems/number-of-longest-increasing-subsequence/) (LeetCode, medium): count them with the `O(n^2)` DP.
+- [Longest Increasing Subsequence II](https://leetcode.com/problems/longest-increasing-subsequence-ii/) (LeetCode, hard): LIS where neighbours differ by at most `k`, solved with a segment tree.
+
+## Quiz
+
+<Quiz id="cp-m13-lis" tags={["dp", "lis"]} questions={[
+  { type: "mcq", q: "In the O(n log n) method, what does tails[k] hold?", options: ["The element at position k", "The smallest possible last value of an increasing subsequence of length k + 1", "The number of subsequences of length k", "The largest value seen so far"], answer: 1, explain: "A smaller ending is always at least as good for extending, so we keep the minimum for each length." },
+  { type: "predict", q: "What does this print?", code: "from bisect import bisect_left\ntails = []\nfor x in [4, 2, 5, 3, 6]:\n    k = bisect_left(tails, x)\n    if k == len(tails):\n        tails.append(x)\n    else:\n        tails[k] = x\nprint(len(tails))", options: ["2", "3", "4", "5"], answer: 1, explain: "tails evolves [4], [2], [2, 5], [2, 3], [2, 3, 6]; the longest rise has length 3 (for example 2 3 6)." },
+  { type: "multi", q: "Which statements are true?", options: ["Using bisect_left gives the longest strictly increasing subsequence", "tails always lists a real increasing subsequence in order", "The simple DP dp[i] = 1 + max dp[j] is O(n^2)", "tails is always sorted"], answer: [0, 2, 3], explain: "tails keeps the right length but not necessarily a real subsequence, so recover an actual one with predecessor links." },
+  { type: "mcq", q: "How do you change the code to get the longest non-decreasing subsequence?", options: ["Reverse the array", "Replace bisect_left with bisect_right", "Sort the array first", "Use a stack"], answer: 1, explain: "bisect_right puts an equal element after its twin, so equal values extend the run." }
+]} />
