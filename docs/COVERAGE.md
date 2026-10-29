@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 143 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 146 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -43,9 +43,9 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 9 Recursion and bitmasks | Complete (5) | 5 |
 | 10 Greedy | Complete (5) | 5 |
 | 11 Graphs: shortest paths and connectivity | Partial (2 lessons: Dijkstra, union-find) | 2 |
-| 12 Range queries and segment trees | Partial (1 lesson; no lazy propagation, Fenwick tree or sparse table yet) | 1 |
-| 13 Dynamic programming | Partial (1 lesson: 0/1 knapsack only) | 1 |
-| 14 String matching | Partial (1 lesson: KMP only; no Z-function or suffix structures) | 1 |
+| 12 Range queries and segment trees | Partial (2 lessons: segment tree, Fenwick tree; no lazy propagation or sparse table yet) | 2 |
+| 13 Dynamic programming | Partial (2 lessons: 0/1 knapsack, longest increasing subsequence) | 2 |
+| 14 String matching | Partial (2 lessons: KMP, Z-function; no suffix structures yet) | 2 |
 | 15-26 (Levels 2-3) | Planned | 0 |
 
 ## Track 2: System Design
