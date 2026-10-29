@@ -1,0 +1,133 @@
+{
+  "id": "m13-edit-steps",
+  "title": "Edit Steps",
+  "source": {
+    "name": "Original exercise; classic technique (edit distance)"
+  },
+  "rating": 1500,
+  "tags": [
+    "dp",
+    "strings",
+    "edit-distance"
+  ],
+  "statement": "Given two words `s` and `t`, find the smallest number of single-letter edits that turn `s` into `t`. One edit is: insert a letter anywhere, delete a letter, or replace a letter by another.\n\n**Input.** Two lines: `s`, then `t`.\n\n**Output.** The minimum number of edits.",
+  "constraints": [
+    "1 ≤ |s|, |t| ≤ 1000 in this browser version (the idea scales to products around 10^7)",
+    "both words consist of lowercase letters `a` to `z`"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "kitten\nsitting\n",
+      "output": "3\n",
+      "hidden": false
+    },
+    {
+      "input": "abc\nabc\n",
+      "output": "0\n",
+      "hidden": false
+    },
+    {
+      "input": "a\nb\n",
+      "output": "1\n",
+      "hidden": true
+    },
+    {
+      "input": "abc\nxyz\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "horse\nros\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "intention\nexecution\n",
+      "output": "5\n",
+      "hidden": true
+    },
+    {
+      "input": "ab\nba\n",
+      "output": "2\n",
+      "hidden": true
+    },
+    {
+      "input": "aaaa\na\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "a\naaaa\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "bbba\naa\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "a\nab\n",
+      "output": "1\n",
+      "hidden": true
+    },
+    {
+      "input": "aabbb\naa\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "baaa\nabb\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "aaab\nbb\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "bba\nab\n",
+      "output": "2\n",
+      "hidden": true
+    },
+    {
+      "input": "cbbbbcacbcacbbbcabbccbabccaabcccaaccacbcbbacababbcaaacacaaaacccababcbbaaabcccacbaaabcbccaaabccaaabaababcacaaaccbbcacbcbbcacaccccacabccbbcbcbcacbcaccbcbabbaaccbbbbcbaabaaacabbcbccaaabccacabaaabcaccbabacbbaacaaabbbbacccbcccbaaabcaabaaabcbbcbabbacbbaaabbaabcccababbbbcbbccababaaabccabaabcbcbbbcabcaabcababbaacbbcaccabccacbabcaacaaabbccbcccacbccaccbbcbbcaaaaabbbccaabaabacbcbcbbacacbbbaaacbaabbcbbcaaacccabcccbbaabcabbacacaaacaacaacbabcacccaabccccbbbaccbabbcaccabaabccbacaccbabbbbccaacabbbcaabcbabcccacaabbcbacbabcaaacacacaacababbbcbacabcabbbcbabaccababacbccabcbcaaaabcccaacbbcabacbacacccaaccbabbabacbbbcacacbabaacaccccbbbacbbbcbcbabababbaccbcaaccbbccccbcccacabbacbccaacacababbbcabbacbaacaabccabacacbacaabcbaacabcbbabaacabcaacbbaccbaaabbabacbcbbccbaaaaacbbccacbbcbcbbbaaaacacacbcacacbacacccbbabbaaaccbacacaabbccabbcabcaccccccacacabaabbbccaaccbabababcaababacaccccbacbaccabbaccaaccbbbacabababcabccbcabbbbaaacccacbcaabccccbabcbcbcacbccbabcaabacaccaccaccbbaacaaaabbacabccbaacbabacbcaabbacbccaabaaaaacbacbbbcc\nbbbcacbbbbcbbabbacaaabcbaccbcbcbbaaacbaacaccaabbcabacabcccacaaacbbcaaacccaccbccaccacacbabccbbabcccacccaacccacbbacbcbacbcbbcbbbabccacaccbcccabcaacbbaacabbabbcbbcaacabbaaabababaccbabacbacbbbacbbccbcaccccbabbccacabbcaacccaabaaccbbabcccbbaacabccccbcaaabacaccbcccbccbbcabcbcbacabaabcaaabbbbabcacabbccbccaacabbccacbacaacbccabbccaabbbcbcacacccbcbaabccaacacbabbbababccaaccacabaabccacbababcacabbcaaaaccbbaabccbbaacbccccbacaacccbcccbbbbacbbacababccabaaaaacbcbcacaccbccbbbaaccbaababbbccbbaaccbcbccbaaacacbbccbcbacccacaacabccabaaaacbabbcabcbabaabbbaccccabccbbbcbcbaabbcacacbcccabaccaacbacbccbcabcccccababaaccccbcacacbabcabbabbcbbbcababcaaabcbbbcaaccaacaaccabcacbacababcbbcbbaabcacaabcaabbcbbaaacccabccaabcbcbcbbabbaabcbaaccbaaabbcccaabccccccbcacabcbbabbbbbacbbacaccacabacabacbbcacabcacccacacccabacbbcaacccacabbccacbaaaabccbcccbacccbcccbbabbbaccbbbcbbbbbcabcbbbcabbacaccaaaacccbcccaccaccbabcabcacbabbaaaacaaacaababbbbaabbccbbaccbccbcaaabaccbcabaaccccacbccacbbaaacbbabaaaabcaacbcbbccbcbccaaacbacaccbcacbcaabcababcc\n",
+      "output": "427\n",
+      "hidden": true
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+      "output": "1000\n",
+      "hidden": true
+    },
+    {
+      "input": "abababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab\nbabababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababa\n",
+      "output": "2\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Think about the last letters of both words. If they match, do you ever need to touch them?",
+    "Let dp[i][j] be the distance between the first i letters of s and the first j letters of t. If the last letters differ, the last edit is an insert, a delete or a replace.",
+    "dp[i][j] = min(dp[i-1][j] + 1, dp[i][j-1] + 1, dp[i-1][j-1] + (s[i-1] != t[j-1])), with dp[i][0] = i and dp[0][j] = j. Only the previous row is needed."
+  ],
+  "editorial": "Let `dp[i][j]` be the fewest edits that turn the first `i` letters of `s` into the first `j` letters of `t`. Turning `s[:i]` into the empty word takes `i` deletions and the reverse takes `j` insertions. Otherwise look at the last edit: delete `s[i-1]` (cost `1 + dp[i-1][j]`), insert `t[j-1]` (cost `1 + dp[i][j-1]`), or align the two last letters, which costs `0` if they are equal and `1` for a replacement, plus `dp[i-1][j-1]`. The table has `(n + 1)(m + 1)` cells with `O(1)` work each, and a rolling row keeps memory at `O(m)`. A brute force over edit sequences grows exponentially.",
+  "complexity": {
+    "time": "O(n^2)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\ns, t = sys.stdin.read().split()\n# print the minimum number of edits\n",
+    "javascript": "const s = readLine().trim();\nconst t = readLine().trim();\n// print the minimum number of edits\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        // read the words s and t\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read the words s and t\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ns, t = sys.stdin.read().split()\nn, m = len(s), len(t)\nprev = list(range(m + 1))     # prev[j] = distance between s[:i-1] and t[:j]\nfor i in range(1, n + 1):\n    cur = [i] + [0] * m\n    for j in range(1, m + 1):\n        cur[j] = min(prev[j] + 1,                                   # delete s[i-1]\n                     cur[j - 1] + 1,                                # insert t[j-1]\n                     prev[j - 1] + (s[i - 1] != t[j - 1]))          # replace, or keep if equal\n    prev = cur\nprint(prev[m])\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst [s, t] = lines.join(' ').split(/\\s+/).filter(x => x.length);\nconst n = s.length, m = t.length;\nlet prev = Array.from({ length: m + 1 }, (_, j) => j);\nfor (let i = 1; i <= n; i++) {\n  const cur = new Array(m + 1).fill(0);\n  cur[0] = i;\n  for (let j = 1; j <= m; j++) {\n    cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (s[i - 1] !== t[j - 1] ? 1 : 0));\n  }\n  prev = cur;\n}\nconsole.log(prev[m]);\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        String s = sc.next(), t = sc.next();\n        int n = s.length(), m = t.length();\n        int[] prev = new int[m + 1];\n        for (int j = 0; j <= m; j++) prev[j] = j;\n        for (int i = 1; i <= n; i++) {\n            int[] cur = new int[m + 1];\n            cur[0] = i;\n            for (int j = 1; j <= m; j++) {\n                int rep = prev[j - 1] + (s.charAt(i - 1) != t.charAt(j - 1) ? 1 : 0);\n                cur[j] = Math.min(rep, Math.min(prev[j] + 1, cur[j - 1] + 1));\n            }\n            prev = cur;\n        }\n        System.out.println(prev[m]);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    string s, t;\n    cin >> s >> t;\n    int n = s.size(), m = t.size();\n    vector<int> prev(m + 1), cur(m + 1);\n    iota(prev.begin(), prev.end(), 0);\n    for (int i = 1; i <= n; i++) {\n        cur[0] = i;\n        for (int j = 1; j <= m; j++) {\n            int rep = prev[j - 1] + (s[i - 1] != t[j - 1]);\n            cur[j] = min(rep, min(prev[j] + 1, cur[j - 1] + 1));\n        }\n        swap(prev, cur);\n    }\n    printf(\"%d\\n\", prev[m]);\n    return 0;\n}\n"
+  }
+}
