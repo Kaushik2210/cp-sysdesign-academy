@@ -726,7 +726,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("106");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("109");
   });
 });
 
@@ -739,7 +739,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 56 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 59 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -826,14 +826,17 @@ test.describe("visualizer lessons", () => {
     ["/cp/range-queries/fenwick-trees/", "Fenwick Trees", "Count Below"],
     ["/cp/dynamic-programming/longest-increasing-subsequence/", "Longest Increasing Subsequence", "Longest Rise"],
     ["/cp/string-matching/z-function/", "The Z-Function", "String Similarity"],
+    ["/cp/graphs/minimum-spanning-tree/", "Minimum Spanning Trees", "Cheapest Network"],
+    ["/cp/graphs/topological-sort/", "Topological Sort", "Course Order"],
+    ["/cp/dynamic-programming/coin-change/", "Coin Change", "Fewest Coins"],
   ];
   for (const [path, title, problem] of LESSONS) {
     test(`${title} has a practice problem and its visualizer where one exists`, async ({ page }) => {
       await page.goto(path);
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
       await expect(page.getByRole("region", { name: `Problem: ${problem}` })).toBeVisible();
-      // Fenwick, LIS and the Z-function have no visualizer yet; the other five embed one.
-      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function"].includes(title)) {
+      // Only the first five lessons embed a visualizer; the rest have none yet.
+      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change"].includes(title)) {
         await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
       }
     });
