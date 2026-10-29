@@ -1,0 +1,181 @@
+---
+title: Fenwick Trees (Binary Indexed Trees)
+track: cp
+module: range-queries
+order: 2
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/range-queries/segment-trees, cp/math-basics/modular-arithmetic]
+tags: [fenwick-tree, bit, range-query, data-structure, inversions]
+type: lesson
+problems: [m12-count-below]
+furtherReading:
+  - title: cp-algorithms, Fenwick Tree
+    url: https://cp-algorithms.com/data_structures/fenwick.html
+  - title: CSES Problem Set, Dynamic Range Sum Queries
+    url: https://cses.fi/problemset/task/1648
+  - title: Codeforces EDU
+    url: https://codeforces.com/edu/courses
+---
+
+## Intuition
+
+The [segment tree](/cp/range-queries/segment-trees/) answers "sum of a range" and handles point updates. A **Fenwick tree** does the same job for prefix sums with about ten lines of code and half the memory, using one trick: the **lowest set bit** of an index decides how much of the array that index is responsible for.
+
+Position `12` is `1100` in binary. Its lowest set bit is `4`, so it stores the sum of the `4` elements ending at `12`, which are positions `9..12`. Position `8` (`1000`) covers `8` elements, `1..8`. Odd positions cover just themselves.
+
+## Definition
+
+Use **1-based** indexes. Let `lowbit(i) = i & -i`. The array `bit[i]` stores the sum of `a[i - lowbit(i) + 1 .. i]`.
+
+- **Prefix sum** `sum(x)`: add `bit[x]`, then remove the lowest set bit (`x -= lowbit(x)`), until `x` is `0`. Each step clears a bit, so there are at most `log n` steps.
+- **Point add** `add(x, d)`: add `d` to `bit[x]`, then move to the next node that covers `x` (`x += lowbit(x)`), until you pass `n`.
+- **Range sum** `[l, r]`: `sum(r) - sum(l - 1)`.
+
+Everything is `O(log n)` and memory is `n + 1` numbers.
+
+| index | binary | covers |
+| --- | --- | --- |
+| 1 | `0001` | 1 |
+| 2 | `0010` | 1..2 |
+| 3 | `0011` | 3 |
+| 4 | `0100` | 1..4 |
+| 6 | `0110` | 5..6 |
+| 8 | `1000` | 1..8 |
+
+For example `sum(7)` adds `bit[7]` (position 7), `bit[6]` (positions 5..6) and `bit[4]` (positions 1..4): three nodes that exactly tile `1..7`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+bit = [0] * (n + 1)
+
+def add(x, d):                      # a[x] += d, 1-based
+    while x <= n:
+        bit[x] += d
+        x += x & -x
+
+def prefix(x):                      # sum of a[1..x]
+    s = 0
+    while x > 0:
+        s += bit[x]
+        x -= x & -x
+    return s
+
+def range_sum(l, r):                # sum of a[l..r]
+    return prefix(r) - prefix(l - 1)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> bit(n + 1, 0);
+void add(int x, long long d) { for (; x <= n; x += x & -x) bit[x] += d; }
+long long prefix(int x) { long long s = 0; for (; x > 0; x -= x & -x) s += bit[x]; return s; }
+long long range_sum(int l, int r) { return prefix(r) - prefix(l - 1); }
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] bit = new long[n + 1];
+void add(int x, long d) { for (; x <= n; x += x & -x) bit[x] += d; }
+long prefix(int x) { long s = 0; for (; x > 0; x -= x & -x) s += bit[x]; return s; }
+long rangeSum(int l, int r) { return prefix(r) - prefix(l - 1); }
+```
+
+</Tab>
+</Tabs>
+
+Run it against a brute force, including the classic use of **counting inversions** by inserting values into a Fenwick tree over their ranks:
+
+<CodeRunner language="python" code={`import random
+
+n = 10
+bit = [0] * (n + 1)
+
+def add(x, d):
+    while x <= n:
+        bit[x] += d
+        x += x & -x
+
+def prefix(x):
+    s = 0
+    while x > 0:
+        s += bit[x]
+        x -= x & -x
+    return s
+
+a = [0] * (n + 1)
+random.seed(5)
+for _ in range(300):
+    if random.random() < 0.5:
+        x, d = random.randint(1, n), random.randint(-5, 5)
+        a[x] += d
+        add(x, d)
+    else:
+        l = random.randint(1, n)
+        r = random.randint(l, n)
+        assert prefix(r) - prefix(l - 1) == sum(a[l:r + 1])
+print("300 random operations agree with brute force")
+
+# counting inversions: pairs i < j with p[i] > p[j]
+p = [3, 1, 4, 2, 5]
+m = len(p)
+bit = [0] * (m + 1)
+n = m
+inv = 0
+for seen, v in enumerate(p):
+    inv += seen - prefix(v)       # earlier elements that are larger than v
+    add(v, 1)
+print("inversions of", p, "=", inv)
+`} />
+
+## When to choose a Fenwick tree
+
+| need | choice |
+| --- | --- |
+| prefix or range sums with point updates | Fenwick: shortest code, fastest constants |
+| range min or max | segment tree (min and max have no inverse) |
+| range update with range query | two Fenwick trees, or a segment tree with lazy propagation |
+| counting elements below a value, inversions | Fenwick over compressed values |
+| anything with a custom merge | segment tree |
+
+<Callout type="tip" title="Order statistics by rank">
+To count elements `<= x` in a growing multiset, keep a Fenwick tree over the value range with `1` per inserted element. With values up to `10^9`, first compress them to ranks `1..n` (sort and deduplicate, see [coordinate mapping](/cp/hashing/coordinate-mapping-grouping/)).
+</Callout>
+
+## Pitfalls
+
+1. **0-based indexes.** `x & -x` is `0` for `x = 0`, so `add(0, d)` loops forever. Shift every index up by one.
+2. **Range sum off by one.** `prefix(r) - prefix(l - 1)`, not `prefix(r) - prefix(l)`.
+3. **Using it for min or max.** The prefix trick needs an inverse operation; you cannot "subtract" a minimum.
+4. **Rebuilding on updates.** An update changes only `log n` nodes; do not recompute.
+5. **Overflow.** Sums of many large values need 64-bit integers.
+6. **Setting a value instead of adding.** The tree supports `add`. To assign, add the *difference* `new - old` (keep a plain array alongside).
+
+## Practice
+
+<Problem id="m12-count-below" />
+
+## Problem ladder
+
+- [Dynamic Range Sum Queries](https://cses.fi/problemset/task/1648) (CSES): point update and range sum.
+- [Salary Queries](https://cses.fi/problemset/task/1144) (CSES): counting values in a range with coordinate compression.
+- [Range Sum Query - Mutable](https://leetcode.com/problems/range-sum-query-mutable/) (LeetCode, medium): the interview version.
+- [Count of Smaller Numbers After Self](https://leetcode.com/problems/count-of-smaller-numbers-after-self/) (LeetCode, hard): Fenwick over ranks.
+- [Pashmak and Parmida's problem](https://codeforces.com/problemset/problem/459/D) (Codeforces 459D, rating about 1800): count pairs with a Fenwick tree over prefix and suffix counts.
+
+## Quiz
+
+<Quiz id="cp-m12-fenwick" tags={["fenwick-tree", "range-query"]} questions={[
+  { type: "mcq", q: "What does bit[i] store in a Fenwick tree?", options: ["The element at position i", "The sum of the lowbit(i) elements ending at position i", "The prefix sum up to i", "The maximum of the last i elements"], answer: 1, explain: "lowbit(i) = i & -i is the number of positions node i covers, ending at i." },
+  { type: "predict", q: "Which indexes are added by prefix(7)?", code: "x = 7\nvisited = []\nwhile x > 0:\n    visited.append(x)\n    x -= x & -x\nprint(visited)", options: ["[7, 6, 4]", "[7, 6, 5, 4]", "[7, 3, 1]", "[7, 4]"], answer: 0, explain: "7 = 111, remove the lowest bit to get 6 = 110, then 4 = 100, then 0. Node 7 covers 7, node 6 covers 5..6 and node 4 covers 1..4." },
+  { type: "multi", q: "Which statements are true?", options: ["Prefix queries and point updates are both O(log n)", "A Fenwick tree can answer range minimum queries with point updates directly", "Indexes should be 1-based", "A range sum is prefix(r) - prefix(l - 1)"], answer: [0, 2, 3], explain: "The prefix trick needs an operation with an inverse, so minimum needs a segment tree. Index 0 would make x += x & -x loop forever." },
+  { type: "mcq", q: "How do you count inversions with a Fenwick tree?", options: ["Sort the array and compare", "For each element, add the number of earlier elements larger than it, found with a prefix query over values, then insert it", "Update every position to its negative", "Use a prefix query on the indexes only"], answer: 1, explain: "Earlier-and-larger equals seen - prefix(v), and each element is then inserted at its value (or rank)." }
+]} />
