@@ -1,0 +1,113 @@
+{
+  "id": "m13-fewest-coins",
+  "title": "Fewest Coins",
+  "source": {
+    "name": "Original exercise; classic technique (coin change)"
+  },
+  "rating": 1300,
+  "tags": [
+    "dp",
+    "coin-change",
+    "unbounded-knapsack"
+  ],
+  "statement": "A machine has `n` kinds of coins with positive integer values; it has an unlimited supply of each kind. Find the **smallest number of coins** whose values sum to exactly `T`. If `T` cannot be paid exactly, the answer is `-1`. (For `T = 0` the answer is `0`.)\n\n**Input.** First line: `n` and `T`. Second line: the `n` coin values.\n\n**Output.** The smallest number of coins, or `-1`.",
+  "constraints": [
+    "1 ≤ n ≤ 100, 0 ≤ T ≤ 10000 in this browser version (the idea scales to n·T around 10^7 to 10^8)",
+    "1 ≤ coin value ≤ 10^4, all values distinct"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "3 6\n1 3 4\n",
+      "output": "2\n",
+      "hidden": false
+    },
+    {
+      "input": "1 3\n2\n",
+      "output": "-1\n",
+      "hidden": false
+    },
+    {
+      "input": "1 0\n5\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "1 7\n7\n",
+      "output": "1\n",
+      "hidden": true
+    },
+    {
+      "input": "4 63\n1 5 10 25\n",
+      "output": "6\n",
+      "hidden": true
+    },
+    {
+      "input": "2 7\n3 5\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "3 11\n2 5 10\n",
+      "output": "4\n",
+      "hidden": true
+    },
+    {
+      "input": "4 6249\n186 419 83 408\n",
+      "output": "20\n",
+      "hidden": true
+    },
+    {
+      "input": "1 9\n14\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "3 39\n14 8 16\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "3 55\n14 2 4\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "2 24\n1 2\n",
+      "output": "12\n",
+      "hidden": true
+    },
+    {
+      "input": "100 10000\n541 939 21 693 820 520 761 462 539 386 736 497 682 50 493 140 887 517 833 662 733 816 965 285 588 447 25 57 647 362 657 416 548 937 356 228 907 238 132 676 635 668 911 463 583 14 184 487 873 421 194 274 843 872 369 363 351 639 921 89 94 352 321 118 631 616 134 17 958 836 48 636 913 642 289 41 191 922 384 725 542 876 944 790 643 804 973 975 828 303 722 535 103 526 69 375 528 659 276 882\n",
+      "output": "11\n",
+      "hidden": true
+    },
+    {
+      "input": "2 9999\n1 9999\n",
+      "output": "1\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Taking the largest coin that fits again and again fails for coins 1, 3, 4 and T = 6: greedy gives 4+1+1, but 3+3 uses fewer coins.",
+    "Let dp[c] be the fewest coins that sum to exactly c. The last coin is one of the n kinds. What does dp[c] then equal?",
+    "dp[0] = 0, dp[c] = 1 + min(dp[c - k]) over coins k <= c, ignoring unreachable states (keep a large INF). Print dp[T], or -1 if it is still INF."
+  ],
+  "editorial": "Let `dp[c]` be the fewest coins that sum to exactly `c`. Any optimal payment of `c` ends with some coin `k`, and what precedes it is an optimal payment of `c - k`, so `dp[c] = 1 + min(dp[c - k])`. Start from `dp[0] = 0` and treat unreachable amounts as infinity. Each of the `T + 1` states tries `n` coins, so the time is `O(nT)`. Unlike the 0/1 knapsack, the supply is unlimited, so `dp[c - k]` may already use the same coin: this is the unbounded knapsack, and computing `dp` in increasing order of `c` is exactly right. Greedy by largest coin is only correct for special coin systems such as `1, 5, 10, 25`.",
+  "complexity": {
+    "time": "O(n^2)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn, T = int(data[0]), int(data[1])\n# the coin values are data[2:2 + n]\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0], T = tok[1];\n// the coin values are tok.slice(2, 2 + n)\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        // read n T, then the n coin values\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read n T, then the n coin values\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn, T = int(data[0]), int(data[1])\ncoins = [int(x) for x in data[2:2 + n]]\nINF = 10**9\ndp = [INF] * (T + 1)          # dp[c] = fewest coins that sum to exactly c\ndp[0] = 0\nfor c in range(1, T + 1):\n    for k in coins:\n        if k <= c and dp[c - k] + 1 < dp[c]:\n            dp[c] = dp[c - k] + 1\nprint(dp[T] if dp[T] < INF else -1)\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0], T = tok[1];\nconst coins = tok.slice(2, 2 + n);\nconst INF = 1e9;\nconst dp = new Array(T + 1).fill(INF);\ndp[0] = 0;\nfor (let c = 1; c <= T; c++) {\n  for (const k of coins) if (k <= c && dp[c - k] + 1 < dp[c]) dp[c] = dp[c - k] + 1;\n}\nconsole.log(dp[T] < INF ? dp[T] : -1);\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int n = sc.nextInt(), T = sc.nextInt();\n        int[] coins = new int[n];\n        for (int i = 0; i < n; i++) coins[i] = sc.nextInt();\n        int INF = 1_000_000_000;\n        int[] dp = new int[T + 1];\n        Arrays.fill(dp, INF);\n        dp[0] = 0;\n        for (int c = 1; c <= T; c++)\n            for (int k : coins)\n                if (k <= c && dp[c - k] + 1 < dp[c]) dp[c] = dp[c - k] + 1;\n        System.out.println(dp[T] < INF ? dp[T] : -1);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n, T;\n    scanf(\"%d %d\", &n, &T);\n    vector<int> coins(n);\n    for (auto& k : coins) scanf(\"%d\", &k);\n    const int INF = 1000000000;\n    vector<int> dp(T + 1, INF);\n    dp[0] = 0;\n    for (int c = 1; c <= T; c++)\n        for (int k : coins)\n            if (k <= c && dp[c - k] + 1 < dp[c]) dp[c] = dp[c - k] + 1;\n    printf(\"%d\\n\", dp[T] < INF ? dp[T] : -1);\n    return 0;\n}\n"
+  }
+}
