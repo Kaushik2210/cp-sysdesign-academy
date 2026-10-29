@@ -11,7 +11,7 @@
     "shortest-path",
     "graph"
   ],
-  "statement": "A trading network has `n` markets numbered `1` to `n` and `m` one-way deals. Deal `i` moves you from market `a` to market `b` and changes your balance by `w` (a negative `w` is a profit if you read it as a cost, a positive `w` is a fee). You start at market `1`.\n\nA **loop** is a closed walk whose total change is negative: repeating it makes the total as small as you like. Decide whether some negative loop can be **reached from market `1`**.\n\n**Input.** First line: `n` and `m`. Then `m` lines `a b w`. Deals may repeat and may start and end at the same market.\n\n**Output.** `YES` if a negative loop is reachable from market `1`, otherwise `NO`.",
+  "statement": "A trading network has `n` markets numbered `1` to `n` and `m` one-way deals. Deal `i` moves you from market `a` to market `b` and costs `w` (a negative `w` means the deal pays you). You start at market `1`.\n\nA **loop** is a closed walk whose total change is negative: repeating it makes the total as small as you like. Decide whether some negative loop can be **reached from market `1`**.\n\n**Input.** First line: `n` and `m`. Then `m` lines `a b w`. Deals may repeat and may start and end at the same market.\n\n**Output.** `YES` if a negative loop is reachable from market `1`, otherwise `NO`.",
   "constraints": [
     "1 ≤ n ≤ 500, 0 ≤ m ≤ 2000 in this browser version (the idea scales to n·m around 10^7)",
     "|w| ≤ 10^9"
