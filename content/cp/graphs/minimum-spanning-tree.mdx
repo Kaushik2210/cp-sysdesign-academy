@@ -1,0 +1,216 @@
+---
+title: Minimum Spanning Trees (Kruskal)
+track: cp
+module: graphs
+order: 3
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/graphs/union-find, cp/sorting-and-searching/sorting-for-problem-solving]
+tags: [graph, mst, kruskal, dsu, greedy]
+type: lesson
+problems: [m11-cheapest-network]
+furtherReading:
+  - title: cp-algorithms, Minimum spanning tree (Kruskal)
+    url: https://cp-algorithms.com/graph/mst_kruskal.html
+  - title: CSES Problem Set, Road Reparation
+    url: https://cses.fi/problemset/task/1675
+  - title: cp-algorithms, Minimum spanning tree (Prim)
+    url: https://cp-algorithms.com/graph/mst_prim.html
+---
+
+## Intuition
+
+You must connect `n` towns with cables, and every possible cable has a price. You want everyone connected at the lowest total price. Two facts shape the answer:
+
+- If a set of cables connects everything and still contains a loop, you can remove one cable of the loop and stay connected, saving money. So an optimal network has **no loops**: it is a tree with exactly `n - 1` cables.
+- Among all such trees you want the cheapest one: the **minimum spanning tree** (MST).
+
+A greedy idea works: look at the cheapest cable. If it joins two towns that are not connected yet, there is no reason to skip it.
+
+## Definition
+
+A **spanning tree** of a connected undirected graph is a subset of `n - 1` edges that connects all vertices without a cycle. An MST is one with the smallest total weight.
+
+**Kruskal's algorithm**
+
+1. Sort the edges by weight, cheapest first.
+2. Go through them. If an edge joins two **different** components (checked with [union-find](/cp/graphs/union-find/)), take it and merge the components. Otherwise skip it, because it would close a cycle.
+3. Stop when `n - 1` edges are taken. If the scan ends with fewer, the graph is not connected.
+
+Time `O(m log m)`, dominated by sorting; the union-find operations are almost constant.
+
+## Why greedy is correct: the cut property
+
+For any way of splitting the vertices into two non-empty groups, the cheapest edge **crossing** the split belongs to some MST.
+
+Why: take an MST that does not contain this edge `e`. Adding `e` creates a cycle, and that cycle crosses the split at least twice, so it contains another crossing edge `f` with `w(f) >= w(e)`. Swap `f` for `e`: still a spanning tree, with weight no larger.
+
+Kruskal applies this repeatedly. When it considers an edge that joins components `A` and `B`, every cheaper edge has already been decided, so this edge is the cheapest one crossing the split "`A` versus everything else".
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def kruskal(n, edges):                 # edges: (w, a, b), vertices 1..n
+    edges.sort()
+    parent = list(range(n + 1))
+
+    def find(x):
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:
+            parent[x], x = root, parent[x]
+        return root
+
+    total = used = 0
+    for w, a, b in edges:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+            total += w
+            used += 1
+    return total if used == n - 1 else None   # None: not connected
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+long long kruskal(int n, vector<array<long long,3>>& edges) {   // {w, a, b}
+    sort(edges.begin(), edges.end());
+    vector<int> parent(n + 1);
+    iota(parent.begin(), parent.end(), 0);
+    function<int(int)> find = [&](int x) { return parent[x] == x ? x : parent[x] = find(parent[x]); };
+    long long total = 0; int used = 0;
+    for (auto& [w, a, b] : edges) {
+        int ra = find(a), rb = find(b);
+        if (ra != rb) { parent[ra] = rb; total += w; used++; }
+    }
+    return used == n - 1 ? total : -1;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long kruskal(int n, long[][] edges) {          // {w, a, b}
+    Arrays.sort(edges, (x, y) -> Long.compare(x[0], y[0]));
+    int[] parent = new int[n + 1];
+    for (int i = 0; i <= n; i++) parent[i] = i;
+    long total = 0; int used = 0;
+    for (long[] e : edges) {
+        int ra = find(parent, (int) e[1]), rb = find(parent, (int) e[2]);
+        if (ra != rb) { parent[ra] = rb; total += e[0]; used++; }
+    }
+    return used == n - 1 ? total : -1;
+}
+int find(int[] parent, int x) {
+    while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+    return x;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, and cross-check against Prim's algorithm, which grows a single tree from vertex 1 with a heap:
+
+<CodeRunner language="python" code={`import heapq, random
+
+def kruskal(n, edges):
+    parent = list(range(n + 1))
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    total = used = 0
+    for w, a, b in sorted(edges):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+            total += w
+            used += 1
+    return total if used == n - 1 else None
+
+def prim(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for w, a, b in edges:
+        adj[a].append((w, b))
+        adj[b].append((w, a))
+    seen = [False] * (n + 1)
+    pq = [(0, 1)]
+    total = cnt = 0
+    while pq:
+        w, u = heapq.heappop(pq)
+        if seen[u]:
+            continue
+        seen[u] = True
+        total += w
+        cnt += 1
+        for c, v in adj[u]:
+            if not seen[v]:
+                heapq.heappush(pq, (c, v))
+    return total if cnt == n else None
+
+edges = [(1, 1, 2), (2, 2, 3), (3, 3, 4), (10, 1, 4), (4, 1, 3)]
+print("MST weight:", kruskal(4, edges))
+
+random.seed(2)
+for _ in range(300):
+    n = random.randint(1, 9)
+    es = [(random.randint(1, 20), random.randint(1, n), random.randint(1, n)) for _ in range(random.randint(0, 20))]
+    assert kruskal(n, es) == prim(n, es)
+print("300 random graphs: Kruskal and Prim agree")
+`} />
+
+## Kruskal or Prim
+
+| | Kruskal | Prim |
+| --- | --- | --- |
+| idea | grow a forest, add the cheapest safe edge | grow one tree, add the cheapest edge leaving it |
+| structure | sort + union-find | heap (like [Dijkstra](/cp/graphs/dijkstra-shortest-paths/)) |
+| time | `O(m log m)` | `O((n + m) log n)` |
+| good for | sparse graphs, edge lists, disconnected input | dense graphs (`O(n^2)` array version) |
+
+Both give a tree of the same total weight (the tree itself may differ when weights tie).
+
+## What else an MST gives you
+
+1. **Bottleneck paths.** In an MST, the path between two vertices minimises the largest edge on it.
+2. **Clustering.** Remove the `k - 1` heaviest MST edges to get `k` groups with the largest gaps between them.
+3. **Second-best MST, MST with a forced edge:** small variations that start from the MST and swap one edge.
+
+## Pitfalls
+
+1. **Forgetting disconnected graphs.** Count the edges taken; fewer than `n - 1` means no spanning tree.
+2. **Treating a directed graph as undirected, or the reverse.** An MST is for undirected graphs. Minimum-cost arborescences are a different, harder problem.
+3. **Sorting by the wrong key.** Sort by weight first; in Python keep the tuple as `(w, a, b)`.
+4. **Skipping the cycle check.** Without union-find you would add every edge.
+5. **Overflow.** Totals up to `n * maxW` need 64-bit integers.
+6. **Assuming a unique MST.** Ties allow several; if the answer must be unique (for example the lexicographically smallest edge set), break ties explicitly.
+
+## Practice
+
+<Problem id="m11-cheapest-network" />
+
+## Problem ladder
+
+- [Road Reparation](https://cses.fi/problemset/task/1675) (CSES): exactly this lesson.
+- [Min Cost to Connect All Points](https://leetcode.com/problems/min-cost-to-connect-all-points/) (LeetCode, medium): MST on a dense implicit graph.
+- [Connecting Cities With Minimum Cost](https://leetcode.com/problems/connecting-cities-with-minimum-cost/) (LeetCode, medium): plain MST with the connectivity check.
+- [Optimize Water Distribution in a Village](https://leetcode.com/problems/optimize-water-distribution-in-a-village/) (LeetCode, hard): add a virtual source vertex.
+- [Minimum spanning tree for each edge](https://codeforces.com/problemset/problem/609/E) (Codeforces 609E, rating about 2100): the lightest spanning tree that must contain each given edge.
+
+## Quiz
+
+<Quiz id="cp-m11-mst" tags={["mst", "kruskal", "dsu"]} questions={[
+  { type: "mcq", q: "How many edges does a spanning tree of a connected graph with n vertices have?", options: ["n", "n - 1", "n + 1", "It depends on the weights"], answer: 1, explain: "A tree on n vertices has n - 1 edges; fewer would leave it disconnected and more would create a cycle." },
+  { type: "multi", q: "Which statements about Kruskal's algorithm are true?", options: ["It processes edges from cheapest to most expensive", "It uses union-find to detect whether an edge would create a cycle", "It fails on graphs with parallel edges", "If fewer than n - 1 edges are taken, the graph is disconnected"], answer: [0, 1, 3], explain: "Parallel edges are fine: the cheaper one is seen first and the other then closes a cycle." },
+  { type: "predict", q: "What total does Kruskal produce for these edges (weight, a, b) on 3 vertices?", code: "edges = [(4, 1, 2), (1, 2, 3), (3, 1, 3)]", options: ["4", "5", "7", "8"], answer: 0, explain: "Sorted: (1, 2, 3) and (3, 1, 3) are taken, giving 4; (4, 1, 2) closes a cycle and is skipped." },
+  { type: "mcq", q: "What justifies taking the cheapest edge that joins two different components?", options: ["Sorting guarantees optimality by itself", "The cut property: the cheapest edge crossing a cut belongs to some MST", "Union-find is exact", "Every edge is in some MST"], answer: 1, explain: "It is the cheapest edge crossing the cut between that component and the rest, so some MST contains it." }
+]} />
