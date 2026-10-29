@@ -1,0 +1,209 @@
+---
+title: Edit Distance and Longest Common Subsequence
+track: cp
+module: dynamic-programming
+order: 4
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack]
+tags: [dp, strings, edit-distance, lcs, two-sequences]
+type: lesson
+problems: [m13-edit-steps]
+furtherReading:
+  - title: cp-algorithms, Levenshtein distance
+    url: https://cp-algorithms.com/others/levenshtein_distance.html
+  - title: CSES Problem Set, Edit Distance
+    url: https://cses.fi/problemset/task/1639
+  - title: AtCoder Educational DP Contest, LCS
+    url: https://atcoder.jp/contests/dp/tasks/dp_f
+---
+
+## Intuition
+
+How different are `kitten` and `sitting`? A spell checker, a diff tool and DNA alignment all need a number. The usual measure is the **edit distance**: the fewest single-letter edits (insert, delete, replace) that turn one word into the other. Here it is `3`: replace `k` by `s`, replace `e` by `i`, insert `g`.
+
+Trying every sequence of edits explodes. The key: look only at the **last letters** of the two words. The last edit either deletes the last letter of `s`, or inserts the last letter of `t`, or lines the two last letters up (free if equal, one replacement if not). What remains is the same question on shorter prefixes.
+
+## Definition
+
+Let `dp[i][j]` be the edit distance between the first `i` letters of `s` and the first `j` letters of `t`.
+
+```text
+dp[i][0] = i                 (delete all i letters)
+dp[0][j] = j                 (insert all j letters)
+dp[i][j] = min( dp[i-1][j] + 1,                          delete s[i-1]
+                dp[i][j-1] + 1,                          insert t[j-1]
+                dp[i-1][j-1] + (s[i-1] != t[j-1]) )      replace, or keep if equal
+```
+
+The answer is `dp[n][m]`. The table has `(n + 1)(m + 1)` cells and each costs `O(1)`: time `O(nm)`. A cell reads only the previous row and the cell to its left, so **two rows** (or one) are enough for memory `O(m)`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def edit_distance(s, t):
+    n, m = len(s), len(t)
+    prev = list(range(m + 1))
+    for i in range(1, n + 1):
+        cur = [i] + [0] * m
+        for j in range(1, m + 1):
+            cur[j] = min(prev[j] + 1,
+                         cur[j - 1] + 1,
+                         prev[j - 1] + (s[i - 1] != t[j - 1]))
+        prev = cur
+    return prev[m]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int edit_distance(const string& s, const string& t) {
+    int n = s.size(), m = t.size();
+    vector<int> prev(m + 1), cur(m + 1);
+    iota(prev.begin(), prev.end(), 0);
+    for (int i = 1; i <= n; i++) {
+        cur[0] = i;
+        for (int j = 1; j <= m; j++)
+            cur[j] = min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (s[i - 1] != t[j - 1])});
+        swap(prev, cur);
+    }
+    return prev[m];
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int editDistance(String s, String t) {
+    int n = s.length(), m = t.length();
+    int[] prev = new int[m + 1];
+    for (int j = 0; j <= m; j++) prev[j] = j;
+    for (int i = 1; i <= n; i++) {
+        int[] cur = new int[m + 1];
+        cur[0] = i;
+        for (int j = 1; j <= m; j++) {
+            int rep = prev[j - 1] + (s.charAt(i - 1) != t.charAt(j - 1) ? 1 : 0);
+            cur[j] = Math.min(rep, Math.min(prev[j] + 1, cur[j - 1] + 1));
+        }
+        prev = cur;
+    }
+    return prev[m];
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, and check it against an exhaustive breadth-first search over edited words:
+
+<CodeRunner language="python" code={`import random
+from collections import deque
+
+def edit_distance(s, t):
+    n, m = len(s), len(t)
+    prev = list(range(m + 1))
+    for i in range(1, n + 1):
+        cur = [i] + [0] * m
+        for j in range(1, m + 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (s[i - 1] != t[j - 1]))
+        prev = cur
+    return prev[m]
+
+def bfs(s, t):
+    alpha = sorted(set(s + t))
+    seen = {s: 0}
+    q = deque([s])
+    while q:
+        u = q.popleft()
+        if u == t:
+            return seen[u]
+        nxt = set()
+        for i in range(len(u) + 1):
+            nxt.update(u[:i] + c + u[i:] for c in alpha)
+            if i < len(u):
+                nxt.add(u[:i] + u[i + 1:])
+                nxt.update(u[:i] + c + u[i + 1:] for c in alpha)
+        for v in nxt:
+            if v not in seen and len(v) <= len(s) + len(t):
+                seen[v] = seen[u] + 1
+                q.append(v)
+
+print("kitten -> sitting:", edit_distance("kitten", "sitting"))
+random.seed(4)
+for _ in range(60):
+    s = "".join(random.choice("ab") for _ in range(random.randint(1, 4)))
+    t = "".join(random.choice("ab") for _ in range(random.randint(1, 4)))
+    assert edit_distance(s, t) == bfs(s, t), (s, t)
+print("60 random pairs agree with breadth-first search")
+`} />
+
+## The same table, a different question: LCS
+
+The **longest common subsequence** keeps letters in order but may skip some. For `ABCBDAB` and `BDCABA` it has length `4` (for example `BCBA`).
+
+```text
+if s[i-1] == t[j-1]:  dp[i][j] = dp[i-1][j-1] + 1
+else:                 dp[i][j] = max(dp[i-1][j], dp[i][j-1])
+```
+
+Same shape of table, same `O(nm)` time. The two problems are linked: if only insertions and deletions are allowed, the distance is `n + m - 2 * LCS`.
+
+<CodeRunner language="python" code={`def lcs(s, t):
+    n, m = len(s), len(t)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            if s[i - 1] == t[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1] + 1
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+    # walk back to recover one longest common subsequence
+    i, j, out = n, m, []
+    while i and j:
+        if s[i - 1] == t[j - 1]:
+            out.append(s[i - 1]); i -= 1; j -= 1
+        elif dp[i - 1][j] >= dp[i][j - 1]:
+            i -= 1
+        else:
+            j -= 1
+    return dp[n][m], "".join(reversed(out))
+
+print(lcs("ABCBDAB", "BDCABA"))
+`} />
+
+To **print** the edits or the subsequence, keep the whole table and walk back from `dp[n][m]`, choosing at each cell the move that explains its value. The two-row trick saves memory but loses this.
+
+## Pitfalls
+
+1. **Off-by-one between `dp[i]` and `s[i-1]`.** `dp[i]` is about the first `i` letters, so the last of those is `s[i-1]`.
+2. **Forgetting the borders.** `dp[i][0] = i` and `dp[0][j] = j`; leaving them at `0` gives wrong answers for different lengths.
+3. **Mixing up substring and subsequence.** A common *substring* needs contiguous letters and a different recurrence (reset to `0` on mismatch).
+4. **Recursion without memoisation.** The plain recursive version is exponential.
+5. **Using a full `n x m` table when only the length is needed** and `nm` is large: use two rows.
+6. **Wrong swap of rows in rolling arrays.** Make sure `cur[0]` is set every iteration.
+
+## Practice
+
+<Problem id="m13-edit-steps" />
+
+## Problem ladder
+
+- [Edit Distance](https://cses.fi/problemset/task/1639) (CSES): exactly this lesson.
+- [Longest Common Subsequence](https://leetcode.com/problems/longest-common-subsequence/) (LeetCode, medium): the LCS table.
+- [Edit Distance](https://leetcode.com/problems/edit-distance/) (LeetCode, medium): the interview version.
+- [Delete Operation for Two Strings](https://leetcode.com/problems/delete-operation-for-two-strings/) (LeetCode, medium): `n + m - 2 * LCS`.
+- [LCS](https://atcoder.jp/contests/dp/tasks/dp_f) (AtCoder DP Contest F): print the subsequence.
+
+## Quiz
+
+<Quiz id="cp-m13-edit-distance" tags={["dp", "edit-distance", "lcs"]} questions={[
+  { type: "mcq", q: "What is dp[i][0] for the edit distance table?", options: ["0", "i", "-1", "The length of t"], answer: 1, explain: "Turning the first i letters into the empty word takes i deletions." },
+  { type: "predict", q: "What is the edit distance between these words?", code: "s = 'ab'\nt = 'ba'", options: ["1", "2", "3", "0"], answer: 1, explain: "Replace a by b and b by a (2 edits). Delete the first letter and insert one at the end also costs 2. One edit is not enough." },
+  { type: "multi", q: "Which statements are true?", options: ["Edit distance takes O(nm) time with the table", "Only two rows are needed if you want just the number", "A common subsequence must be contiguous", "With only insertions and deletions the distance is n + m - 2 * LCS"], answer: [0, 1, 3], explain: "A subsequence may skip letters; a substring cannot." },
+  { type: "mcq", q: "When two last letters s[i-1] and t[j-1] are equal, which term applies to the diagonal move?", options: ["dp[i-1][j-1] + 1", "dp[i-1][j-1] + 0", "dp[i-1][j] + 1", "dp[i][j-1] + 2"], answer: 1, explain: "Equal letters line up for free, so the diagonal adds nothing." }
+]} />
