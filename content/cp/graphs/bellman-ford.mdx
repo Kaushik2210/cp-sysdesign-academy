@@ -1,0 +1,183 @@
+---
+title: Bellman-Ford and Negative Cycles
+track: cp
+module: graphs
+order: 5
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/graphs/dijkstra-shortest-paths]
+tags: [graph, shortest-path, bellman-ford, negative-cycle]
+type: lesson
+problems: [m11-profit-loop]
+furtherReading:
+  - title: cp-algorithms, Bellman-Ford algorithm
+    url: https://cp-algorithms.com/graph/bellman_ford.html
+  - title: CSES Problem Set, High Score
+    url: https://cses.fi/problemset/task/1673
+  - title: CSES Problem Set, Cycle Finding
+    url: https://cses.fi/problemset/task/1197
+---
+
+## Intuition
+
+[Dijkstra](/cp/graphs/dijkstra-shortest-paths/) is fast but breaks when an edge can be negative: a node that looked finished may still be improved by a path that goes through a negative edge later. Negative weights are real (profit on a trade, a discount, a refund), so we need a method that does not rely on "finished" nodes.
+
+The idea is blunt: **relax every edge, over and over**. A shortest path without a loop has at most `n - 1` edges, and each full pass fixes at least one more edge of every shortest path, so `n - 1` passes are enough.
+
+## Definition
+
+Keep `dist[v]` (infinity, except `dist[source] = 0`). One **round** relaxes every edge `a -> b` of weight `w`:
+
+```text
+if dist[a] is finite and dist[a] + w < dist[b]:  dist[b] = dist[a] + w
+```
+
+Do up to `n` rounds. If a round changes nothing, stop. The cost is `O(n * m)`.
+
+### Detecting a negative cycle
+
+A **negative cycle** is a loop whose weights sum to a negative number; going around it makes any path through it arbitrarily short, so shortest distances to everything it can reach are undefined.
+
+- Without such a cycle, everything is settled after round `n - 1`, so round `n` changes nothing.
+- If round `n` still improves some `dist`, a negative cycle is **reachable from the source**.
+
+Cycles that cannot be reached from the source never matter, because their vertices keep infinite distance and are skipped.
+
+## Why it is correct
+
+After round `k`, `dist[v]` is at most the weight of the best path from the source to `v` that uses at most `k` edges. (Induction: such a path ends with an edge `a -> v` after a path of at most `k - 1` edges to `a`, which round `k - 1` already covered.) A simple path has at most `n - 1` edges, so after round `n - 1` every `dist` is exact, unless a negative cycle lets a walk of `n` or more edges win. That is precisely what an improvement in round `n` reveals.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def bellman_ford(n, edges, s):           # vertices 1..n, edges (a, b, w)
+    INF = float("inf")
+    dist = [INF] * (n + 1)
+    dist[s] = 0
+    for round_ in range(n):
+        changed = False
+        for a, b, w in edges:
+            if dist[a] != INF and dist[a] + w < dist[b]:
+                dist[b] = dist[a] + w
+                changed = True
+        if not changed:
+            return dist, False           # no negative cycle reachable
+    return dist, True                    # still improving in round n
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+bool bellman_ford(int n, const vector<array<long long,3>>& edges, int s, vector<long long>& dist) {
+    const long long INF = LLONG_MAX / 4;
+    dist.assign(n + 1, INF);
+    dist[s] = 0;
+    for (int round = 0; round < n; round++) {
+        bool changed = false;
+        for (auto& [a, b, w] : edges)
+            if (dist[a] != INF && dist[a] + w < dist[b]) { dist[b] = dist[a] + w; changed = true; }
+        if (!changed) return false;          // no negative cycle reachable
+    }
+    return true;                             // negative cycle reachable
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+boolean bellmanFord(int n, long[][] edges, int s, long[] dist) {   // edges {a, b, w}
+    long INF = Long.MAX_VALUE / 4;
+    Arrays.fill(dist, INF);
+    dist[s] = 0;
+    for (int round = 0; round < n; round++) {
+        boolean changed = false;
+        for (long[] e : edges) {
+            int a = (int) e[0], b = (int) e[1];
+            if (dist[a] != INF && dist[a] + e[2] < dist[b]) { dist[b] = dist[a] + e[2]; changed = true; }
+        }
+        if (!changed) return false;          // no negative cycle reachable
+    }
+    return true;                             // negative cycle reachable
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it on a graph with a negative edge (no cycle), then one with a negative cycle:
+
+<CodeRunner language="python" code={`def bellman_ford(n, edges, s):
+    INF = float("inf")
+    dist = [INF] * (n + 1)
+    dist[s] = 0
+    for _ in range(n):
+        changed = False
+        for a, b, w in edges:
+            if dist[a] != INF and dist[a] + w < dist[b]:
+                dist[b] = dist[a] + w
+                changed = True
+        if not changed:
+            return dist, False
+    return dist, True
+
+# 1 -> 2 (4), 2 -> 3 (-2), 1 -> 3 (5): a negative edge but no cycle
+d, neg = bellman_ford(3, [(1, 2, 4), (2, 3, -2), (1, 3, 5)], 1)
+print("dist:", d[1:], "negative cycle:", neg)
+
+# 2 -> 3 -> 2 has total weight -2
+d, neg = bellman_ford(3, [(1, 2, 1), (2, 3, -3), (3, 2, 1)], 1)
+print("negative cycle:", neg)
+
+# the same cycle, but unreachable from vertex 1
+d, neg = bellman_ford(4, [(2, 3, -3), (3, 2, 1), (1, 4, 1)], 1)
+print("unreachable negative cycle ignored:", not neg)
+`} />
+
+## Faster variants and relatives
+
+| method | when to use |
+| --- | --- |
+| queue-based Bellman-Ford (SPFA) | usually fast in practice, worst case still `O(nm)`; only re-relax vertices whose distance changed |
+| Dijkstra | all weights non-negative |
+| DAG relaxation in [topological order](/cp/graphs/topological-sort/) | the graph has no cycles, even with negative weights: `O(n + m)` |
+| Floyd-Warshall | all pairs, `n` up to about 400 |
+| Johnson's reweighting | all pairs on sparse graphs with negative edges |
+
+<Callout type="tip" title="Constraint check">
+`O(n * m)` is about `10^7` operations for `n = 500` and `m = 2000`, fine; for `n = m = 2·10^5` it is far too slow, and you need Dijkstra, a DAG order or a different idea.
+</Callout>
+
+## Pitfalls
+
+1. **Relaxing from an infinite distance.** `INF + w` with a negative `w` looks like a real distance. Always skip edges whose start is unreached.
+2. **Stopping after `n - 1` rounds and not checking round `n`**, which misses the cycle.
+3. **Treating a negative undirected edge as an ordinary edge.** An undirected edge with negative weight is itself a negative cycle (go back and forth).
+4. **Reporting a negative cycle that is not reachable from the source**, when the problem only cares about reachable ones (or the opposite).
+5. **Overflow.** Distances reach `n * maxW`; use 64-bit integers.
+6. **Using Bellman-Ford when Dijkstra suffices.** It is `O(nm)` versus `O(m log n)`.
+
+## Practice
+
+<Problem id="m11-profit-loop" />
+
+## Problem ladder
+
+- [High Score](https://cses.fi/problemset/task/1673) (CSES): longest path, with a reachability condition on the cycle.
+- [Cycle Finding](https://cses.fi/problemset/task/1197) (CSES): find and print a negative cycle.
+- [Cheapest Flights Within K Stops](https://leetcode.com/problems/cheapest-flights-within-k-stops/) (LeetCode, medium): Bellman-Ford limited to `k + 1` rounds.
+- [Network Delay Time](https://leetcode.com/problems/network-delay-time/) (LeetCode, medium): shortest paths, with a choice of algorithm.
+- [Path with Maximum Probability](https://leetcode.com/problems/path-with-maximum-probability/) (LeetCode, medium): relaxation with products instead of sums.
+
+## Quiz
+
+<Quiz id="cp-m11-bellman-ford" tags={["bellman-ford", "negative-cycle"]} questions={[
+  { type: "mcq", q: "How many full rounds of relaxing all edges guarantee exact distances when there is no negative cycle?", options: ["1", "n - 1", "m", "n * m"], answer: 1, explain: "A shortest simple path has at most n - 1 edges, and each round extends the settled prefix by one edge." },
+  { type: "multi", q: "Which statements about Bellman-Ford are true?", options: ["It handles negative edge weights", "An improvement in round n shows a negative cycle reachable from the source", "Its worst-case time is O(n * m)", "It needs a heap"], answer: [0, 1, 2], explain: "It only loops over the edge list; no priority queue is involved." },
+  { type: "predict", q: "How many rounds change something for edges 1->2 (5), 2->3 (-1), 1->3 (10) from source 1, if the edges are listed in this order?", code: "edges = [(1, 2, 5), (2, 3, -1), (1, 3, 10)]", options: ["1", "2", "3", "0"], answer: 0, explain: "In round 1, dist[2] = 5, then dist[3] = 4 via 2, and the direct edge 10 does not improve it. Round 2 changes nothing." },
+  { type: "mcq", q: "Why must edges leaving an unreached vertex be skipped?", options: ["They are always negative", "infinity plus a negative weight could look like a finite distance", "They would be counted twice", "The graph would become undirected"], answer: 1, explain: "Skipping them keeps unreached vertices at infinity and avoids bogus improvements or overflow." }
+]} />
