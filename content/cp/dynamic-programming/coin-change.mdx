@@ -1,0 +1,185 @@
+---
+title: Coin Change and the Unbounded Knapsack
+track: cp
+module: dynamic-programming
+order: 3
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/dynamic-programming/knapsack, cp/greedy/proofs-and-when-greedy-fails]
+tags: [dp, coin-change, unbounded-knapsack, counting]
+type: lesson
+problems: [m13-fewest-coins]
+furtherReading:
+  - title: cp-algorithms, Knapsack problem
+    url: https://cp-algorithms.com/dynamic_programming/knapsack.html
+  - title: CSES Problem Set, Minimizing Coins
+    url: https://cses.fi/problemset/task/1634
+  - title: CSES Problem Set, Coin Combinations I
+    url: https://cses.fi/problemset/task/1635
+---
+
+## Intuition
+
+A vending machine has coin kinds of various values and an endless supply of each. How few coins make exactly `T`?
+
+Greedy ("always take the largest coin that fits") feels natural and is correct for real currencies, but not for every coin system. With coins `1, 3, 4` and `T = 6` greedy gives `4 + 1 + 1` (three coins), while `3 + 3` uses two.
+
+The dynamic programming view: whatever the best payment of `c` is, **its last coin** is one of the kinds `k`, and what remains is a best payment of `c - k`. So the answers for smaller amounts are all you need.
+
+## Definition
+
+Let `dp[c]` be the fewest coins summing to exactly `c`.
+
+```text
+dp[0] = 0
+dp[c] = 1 + min( dp[c - k] )   over coin values k <= c with dp[c - k] reachable
+```
+
+Unreachable amounts hold infinity. The answer is `dp[T]` (or `-1` if infinity). With `n` kinds and amount `T` the time is `O(nT)` and memory `O(T)`.
+
+This is the **unbounded knapsack**: unlike the [0/1 version](/cp/dynamic-programming/knapsack/), an item can be reused. In the one-array formulation the capacity loop therefore goes **upwards**, so `dp[c - k]` may already include the same coin. (In the 0/1 case going upwards was the bug; here it is the feature.)
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+INF = 10**9
+dp = [INF] * (T + 1)
+dp[0] = 0
+for c in range(1, T + 1):
+    for k in coins:
+        if k <= c and dp[c - k] + 1 < dp[c]:
+            dp[c] = dp[c - k] + 1
+print(dp[T] if dp[T] < INF else -1)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+const int INF = 1e9;
+vector<int> dp(T + 1, INF);
+dp[0] = 0;
+for (int c = 1; c <= T; c++)
+    for (int k : coins)
+        if (k <= c && dp[c - k] + 1 < dp[c]) dp[c] = dp[c - k] + 1;
+cout << (dp[T] < INF ? dp[T] : -1);
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int INF = 1_000_000_000;
+int[] dp = new int[T + 1];
+Arrays.fill(dp, INF);
+dp[0] = 0;
+for (int c = 1; c <= T; c++)
+    for (int k : coins)
+        if (k <= c && dp[c - k] + 1 < dp[c]) dp[c] = dp[c - k] + 1;
+System.out.println(dp[T] < INF ? dp[T] : -1);
+```
+
+</Tab>
+</Tabs>
+
+Run it, and see greedy fail:
+
+<CodeRunner language="python" code={`def fewest(coins, T):
+    INF = 10**9
+    dp = [INF] * (T + 1)
+    dp[0] = 0
+    for c in range(1, T + 1):
+        for k in coins:
+            if k <= c and dp[c - k] + 1 < dp[c]:
+                dp[c] = dp[c - k] + 1
+    return dp[T] if dp[T] < INF else -1
+
+def greedy(coins, T):
+    count = 0
+    for k in sorted(coins, reverse=True):
+        count += T // k
+        T %= k
+    return count if T == 0 else -1
+
+for coins, T in [([1, 3, 4], 6), ([1, 5, 10, 25], 63), ([2], 3), ([5, 7], 24)]:
+    print(coins, T, "dp:", fewest(coins, T), " greedy:", greedy(coins, T))
+`} />
+
+The `1, 3, 4` row shows the gap (dp 2, greedy 3). The `[5, 7]` row shows that greedy may even claim impossibility for an amount that is payable (`24 = 5 + 5 + 7 + 7`).
+
+## Counting instead of minimising
+
+A close cousin asks **how many ways** to pay `T`. The order of the two loops decides what you count.
+
+| goal | loops | counts |
+| --- | --- | --- |
+| combinations (order of coins ignored) | outer: coins, inner: amounts upwards | `1+2` and `2+1` count once |
+| sequences (order matters) | outer: amounts, inner: coins | `1+2` and `2+1` count twice |
+
+<CodeRunner language="python" code={`def combinations(coins, T):
+    ways = [1] + [0] * T
+    for k in coins:                  # coins outermost: each multiset counted once
+        for c in range(k, T + 1):
+            ways[c] += ways[c - k]
+    return ways[T]
+
+def sequences(coins, T):
+    ways = [1] + [0] * T
+    for c in range(1, T + 1):        # amounts outermost: order matters
+        for k in coins:
+            if k <= c:
+                ways[c] += ways[c - k]
+    return ways[T]
+
+print("combinations of 4 from {1,2,3}:", combinations([1, 2, 3], 4))
+print("sequences of 4 from {1,2,3}:   ", sequences([1, 2, 3], 4))
+`} />
+
+For `T = 4` there are 4 combinations (`1111`, `112`, `22`, `13`) and 7 sequences (the 4 combinations arranged in every distinct order: 1 + 3 + 1 + 2).
+
+<Callout type="pitfall" title="Swapping the loops changes the problem">
+If the question says "different orders count as different ways", the amount loop goes outside. If it says "multisets" or "combinations", the coin loop goes outside. Reading the statement carefully here is worth more than any optimisation.
+</Callout>
+
+## Related problems
+
+| twist | change |
+| --- | --- |
+| print the coins used | store `choice[c] = k` and walk back from `T` |
+| minimum cost with a cost per coin | `dp[c] = min(dp[c - k] + cost[k])` |
+| ways modulo `10^9 + 7` | reduce after each addition |
+| huge `T`, tiny coins | matrix exponentiation or the Frobenius structure (a later topic) |
+| each coin at most once | the 0/1 knapsack (loop downwards) |
+
+## Pitfalls
+
+1. **Greedy by largest coin** without proof. Check the coin system or use the DP.
+2. **`dp[c - k]` unreachable but used.** Skip infinite states; otherwise `INF + 1` can overflow or be mistaken for an answer.
+3. **Initialising `dp[0]` wrongly.** `dp[0] = 0` coins for the minimum, `1` way for counting.
+4. **Mixing up the loop order** when counting combinations versus sequences.
+5. **Forgetting the unreachable case.** Print `-1` (or whatever the statement says) when `dp[T]` is still infinite.
+6. **Time limit with `T` up to `10^9`.** The table must fit in memory; with huge `T` this approach does not apply.
+
+## Practice
+
+<Problem id="m13-fewest-coins" />
+
+## Problem ladder
+
+- [Minimizing Coins](https://cses.fi/problemset/task/1634) (CSES): exactly this lesson.
+- [Coin Combinations I](https://cses.fi/problemset/task/1635) (CSES): count sequences.
+- [Coin Combinations II](https://cses.fi/problemset/task/1636) (CSES): count combinations.
+- [Coin Change](https://leetcode.com/problems/coin-change/) (LeetCode, medium): the interview version.
+- [Coin Change II](https://leetcode.com/problems/coin-change-ii/) (LeetCode, medium): count combinations.
+
+## Quiz
+
+<Quiz id="cp-m13-coin-change" tags={["dp", "coin-change"]} questions={[
+  { type: "mcq", q: "For coins 1, 3, 4 and amount 6, what is the fewest number of coins?", options: ["2", "3", "4", "6"], answer: 0, explain: "3 + 3 uses two coins; greedy would take 4 + 1 + 1 (three coins)." },
+  { type: "multi", q: "Which statements are true about the unbounded knapsack and coin change?", options: ["The 1D capacity loop runs upwards so a coin can be reused", "Greedy by largest coin is always optimal", "The minimum-coins DP takes O(nT) time", "Looping coins outermost counts combinations; amounts outermost counts sequences"], answer: [0, 2, 3], explain: "Greedy works only for special coin systems such as 1, 5, 10, 25." },
+  { type: "predict", q: "What does this print?", code: "ways = [1, 0, 0, 0, 0]\nfor k in [1, 2]:\n    for c in range(k, 5):\n        ways[c] += ways[c - k]\nprint(ways[4])", options: ["2", "3", "4", "5"], answer: 1, explain: "Combinations of 4 from {1, 2}: 1111, 112, 22. That is 3 ways." },
+  { type: "mcq", q: "Why do we skip dp[c - k] when it is infinite?", options: ["It would be faster", "Adding 1 to infinity could be mistaken for a real value or overflow", "Because coins cannot be reused", "Because dp[0] is 1"], answer: 1, explain: "Unreachable states must not produce a finite-looking answer; skipping them keeps dp[c] infinite when c cannot be paid." }
+]} />
