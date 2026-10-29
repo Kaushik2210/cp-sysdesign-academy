@@ -726,7 +726,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("109");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("112");
   });
 });
 
@@ -739,7 +739,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 59 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 62 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -829,6 +829,9 @@ test.describe("visualizer lessons", () => {
     ["/cp/graphs/minimum-spanning-tree/", "Minimum Spanning Trees", "Cheapest Network"],
     ["/cp/graphs/topological-sort/", "Topological Sort", "Course Order"],
     ["/cp/dynamic-programming/coin-change/", "Coin Change", "Fewest Coins"],
+    ["/cp/graphs/bellman-ford/", "Bellman-Ford", "Profit Loop"],
+    ["/cp/dynamic-programming/edit-distance-and-lcs/", "Edit Distance", "Edit Steps"],
+    ["/cp/trees/lowest-common-ancestor/", "Lowest Common Ancestor", "Meeting Point"],
   ];
   for (const [path, title, problem] of LESSONS) {
     test(`${title} has a practice problem and its visualizer where one exists`, async ({ page }) => {
@@ -836,7 +839,7 @@ test.describe("visualizer lessons", () => {
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
       await expect(page.getByRole("region", { name: `Problem: ${problem}` })).toBeVisible();
       // Only the first five lessons embed a visualizer; the rest have none yet.
-      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change"].includes(title)) {
+      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor"].includes(title)) {
         await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
       }
     });
