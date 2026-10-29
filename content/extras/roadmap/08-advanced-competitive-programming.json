@@ -14,8 +14,11 @@
     { "kind": "lesson", "ref": "cp/stacks-and-queues/monotonic-queue" },
     { "kind": "lesson", "ref": "cp/graphs/dijkstra-shortest-paths" },
     { "kind": "lesson", "ref": "cp/graphs/union-find" },
+    { "kind": "lesson", "ref": "cp/graphs/minimum-spanning-tree" },
+    { "kind": "lesson", "ref": "cp/graphs/topological-sort" },
     { "kind": "lesson", "ref": "cp/range-queries/segment-trees" },
     { "kind": "lesson", "ref": "cp/dynamic-programming/knapsack" },
+    { "kind": "lesson", "ref": "cp/dynamic-programming/coin-change" },
     { "kind": "lesson", "ref": "cp/string-matching/kmp" },
     { "kind": "lesson", "ref": "cp/range-queries/fenwick-trees" },
     { "kind": "lesson", "ref": "cp/dynamic-programming/longest-increasing-subsequence" },
@@ -25,7 +28,7 @@
     { "kind": "external", "title": "AtCoder", "url": "https://atcoder.jp/", "type": "practice", "note": "High-quality problems; the ABC and ARC contests are excellent for steady growth." },
     { "kind": "external", "title": "Codeforces EDU", "url": "https://codeforces.com/edu/courses", "type": "course", "note": "Step-by-step courses on segment trees, binary search and more, with practice problems." },
     { "kind": "external", "title": "cp-algorithms", "url": "https://cp-algorithms.com/", "type": "docs", "note": "The reference for every advanced algorithm you will need." },
-    { "kind": "planned", "title": "Trees, segment trees, advanced DP, graphs II, strings II, geometry and contest strategy", "note": "CP modules 15 to 26 are not written on this site yet (modules 11 to 14 cover Dijkstra, union-find, segment and Fenwick trees, knapsack, LIS, KMP and the Z-function only). Learn them from cp-algorithms and Codeforces EDU, and use the pattern library to connect them to the signals you already know." },
+    { "kind": "planned", "title": "Trees, segment trees, advanced DP, graphs II, strings II, geometry and contest strategy", "note": "CP modules 15 to 26 are not written on this site yet (modules 11 to 14 cover Dijkstra, union-find, spanning trees, topological sort, segment and Fenwick trees, knapsack, coin change, LIS, KMP and the Z-function only). Learn them from cp-algorithms and Codeforces EDU, and use the pattern library to connect them to the signals you already know." },
     { "kind": "project", "title": "A contest-and-upsolve habit with a rating target", "brief": "Compete in at least two rated contests a month. After each, upsolve at least two problems and add the technique to a personal notebook with the signal that reveals it. Track your rating every month.", "deliverable": "A public or private log of contests, upsolves and rating, with targets of about 1600, then 1900, then 2100 or higher over time." }
   ],
   "exit": [
