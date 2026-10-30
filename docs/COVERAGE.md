@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 155 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 158 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -43,10 +43,10 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 9 Recursion and bitmasks | Complete (5) | 5 |
 | 10 Greedy | Complete (5) | 5 |
 | 11 Graphs: shortest paths and connectivity | Partial (6 lessons: Dijkstra, union-find, minimum spanning tree, topological sort, Bellman-Ford, bipartite graphs; no bridges or flows yet) | 6 |
-| 12 Range queries and segment trees | Partial (2 lessons: segment tree, Fenwick tree; no lazy propagation or sparse table yet) | 2 |
-| 13 Dynamic programming | Partial (5 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths; no intervals, bitmask or digit DP yet) | 5 |
+| 12 Range queries and segment trees | Partial (3 lessons: segment tree, Fenwick tree, sparse table; no lazy propagation yet) | 3 |
+| 13 Dynamic programming | Partial (6 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths, bitmask DP; no interval or digit DP yet) | 6 |
 | 14 String matching | Partial (2 lessons: KMP, Z-function; no suffix structures yet) | 2 |
-| 15 Trees and ancestors | Partial (2 lessons: LCA with binary lifting, Euler tours and subtree queries; no tree DP or heavy-light decomposition yet) | 2 |
+| 15 Trees and ancestors | Partial (3 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter; no rerooting or heavy-light decomposition yet) | 3 |
 | 16-26 (Levels 2-3) | Planned | 0 |
 
 ## Track 2: System Design
