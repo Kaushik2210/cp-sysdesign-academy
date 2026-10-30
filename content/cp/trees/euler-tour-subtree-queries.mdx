@@ -1,0 +1,226 @@
+---
+title: Euler Tours and Subtree Queries
+track: cp
+module: trees
+order: 2
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/trees/lowest-common-ancestor, cp/range-queries/fenwick-trees]
+tags: [trees, euler-tour, dfs, subtree, fenwick-tree]
+type: lesson
+problems: [m15-team-totals]
+furtherReading:
+  - title: cp-algorithms, Depth First Search
+    url: https://cp-algorithms.com/graph/depth-first-search.html
+  - title: CSES Problem Set, Subtree Queries
+    url: https://cses.fi/problemset/task/1137
+  - title: CSES Problem Set, Subordinates
+    url: https://cses.fi/problemset/task/1674
+---
+
+## Intuition
+
+A company tree: "what is the total bonus of this manager's whole team?" Walking down the tree for every question costs the size of the team, which for the CEO is everyone.
+
+Here is the trick. Number the employees in the order a depth-first search **first visits** them. Everyone in the team of `v` is visited after `v` and **before the search leaves `v`**. So the team of `v` is a **contiguous block** of numbers: `v` itself followed by all of its descendants. A tree question becomes an **array range** question, and we already have tools for those: prefix sums, [Fenwick trees](/cp/range-queries/fenwick-trees/) and [segment trees](/cp/range-queries/segment-trees/).
+
+## Definition
+
+Run a depth-first search from the root and keep a counter.
+
+- `tin[v]`: the counter value when the search **enters** `v`.
+- `tout[v]`: the counter value when it **leaves** `v` (or equivalently `tin[v] + size[v] - 1`).
+
+Then `u` lies in the subtree of `v` exactly when `tin[v] <= tin[u] <= tout[v]`, and the subtree of `v` is the range `[tin[v], tin[v] + size[v] - 1]` of the flattened array.
+
+```text
+          1                 tour:  1  2  4  5  3  6
+        /   \                       tin: 1->1  2->2  4->3  5->4  3->5  6->6
+       2     3              subtree of 2 = positions 2..4  (vertices 2, 4, 5)
+      / \     \             subtree of 3 = positions 5..6  (vertices 3, 6)
+     4   5     6
+```
+
+With that array:
+
+| query | how |
+| --- | --- |
+| sum of a subtree | range sum over `[tin[v], tout[v]]` |
+| change one vertex's value | point update at `tin[v]` |
+| add a value to a whole subtree | range update (a difference array, or a Fenwick tree on differences) |
+| is `a` an ancestor of `b`? | `tin[a] <= tin[b] <= tout[a]`, in `O(1)` |
+| size of a subtree | `tout[v] - tin[v] + 1` |
+
+## Computing tin and tout
+
+Recursion overflows on a path of `10^5` vertices in Python, so use an explicit stack.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def euler(n, children):                 # vertices 1..n, root 1
+    tin = [0] * (n + 1)
+    tout = [0] * (n + 1)
+    timer = 0
+    stack = [(1, 0)]                    # (vertex, index of the next child to visit)
+    while stack:
+        v, i = stack.pop()
+        if i == 0:
+            timer += 1
+            tin[v] = timer
+        if i < len(children[v]):
+            stack.append((v, i + 1))
+            stack.append((children[v][i], 0))
+        else:
+            tout[v] = timer             # the last position used inside the subtree of v
+    return tin, tout
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> tin(n + 1), tout(n + 1);
+int timer = 0;
+function<void(int)> dfs = [&](int v) {
+    tin[v] = ++timer;
+    for (int c : children[v]) dfs(c);
+    tout[v] = timer;                    // for very deep trees use an explicit stack
+};
+dfs(1);
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] tin = new int[n + 1], tout = new int[n + 1];
+int timer = 0;
+int[] it = new int[n + 1];              // next child index per vertex
+Deque<Integer> stack = new ArrayDeque<>();
+stack.push(1);
+tin[1] = ++timer;
+while (!stack.isEmpty()) {
+    int v = stack.peek();
+    if (it[v] < children[v].size()) {
+        int c = children[v].get(it[v]++);
+        tin[c] = ++timer;
+        stack.push(c);
+    } else {
+        tout[v] = timer;
+        stack.pop();
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+**A shortcut when parents have smaller numbers.** If every parent's number is smaller than its child's (`p[v] < v`), no search is needed: compute `size[v]` with the backward loop `size[p[v]] += size[v]`, then hand out positions with the forward loop `tin[v] = next[p[v]]; next[p[v]] += size[v]; next[v] = tin[v] + 1`. This is what the practice problem uses.
+
+Run the whole idea, with subtree sums and updates in a Fenwick tree checked against a brute force:
+
+<CodeRunner language="python" code={`import random
+
+def build(n, parent):
+    children = [[] for _ in range(n + 1)]
+    for v in range(2, n + 1):
+        children[parent[v]].append(v)
+    tin = [0] * (n + 1)
+    size = [1] * (n + 1)
+    timer = 0
+    stack = [(1, 0)]
+    while stack:
+        v, i = stack.pop()
+        if i == 0:
+            timer += 1
+            tin[v] = timer
+        if i < len(children[v]):
+            stack.append((v, i + 1))
+            stack.append((children[v][i], 0))
+        elif v != 1:
+            size[parent[v]] += size[v]
+    return children, tin, size
+
+random.seed(6)
+n = 200
+parent = [0, 0] + [random.randint(1, v - 1) for v in range(2, n + 1)]
+children, tin, size = build(n, parent)
+vals = [random.randint(-9, 9) for _ in range(n + 1)]
+
+bit = [0] * (n + 2)
+def add(i, d):
+    while i <= n:
+        bit[i] += d
+        i += i & -i
+def prefix(i):
+    s = 0
+    while i > 0:
+        s += bit[i]
+        i -= i & -i
+    return s
+for v in range(1, n + 1):
+    add(tin[v], vals[v])
+
+def brute(v):
+    total, stack = 0, [v]
+    while stack:
+        u = stack.pop()
+        total += vals[u]
+        stack.extend(children[u])
+    return total
+
+for _ in range(1000):
+    v = random.randint(1, n)
+    if random.random() < 0.5:
+        x = random.randint(-9, 9)
+        add(tin[v], x - vals[v])
+        vals[v] = x
+    else:
+        assert prefix(tin[v] + size[v] - 1) - prefix(tin[v] - 1) == brute(v)
+print("1000 random updates and subtree sums agree with brute force")
+print("root subtree size:", size[1], "of", n)
+`} />
+
+## More uses of the flattened tree
+
+1. **Subtree updates:** add `x` to every vertex of a subtree with a range update.
+2. **Path queries from the root:** with a Fenwick tree on differences, an update on a subtree adds to every descendant, and a point query gives the sum along the root path.
+3. **Counting distinct values in subtrees** (offline, with a sorted query order) and **small-to-large merging**.
+4. **Ancestor tests** in `O(1)`, used by LCA variants and by problems that ask "is `a` on the path to `b`?".
+5. The full **Euler tour** that records a vertex every time the walk passes it (`2n - 1` entries) combined with a sparse table gives `O(1)` LCA.
+
+<Callout type="tip" title="Subtree = range, path = something else">
+The flattening works for *subtrees*. A path between two arbitrary vertices is not contiguous in the tour. Paths need LCA, binary lifting or heavy-light decomposition.
+</Callout>
+
+## Pitfalls
+
+1. **Recursive DFS on deep trees.** A path of `10^5` vertices overflows the recursion limit in Python and can overflow the stack in C++ and Java.
+2. **Off-by-one in the range.** The subtree is `[tin, tin + size - 1]`; using `tin + size` includes the next vertex.
+3. **Mixing 0-based and 1-based positions** with a Fenwick tree, which needs 1-based positions.
+4. **Assuming `tin` equals the vertex number.** It is the visit order, which depends on the order children are visited.
+5. **Setting instead of adding.** A Fenwick tree supports `add`; to set a value add `new - old`.
+6. **Forgetting disconnected input.** A tree is connected; if the problem gives a forest, run a search from every root.
+
+## Practice
+
+<Problem id="m15-team-totals" />
+
+## Problem ladder
+
+- [Subordinates](https://cses.fi/problemset/task/1674) (CSES): subtree sizes.
+- [Subtree Queries](https://cses.fi/problemset/task/1137) (CSES): exactly this lesson, with updates and subtree sums.
+- [Path Queries](https://cses.fi/problemset/task/1138) (CSES): subtree updates, root-path point queries.
+- [Binary Tree Maximum Path Sum](https://leetcode.com/problems/binary-tree-maximum-path-sum/) (LeetCode, hard): tree recursion, a contrast with flattening.
+- [Sum of Distances in Tree](https://leetcode.com/problems/sum-of-distances-in-tree/) (LeetCode, hard): rerooting, the next step.
+
+## Quiz
+
+<Quiz id="cp-m15-euler-tour" tags={["trees", "euler-tour", "fenwick-tree"]} questions={[
+  { type: "mcq", q: "After numbering vertices in DFS entry order, what does the subtree of v look like?", options: ["A contiguous block starting at tin[v]", "Every other position after tin[v]", "The positions of v's children only", "Positions chosen by vertex number"], answer: 0, explain: "The search finishes everything below v before leaving it, so the descendants form one block right after v." },
+  { type: "predict", q: "A subtree has root position tin = 5 and size = 3. Which positions does it occupy?", code: "tin = 5\nsize = 3\nprint(list(range(tin, tin + size)))", options: ["[5, 6]", "[5, 6, 7]", "[5, 6, 7, 8]", "[4, 5, 6]"], answer: 1, explain: "The range is tin .. tin + size - 1, i.e. 5, 6 and 7." },
+  { type: "multi", q: "Which queries become easy after the flattening?", options: ["Sum of a vertex's subtree", "Is a an ancestor of b", "Sum along an arbitrary path between two vertices", "Subtree size"], answer: [0, 1, 3], explain: "Arbitrary paths are not contiguous in the tour; they need LCA or heavy-light decomposition." },
+  { type: "mcq", q: "Why is an explicit stack often used for the DFS in contests?", options: ["It is always faster", "Deep trees can overflow the recursion stack", "Recursion gives wrong tin values", "Explicit stacks sort the children"], answer: 1, explain: "A path-shaped tree with 10^5 vertices recurses 10^5 levels deep, which overflows Python's recursion limit and may overflow native stacks." }
+]} />
