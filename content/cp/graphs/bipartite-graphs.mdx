@@ -1,0 +1,200 @@
+---
+title: Bipartite Graphs and 2-Colouring
+track: cp
+module: graphs
+order: 6
+difficulty: easy
+estMinutes: 30
+prerequisites: [cp/stacks-and-queues/queues-deques-bfs]
+tags: [graph, bipartite, bfs, coloring, odd-cycle]
+type: lesson
+problems: [m11-two-teams]
+furtherReading:
+  - title: cp-algorithms, Check whether a graph is bipartite
+    url: https://cp-algorithms.com/graph/bipartite-check.html
+  - title: CSES Problem Set, Building Teams
+    url: https://cses.fi/problemset/task/1668
+  - title: cp-algorithms, Kuhn's algorithm for maximum bipartite matching
+    url: https://cp-algorithms.com/graph/kuhn_maximum_bipartite_matching.html
+---
+
+## Intuition
+
+Some students dislike each other. Can you split the class into two teams so that **nobody shares a team with someone they dislike**? Graph language: students are vertices, "dislike" is an edge, and you ask whether the vertices can be painted with **two colours** so that every edge joins different colours.
+
+Try it by hand. Pick a student and put them in team A. Everyone they dislike must go to team B. Everyone *those* students dislike must go back to team A. The choice is forced all the way through the group. A contradiction can only appear if the forcing runs into a student who would need both colours.
+
+## Definition
+
+A graph is **bipartite** when its vertices split into two sets with every edge between the sets.
+
+> A graph is bipartite exactly when it has **no cycle of odd length**.
+
+Why: along a cycle the colours must alternate, so an odd cycle would need the first vertex to have two different colours. Conversely, if there is no odd cycle, the BFS colouring below never meets a conflict.
+
+### Checking by BFS
+
+1. Give every vertex the colour "unknown".
+2. For each unknown vertex (a graph may have several **components**), colour it `0` and start a BFS.
+3. When you reach a new neighbour, give it the **opposite** colour of the current vertex.
+4. If a neighbour already has the **same** colour as the current vertex, the graph is not bipartite.
+
+Time `O(n + m)`. A DFS works as well, and so does union-find with a "parity" per vertex.
+
+<Callout type="note" title="Layers of BFS">
+BFS visits vertices in layers of equal distance from the start. Colouring by the parity of the layer is the same thing as the 2-colouring, which explains why an edge inside a layer (or between layers of equal parity) reveals an odd cycle.
+</Callout>
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from collections import deque
+
+def is_bipartite(n, adj):                # vertices 1..n
+    color = [-1] * (n + 1)
+    for s in range(1, n + 1):
+        if color[s] != -1:
+            continue
+        color[s] = 0
+        q = deque([s])
+        while q:
+            u = q.popleft()
+            for v in adj[u]:
+                if color[v] == -1:
+                    color[v] = color[u] ^ 1
+                    q.append(v)
+                elif color[v] == color[u]:
+                    return False, None
+    return True, color
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+bool is_bipartite(int n, const vector<vector<int>>& adj, vector<int>& color) {
+    color.assign(n + 1, -1);
+    for (int s = 1; s <= n; s++) {
+        if (color[s] != -1) continue;
+        color[s] = 0;
+        queue<int> q; q.push(s);
+        while (!q.empty()) {
+            int u = q.front(); q.pop();
+            for (int v : adj[u]) {
+                if (color[v] == -1) { color[v] = color[u] ^ 1; q.push(v); }
+                else if (color[v] == color[u]) return false;
+            }
+        }
+    }
+    return true;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+boolean isBipartite(int n, List<Integer>[] adj, int[] color) {
+    Arrays.fill(color, -1);
+    for (int s = 1; s <= n; s++) {
+        if (color[s] != -1) continue;
+        color[s] = 0;
+        Deque<Integer> q = new ArrayDeque<>();
+        q.add(s);
+        while (!q.isEmpty()) {
+            int u = q.poll();
+            for (int v : adj[u]) {
+                if (color[v] == -1) { color[v] = color[u] ^ 1; q.add(v); }
+                else if (color[v] == color[u]) return false;
+            }
+        }
+    }
+    return true;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, and compare with trying every colouring on small random graphs:
+
+<CodeRunner language="python" code={`import random
+from collections import deque
+
+def is_bipartite(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for a, b in edges:
+        adj[a].append(b)
+        adj[b].append(a)
+    color = [-1] * (n + 1)
+    for s in range(1, n + 1):
+        if color[s] != -1:
+            continue
+        color[s] = 0
+        q = deque([s])
+        while q:
+            u = q.popleft()
+            for v in adj[u]:
+                if color[v] == -1:
+                    color[v] = color[u] ^ 1
+                    q.append(v)
+                elif color[v] == color[u]:
+                    return False
+    return True
+
+def brute(n, edges):
+    for mask in range(1 << n):
+        if all(((mask >> (a - 1)) & 1) != ((mask >> (b - 1)) & 1) for a, b in edges):
+            return True
+    return False
+
+print("square (even cycle):", is_bipartite(4, [(1, 2), (2, 3), (3, 4), (4, 1)]))
+print("triangle (odd cycle):", is_bipartite(3, [(1, 2), (2, 3), (3, 1)]))
+
+random.seed(1)
+for _ in range(300):
+    n = random.randint(1, 8)
+    edges = [(random.randint(1, n), random.randint(1, n)) for _ in range(random.randint(0, 10))]
+    assert is_bipartite(n, edges) == brute(n, edges)
+print("300 random graphs agree with the exhaustive check")
+`} />
+
+## What bipartite graphs are good for
+
+1. **Two-team and conflict problems** (this lesson's exercise, scheduling with exclusions).
+2. **Matching:** in a bipartite graph the maximum matching can be found with augmenting paths (Kuhn's algorithm), and by König's theorem it equals the minimum vertex cover.
+3. **Bounding structure:** grids and trees are bipartite (colour by the parity of `row + column`, or by depth), which is the idea behind chessboard-colouring arguments.
+4. **Parity constraints** such as "these two must differ" or "these two must be equal" are solved with the same colouring, with union-find carrying a parity bit.
+
+## Pitfalls
+
+1. **Starting only from vertex 1.** A graph with several components needs a BFS from each uncoloured vertex.
+2. **Treating a self-loop as fine.** An edge `a - a` joins a vertex to itself, so it is an odd cycle (length 1) and the answer is "not bipartite".
+3. **Checking only tree edges.** The conflict appears on a non-tree edge, so examine every edge from the visited vertex.
+4. **Directed graphs.** Bipartiteness ignores direction; build the adjacency both ways.
+5. **Recursive DFS on a deep path** overflows in Python; use BFS or an explicit stack.
+6. **Confusing bipartite with tree.** Every tree is bipartite, but a bipartite graph may have even cycles.
+
+## Practice
+
+<Problem id="m11-two-teams" />
+
+## Problem ladder
+
+- [Building Teams](https://cses.fi/problemset/task/1668) (CSES): exactly this lesson, and print the teams.
+- [Is Graph Bipartite?](https://leetcode.com/problems/is-graph-bipartite/) (LeetCode, medium): the interview version.
+- [Possible Bipartition](https://leetcode.com/problems/possible-bipartition/) (LeetCode, medium): the story of this lesson's exercise.
+- [School Dance](https://cses.fi/problemset/task/1696) (CSES): maximum matching in a bipartite graph, the next step.
+- [Graph Without Long Directed Paths](https://codeforces.com/problemset/problem/1144/F) (Codeforces 1144F, rating about 1700): orient edges by a bipartite colouring.
+
+## Quiz
+
+<Quiz id="cp-m11-bipartite" tags={["bipartite", "bfs", "graph"]} questions={[
+  { type: "mcq", q: "A graph is bipartite exactly when it has no cycle of which kind?", options: ["Even length", "Odd length", "Length 3 only", "Any cycle"], answer: 1, explain: "Colours alternate along a cycle, so an odd cycle would force a vertex to have two colours." },
+  { type: "multi", q: "Which statements are true?", options: ["Trees are bipartite", "A self-loop makes a graph non-bipartite", "You only need to run BFS from vertex 1", "BFS colouring takes O(n + m)"], answer: [0, 1, 3], explain: "Disconnected graphs need a search from every uncoloured vertex." },
+  { type: "predict", q: "Is this graph bipartite? Edges: 1-2, 2-3, 3-4, 4-5, 5-1.", code: "edges = [(1, 2), (2, 3), (3, 4), (4, 5), (5, 1)]", options: ["Yes", "No"], answer: 1, explain: "The edges form a 5-cycle, an odd cycle, so no valid 2-colouring exists." },
+  { type: "mcq", q: "When BFS reaches a neighbour that already has the same colour as the current vertex, what does it mean?", options: ["Nothing; skip it", "The graph contains an odd cycle", "The graph is disconnected", "The BFS should restart from vertex 1"], answer: 1, explain: "The two vertices are joined by an edge and by two paths of equal parity, which closes an odd cycle." }
+]} />
