@@ -1,0 +1,185 @@
+---
+title: Grid Paths and Counting DP
+track: cp
+module: dynamic-programming
+order: 5
+difficulty: easy
+estMinutes: 30
+prerequisites: [cp/dynamic-programming/knapsack, cp/math-basics/modular-arithmetic]
+tags: [dp, grid, counting, modular-arithmetic, paths]
+type: lesson
+problems: [m13-maze-routes]
+furtherReading:
+  - title: CSES Problem Set, Grid Paths
+    url: https://cses.fi/problemset/task/1638
+  - title: AtCoder Educational DP Contest, Grid 1
+    url: https://atcoder.jp/contests/dp/tasks/dp_h
+  - title: cp-algorithms, Binomial coefficients
+    url: https://cp-algorithms.com/combinatorics/binomial-coefficients.html
+---
+
+## Intuition
+
+You stand in the top-left corner of a grid and may only step **right** or **down**. How many different routes lead to the bottom-right corner? Some cells are blocked.
+
+Counting routes one by one is hopeless (a `300 x 300` grid has more routes than there are atoms in the universe). But every route to a cell arrives from exactly **two** places: the cell above or the cell to the left. So
+
+> routes to a cell = routes to the cell above + routes to the cell on the left.
+
+Each cell's answer depends only on two earlier cells. That is dynamic programming in its simplest form.
+
+## Definition
+
+Let `dp[i][j]` be the number of routes from `(0, 0)` to `(i, j)` using only right and down moves.
+
+```text
+dp[0][0] = 1                                   (if the start is free)
+dp[i][j] = 0                                   if (i, j) is blocked
+dp[i][j] = dp[i-1][j] + dp[i][j-1]             otherwise (missing neighbours count as 0)
+```
+
+The answer is `dp[h-1][w-1]`. Fill the table row by row; time and memory `O(hw)`. Since a row needs only the row above, one row of memory is enough.
+
+The counts explode, so problems ask for the answer **modulo** a prime such as `10^9 + 7`. Reduce after every addition, which is valid because addition respects remainders:
+
+```text
+(a + b) mod p == ((a mod p) + (b mod p)) mod p
+```
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+MOD = 10**9 + 7
+dp = [[0] * w for _ in range(h)]
+if g[0][0] == '.':
+    dp[0][0] = 1
+for i in range(h):
+    for j in range(w):
+        if g[i][j] == '#':
+            dp[i][j] = 0
+        elif i or j:
+            up = dp[i - 1][j] if i else 0
+            left = dp[i][j - 1] if j else 0
+            dp[i][j] = (up + left) % MOD
+print(dp[h - 1][w - 1])
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+const int MOD = 1e9 + 7;
+vector<vector<int>> dp(h, vector<int>(w, 0));
+if (g[0][0] == '.') dp[0][0] = 1;
+for (int i = 0; i < h; i++)
+    for (int j = 0; j < w; j++) {
+        if (g[i][j] == '#') { dp[i][j] = 0; continue; }
+        if (i == 0 && j == 0) continue;
+        long long up = i ? dp[i-1][j] : 0, left = j ? dp[i][j-1] : 0;
+        dp[i][j] = (up + left) % MOD;
+    }
+cout << dp[h-1][w-1];
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+final int MOD = 1_000_000_007;
+int[][] dp = new int[h][w];
+if (g[0].charAt(0) == '.') dp[0][0] = 1;
+for (int i = 0; i < h; i++)
+    for (int j = 0; j < w; j++) {
+        if (g[i].charAt(j) == '#') { dp[i][j] = 0; continue; }
+        if (i == 0 && j == 0) continue;
+        long up = i > 0 ? dp[i-1][j] : 0, left = j > 0 ? dp[i][j-1] : 0;
+        dp[i][j] = (int) ((up + left) % MOD);
+    }
+System.out.println(dp[h-1][w-1]);
+```
+
+</Tab>
+</Tabs>
+
+Run it on a small maze, then check a free grid against the closed formula:
+
+<CodeRunner language="python" code={`from math import comb
+
+MOD = 10**9 + 7
+
+def routes(grid):
+    h, w = len(grid), len(grid[0])
+    dp = [[0] * w for _ in range(h)]
+    if grid[0][0] == '.':
+        dp[0][0] = 1
+    for i in range(h):
+        for j in range(w):
+            if grid[i][j] == '#':
+                dp[i][j] = 0
+            elif i or j:
+                dp[i][j] = ((dp[i - 1][j] if i else 0) + (dp[i][j - 1] if j else 0)) % MOD
+    return dp[h - 1][w - 1]
+
+maze = ["...",
+        ".#.",
+        "..."]
+print("routes in the 3x3 maze with a wall in the middle:", routes(maze))
+
+free = ["." * 6 for _ in range(5)]
+print("free 5x6 grid:", routes(free), "formula C(9, 4) =", comb(9, 4))
+
+big = ["." * 300 for _ in range(300)]
+print("free 300x300 grid mod p:", routes(big), "formula:", comb(598, 299) % MOD)
+`} />
+
+## The closed form for free grids
+
+With no obstacles, every route has exactly `h - 1` down moves and `w - 1` right moves in some order, so the count is `C(h + w - 2, h - 1)`. Obstacles break the formula, which is why the table is needed. With few obstacles you can also count by **inclusion-exclusion over the blocked cells**, sorted by position, but that is a separate technique.
+
+## Variations
+
+| twist | change |
+| --- | --- |
+| minimum cost path | `dp[i][j] = cost[i][j] + min(dp[i-1][j], dp[i][j-1])` |
+| maximum value collected | same shape with `max` |
+| moves allowed in more directions | the table order must still respect dependencies; with cycles use BFS or Dijkstra instead |
+| must pass through a given cell | multiply the counts of two separate runs |
+| count paths with exactly `k` turns | add a state dimension |
+| huge grid, few obstacles | inclusion-exclusion with binomials |
+
+<Callout type="pitfall" title="Down and right only">
+The DP is valid because the moves go in one direction, so every cell's dependencies are filled earlier. If you may also move up or left, a route can loop and there can be infinitely many; the question changes into a shortest-path problem.
+</Callout>
+
+## Pitfalls
+
+1. **Seeding `dp[0][0] = 1` when the start is blocked.** Check the start cell first.
+2. **Forgetting the modulus**, or reducing only at the end, which overflows fixed-width integers.
+3. **Letting a blocked cell keep a nonzero value** from an earlier assignment. Reset blocked cells to `0`.
+4. **Reading `dp[i-1][j]` for `i = 0`.** In Python a negative index silently wraps to the last row; guard it.
+5. **Allocating the table the wrong way round.** Rows are `h`, columns are `w`; mixing them breaks non-square grids.
+6. **Using recursion without memoisation.** The plain recursion is exponential.
+
+## Practice
+
+<Problem id="m13-maze-routes" />
+
+## Problem ladder
+
+- [Grid Paths](https://cses.fi/problemset/task/1638) (CSES): exactly this lesson.
+- [Grid 1](https://atcoder.jp/contests/dp/tasks/dp_h) (AtCoder DP Contest H): the same with modulo `10^9 + 7`.
+- [Unique Paths II](https://leetcode.com/problems/unique-paths-ii/) (LeetCode, medium): the interview version.
+- [Minimum Path Sum](https://leetcode.com/problems/minimum-path-sum/) (LeetCode, medium): the same table with `min`.
+- [Cherry Pickup](https://leetcode.com/problems/cherry-pickup/) (LeetCode, hard): two walkers, an extra dimension.
+
+## Quiz
+
+<Quiz id="cp-m13-grid-paths" tags={["dp", "grid", "counting"]} questions={[
+  { type: "mcq", q: "Moving only right or down, from which cells can a route enter cell (i, j)?", options: ["Only from above", "Only from the left", "From above or from the left", "From all four neighbours"], answer: 2, explain: "A route's previous step came from the cell above or the cell to the left." },
+  { type: "predict", q: "How many right-and-down routes does a free 3 by 3 grid have?", code: "from math import comb\nprint(comb(4, 2))", options: ["4", "6", "9", "12"], answer: 1, explain: "Two downs and two rights in some order: C(4, 2) = 6." },
+  { type: "multi", q: "Which statements are true?", options: ["A blocked cell has zero routes through it", "The count can be reduced modulo p after each addition", "The recurrence is still valid if moves up and left are also allowed", "O(hw) time is enough"], answer: [0, 1, 3], explain: "With moves in all directions routes can loop, so the DP order breaks down." },
+  { type: "mcq", q: "What is the answer if the start cell is blocked?", options: ["1", "0", "-1", "It depends on the end cell"], answer: 1, explain: "No route can begin, so the count is 0 even for a 1 by 1 blocked grid." }
+]} />
