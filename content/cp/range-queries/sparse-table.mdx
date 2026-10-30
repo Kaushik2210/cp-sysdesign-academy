@@ -1,0 +1,189 @@
+---
+title: Sparse Tables
+track: cp
+module: range-queries
+order: 3
+difficulty: medium
+estMinutes: 30
+prerequisites: [cp/range-queries/segment-trees, cp/arrays-and-windows/prefix-sums]
+tags: [sparse-table, rmq, range-query, static-array, idempotent]
+type: lesson
+problems: [m12-lowest-in-range]
+furtherReading:
+  - title: cp-algorithms, Sparse Table
+    url: https://cp-algorithms.com/data_structures/sparse-table.html
+  - title: CSES Problem Set, Static Range Minimum Queries
+    url: https://cses.fi/problemset/task/1647
+  - title: cp-algorithms, Lowest Common Ancestor (Euler tour and RMQ)
+    url: https://cp-algorithms.com/graph/lca.html
+---
+
+## Intuition
+
+The array never changes, and you are asked "what is the smallest value between positions `l` and `r`?" many times. A [segment tree](/cp/range-queries/segment-trees/) answers in `O(log n)`, but because the array is **static** we can do better: precompute enough to answer in `O(1)`.
+
+The idea: for a minimum, **overlap is harmless**. The minimum of `[2, 7]` equals the minimum of `[2, 5]` and `[4, 7]` taken together, even though positions 4 and 5 are counted twice. So any range can be covered by **just two** blocks whose length is a power of two, as long as the table already holds the answer for every block of those lengths.
+
+## Definition
+
+Let `sp[k][i]` be the minimum of `a[i .. i + 2^k - 1]` (the block of length `2^k` starting at `i`).
+
+```text
+sp[0][i] = a[i]
+sp[k][i] = min( sp[k-1][i], sp[k-1][i + 2^(k-1)] )       two halves
+```
+
+There are about `log2(n)` levels with up to `n` entries each: time and memory `O(n log n)`.
+
+**Query** `[l, r]` (0-based, inclusive): let `k` be the largest integer with `2^k <= r - l + 1`, that is `k = (r - l + 1).bit_length() - 1`. Then
+
+```text
+answer = min( sp[k][l], sp[k][r - 2^k + 1] )
+```
+
+The first block starts at the left end, the second ends at the right end, both have length `2^k`, together they cover `[l, r]`, and they may overlap. Each query is `O(1)`.
+
+## Idempotent operations only
+
+An operation `f` is **idempotent** when `f(x, x) = x`. Minimum, maximum, gcd, bitwise AND and OR are. **Sum is not**: counting the overlap twice gives the wrong total.
+
+| operation | sparse table with overlap trick? |
+| --- | --- |
+| min, max | yes |
+| gcd, AND, OR | yes |
+| sum, product, xor | no, use a prefix array or split the range into disjoint power-of-two blocks (`O(log n)` per query) |
+| anything with updates | no, use a segment tree |
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+sp = [a]
+k = 1
+while (1 << k) <= n:
+    prev = sp[-1]
+    half = 1 << (k - 1)
+    sp.append([min(prev[i], prev[i + half]) for i in range(n - (1 << k) + 1)])
+    k += 1
+
+def query(l, r):                          # 0-based, inclusive
+    j = (r - l + 1).bit_length() - 1
+    return min(sp[j][l], sp[j][r - (1 << j) + 1])
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<int>> sp(1, a);
+for (int k = 1; (1 << k) <= n; k++) {
+    sp.push_back(vector<int>(n - (1 << k) + 1));
+    for (int i = 0; i + (1 << k) <= n; i++)
+        sp[k][i] = min(sp[k-1][i], sp[k-1][i + (1 << (k-1))]);
+}
+int query(int l, int r) {                 // 0-based, inclusive
+    int j = 31 - __builtin_clz(r - l + 1);
+    return min(sp[j][l], sp[j][r - (1 << j) + 1]);
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int levels = 1; while ((1 << levels) <= n) levels++;
+int[][] sp = new int[levels][];
+sp[0] = a.clone();
+for (int k = 1; k < levels; k++) {
+    sp[k] = new int[n - (1 << k) + 1];
+    for (int i = 0; i < sp[k].length; i++)
+        sp[k][i] = Math.min(sp[k-1][i], sp[k-1][i + (1 << (k-1))]);
+}
+int query(int l, int r) {                 // 0-based, inclusive
+    int j = 31 - Integer.numberOfLeadingZeros(r - l + 1);
+    return Math.min(sp[j][l], sp[j][r - (1 << j) + 1]);
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, compare with a brute force, and watch the overlap break the sum:
+
+<CodeRunner language="python" code={`import random
+
+def build(a, op=min):
+    n = len(a)
+    sp = [a[:]]
+    k = 1
+    while (1 << k) <= n:
+        prev = sp[-1]
+        half = 1 << (k - 1)
+        sp.append([op(prev[i], prev[i + half]) for i in range(n - (1 << k) + 1)])
+        k += 1
+    return sp
+
+def query(sp, l, r, op=min):
+    j = (r - l + 1).bit_length() - 1
+    return op(sp[j][l], sp[j][r - (1 << j) + 1])
+
+a = [5, 2, 4, 7, 1, 3]
+sp = build(a)
+print("min of a[1..4]:", query(sp, 1, 4))
+
+random.seed(3)
+a = [random.randint(-50, 50) for _ in range(200)]
+sp = build(a)
+for _ in range(2000):
+    l = random.randint(0, 199)
+    r = random.randint(l, 199)
+    assert query(sp, l, r) == min(a[l:r + 1])
+print("2000 random queries agree with brute force")
+
+add = lambda x, y: x + y
+sp_sum = build([1, 1, 1, 1, 1], add)
+print("sum of a[0..2] via overlap trick:", query(sp_sum, 0, 2, add), "(the true sum is 3: overlap counted twice)")
+`} />
+
+## Choosing between the range structures
+
+| structure | build | query | update | supports |
+| --- | --- | --- | --- | --- |
+| prefix sums | `O(n)` | `O(1)` | none | sums (any invertible operation) |
+| sparse table | `O(n log n)` | `O(1)` | none | min, max, gcd and other idempotent operations |
+| Fenwick tree | `O(n)` | `O(log n)` | `O(log n)` | sums and other invertible operations |
+| segment tree | `O(n)` | `O(log n)` | `O(log n)` | any associative operation |
+
+A sparse table is also the engine behind `O(1)` **LCA**: take the Euler tour of the tree and answer "minimum depth between two visits" as a range-minimum query.
+
+## Pitfalls
+
+1. **Using it for sums.** The overlap double counts; use prefix sums instead.
+2. **Updates after the build.** A change invalidates `O(n log n)` entries, so use a segment tree when the array changes.
+3. **Wrong `k`.** `k` is the largest power with `2^k <= length`, i.e. `bit_length - 1`, not `bit_length`.
+4. **Wrong second block start.** It is `r - 2^k + 1`, so the block *ends* at `r`.
+5. **Level sizes.** Level `k` has `n - 2^k + 1` entries, not `n`; indexing beyond that is out of range.
+6. **Memory.** `n log n` numbers: `2·10^5 * 18` is 3.6 million, fine in compiled languages but heavy for Python lists, so consider `array` or NumPy.
+
+## Practice
+
+<Problem id="m12-lowest-in-range" />
+
+## Problem ladder
+
+- [Static Range Minimum Queries](https://cses.fi/problemset/task/1647) (CSES): exactly this lesson.
+- [Range Minimum Query](https://judge.yosupo.jp/problem/staticrmq) (Library Checker): the large-input benchmark version.
+- [Sliding Window Maximum](https://leetcode.com/problems/sliding-window-maximum/) (LeetCode, hard): also solvable with a sparse table instead of a deque.
+- [Range Sum Query - Immutable](https://leetcode.com/problems/range-sum-query-immutable/) (LeetCode, easy): the prefix-sum contrast.
+- [Sonya and Bitwise OR](https://codeforces.com/problemset/problem/1004/F) (Codeforces 1004F, rating about 2400): range OR is idempotent too, a stretch goal.
+
+## Quiz
+
+<Quiz id="cp-m12-sparse-table" tags={["sparse-table", "rmq"]} questions={[
+  { type: "mcq", q: "Why can a sparse table answer a range-minimum query with two possibly overlapping blocks?", options: ["Overlap is impossible", "Minimum is idempotent, so counting an element twice does not change it", "The blocks are sorted", "Because the table stores prefix minima"], answer: 1, explain: "min(x, x) = x, so the overlap does not affect the result." },
+  { type: "predict", q: "For a query on positions l = 1 to r = 5 (length 5), what is k?", code: "length = 5\nprint(length.bit_length() - 1)", options: ["1", "2", "3", "5"], answer: 1, explain: "The largest power of two not above 5 is 4 = 2^2, so k = 2." },
+  { type: "multi", q: "Which operations can use the overlap trick?", options: ["min", "max", "gcd", "sum"], answer: [0, 1, 2], explain: "Sum is not idempotent; overlapped elements would be counted twice." },
+  { type: "mcq", q: "What are the build time and the query time of a sparse table?", options: ["O(n) and O(log n)", "O(n log n) and O(1)", "O(n^2) and O(1)", "O(n log n) and O(log n)"], answer: 1, explain: "There are log n levels of up to n entries each, and a query reads two entries." }
+]} />
