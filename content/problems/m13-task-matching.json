@@ -1,0 +1,113 @@
+{
+  "id": "m13-task-matching",
+  "title": "Task Matching",
+  "source": {
+    "name": "Original exercise; classic technique (assignment problem by bitmask DP)"
+  },
+  "rating": 1700,
+  "tags": [
+    "dp",
+    "bitmask",
+    "assignment"
+  ],
+  "statement": "There are `n` workers and `n` tasks. Worker `i` would charge `cost[i][j]` to do task `j`. Every worker must get exactly one task and every task exactly one worker. Find the smallest possible total cost.\n\n**Input.** First line: `n`. Then `n` lines with `n` integers each: row `i` holds `cost[i][0], ..., cost[i][n-1]`.\n\n**Output.** The minimum total cost.",
+  "constraints": [
+    "1 ≤ n ≤ 15 in this browser version (the table has 2^n states; the idea works up to about n = 20)",
+    "0 ≤ cost ≤ 10^9 (totals can exceed 32 bits)"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "3\n9 2 7\n3 6 4\n5 8 1\n",
+      "output": "6\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n5\n",
+      "output": "5\n",
+      "hidden": false
+    },
+    {
+      "input": "2\n1 1\n1 1\n",
+      "output": "2\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n0 0 0\n0 0 0\n0 0 0\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n1 100 100\n100 1 100\n100 100 1\n",
+      "output": "3\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n4 3 2 1\n1 4 3 2\n2 1 4 3\n3 2 1 4\n",
+      "output": "4\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n34 41 44 18 1\n45 24 18 27 3\n36 41 30 42 1\n7 36 20 32 3\n35 15 26 18 43\n",
+      "output": "59\n",
+      "hidden": true
+    },
+    {
+      "input": "6\n39 9 47 38 18 1\n34 4 10 45 20 37\n17 28 17 21 1 0\n19 32 5 38 28 38\n23 40 27 17 40 32\n2 16 1 1 20 45\n",
+      "output": "30\n",
+      "hidden": true
+    },
+    {
+      "input": "7\n39 29 17 37 37 38 7\n24 46 9 26 29 16 46\n47 49 15 42 39 38 50\n42 8 45 50 40 9 12\n27 13 0 2 18 39 7\n10 10 4 6 43 42 23\n38 44 26 15 35 48 36\n",
+      "output": "89\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n5 4 34 46 18 6 49 30\n48 48 29 8 32 40 0 46\n49 17 16 29 38 19 5 30\n17 27 29 34 30 7 8 49\n32 12 28 49 30 25 0 19\n5 13 12 50 30 11 10 5\n22 40 16 19 10 36 42 36\n13 29 29 31 1 42 37 48\n",
+      "output": "59\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n0 22 42 20 35 5 45 47\n33 42 28 33 37 31 13 35\n45 0 14 40 42 36 35 50\n19 26 15 25 44 8 35 41\n2 33 12 17 29 41 11 13\n49 2 24 29 19 11 35 4\n10 12 6 27 18 47 7 4\n45 48 18 9 44 27 18 4\n",
+      "output": "64\n",
+      "hidden": true
+    },
+    {
+      "input": "12\n3087035 617074809 409000335 560266742 729377010 531739723 37854137 985837294 180676702 584569352 701864546 401495663\n635450872 721760495 951448692 554784552 548429410 472538895 147981587 558891158 210695661 405613617 90206928 187685858\n906424417 910309279 745883283 529559000 372970920 847625266 265794987 605982058 596462436 168005607 221875451 675987080\n376320338 36491597 321988848 112499505 615413805 71747321 169209744 840504815 145795163 210229901 993800152 708664933\n734742379 997784427 425161821 930826430 742919583 835587154 61444410 166268003 295190779 999015196 257947833 819962803\n651833952 345700290 142280212 74677374 617018629 81958132 307150765 746904410 843146362 151551480 229424845 927820981\n294083694 691351805 959304238 559938698 107660143 406671987 942069431 799361746 855613168 454443364 173209375 743477105\n935526193 324665673 567402526 184126788 765917696 768247768 195942432 685276178 46603072 444761207 383261324 964288034\n165604883 9011068 70795063 720360396 17661449 103538575 976645552 555394442 599218829 986319347 739586681 226899675\n964781197 367381755 410619640 911383185 527213290 238705931 791629107 219687409 27825584 195817823 86064564 274397698\n745550670 673192727 554391772 709870966 492478666 534505161 577941622 137734661 43060121 25001861 157665529 988206533\n843286346 979086673 58762222 245541136 219008194 215849252 44492896 60207976 932437792 141291264 950161464 937060938\n",
+      "output": "1012483335\n",
+      "hidden": true
+    },
+    {
+      "input": "15\n299645308 714270632 85001995 791417408 247954968 394293717 238872049 806300380 269925992 742019424 734015682 590509077 439216084 87002320 156836002\n820883800 944893878 26714333 2170135 463867630 682023746 126747006 200425646 895306982 13444818 41189428 293982246 822373807 901034056 202128007\n381247641 305893585 170327277 741939919 998381279 642432758 14908621 715736146 654141000 323530594 277977940 947529235 217819994 596361605 906132360\n587949300 940945213 792420362 583160828 789227479 487569052 820149539 881107016 149115659 419686575 232469092 965548301 702919447 904300665 541934749\n60496723 246168482 862782875 741315637 915769156 476028265 174250451 218200413 18971503 550621733 852262738 293614325 96961953 4320692 552408301\n817323991 419672037 298275641 886978674 315414176 718069458 213091625 660492479 945767511 4680756 627979506 620803710 845705086 391647220 782359845\n730038719 468526489 373439141 629876104 321526375 301505287 374849065 526958010 104169067 239365184 223711334 637414816 942225326 33778817 967751636\n78370019 162913077 91791497 80251193 308853121 742142354 110067814 941257965 35756962 396296246 425925191 555081953 545789219 327792073 94527517\n107048018 817875788 320988683 518351553 131374131 993472847 62258246 704210074 805931083 397750862 156530660 939524425 95863799 909411903 432062625\n341297821 817472450 66401391 193669209 339483479 722444901 921391783 375480446 64165248 812136087 949369726 752078374 119825184 27503937 571265221\n384206399 877333157 829307519 654459689 739023207 984665274 790548671 439319853 341795343 427990375 158028395 331168513 139282593 287231313 817643547\n337125808 105329309 106182545 13884436 969179158 295751014 135998346 482798174 35385979 733009744 622995045 42918559 881377875 179010343 471242126\n798007068 780905635 438328906 356225407 441522097 611067647 461530593 50330288 243570457 164303948 565441344 283490441 176842198 889742836 587074311\n257041334 473203581 756554108 895800727 643360748 608444078 31461959 648455883 576022720 398440055 59279542 611445274 338667323 125053494 990665224\n407487758 244790780 824297342 635982290 122469743 330557764 935100265 477486801 983795723 42321374 519291550 364436538 846563262 586395403 962378154\n",
+      "output": "1384180363\n",
+      "hidden": true
+    },
+    {
+      "input": "15\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000 1000000000\n",
+      "output": "15000000000\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Trying every assignment is n! possibilities: 15! is over a trillion.",
+    "What do you need to know to place worker i? Only which tasks are already taken, not who took which. That is a subset of tasks: 2^n possibilities.",
+    "dp[mask] is the cheapest way to hand the tasks in mask to the first popcount(mask) workers. The next worker is i = popcount(mask); try each free task j and update dp[mask | (1 << j)]."
+  ],
+  "editorial": "The state `mask` records which tasks are taken; the number of set bits `i` tells which worker is placed next, so no extra dimension is needed. `dp[mask]` is the minimum cost for the first `i` workers to take exactly the tasks in `mask`, and `dp[mask | 1 << j] = min(dp[mask] + cost[i][j])` over free tasks `j`. Iterating masks in increasing numeric order is valid because adding a bit always increases the number. There are `2^n` states with `n` transitions each: `O(2^n * n)` instead of `n!`. The Hungarian algorithm solves the same problem in `O(n^3)` and scales much further, but bitmask DP is the standard tool when `n` is at most about `20` or when the state needs extra information.",
+  "complexity": {
+    "time": "O(n^2)",
+    "space": "O(2^n)"
+  },
+  "starter": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn = int(data[0])\n# cost[i][j] is data[1 + i * n + j]\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0];\n// cost[i][j] is tok[1 + i * n + j]\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        // read n, then the n by n cost matrix\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read n, then the n by n cost matrix\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn = int(data[0])\ncost = [[int(data[1 + i * n + j]) for j in range(n)] for i in range(n)]\nINF = float(\"inf\")\ndp = [INF] * (1 << n)         # dp[mask] = cheapest way to give the tasks in mask to the first popcount(mask) workers\ndp[0] = 0\nfor mask in range(1 << n):\n    i = bin(mask).count(\"1\")  # the next worker to place\n    if i == n:\n        continue\n    for j in range(n):\n        if not mask >> j & 1:\n            nm = mask | 1 << j\n            if dp[mask] + cost[i][j] < dp[nm]:\n                dp[nm] = dp[mask] + cost[i][j]\nprint(dp[(1 << n) - 1])\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0];\nconst cost = [];\nfor (let i = 0; i < n; i++) cost.push(tok.slice(1 + i * n, 1 + (i + 1) * n));\nconst full = (1 << n) - 1;\nconst dp = new Array(full + 1).fill(Infinity);\ndp[0] = 0;\nfor (let mask = 0; mask <= full; mask++) {\n  let i = 0;\n  for (let t = mask; t; t &= t - 1) i++;\n  if (i === n) continue;\n  for (let j = 0; j < n; j++) {\n    if (!((mask >> j) & 1)) {\n      const nm = mask | (1 << j);\n      if (dp[mask] + cost[i][j] < dp[nm]) dp[nm] = dp[mask] + cost[i][j];\n    }\n  }\n}\nconsole.log(dp[full]);\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int n = sc.nextInt();\n        long[][] cost = new long[n][n];\n        for (int i = 0; i < n; i++)\n            for (int j = 0; j < n; j++) cost[i][j] = sc.nextLong();\n        int full = (1 << n) - 1;\n        long INF = Long.MAX_VALUE / 4;\n        long[] dp = new long[full + 1];\n        Arrays.fill(dp, INF);\n        dp[0] = 0;\n        for (int mask = 0; mask <= full; mask++) {\n            int i = Integer.bitCount(mask);\n            if (i == n) continue;\n            for (int j = 0; j < n; j++) {\n                if ((mask >> j & 1) == 0) {\n                    int nm = mask | (1 << j);\n                    dp[nm] = Math.min(dp[nm], dp[mask] + cost[i][j]);\n                }\n            }\n        }\n        System.out.println(dp[full]);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n;\n    scanf(\"%d\", &n);\n    vector<vector<long long>> cost(n, vector<long long>(n));\n    for (auto& row : cost) for (auto& x : row) scanf(\"%lld\", &x);\n    int full = (1 << n) - 1;\n    const long long INF = LLONG_MAX / 4;\n    vector<long long> dp(full + 1, INF);\n    dp[0] = 0;\n    for (int mask = 0; mask <= full; mask++) {\n        int i = __builtin_popcount(mask);\n        if (i == n) continue;\n        for (int j = 0; j < n; j++) {\n            if (!(mask >> j & 1)) {\n                int nm = mask | (1 << j);\n                dp[nm] = min(dp[nm], dp[mask] + cost[i][j]);\n            }\n        }\n    }\n    printf(\"%lld\\n\", dp[full]);\n    return 0;\n}\n"
+  }
+}
