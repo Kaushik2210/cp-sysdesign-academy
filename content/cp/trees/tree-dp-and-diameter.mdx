@@ -1,0 +1,198 @@
+---
+title: Tree DP and the Diameter
+track: cp
+module: trees
+order: 3
+difficulty: medium
+estMinutes: 35
+prerequisites: [cp/trees/euler-tour-subtree-queries, cp/dynamic-programming/knapsack]
+tags: [trees, tree-dp, diameter, dp]
+type: lesson
+problems: [m15-longest-chain]
+furtherReading:
+  - title: CSES Problem Set, Tree Diameter
+    url: https://cses.fi/problemset/task/1131
+  - title: CSES Problem Set, Tree Distances I
+    url: https://cses.fi/problemset/task/1132
+  - title: AtCoder Educational DP Contest, Independent Set
+    url: https://atcoder.jp/contests/dp/tasks/dp_p
+---
+
+## Intuition
+
+On an array, dynamic programming walks left to right. On a **tree** the natural order is **from the leaves up**: a vertex's answer is built from the answers of its children, because the subtrees of different children do not overlap.
+
+Example: the **diameter**, the longest path between any two vertices. Every path in a rooted tree has a unique **highest vertex**, where it stops going up and starts going down. So the longest path whose top is `v` simply glues together the two longest branches hanging below `v`.
+
+## Definition
+
+Root the tree. Define for each vertex `v`:
+
+```text
+down[v] = length of the longest path that starts at v and goes only downward   (0 for a leaf)
+```
+
+If `v` has children `c1, c2, ...` joined by edges of length `w1, w2, ...`, then
+
+```text
+down[v]        = max( down[c] + w )               over all children c   (0 if there are none)
+through[v]     = sum of the two largest values of (down[c] + w)         (one value if there is only one child)
+diameter       = max( through[v] )                over all vertices v
+```
+
+Because the order is leaves first, each vertex is processed once: `O(n)`.
+
+### No recursion when parents have smaller numbers
+
+If the input guarantees `p[v] < v`, then children have **larger** numbers than their parent. Walking `v = n, n-1, ..., 2` processes every child before its parent. For each `v`, compute its branch `down[v] + w[v]` and push it to its parent:
+
+```text
+best = max(best, down[p] + branch)     # pair it with the best branch of p seen so far
+down[p] = max(down[p], branch)
+```
+
+Keeping only the best branch seen so far is enough to find the best *pair*: when the second-best arrives, it is paired with the best.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+down = [0] * (n + 1)
+best = 0
+for v in range(n, 1, -1):              # children are numbered after their parent
+    p = parent[v]
+    branch = down[v] + weight[v]
+    best = max(best, down[p] + branch)
+    down[p] = max(down[p], branch)
+print(best)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> down(n + 1, 0);
+long long best = 0;
+for (int v = n; v >= 2; v--) {
+    int p = parent[v];
+    long long branch = down[v] + weight[v];
+    best = max(best, down[p] + branch);
+    down[p] = max(down[p], branch);
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] down = new long[n + 1];
+long best = 0;
+for (int v = n; v >= 2; v--) {
+    int p = parent[v];
+    long branch = down[v] + weight[v];
+    best = Math.max(best, down[p] + branch);
+    down[p] = Math.max(down[p], branch);
+}
+```
+
+</Tab>
+</Tabs>
+
+For a general tree given as an edge list (any numbering), use an iterative DFS order and process it in reverse. Run both ways below and compare with the classic two-search method:
+
+<CodeRunner language="python" code={`import random
+
+def diameter_dp(n, parent, weight):
+    down = [0] * (n + 1)
+    best = 0
+    for v in range(n, 1, -1):
+        p = parent[v]
+        branch = down[v] + weight[v]
+        best = max(best, down[p] + branch)
+        down[p] = max(down[p], branch)
+    return best
+
+def diameter_two_searches(n, parent, weight):
+    adj = [[] for _ in range(n + 1)]
+    for v in range(2, n + 1):
+        adj[v].append((parent[v], weight[v]))
+        adj[parent[v]].append((v, weight[v]))
+    def farthest(s):
+        dist = {s: 0}
+        stack = [s]
+        while stack:
+            u = stack.pop()
+            for v, c in adj[u]:
+                if v not in dist:
+                    dist[v] = dist[u] + c
+                    stack.append(v)
+        node = max(dist, key=dist.get)
+        return node, dist[node]
+    a, _ = farthest(1)
+    return farthest(a)[1]
+
+#      1
+#   3/   \\4
+#   2     3        edges: 2-1 (3), 3-1 (4), 4-2 (2), 5-2 (5)
+parent = [0, 0, 1, 1, 2, 2]
+weight = [0, 0, 3, 4, 2, 5]
+print("diameter:", diameter_dp(5, parent, weight))
+
+random.seed(9)
+for _ in range(300):
+    n = random.randint(1, 30)
+    parent = [0, 0] + [random.randint(1, v - 1) for v in range(2, n + 1)]
+    weight = [0, 0] + [random.randint(1, 20) for _ in range(2, n + 1)]
+    assert diameter_dp(n, parent, weight) == diameter_two_searches(n, parent, weight)
+print("300 random trees: the DP and the two-search method agree")
+`} />
+
+## Two-search method and when it fails
+
+Pick any vertex, find the farthest vertex `a` from it, then the farthest vertex from `a`: that distance is the diameter. This is short and works for **non-negative** weights. The DP is slightly longer but also adapts to other questions (counts, negative weights, "through the vertex" constraints), so it is worth knowing.
+
+## The same pattern for other problems
+
+| problem | state per vertex | combine |
+| --- | --- | --- |
+| diameter | `down[v]` | best two child branches |
+| maximum independent set (no two adjacent chosen) | `take[v]`, `skip[v]` | `take[v] = val + sum(skip[c])`, `skip[v] = sum(max(take[c], skip[c]))` |
+| subtree size, depth sum | `size[v]` | sum over children |
+| number of vertices at distance `k` | array of counts | merge by shifting (small-to-large) |
+| farthest vertex from every vertex ("rerooting") | `down[v]` and `up[v]` | second pass from the root downwards |
+
+<Callout type="tip" title="Process in reverse BFS or DFS order">
+Whatever the input numbering, a **parent-before-child order** (from BFS or an iterative DFS) read backwards gives a **child-before-parent order**. Iterate over that list instead of recursing.
+</Callout>
+
+## Pitfalls
+
+1. **Recursion on deep trees.** A path with `10^5` vertices crashes recursive solutions in Python; use the reverse order.
+2. **Counting a branch twice.** When combining, pair the new branch with the best of the earlier branches *before* updating the maximum.
+3. **Forgetting that a path may end at the top vertex.** `down[p]` starts at `0`, so a single branch also forms a path.
+4. **Mixing edges and vertices.** Count the length of a path in edges (or sum of weights); a path with `k` vertices has `k - 1` edges.
+5. **Using the two-search trick with negative weights.** It relies on non-negative lengths.
+6. **Overflow.** Sums of up to `n` weights of `10^9` need 64-bit integers.
+
+## Practice
+
+<Problem id="m15-longest-chain" />
+
+## Problem ladder
+
+- [Tree Diameter](https://cses.fi/problemset/task/1131) (CSES): the plain version.
+- [Tree Distances I](https://cses.fi/problemset/task/1132) (CSES): the farthest vertex from every vertex, via the diameter's endpoints.
+- [Diameter of Binary Tree](https://leetcode.com/problems/diameter-of-binary-tree/) (LeetCode, easy): the same DP on a binary tree.
+- [House Robber III](https://leetcode.com/problems/house-robber-iii/) (LeetCode, medium): independent set on a tree.
+- [Independent Set](https://atcoder.jp/contests/dp/tasks/dp_p) (AtCoder DP Contest P): counting independent sets on a tree.
+
+## Quiz
+
+<Quiz id="cp-m15-tree-dp" tags={["trees", "tree-dp", "diameter"]} questions={[
+  { type: "mcq", q: "In a rooted tree, what is special about the highest vertex of a path?", options: ["It is always the root", "The path stops going up and starts going down there", "It has the largest degree", "It is always a leaf"], answer: 1, explain: "Every path has exactly one turning point, and the longest path with that top uses the two longest branches below it." },
+  { type: "multi", q: "Which statements about the DP for the diameter are true?", options: ["down[v] is the longest downward path starting at v", "It processes children before their parent", "The answer is down[root]", "The time is O(n)"], answer: [0, 1, 3], explain: "The diameter is the maximum over all vertices of the sum of their two best branches, not just down[root]." },
+  { type: "predict", q: "A vertex has two children branches of lengths 4 and 7 below it. What is the longest path with that vertex as its top?", code: "branches = [4, 7]\nprint(sum(sorted(branches)[-2:]))", options: ["7", "11", "4", "3"], answer: 1, explain: "Join the two longest branches: 4 + 7 = 11." },
+  { type: "mcq", q: "Why is a reversed parent-before-child order useful?", options: ["It gives the shortest path", "It provides a child-before-parent order without recursion", "It sorts vertices by weight", "It removes cycles"], answer: 1, explain: "Reading a BFS or DFS order backwards processes all descendants first, so no recursion is needed." }
+]} />
