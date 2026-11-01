@@ -16,9 +16,13 @@
     { "kind": "lesson", "ref": "sd/queues-and-streaming/stream-processing-basics" },
     { "kind": "lesson", "ref": "sd/scalability/distributed-rate-limiting" },
     { "kind": "lesson", "ref": "sd/scalability/load-shedding-and-bulkheads" },
+    { "kind": "lesson", "ref": "sd/distributed-theory/cap-theorem-and-pacelc" },
+    { "kind": "lesson", "ref": "sd/distributed-theory/consistency-models-and-quorums" },
+    { "kind": "lesson", "ref": "sd/distributed-theory/time-clocks-and-ordering" },
+    { "kind": "lesson", "ref": "sd/distributed-theory/distributed-transactions-2pc-and-sagas" },
     { "kind": "page", "title": "Glossary: consensus, quorum, split brain, fencing token", "href": "/glossary/", "note": "Search these terms and follow the related links." },
     { "kind": "project", "title": "A replicated key-value store that survives failures", "brief": "Implement a leader-based replicated store (the MIT labs are a good scaffold). Add a test harness that kills nodes, delays and drops messages, and checks that acknowledged writes are never lost and reads are linearizable where you promise it.", "deliverable": "A repository with the store, a fault-injection test suite and a short document explaining which guarantees you provide and which you do not." },
-    { "kind": "planned", "title": "Consensus, coordination, microservice patterns, search and security modules", "note": "SD modules 11 to 16 are not written on this site yet. The papers and course above cover the same ground in the meantime." }
+    { "kind": "planned", "title": "Consensus, microservice patterns, search and security modules", "note": "SD modules 12 to 16 are not written on this site yet. The papers and course above cover the same ground in the meantime." }
   ],
   "exit": [
     "You can explain how Raft elects a leader and why a committed entry cannot be lost.",
