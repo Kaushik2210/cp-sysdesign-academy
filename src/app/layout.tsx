@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { Cursor } from "@/components/fx/Cursor";
 import { ThemeProvider } from "@/components/layout/theme";
+import "@fontsource-variable/bricolage-grotesque";
+import "@fontsource/space-mono/400.css";
+import "@fontsource/space-mono/700.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -24,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Header />
           <div id="main">{children}</div>
           <Footer />
+          <Cursor />
         </ThemeProvider>
       </body>
     </html>

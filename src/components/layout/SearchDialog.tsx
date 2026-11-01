@@ -107,7 +107,7 @@ export function SearchDialog() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Search (Ctrl+K)"
-        className="flex min-h-11 items-center gap-2 rounded-full border border-border px-4 text-sm text-muted-fg transition hover:border-fg hover:text-fg"
+        className="flex min-h-11 items-center gap-2 rounded-full border border-border bg-card px-4 text-sm font-semibold shadow-[3px_3px_0_hsl(var(--shadow))] transition hover:-translate-y-0.5 hover:bg-yellow hover:text-[#0d0d0d]"
       >
         <Search size={14} aria-hidden />
         <span className="hidden sm:inline">Search</span>

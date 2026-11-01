@@ -100,8 +100,16 @@ export function HeroPlayground() {
   return (
     <section
       aria-label="Sorting playground"
-      className="relative rounded-3xl border border-border bg-card/70 p-4 shadow-2xl ring-glow backdrop-blur-md sm:p-5"
+      className="win relative"
     >
+      <div className="win-bar" aria-hidden="true">
+        <span className="win-dot bg-[hsl(var(--pink))]" />
+        <span className="win-dot bg-white" />
+        <span className="win-dot bg-[hsl(var(--mint))]" />
+        <span className="ml-2">sorting.exe</span>
+        <span className="ml-auto">— □ ×</span>
+      </div>
+      <div className="p-4 sm:p-5">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <span className="mr-auto text-xs font-semibold uppercase tracking-widest text-muted-fg">Live demo · try it</span>
         {(Object.keys(ALGOS) as AlgoKey[]).map((k) => (
@@ -173,6 +181,7 @@ export function HeroPlayground() {
             className="h-11 flex-1 accent-[hsl(var(--hot))]"
           />
         </label>
+      </div>
       </div>
     </section>
   );

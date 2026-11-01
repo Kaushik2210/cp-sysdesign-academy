@@ -21,6 +21,8 @@
         "verify:all": "tsx scripts/verify-solutions.ts && tsx scripts/verify-templates.ts"
     },
     "dependencies": {
+        "@fontsource-variable/bricolage-grotesque": "^5.3.0",
+        "@fontsource/space-mono": "^5.3.0",
         "@monaco-editor/react": "^4.7.0",
         "@xyflow/react": "^12.12.0",
         "clsx": "^2.1.1",

@@ -21,7 +21,7 @@ export const NAV: { href: string; label: string }[] = [
   { href: "/dashboard/", label: "Dashboard" },
 ];
 
-/** Main navigation pills. The current section is marked with aria-current and a solid blue fill. */
+/** Main navigation pills. The current section is marked with aria-current and a solid blue fill and a hard shadow. */
 export function NavLinks() {
   const raw = usePathname() ?? "/";
   // Static export with trailingSlash: normalise so "/cp" and "/cp/" both match.
@@ -36,8 +36,8 @@ export function NavLinks() {
             href={n.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full border px-3.5 text-[13px] font-medium transition-colors",
-              active ? "border-accent bg-accent text-accent-fg" : "border-transparent text-muted-fg hover:border-border hover:text-fg",
+              "nav-link inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full px-3.5 text-[13px] font-bold",
+              active ? "border-[#0d0d0d] bg-accent text-accent-fg shadow-[3px_3px_0_hsl(var(--shadow))]" : "text-fg",
             )}
           >
             {n.label}

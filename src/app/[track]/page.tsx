@@ -34,9 +34,8 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
       <header className="border-b border-border pb-8" data-tint={tint}>
-        <h1 className="text-4xl font-medium leading-[1.05] tracking-tight sm:text-6xl">
-          <span aria-hidden="true" className="mr-3 text-accent">—</span>
-          {meta.title}
+        <h1 className="text-5xl font-extrabold leading-[0.95] tracking-[-0.04em] sm:text-7xl">
+          <span className="mark">{meta.title}</span>
         </h1>
         <p className="mt-4 max-w-2xl text-lg text-muted-fg">{meta.tagline}</p>
         <div className="mt-6 flex flex-wrap items-center gap-x-8 gap-y-4">
@@ -51,8 +50,10 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
       </header>
       {levels.map((level, li) => (
         <section key={level} className="mt-12">
-          <h2 className="mb-4 flex items-baseline gap-3 text-xl font-medium tracking-tight">
-            <span aria-hidden="true" className="text-sm tabular-nums text-muted-fg">{String(li + 1).padStart(2, "0")}</span>
+          <h2 className="mb-5 flex items-center gap-3 text-2xl font-extrabold tracking-tight">
+            <span aria-hidden="true" className={`sticker ${["pop-pink", "pop-yellow", "pop-mint", "pop-sky", "pop-orange"][li % 5]}`} style={{ ["--r" as string]: `${li % 2 ? 3 : -4}deg` }}>
+              {String(li + 1).padStart(2, "0")}
+            </span>
             {level}
           </h2>
           <ul className="grid gap-4 sm:grid-cols-2">

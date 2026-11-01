@@ -40,7 +40,7 @@ export function Spotlight({ children, href, tint = "accent", className, tilt = 0
   };
 
   const props = {
-    className: cn("spotlight rounded-xl border border-border bg-card", className),
+    className: cn("spotlight group rounded-2xl border border-border", !className?.includes("pop-") && "bg-card", className),
     style: { "--tint": `var(--${tint})` } as CSSProperties,
     onPointerMove: onMove,
     onPointerLeave: onLeave,

@@ -7,6 +7,8 @@ import { Spotlight, type Tint } from "@/components/fx/Spotlight";
 import { useProgress } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
+const POPS = ["pop-yellow", "pop-pink", "pop-mint", "pop-sky", "pop-orange", "pop-lilac"];
+
 export interface ModuleCardData {
   order: number;
   title: string;
@@ -28,12 +30,12 @@ export function ModuleCard({ module: m, tint }: { module: ModuleCardData; tint: 
       <div className="flex items-start gap-3">
         <span
           aria-hidden="true"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-fg text-sm font-medium"
+          className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl border-2 border-[#0d0d0d] text-base font-extrabold text-[#0d0d0d] shadow-[2px_2px_0_#0d0d0d]", POPS[m.order % POPS.length])}
         >
           {m.order}
         </span>
         <div className="min-w-0">
-          <h3 className="font-bold leading-snug">{m.title}</h3>
+          <h3 className="text-lg font-extrabold leading-snug">{m.title}</h3>
           <p className="mt-0.5 text-xs text-muted-fg">
             {m.lessons.length} lessons · about {minutes} min
           </p>
@@ -46,9 +48,9 @@ export function ModuleCard({ module: m, tint }: { module: ModuleCardData; tint: 
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
-        className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"
+        className="mt-3 h-1.5 overflow-hidden rounded-full border-2 border-border bg-muted"
       >
-        <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${pct}%` }} />
+        <div className="h-full bg-[hsl(var(--mint))] transition-[width] duration-700" style={{ width: `${pct}%` }} />
       </div>
       <ul className="mt-3 space-y-0.5 text-sm">
         {m.lessons.map((l) => {

@@ -27,3 +27,13 @@ The aurora/gradient/glow look was replaced with a flat gallery style inspired by
 - **No web fonts**: the static export stays fast and offline friendly.
 - **Footer is always dark** so contrast holds in both themes.
 - **Code blocks** fall back to ink when a token colour variable is absent (plain `text` blocks were near invisible in light mode).
+
+## Maximalist arcade-zine pass (2026-11-01, supersedes the flat gallery pass above)
+
+Pushed further on request, drawing on neo-brutalist and colour-blocked award sites. Choices worth knowing:
+
+- **System:** cream paper (near-black violet in dark), ink borders (cream in dark), six pop fills (pink, yellow, mint, orange, lilac, sky) always paired with fixed `#0d0d0d` text so contrast holds in both themes; electric blue stays the interactive accent. Every `.border` is 2px, and `rounded-xl/2xl/3xl` bordered cards get a hard offset shadow automatically (opt out with `.no-shadow`).
+- **Type:** Bricolage Grotesque (variable) for text and display, Space Mono for code, both self-hosted via `@fontsource` so the static export has no runtime font requests.
+- **Motifs:** film grain overlay, tilted tape marquees, sticker labels, retro-OS window chrome on the live demo, a spinning badge, a scroll-driven giant word band, per-letter hover wave, a blend-mode cursor blob, and nav links that flash a different colour on hover.
+- **Accessibility kept:** all motion (marquees, spin, wobble, cursor, scroll word) is disabled for `prefers-reduced-motion`; the cursor blob only runs for fine pointers and never replaces the real cursor; decorative elements are `aria-hidden` and `pointer-events: none` (a badge once covered the demo's play button, so decorative overlays must never be interactive); the visual "&" in the headline is CSS-generated with the real word "and" kept for screen readers.
+- **Inline code** is ink on yellow in both themes (cream-on-translucent-yellow failed contrast in dark).

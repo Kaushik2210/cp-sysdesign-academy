@@ -10,7 +10,7 @@ export function ScrollProgress() {
   return (
     <motion.div
       aria-hidden="true"
-      className="no-print absolute inset-x-0 bottom-[-1px] h-[2px] origin-left bg-accent"
+      className="no-print absolute inset-x-0 bottom-[-3px] h-[3px] origin-left bg-[hsl(var(--pink))]"
       style={{ scaleX: reduce ? scrollYProgress : x }}
     />
   );
