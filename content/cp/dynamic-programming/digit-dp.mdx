@@ -1,0 +1,237 @@
+---
+title: Digit DP
+track: cp
+module: dynamic-programming
+order: 8
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack, cp/math-basics/combinatorics-basics]
+tags: [dp, digit-dp, counting, tight-bound]
+type: lesson
+problems: [m13-lucky-sums]
+furtherReading:
+  - title: cp-algorithms, Digit DP (count numbers by digit properties)
+    url: https://cp-algorithms.com/dynamic_programming/digit-dp.html
+  - title: CSES Problem Set, Counting Numbers
+    url: https://cses.fi/problemset/task/2220
+  - title: LeetCode, Numbers At Most N Given Digit Set
+    url: https://leetcode.com/problems/numbers-at-most-n-given-digit-set/
+---
+
+## Intuition
+
+"How many integers between `a` and `b` have digit sum divisible by 7?" with `b` up to `10^18`. You cannot loop over a quintillion numbers, but a number is just a short string of digits, and *how many strings have a given property* is a counting problem that DP handles well.
+
+Two ideas make it work:
+
+1. **Prefix counting.** Count the good numbers in `[0, N]` as `f(N)`. Then any range is `f(b) - f(a - 1)`.
+2. **Tight versus free.** Write `N` digit by digit. A number `x ≤ N` agrees with `N` on some prefix, then at the next position takes a **smaller** digit. From that moment the rest of `x` is **free**: any digits at all. The number of free tails with a given property depends only on how many positions remain, not on `N`, so we precompute it.
+
+## Definition
+
+Let `N` have `L` digits and let `K` be the modulus. Precompute
+
+```text
+cnt[r][s] = number of digit strings of length r (leading zeros allowed) whose digit sum ≡ s (mod K)
+
+cnt[0][0] = 1
+cnt[r][(s + d) mod K] += cnt[r-1][s]        for every digit d in 0..9
+```
+
+Now walk the digits of `N` from the left. Keep `pre`, the digit sum of the prefix that still matches `N`. At position `i` (so `r = L - 1 - i` positions remain after it), for every digit `d` **smaller** than `N[i]`:
+
+```text
+the tail is free; we need  pre + d + (tail sum) ≡ 0 (mod K)
+so add cnt[r][ (-(pre + d)) mod K ]
+```
+
+Then set `pre += N[i]` and continue along the tight path. After the last digit add 1 if `N` itself qualifies (`pre mod K == 0`).
+
+Cost per query: building `cnt` is `O(L · K · 10)`, the walk is `O(L · 10)`. For `L ≤ 18` and small `K` that is tiny.
+
+## Example
+
+Count numbers in `[0, 25]` with digit sum divisible by 3. Digits `2, 5`, `K = 3`.
+
+```text
+position 0 (digit 2, 1 digit remains, pre = 0):
+    d = 0 -> tail must have sum ≡ 0: cnt[1][0] = 4   (0, 3, 6, 9)
+    d = 1 -> tail must have sum ≡ 2: cnt[1][2] = 3   (2, 5, 8)
+pre = 2
+position 1 (digit 5, nothing remains):
+    d = 0..4 -> tail is empty; need (2 + d) ≡ 0 (mod 3): d = 1 (21) and d = 4 (24) -> 2 numbers
+pre = 7;  7 mod 3 != 0 so 25 itself is not counted
+total = 4 + 3 + 2 = 9      (0, 3, 6, 9, 12, 15, 18, 21, 24)
+```
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def f(N, K):                                   # good numbers in [0, N]
+    if N < 0: return 0
+    digs = [int(c) for c in str(N)]
+    L = len(digs)
+    cnt = [[0] * K for _ in range(L)]
+    cnt[0][0] = 1
+    for r in range(1, L):
+        for s in range(K):
+            if cnt[r - 1][s]:
+                for d in range(10):
+                    cnt[r][(s + d) % K] += cnt[r - 1][s]
+    total = pre = 0
+    for i, dg in enumerate(digs):
+        r = L - 1 - i
+        for d in range(dg):                    # smaller digit here, free tail of length r
+            total += cnt[r][(-(pre + d)) % K]
+        pre += dg
+    return total + (1 if pre % K == 0 else 0)  # N itself
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+long long f(long long N, int K) {
+    if (N < 0) return 0;
+    string s = to_string(N);
+    int L = s.size();
+    vector<vector<long long>> cnt(L, vector<long long>(K, 0));
+    cnt[0][0] = 1;
+    for (int r = 1; r < L; r++)
+        for (int t = 0; t < K; t++)
+            if (cnt[r-1][t])
+                for (int d = 0; d < 10; d++) cnt[r][(t + d) % K] += cnt[r-1][t];
+    long long total = 0;
+    int pre = 0;
+    for (int i = 0; i < L; i++) {
+        int dg = s[i] - '0', r = L - 1 - i;
+        for (int d = 0; d < dg; d++) total += cnt[r][(((-(pre + d)) % K) + K) % K];
+        pre += dg;
+    }
+    return total + (pre % K == 0);
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long f(long N, int K) {
+    if (N < 0) return 0;
+    String s = Long.toString(N);
+    int L = s.length();
+    long[][] cnt = new long[L][K];
+    cnt[0][0] = 1;
+    for (int r = 1; r < L; r++)
+        for (int t = 0; t < K; t++)
+            if (cnt[r-1][t] != 0)
+                for (int d = 0; d < 10; d++) cnt[r][(t + d) % K] += cnt[r-1][t];
+    long total = 0;
+    int pre = 0;
+    for (int i = 0; i < L; i++) {
+        int dg = s.charAt(i) - '0', r = L - 1 - i;
+        for (int d = 0; d < dg; d++) total += cnt[r][(((-(pre + d)) % K) + K) % K];
+        pre += dg;
+    }
+    return total + (pre % K == 0 ? 1 : 0);
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it against a brute force, and try the answer for a huge range:
+
+<CodeRunner language="python" code={`import random
+
+def f(N, K):
+    if N < 0:
+        return 0
+    digs = [int(c) for c in str(N)]
+    L = len(digs)
+    cnt = [[0] * K for _ in range(L)]
+    cnt[0][0] = 1
+    for r in range(1, L):
+        for s in range(K):
+            if cnt[r - 1][s]:
+                for d in range(10):
+                    cnt[r][(s + d) % K] += cnt[r - 1][s]
+    total = pre = 0
+    for i, dg in enumerate(digs):
+        r = L - 1 - i
+        for d in range(dg):
+            total += cnt[r][(-(pre + d)) % K]
+        pre += dg
+    return total + (1 if pre % K == 0 else 0)
+
+def brute(a, b, k):
+    return sum(1 for x in range(a, b + 1) if sum(map(int, str(x))) % k == 0)
+
+print("good numbers in [0, 25] for K = 3:", f(25, 3), "(worked example above says 9)")
+
+random.seed(8)
+for _ in range(1500):
+    a = random.randint(1, 5000)
+    b = random.randint(a, 6000)
+    k = random.randint(1, 25)
+    assert f(b, k) - f(a - 1, k) == brute(a, b, k), (a, b, k)
+print("1500 random ranges agree with counting one number at a time")
+
+print("1 .. 10^18 with digit sum divisible by 9:", f(10**18, 9) - f(0, 9))
+print("(a number is divisible by 9 exactly when its digit sum is, so this is 10^18 // 9 =", 10**18 // 9, ")")
+`} />
+
+## The general recipe: state = (position, what you remember, tight)
+
+The walk above avoids a big table by exploiting that the free tails depend only on the remaining length. When the property needs more memory, use the classic memoised form:
+
+```text
+count(pos, remembered_state, tight, started):
+    if pos == L: return 1 if remembered_state is good else 0
+    limit = digit[pos] if tight else 9
+    total = 0
+    for d in 0..limit:
+        total += count(pos + 1, update(remembered_state, d), tight and d == limit, started or d > 0)
+```
+
+| property | remembered state |
+| --- | --- |
+| digit sum divisible by `K` | sum mod `K` |
+| no two adjacent equal digits | the previous digit |
+| contains a given digit | a boolean |
+| number of 7s equals number of 4s | difference of the counts (offset to be non-negative) |
+| divisible by `K` | the number mod `K` (build `value*10 + d`) |
+| leading zeros matter (counting distinct digits) | add the `started` flag so leading zeros do not count |
+
+Memoise on `(pos, state, tight, started)`; the `tight = true` branch only ever has one path, so the table is small. Without memoisation the same code is exponential.
+
+## Pitfalls
+
+1. **`f(a - 1)` when `a = 0` or `1`.** Make `f(-1) = 0`, and remember that `0` itself is counted by `f` (it cancels in a difference).
+2. **Forgetting `N` itself.** The walk only counts numbers strictly smaller along the tight path; add the final check.
+3. **Negative modulus.** In C++ and Java `(-x) % K` can be negative; normalise with `((x % K) + K) % K`.
+4. **Leading zeros.** Strings with leading zeros represent shorter numbers, which is fine for digit sums but wrong for "number of distinct digits" or "adjacent digits differ": track `started`.
+5. **Overflow.** Counts reach `10^18`; use 64-bit integers (and 128-bit or big integers beyond that).
+6. **Memoising with `tight` omitted.** The answer depends on `tight`; leaving it out of the memo key mixes two different subproblems.
+
+## Practice
+
+<Problem id="m13-lucky-sums" />
+
+## Problem ladder
+
+- [Counting Numbers](https://cses.fi/problemset/task/2220) (CSES): count numbers in a range with no two adjacent equal digits.
+- [Numbers At Most N Given Digit Set](https://leetcode.com/problems/numbers-at-most-n-given-digit-set/) (LeetCode, hard): the tight/free split in its purest form.
+- [Count Numbers with Unique Digits](https://leetcode.com/problems/count-numbers-with-unique-digits/) (LeetCode, medium): a gentle warm-up.
+
+## Quiz
+
+<Quiz id="cp-m13-digit-dp" tags={["dp", "digit-dp"]} questions={[
+  { type: "mcq", q: "How do you count good numbers in the range [a, b] with a prefix-counting function f?", options: ["f(b) + f(a)", "f(b) - f(a - 1)", "f(b - a)", "f(b) * f(a)"], answer: 1, explain: "f(b) counts [0, b] and f(a - 1) counts [0, a - 1]; the difference is exactly [a, b]." },
+  { type: "mcq", q: "What does 'tight' mean in digit DP?", options: ["The number has few digits", "All digits chosen so far equal the digits of N, so the next digit is capped by N's digit", "The digit sum is minimal", "The state table is full"], answer: 1, explain: "While tight, the next digit cannot exceed N's digit; once a smaller digit is placed the rest is free." },
+  { type: "predict", q: "Numbers in [0, 9] whose digit sum is divisible by 3 are 0, 3, 6, 9. What is cnt[1][0] for K = 3?", code: "K = 3\nprint(sum(1 for d in range(10) if d % K == 0))", options: ["1", "3", "4", "10"], answer: 2, explain: "Digit strings of length 1 with sum ≡ 0 mod 3 are 0, 3, 6, 9: four of them." },
+  { type: "multi", q: "Which are common digit-DP pitfalls?", options: ["Forgetting to count N itself", "Negative remainders in C++/Java", "Counting leading zeros as real digits when it matters", "Using prefix sums"], answer: [0, 1, 2], explain: "Prefix sums are not a pitfall of the technique itself." }
+]} />
