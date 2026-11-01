@@ -1,0 +1,270 @@
+---
+title: Rerooting
+track: cp
+module: trees
+order: 4
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/trees/tree-dp-and-diameter]
+tags: [trees, rerooting, tree-dp, dfs, distances]
+type: lesson
+problems: [m15-distance-sums]
+furtherReading:
+  - title: cp-algorithms, Lowest Common Ancestor (rooted tree basics)
+    url: https://cp-algorithms.com/graph/lca.html
+  - title: CSES Problem Set, Tree Distances II
+    url: https://cses.fi/problemset/task/1133
+  - title: CSES Problem Set, Tree Distances I
+    url: https://cses.fi/problemset/task/1132
+---
+
+## Intuition
+
+[Tree DP](/cp/trees/tree-dp-and-diameter/) answers a question **for one chosen root**: root the tree at 1 and compute something per subtree. But some questions ask the answer **for every vertex as the root**: "for each hut, the sum of its distances to all other huts." Rooting at each vertex in turn costs `O(n²)`.
+
+**Rerooting** gets all `n` answers in `O(n)`. Compute the answer for one root, then **move the root across an edge**. Moving from a parent `p` to its child `c` changes only a small, easy-to-describe part of the picture: the subtree of `c` gets closer, everything else gets farther. If you can update the answer in `O(1)`, you can sweep the whole tree.
+
+## The two-pass pattern
+
+1. **Down pass (bottom-up):** the ordinary tree DP rooted at vertex 1. For each `v`, `down[v]` describes the subtree of `v` only.
+2. **Up pass (top-down):** compute `ans[v]` for every vertex as the root, from `ans[parent]` plus information about everything *outside* `v`'s subtree.
+
+Both passes visit each vertex once, so the total is `O(n)`. Use an explicit order (BFS order from the root, then walk it forwards and backwards) so deep paths do not overflow the stack.
+
+## Worked problem: sum of distances
+
+For every vertex `v`, find `S(v) = Σ dist(v, u)` over all `u`.
+
+Root at 1. Let `sz[v]` be the subtree size and `down[v]` the sum of distances from `v` to the vertices **inside its subtree**:
+
+```text
+down[v] = Σ over children c of ( down[c] + sz[c] )        every vertex in c's subtree is one step farther from v
+```
+
+Then `S(1) = down[1]`. To move the root from `p` to its child `c`:
+
+```text
+the sz[c] vertices inside c's subtree get 1 closer        (-sz[c])
+the other n - sz[c] vertices get 1 farther                (+(n - sz[c]))
+
+S(c) = S(p) - sz[c] + (n - sz[c])
+```
+
+That is the whole algorithm: one bottom-up loop for `sz` and `down`, one top-down loop for `S`.
+
+```text
+        1                 n = 5, sizes: sz[1]=5, sz[2]=1, sz[3]=3, sz[4]=sz[5]=1
+       / \
+      2   3               S(1) = 1 + 1 + 2 + 2 = 6       (down[1], computed bottom-up)
+         / \
+        4   5             S(3) = S(1) - sz[3] + (5 - sz[3]) = 6 - 3 + 2 = 5
+```
+
+Check by hand: from vertex 3, the distances to 1, 2, 4, 5 are 1, 2, 1, 1, which sum to 5.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def distance_sums(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for a, b in edges:
+        adj[a].append(b); adj[b].append(a)
+    par = [0] * (n + 1); par[1] = -1
+    order = [1]
+    for v in order:                                # BFS order: parents before children
+        for to in adj[v]:
+            if to != par[v]:
+                par[to] = v; order.append(to)
+    sz = [1] * (n + 1); down = [0] * (n + 1)
+    for v in reversed(order):                      # down pass: children before parents
+        p = par[v]
+        if p > 0:
+            sz[p] += sz[v]
+            down[p] += down[v] + sz[v]
+    ans = [0] * (n + 1); ans[1] = down[1]
+    for v in order[1:]:                            # up pass: move the root one edge down
+        ans[v] = ans[par[v]] - sz[v] + (n - sz[v])
+    return ans[1:]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> distanceSums(int n, const vector<vector<int>>& adj) {
+    vector<int> par(n + 1, 0), order{1};
+    par[1] = -1;
+    for (size_t i = 0; i < order.size(); i++)
+        for (int to : adj[order[i]])
+            if (to != par[order[i]]) { par[to] = order[i]; order.push_back(to); }
+    vector<long long> sz(n + 1, 1), down(n + 1, 0), ans(n + 1, 0);
+    for (int i = n - 1; i >= 0; i--) {             // children before parents
+        int v = order[i], p = par[v];
+        if (p > 0) { sz[p] += sz[v]; down[p] += down[v] + sz[v]; }
+    }
+    ans[1] = down[1];
+    for (int i = 1; i < n; i++) {                  // parents before children
+        int v = order[i];
+        ans[v] = ans[par[v]] - sz[v] + (n - sz[v]);
+    }
+    return ans;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] distanceSums(int n, List<Integer>[] adj) {
+    int[] par = new int[n + 1], order = new int[n];
+    int head = 0, tail = 0;
+    par[1] = -1; order[tail++] = 1;
+    while (head < tail) {
+        int v = order[head++];
+        for (int to : adj[v]) if (to != par[v]) { par[to] = v; order[tail++] = to; }
+    }
+    long[] sz = new long[n + 1], down = new long[n + 1], ans = new long[n + 1];
+    Arrays.fill(sz, 1);
+    for (int i = n - 1; i >= 0; i--) {             // children before parents
+        int v = order[i], p = par[v];
+        if (p > 0) { sz[p] += sz[v]; down[p] += down[v] + sz[v]; }
+    }
+    ans[1] = down[1];
+    for (int i = 1; i < n; i++) {                  // parents before children
+        int v = order[i];
+        ans[v] = ans[par[v]] - sz[v] + (n - sz[v]);
+    }
+    return ans;
+}
+```
+
+</Tab>
+</Tabs>
+
+## When the update is not a simple formula: the "up" value
+
+Sums of distances reroot with one subtraction. Other questions need an explicit **up value**: the best answer using only the part of the tree *outside* `v`'s subtree. The classic example is the **farthest vertex from each vertex** (the eccentricity):
+
+```text
+down1[v] = longest downward path from v        = max over children c of (down1[c] + 1)
+up[c]    = longest path from c that first goes to its parent p
+         = 1 + max( up[p],  down1[sibling] + 1 for every sibling of c )
+ecc[v]   = max(down1[v], up[v])
+```
+
+The trap: the best sibling of `c` may be `c` itself, which would double count. Store the **top two** downward values at each vertex, and use the second-best when `c` supplied the best.
+
+The same shape (a "down" value, an "up" value built from the parent's up value and the siblings, and a merge operator) covers counting, minima, maxima, and many problems on weighted trees. The merge must be **associative with an identity** so you can combine "all siblings except `c`"; for sums you subtract, for max you keep the top two (or use prefix and suffix aggregates over the children).
+
+Run both versions against a search from every vertex:
+
+<CodeRunner language="python" code={`import random
+
+def build(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for a, b in edges:
+        adj[a].append(b); adj[b].append(a)
+    par = [0] * (n + 1); par[1] = -1
+    order = [1]
+    for v in order:
+        for to in adj[v]:
+            if to != par[v]:
+                par[to] = v; order.append(to)
+    return adj, par, order
+
+def distance_sums(n, edges):
+    adj, par, order = build(n, edges)
+    sz = [1] * (n + 1); down = [0] * (n + 1)
+    for v in reversed(order):
+        p = par[v]
+        if p > 0:
+            sz[p] += sz[v]; down[p] += down[v] + sz[v]
+    ans = [0] * (n + 1); ans[1] = down[1]
+    for v in order[1:]:
+        ans[v] = ans[par[v]] - sz[v] + (n - sz[v])
+    return ans[1:]
+
+def farthest(n, edges):
+    adj, par, order = build(n, edges)
+    best1 = [0] * (n + 1); best2 = [0] * (n + 1); who = [0] * (n + 1)
+    for v in reversed(order):
+        p = par[v]
+        if p > 0:
+            val = best1[v] + 1
+            if val > best1[p]:
+                best2[p] = best1[p]; best1[p] = val; who[p] = v
+            elif val > best2[p]:
+                best2[p] = val
+    up = [0] * (n + 1)
+    for v in order[1:]:
+        p = par[v]
+        sibling = best2[p] if who[p] == v else best1[p]
+        up[v] = 1 + max(up[p], sibling)
+    return [max(best1[v], up[v]) for v in range(1, n + 1)]
+
+def brute(n, edges):
+    adj, _, _ = build(n, edges)
+    sums, far = [], []
+    for s in range(1, n + 1):
+        d = {s: 0}; q = [s]
+        for x in q:
+            for y in adj[x]:
+                if y not in d:
+                    d[y] = d[x] + 1; q.append(y)
+        sums.append(sum(d.values())); far.append(max(d.values()))
+    return sums, far
+
+edges = [(1, 2), (1, 3), (3, 4), (3, 5)]
+print("distance sums:", distance_sums(5, edges), " farthest:", farthest(5, edges))
+
+random.seed(6)
+for _ in range(500):
+    n = random.randint(1, 25)
+    es = [(random.randint(1, i - 1), i) for i in range(2, n + 1)]
+    s, f = brute(n, es)
+    assert distance_sums(n, es) == s and farthest(n, es) == f, (n, es)
+print("500 random trees: both rerooting answers agree with a search from every vertex")
+`} />
+
+## Choosing the technique
+
+| need | use |
+| --- | --- |
+| an answer for one fixed root | plain [tree DP](/cp/trees/tree-dp-and-diameter/) |
+| an answer for every vertex as root, answer changes by a simple formula when the root moves | rerooting with a delta, as in the distance sum |
+| an answer for every vertex, needs "everything outside the subtree" | rerooting with an up value (top-two or prefix/suffix) |
+| path queries between arbitrary vertex pairs | [LCA](/cp/trees/lowest-common-ancestor/) |
+| subtree queries with updates | [Euler tour](/cp/trees/euler-tour-subtree-queries/) with a Fenwick tree |
+
+## Pitfalls
+
+1. **Recursing on a deep tree.** A path of `2·10^5` vertices overflows the stack; iterate over a BFS order.
+2. **Using the old subtree size after moving the root.** Both `sz` and `down` always refer to the tree rooted at 1; the up pass uses them unchanged.
+3. **Double counting the child in the up value.** For max, exclude the child's own branch via the second-best value; for sums, subtract it.
+4. **Forgetting `n - sz[c]`.** The vertices outside the child's subtree move *away*; they are `n - sz[c]`, not `n - sz[c] - 1`.
+5. **32-bit overflow.** Distance sums reach about `n²/2`; use 64-bit integers in the full-size problem.
+6. **Mixing 0-based and 1-based indices.** The parent of the root is a sentinel (`-1` or `0`); never index an array with it.
+
+## Practice
+
+<Problem id="m15-distance-sums" />
+
+## Problem ladder
+
+- [Tree Distances I](https://cses.fi/problemset/task/1132) (CSES): farthest vertex from each vertex, solvable by rerooting or by the diameter endpoints.
+- [Tree Distances II](https://cses.fi/problemset/task/1133) (CSES): the distance sum, this lesson exactly.
+- [Sum of Distances in Tree](https://leetcode.com/problems/sum-of-distances-in-tree/) (LeetCode, hard): the same problem on LeetCode.
+- [Minimum Height Trees](https://leetcode.com/problems/minimum-height-trees/) (LeetCode, medium): vertices with the smallest eccentricity, a rerooting-flavoured question.
+- [Subtree](https://atcoder.jp/contests/dp/tasks/dp_v) (AtCoder Educational DP, task V): rerooting with a modular count, where subtraction is not allowed and prefix/suffix products are needed.
+
+## Quiz
+
+<Quiz id="cp-m15-rerooting" tags={["trees", "rerooting"]} questions={[
+  { type: "mcq", q: "What is the main idea of rerooting?", options: ["Run the tree DP once per vertex", "Compute the answer for one root, then update it in O(1) per edge as the root moves", "Convert the tree to an array", "Sort the vertices by depth"], answer: 1, explain: "Moving the root across one edge changes the answer in a simple way, so n answers cost O(n)." },
+  { type: "predict", q: "In a tree with n = 5 and a child c whose subtree has 3 vertices, the sum of distances for the parent is 6. What is the child's sum?", code: "n, parent_sum, sz_c = 5, 6, 3\nprint(parent_sum - sz_c + (n - sz_c))", options: ["5", "6", "7", "9"], answer: 0, explain: "The 3 vertices in the child's subtree get 1 closer and the other 2 get 1 farther: 6 - 3 + 2 = 5." },
+  { type: "mcq", q: "Why do we store the top TWO downward values per vertex when rerooting a maximum?", options: ["To save memory", "So that excluding the child that supplied the best value still leaves the best of its siblings", "Because the tree has two roots", "To detect cycles"], answer: 1, explain: "The up value for a child must not reuse the child's own branch; the second-best value covers that case." },
+  { type: "multi", q: "Which are good practices for rerooting on large trees?", options: ["Process vertices in BFS order instead of recursing", "Use 64-bit integers for sums of distances", "Recurse naively on a path-shaped tree", "Compute down values before up values"], answer: [0, 1, 3], explain: "A path-shaped tree is as deep as n, so naive recursion overflows the stack." }
+]} />
