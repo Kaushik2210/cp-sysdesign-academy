@@ -1,0 +1,114 @@
+{
+  "id": "m13-merge-the-piles",
+  "title": "Merge the Piles",
+  "source": {
+    "name": "Original exercise; classic technique (interval DP, in the style of 'Stone Merging' and CSES 'Removal Game')"
+  },
+  "rating": 1800,
+  "tags": [
+    "dp",
+    "interval-dp",
+    "prefix-sums"
+  ],
+  "statement": "`n` piles of sand lie in a row, the `i`-th weighing `w[i]`. In one move you may merge two **neighbouring** piles into one pile; the move costs the total weight of the two piles, and the new pile takes their place in the row. Repeat until a single pile remains.\n\nFind the minimum total cost of all moves.\n\n**Input.** First line: `n`. Second line: `w[1..n]`.\n\n**Output.** The minimum total cost (`0` when `n = 1`).",
+  "constraints": [
+    "1 ≤ n ≤ 200 in this browser version (the O(n³) idea is the point; the full-size version has n ≤ 400)",
+    "1 ≤ w[i] ≤ 10^6",
+    "The answer can exceed 32 bits: use 64-bit integers"
+  ],
+  "timeLimitMs": 3000,
+  "tests": [
+    {
+      "input": "4\n2 2 1 2\n",
+      "output": "14\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n5\n",
+      "output": "0\n",
+      "hidden": false
+    },
+    {
+      "input": "2\n3 7\n",
+      "output": "10\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n1 1 1 1 1 1 1 1\n",
+      "output": "24\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n1000000 1000000 1000000 1000000 1000000\n",
+      "output": "12000000\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n1 100 1 100 1\n",
+      "output": "507\n",
+      "hidden": true
+    },
+    {
+      "input": "9\n9 8 7 6 5 4 3 2 1\n",
+      "output": "135\n",
+      "hidden": true
+    },
+    {
+      "input": "6\n48 100 73 52 70 11\n",
+      "output": "914\n",
+      "hidden": true
+    },
+    {
+      "input": "10\n98 69 39 38 98 23 29 92 74 36\n",
+      "output": "1917\n",
+      "hidden": true
+    },
+    {
+      "input": "17\n34 46 13 73 82 40 41 68 71 34 91 74 82 30 92 49 27\n",
+      "output": "3836\n",
+      "hidden": true
+    },
+    {
+      "input": "25\n22 86 30 99 67 16 53 90 91 36 82 40 92 68 70 67 77 71 63 37 46 37 36 41 40\n",
+      "output": "6754\n",
+      "hidden": true
+    },
+    {
+      "input": "40\n8 52 49 9 22 14 85 39 23 40 26 62 38 19 22 84 37 77 79 31 65 13 95 16 33 18 22 7 2 11 21 46 68 52 47 72 31 72 8 30\n",
+      "output": "7913\n",
+      "hidden": true
+    },
+    {
+      "input": "120\n437989 626040 121676 433386 494132 346008 468775 662327 23842 588998 203348 918910 869082 755117 342939 988773 318381 508263 8706 764034 817472 987104 50093 167704 527240 707680 384156 338931 501370 80117 862510 210669 140081 134580 261136 859630 583067 566897 867212 8689 545014 199009 692168 168008 16473 279676 311659 980014 678159 913617 180215 395905 228089 433380 283491 674427 386478 181200 512837 885763 410576 597692 929951 246137 644364 672890 874436 260174 534464 616743 722991 102503 342630 305305 481545 690811 411126 599991 260738 426272 771738 454539 764934 104267 26196 513456 801166 2169 921898 333466 710343 519872 302501 271814 778643 680786 273951 696100 458190 438742 672584 602901 800921 996412 755192 643949 959409 599889 976232 47519 942261 885907 297346 365149 963950 547168 556867 272259 314320 949978\n",
+      "output": "413083779\n",
+      "hidden": true
+    },
+    {
+      "input": "200\n576883 3700 38588 704771 3689 223135 89982 129703 842493 3610 284126 179716 938840 506510 120881 851905 91302 880720 827506 794733 108796 238102 93243 46058 743909 243129 573246 695178 347926 875258 645681 34745 663429 769709 230160 788540 341351 874233 21227 763307 26433 839133 781895 752976 998287 645038 242095 8504 286370 535529 747956 667847 229600 859284 492204 415978 864501 751939 97536 735868 778725 78499 710593 487222 389233 684848 993177 980136 122864 157304 339060 807739 810268 775232 713740 900802 182738 740050 944611 268871 17142 891145 530092 237372 199173 284995 246165 135424 582932 543633 552658 456255 761785 290936 957032 665645 49141 647492 474903 191258 487295 199497 492941 471861 562943 944991 882563 930128 753563 253336 324867 49337 100529 317276 354660 596539 253498 836138 42451 912869 583872 563593 360262 85754 500627 986317 739640 393133 225806 370461 947479 219423 724150 405790 651466 519355 222156 720654 195764 344005 140685 24471 268314 313557 299316 374084 748896 317146 248307 383012 295038 153857 921854 311268 100988 365370 789798 233685 797606 471677 287784 319662 488392 873168 105216 172813 692386 902693 551130 437047 962742 758152 467927 374930 243952 192438 685217 723301 672576 479423 697870 4956 584356 553323 279310 100834 851546 857148 753266 601337 246448 872171 471472 616778 947144 95606 471263 988484 347679 854385\n",
+      "output": "727971629\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Always merging the two lightest neighbours is tempting, but try [2, 2, 1, 2]: that rule (ties broken left to right) costs 15, while the best order costs 14. The order of merges matters.",
+    "Think about the **last** merge: it joins a prefix block and a suffix block of some interval. Define dp[i][j] as the cheapest way to turn piles i..j into one pile.",
+    "dp[i][j] = min over split points k of dp[i][k] + dp[k+1][j], plus the weight of the whole interval (the cost of the final merge), which prefix sums give in O(1). Fill intervals by increasing length."
+  ],
+  "editorial": "Whatever the order of merges, the final move joins two blocks that were built independently from a prefix and a suffix of the interval. So let `dp[i][j]` be the minimum cost of merging piles `i..j` into one. For `i = j` it is `0`. Otherwise the final merge splits the interval at some `k` (`i <= k < j`) and costs the weight of the entire interval, which is `pre[j+1] - pre[i]` from prefix sums: `dp[i][j] = min_k (dp[i][k] + dp[k+1][j]) + sum(i..j)`. Compute by increasing interval length so both parts are ready. There are `O(n^2)` states and `O(n)` transitions each, so `O(n^3)` time and `O(n^2)` memory, which is fine for `n` up to a few hundred. Greedy fails: on `[2, 2, 1, 2]` always merging the lightest neighbouring pair (ties left to right) costs 3 + 5 + 7 = 15, but merging `(1, 2)` first, then `(2, 2)`, costs 3 + 4 + 7 = 14; no simple local rule is correct in general, which is why the DP tries every split. Knuth's optimisation reduces this to `O(n^2)` for large `n`.",
+  "complexity": {
+    "time": "O(n^3)",
+    "space": "O(n^2)"
+  },
+  "starter": {
+    "python": "import sys\ndata = sys.stdin.read().split()\n# read n and the weights w; print the minimum total merge cost\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\n// read n and the weights w; print the minimum total merge cost\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        // read n and the weights w; print the minimum total merge cost\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read n and the weights w; print the minimum total merge cost\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn = int(data[0])\nw = [int(x) for x in data[1:1 + n]]\npre = [0] * (n + 1)\nfor i in range(n):\n    pre[i + 1] = pre[i] + w[i]\ndp = [[0] * n for _ in range(n)]\nfor length in range(2, n + 1):\n    for i in range(n - length + 1):\n        j = i + length - 1\n        best = min(dp[i][k] + dp[k + 1][j] for k in range(i, j))   # try every split point\n        dp[i][j] = best + pre[j + 1] - pre[i]                       # plus the cost of the last merge\nprint(dp[0][n - 1])\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0];\nconst pre = new Array(n + 1).fill(0);\nfor (let i = 0; i < n; i++) pre[i + 1] = pre[i] + tok[1 + i];\nconst dp = Array.from({ length: n }, () => new Array(n).fill(0));\nfor (let len = 2; len <= n; len++) {\n  for (let i = 0; i + len <= n; i++) {\n    const j = i + len - 1;\n    let best = Infinity;\n    for (let k = i; k < j; k++) best = Math.min(best, dp[i][k] + dp[k + 1][j]);\n    dp[i][j] = best + pre[j + 1] - pre[i];\n  }\n}\nconsole.log(String(dp[0][n - 1]));\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StreamTokenizer in = new StreamTokenizer(new BufferedInputStream(System.in));\n        in.nextToken();\n        int n = (int) in.nval;\n        long[] pre = new long[n + 1];\n        for (int i = 0; i < n; i++) {\n            in.nextToken();\n            pre[i + 1] = pre[i] + (long) in.nval;\n        }\n        long[][] dp = new long[n][n];\n        for (int len = 2; len <= n; len++) {\n            for (int i = 0; i + len <= n; i++) {\n                int j = i + len - 1;\n                long best = Long.MAX_VALUE;\n                for (int k = i; k < j; k++) best = Math.min(best, dp[i][k] + dp[k + 1][j]);\n                dp[i][j] = best + pre[j + 1] - pre[i];\n            }\n        }\n        System.out.println(dp[0][n - 1]);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\nint main() {\n    int n;\n    scanf(\"%d\", &n);\n    vector<ll> pre(n + 1, 0);\n    for (int i = 0; i < n; i++) {\n        ll x;\n        scanf(\"%lld\", &x);\n        pre[i + 1] = pre[i] + x;\n    }\n    vector<vector<ll>> dp(n, vector<ll>(n, 0));\n    for (int len = 2; len <= n; len++) {\n        for (int i = 0; i + len <= n; i++) {\n            int j = i + len - 1;\n            ll best = LLONG_MAX;\n            for (int k = i; k < j; k++) best = min(best, dp[i][k] + dp[k + 1][j]);\n            dp[i][j] = best + pre[j + 1] - pre[i];\n        }\n    }\n    printf(\"%lld\\n\", dp[0][n - 1]);\n    return 0;\n}\n"
+  }
+}
