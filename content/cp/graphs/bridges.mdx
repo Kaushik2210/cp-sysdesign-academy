@@ -1,0 +1,250 @@
+---
+title: Bridges and Low-Link
+track: cp
+module: graphs
+order: 7
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/recursion-and-bitmasks/recursion-and-call-stack, cp/stacks-and-queues/queues-deques-bfs]
+tags: [graph, dfs, bridges, low-link, connectivity]
+type: lesson
+problems: [m11-critical-roads]
+furtherReading:
+  - title: cp-algorithms, Finding bridges in an undirected graph
+    url: https://cp-algorithms.com/graph/bridge-searching.html
+  - title: cp-algorithms, Finding articulation points
+    url: https://cp-algorithms.com/graph/cutpoints.html
+  - title: cp-algorithms, Strongly connected components and condensation graph
+    url: https://cp-algorithms.com/graph/strongly-connected-components.html
+---
+
+## Intuition
+
+A network of roads is working fine, but you worry about single points of failure: **which one road, if closed, would cut the country in two?** Checking each road by deleting it and re-running a search costs `O(m (n + m))`. One depth-first search can answer for all roads at once.
+
+The key observation: in a DFS tree, a road that is **not** in the tree (a *back edge*) always closes a cycle, so it can never be critical. A tree road `p → c` is critical exactly when the whole subtree below `c` has **no escape route** back to `p` or higher through a back edge.
+
+## Definition
+
+Run a DFS and number the vertices in the order they are first visited: `tin[v]`. Define
+
+```text
+low[v] = the smallest tin reachable from v's subtree
+         using tree edges downward and at most one back edge
+```
+
+Updates, for each edge `v - to` (skipping the edge used to arrive at `v`):
+
+```text
+to already visited (back edge):   low[v] = min(low[v], tin[to])
+to is a child (after returning):  low[v] = min(low[v], low[to])
+```
+
+A tree edge `(p, c)` is a **bridge** exactly when
+
+```text
+low[c] > tin[p]
+```
+
+Nothing in the subtree of `c` reaches `p` or an ancestor, so removing the edge isolates that subtree. If `low[c] <= tin[p]`, some back edge bypasses it. Total time is `O(n + m)`.
+
+## Example
+
+Two triangles joined by one road:
+
+```text
+1 - 2        4 - 5
+ \ /    3-4   \ /
+  3            6
+```
+
+The triangles' roads all lie on cycles, so their `low` values reach back to the triangle's first vertex. The road `3 - 4` is the only way across: `low[4] = tin[4] > tin[3]`, so it is the single bridge.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def find_bridges(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for i, (u, v) in enumerate(edges):
+        adj[u].append((v, i))
+        adj[v].append((u, i))
+    tin = [0] * (n + 1); low = [0] * (n + 1)
+    pe = [-1] * (n + 1); nxt = [0] * (n + 1)
+    timer = 0; bridges = []
+    for s in range(1, n + 1):
+        if tin[s]: continue
+        timer += 1; tin[s] = low[s] = timer
+        stack = [s]
+        while stack:                              # explicit stack: no recursion limit
+            v = stack[-1]
+            if nxt[v] < len(adj[v]):
+                to, e = adj[v][nxt[v]]; nxt[v] += 1
+                if e == pe[v]: continue           # skip the arrival edge by id
+                if tin[to]:
+                    low[v] = min(low[v], tin[to])
+                else:
+                    timer += 1; tin[to] = low[to] = timer
+                    pe[to] = e; stack.append(to)
+            else:
+                stack.pop()
+                if stack:
+                    p = stack[-1]
+                    low[p] = min(low[p], low[v])
+                    if low[v] > tin[p]: bridges.append(pe[v])
+    return sorted(bridges)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<pair<int,int>>> adj;     // (neighbour, edge id)
+vector<int> tin, low, bridges;
+int timer_ = 0;
+
+void dfs(int v, int parentEdge) {
+    tin[v] = low[v] = ++timer_;
+    for (auto [to, e] : adj[v]) {
+        if (e == parentEdge) continue;             // by id, so parallel edges work
+        if (tin[to]) {
+            low[v] = min(low[v], tin[to]);          // back edge
+        } else {
+            dfs(to, e);
+            low[v] = min(low[v], low[to]);
+            if (low[to] > tin[v]) bridges.push_back(e);
+        }
+    }
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static List<int[]>[] adj;              // {neighbour, edge id}
+static int[] tin, low;
+static int timer = 0;
+static List<Integer> bridges = new ArrayList<>();
+
+static void dfs(int v, int parentEdge) {
+    tin[v] = low[v] = ++timer;
+    for (int[] ed : adj[v]) {
+        int to = ed[0], e = ed[1];
+        if (e == parentEdge) continue;
+        if (tin[to] != 0) {
+            low[v] = Math.min(low[v], tin[to]);
+        } else {
+            dfs(to, e);
+            low[v] = Math.min(low[v], low[to]);
+            if (low[to] > tin[v]) bridges.add(e);
+        }
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it and compare with the slow "delete each edge" check:
+
+<CodeRunner language="python" code={`import random
+
+def find_bridges(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for i, (u, v) in enumerate(edges):
+        adj[u].append((v, i))
+        adj[v].append((u, i))
+    tin = [0] * (n + 1); low = [0] * (n + 1)
+    pe = [-1] * (n + 1); nxt = [0] * (n + 1)
+    timer = 0; bridges = []
+    for s in range(1, n + 1):
+        if tin[s]: continue
+        timer += 1; tin[s] = low[s] = timer
+        stack = [s]
+        while stack:
+            v = stack[-1]
+            if nxt[v] < len(adj[v]):
+                to, e = adj[v][nxt[v]]; nxt[v] += 1
+                if e == pe[v]: continue
+                if tin[to]:
+                    low[v] = min(low[v], tin[to])
+                else:
+                    timer += 1; tin[to] = low[to] = timer
+                    pe[to] = e; stack.append(to)
+            else:
+                stack.pop()
+                if stack:
+                    p = stack[-1]
+                    low[p] = min(low[p], low[v])
+                    if low[v] > tin[p]: bridges.append(pe[v])
+    return sorted(bridges)
+
+def slow(n, edges):
+    def comps(skip):
+        par = list(range(n + 1))
+        def f(x):
+            while par[x] != x:
+                par[x] = par[par[x]]; x = par[x]
+            return x
+        c = n
+        for i, (u, v) in enumerate(edges):
+            if i == skip: continue
+            a, b = f(u), f(v)
+            if a != b: par[a] = b; c -= 1
+        return c
+    base = comps(-1)
+    return [i for i in range(len(edges)) if comps(i) > base]
+
+edges = [(1, 2), (2, 3), (3, 1), (3, 4), (4, 5), (5, 6), (6, 4)]
+print("two triangles + link, bridge edge indices:", find_bridges(6, edges))
+print("two parallel roads, bridges:", find_bridges(2, [(1, 2), (1, 2)]))
+
+random.seed(5)
+for _ in range(500):
+    n = random.randint(2, 12)
+    m = random.randint(0, 16)
+    es = []
+    for _ in range(m):
+        u, v = random.randint(1, n), random.randint(1, n)
+        if u != v: es.append((u, v))
+    assert find_bridges(n, es) == slow(n, es), (n, es)
+print("500 random graphs agree with the delete-each-edge check")
+`} />
+
+## Articulation points (cut vertices)
+
+A **cut vertex** is a vertex whose removal disconnects its region. The same `tin` and `low` work, with two small changes:
+
+- A non-root vertex `p` is a cut vertex if some child `c` has `low[c] >= tin[p]` (note `>=`, because the escape route may land on `p` itself, which is deleted too).
+- The DFS root is a cut vertex only if it has **two or more** DFS-tree children.
+
+## Pitfalls
+
+1. **Skipping the parent vertex instead of the parent edge.** With parallel roads the second copy is a genuine back edge. Compare edge ids.
+2. **`>` versus `>=`.** Bridges use `low[c] > tin[p]`; cut vertices use `>=`. Mixing them up is the classic bug.
+3. **Forgetting disconnected graphs.** Start a new DFS from every unvisited vertex.
+4. **Recursion depth.** A path graph of `2·10^5` vertices overflows Python's stack (and risks the C++ one); use an explicit stack or raise the limit with care.
+5. **Updating `low` through a visited vertex's `low`.** For a back edge use `tin[to]`, not `low[to]`; mixing them still gives bridges but breaks the 2-edge-connected-component and cut-vertex variants.
+6. **Reporting vertex pairs instead of edge ids.** When the input has parallel edges the pair is ambiguous.
+
+## Practice
+
+<Problem id="m11-critical-roads" />
+
+## Problem ladder
+
+- [Necessary Roads](https://cses.fi/problemset/task/2177) (CSES): list the roads whose removal disconnects the network, close to this lesson.
+- [Critical Connections in a Network](https://leetcode.com/problems/critical-connections-in-a-network/) (LeetCode, hard): bridges exactly.
+- [Bertown roads](https://codeforces.com/problemset/problem/118/E) (Codeforces 118E, rating about 2000): orient every road so the network stays strongly connected, possible exactly when there is no bridge.
+
+## Quiz
+
+<Quiz id="cp-m11-bridges" tags={["graph", "bridges"]} questions={[
+  { type: "mcq", q: "When is the tree edge (p, c) a bridge?", options: ["low[c] < tin[p]", "low[c] > tin[p]", "low[c] == tin[c]", "c has no children"], answer: 1, explain: "If nothing in c's subtree reaches p or higher, low[c] stays above tin[p], and removing the edge isolates the subtree." },
+  { type: "mcq", q: "Why skip the arrival edge by id rather than skipping the parent vertex?", options: ["It is faster", "A parallel road to the parent is a real back edge and means the road is not a bridge", "Ids are unique across components", "The parent has no edge back"], answer: 1, explain: "Two roads between the same towns form a cycle, so neither is critical; skipping the parent vertex would hide the second road." },
+  { type: "predict", q: "A path 1-2-3-4 (edges 1-2, 2-3, 3-4) is a tree. How many bridges does it have?", code: "n = 4\nedges = [(1, 2), (2, 3), (3, 4)]\nprint(len(edges))", options: ["0", "1", "3", "4"], answer: 2, explain: "In a tree there are no cycles, so every edge is a bridge." },
+  { type: "multi", q: "Which statements about the DFS root are true for articulation points?", options: ["It is a cut vertex if it has two or more tree children", "It is a cut vertex if it has exactly one tree child", "The test low[c] >= tin[p] is not used for the root", "Back edges make it a cut vertex"], answer: [0, 2], explain: "For the root, only the number of DFS-tree children matters." }
+]} />
