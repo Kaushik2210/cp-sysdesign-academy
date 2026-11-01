@@ -1,0 +1,281 @@
+---
+title: Bridges and Low-Link
+track: cp
+module: graphs
+order: 7
+difficulty: hard
+estMinutes: 35
+prerequisites: [cp/graphs/bipartite-graphs]
+tags: [graph, dfs, bridges, low-link, connectivity, articulation-points]
+type: lesson
+problems: [m11-critical-links]
+furtherReading:
+  - title: cp-algorithms, Finding bridges in an undirected graph
+    url: https://cp-algorithms.com/graph/bridge-searching.html
+  - title: cp-algorithms, Finding articulation points in a graph
+    url: https://cp-algorithms.com/graph/cutpoints.html
+  - title: CSES Problem Set, Necessary Roads
+    url: https://cses.fi/problemset/task/2174
+---
+
+## Intuition
+
+A company's servers are joined by cables. Some cables are a single point of failure: cut it and part of the network is stranded. Others have a backup route around them. A cable of the first kind is called a **bridge**.
+
+Testing every cable by removing it and re-checking connectivity works, but costs `O(m (n + m))`. A single DFS can answer for all cables at once, using one question per vertex: *"how high up the DFS tree can this vertex's subtree reach by taking one shortcut?"* If the subtree can climb back above the edge that leads into it, that edge has a backup. If not, the edge is a bridge.
+
+## Definition
+
+In a connected undirected graph, an edge is a **bridge** if deleting it increases the number of connected components. (In a disconnected graph, apply this to the component the edge lives in.)
+
+Run a DFS and record for every vertex:
+
+- `tin[v]`: the time `v` was first reached (0, 1, 2, ...).
+- `low[v]`: the smallest `tin` reachable from the **subtree** of `v` using tree edges downwards plus **at most one** non-tree (back) edge:
+
+```text
+low[v] = min( tin[v],
+              tin[w]   for every back edge (v, w),
+              low[c]   for every DFS child c of v )
+```
+
+**Bridge test.** A tree edge from `p` to its child `c` is a bridge exactly when
+
+```text
+low[c] > tin[p]
+```
+
+Nothing in the subtree of `c` can reach `p` or anything earlier than `p` except through this very edge, so cutting it strands the subtree. Non-tree edges close a cycle with the tree and are never bridges.
+
+## Example, step by step
+
+Graph with 6 vertices and 7 cables, numbered in input order:
+
+```text
+1: 1-2   2: 2-3   3: 3-1   4: 3-4   5: 4-5   6: 5-6   7: 6-4
+```
+
+It is two triangles, `{1,2,3}` and `{4,5,6}`, joined by cable 4. DFS from vertex 1, taking neighbours in input order:
+
+| vertex | `tin` | `low` | why |
+| --- | --- | --- | --- |
+| 1 | 0 | 0 | root |
+| 2 | 1 | 0 | child 3 has `low = 0` |
+| 3 | 2 | 0 | back edge 3-1 reaches `tin = 0` |
+| 4 | 3 | 3 | the triangle below only reaches back to 4 itself |
+| 5 | 4 | 3 | back edge 6-4 gives `low[6] = 3` |
+| 6 | 5 | 3 | back edge 6-4 reaches `tin = 3` |
+
+Now test each tree edge `p -> c` with `low[c] > tin[p]`:
+
+- `4 -> 5`: `low[5] = 3`, `tin[4] = 3`, not greater. Not a bridge.
+- `5 -> 6`: `low[6] = 3 > tin[5] = 4`? No.
+- `3 -> 4`: `low[4] = 3 > tin[3] = 2`. **Yes: cable 4 is the only bridge.**
+- `2 -> 3`: `low[3] = 0 > tin[2] = 1`? No. `1 -> 2`: `low[2] = 0 > tin[1] = 0`? No.
+
+## The detail that breaks most solutions
+
+When scanning the neighbours of `v`, you must not treat the edge you **arrived by** as a back edge, or every vertex would see its parent and `low` would collapse. But skip it by **edge id**, not by "the neighbour is my parent":
+
+```text
+cables:  1-2 (id 0),  1-2 (id 1),  2-3 (id 2)
+```
+
+The two parallel cables between 1 and 2 are a backup for each other, so neither is a bridge. If you skipped *every* edge to the parent vertex, vertex 2 would never see the second cable and cable 1 would be reported wrongly. Skipping only the edge with `id == parent_edge` lets the other parallel cable count as a way back.
+
+## Code
+
+The recursive form is the shortest. It uses an adjacency list of `(neighbour, edge id)` pairs.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import sys
+sys.setrecursionlimit(10000)         # fine for a few thousand vertices; see the pitfalls for larger graphs
+
+tin = [-1] * (n + 1)
+low = [0] * (n + 1)
+timer = 0
+bridges = []
+
+def dfs(v, parent_edge):
+    global timer
+    tin[v] = low[v] = timer
+    timer += 1
+    for to, e in adj[v]:
+        if e == parent_edge:
+            continue
+        if tin[to] != -1:
+            low[v] = min(low[v], tin[to])          # back edge
+        else:
+            dfs(to, e)
+            low[v] = min(low[v], low[to])
+            if low[to] > tin[v]:
+                bridges.append(e)
+
+for s in range(1, n + 1):
+    if tin[s] == -1:
+        dfs(s, -1)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<pair<int,int>>> adj(n + 1);     // (neighbour, edge id)
+vector<int> tin(n + 1, -1), low(n + 1), bridges;
+int timer = 0;
+
+void dfs(int v, int parentEdge) {
+    tin[v] = low[v] = timer++;
+    for (auto [to, e] : adj[v]) {
+        if (e == parentEdge) continue;
+        if (tin[to] != -1) {
+            low[v] = min(low[v], tin[to]);        // back edge
+        } else {
+            dfs(to, e);
+            low[v] = min(low[v], low[to]);
+            if (low[to] > tin[v]) bridges.push_back(e);
+        }
+    }
+}
+// for (int s = 1; s <= n; s++) if (tin[s] == -1) dfs(s, -1);
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static List<int[]>[] adj;                     // each entry: {neighbour, edge id}
+static int[] tin, low;
+static int timer = 0;
+static List<Integer> bridges = new ArrayList<>();
+
+static void dfs(int v, int parentEdge) {
+    tin[v] = low[v] = timer++;
+    for (int[] edge : adj[v]) {
+        int to = edge[0], e = edge[1];
+        if (e == parentEdge) continue;
+        if (tin[to] != -1) {
+            low[v] = Math.min(low[v], tin[to]);   // back edge
+        } else {
+            dfs(to, e);
+            low[v] = Math.min(low[v], low[to]);
+            if (low[to] > tin[v]) bridges.add(e);
+        }
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+Compare it with the slow "remove one cable at a time" method on random graphs, including parallel cables:
+
+<CodeRunner language="python" code={`import random, sys
+sys.setrecursionlimit(10000)
+
+def bridges(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for e, (u, v) in enumerate(edges):
+        adj[u].append((v, e))
+        adj[v].append((u, e))
+    tin = [-1] * (n + 1)
+    low = [0] * (n + 1)
+    found = []
+    timer = [0]
+
+    def dfs(v, parent_edge):
+        tin[v] = low[v] = timer[0]
+        timer[0] += 1
+        for to, e in adj[v]:
+            if e == parent_edge:
+                continue
+            if tin[to] != -1:
+                low[v] = min(low[v], tin[to])
+            else:
+                dfs(to, e)
+                low[v] = min(low[v], low[to])
+                if low[to] > tin[v]:
+                    found.append(e + 1)
+
+    for s in range(1, n + 1):
+        if tin[s] == -1:
+            dfs(s, -1)
+    return sorted(found)
+
+def components(n, edges, skip):
+    par = list(range(n + 1))
+    def find(x):
+        while par[x] != x:
+            par[x] = par[par[x]]
+            x = par[x]
+        return x
+    c = n
+    for i, (u, v) in enumerate(edges):
+        if i == skip:
+            continue
+        a, b = find(u), find(v)
+        if a != b:
+            par[a] = b
+            c -= 1
+    return c
+
+def brute(n, edges):
+    base = components(n, edges, -1)
+    return [i + 1 for i in range(len(edges)) if components(n, edges, i) > base]
+
+edges = [(1, 2), (2, 3), (3, 1), (3, 4), (4, 5), (5, 6), (6, 4)]
+print("bridges of the lesson graph:", bridges(6, edges))
+print("doubled cable 1-2 plus 2-3:", bridges(3, [(1, 2), (1, 2), (2, 3)]))
+
+random.seed(9)
+for _ in range(500):
+    n = random.randint(1, 12)
+    m = random.randint(0, 16) if n > 1 else 0
+    es = []
+    while len(es) < m:
+        u, v = random.randint(1, n), random.randint(1, n)
+        if u != v:
+            es.append((u, v))
+    assert bridges(n, es) == brute(n, es)
+print("500 random graphs agree with remove-one-edge brute force")
+`} />
+
+## What bridges give you
+
+- **2-edge-connected components.** Delete all bridges; the remaining components are the groups of vertices that survive any single cable failure. Contract each group to one vertex and the graph becomes a **tree** (the bridge tree), which turns many "robust network" questions into tree problems.
+- **Articulation points** (cut vertices) use the same DFS with a slightly different test: a non-root vertex `p` is a cut vertex if some child `c` has `low[c] >= tin[p]` (with `>=`, because removing a vertex also removes the edge that would have been the backup). The root is a cut vertex only if it has two or more DFS children.
+- **Directed graphs** are a different problem (strongly connected components); do not reuse this test there.
+
+## Pitfalls
+
+1. **Skipping the parent by vertex instead of by edge id.** It hides parallel cables and reports them as bridges. Always pass the edge id down.
+2. **Not starting from every vertex.** A disconnected graph needs the outer loop `for s in 1..n`.
+3. **Using `>=` for bridges.** Bridges use strict `low[c] > tin[p]`. The non-strict version is the articulation-point test and reports too many edges.
+4. **Updating `low` from a child's `tin`.** A child contributes `low[c]`; a back edge contributes `tin[w]`. Mixing them makes `low` too small.
+5. **Recursion depth.** A path of `2·10^5` vertices overflows the stack in Python, and in Java without a larger thread stack. Use an explicit stack with a per-vertex "next neighbour" pointer, as in the practice problem's reference solution.
+6. **Reporting vertex pairs instead of edge ids.** With parallel cables the pair is ambiguous; keep edge ids if the output asks for cables.
+
+## Practice
+
+<Problem id="m11-critical-links" />
+
+## Problem ladder
+
+- [Necessary Roads](https://cses.fi/problemset/task/2174) (CSES): list all bridges, this lesson on a larger scale.
+- [Critical Connections in a Network](https://leetcode.com/problems/critical-connections-in-a-network/) (LeetCode 1192, hard): the same task with a LeetCode interface.
+- [Redundant Paths](http://poj.org/problem?id=3177) (POJ 3177, from USACO): add the fewest cables so no single cable is critical; compute the bridge tree and count its leaves.
+- [Bridges](https://judge.yosupo.jp/problem/two_edge_connected_components) (Library Checker, Two-Edge-Connected Components): the large-input benchmark.
+- [Flight Routes Check / Strongly Connected Components](https://cses.fi/problemset/task/1682) (CSES): the directed counterpart, to see how the idea changes.
+
+## Quiz
+
+<Quiz id="cp-m11-bridges" tags={["graph", "bridges", "dfs"]} questions={[
+  { type: "mcq", q: "When is the DFS tree edge from p to child c a bridge?", options: ["low[c] >= tin[p]", "low[c] > tin[p]", "low[c] == tin[c]", "tin[c] > tin[p]"], answer: 1, explain: "If nothing in c's subtree reaches p or earlier except through this edge, i.e. low[c] > tin[p], cutting it disconnects the subtree." },
+  { type: "mcq", q: "Why skip the parent edge by id and not by parent vertex?", options: ["It is faster", "Parallel cables to the parent are valid backups and must count", "The parent has no id", "Vertices are not unique"], answer: 1, explain: "A second cable between the same two vertices gives a different route, so the edge is not a bridge." },
+  { type: "predict", q: "A triangle 1-2, 2-3, 3-1 is explored from vertex 1 in that neighbour order. What is low of vertex 3?", code: "# tin: 1 -> 0, 2 -> 1, 3 -> 2\n# vertex 3 has a back edge to vertex 1\nprint(min(2, 0))", options: ["0", "1", "2", "3"], answer: 0, explain: "The back edge 3-1 reaches tin[1] = 0, so low[3] = 0. The triangle has no bridge." },
+  { type: "multi", q: "Which of these are always true?", options: ["Every edge of a tree graph is a bridge", "A cycle edge is never a bridge", "A non-tree DFS edge is never a bridge", "Removing a bridge increases the component count by exactly 1"], answer: [0, 1, 2, 3], explain: "A bridge connects two parts that have no other connection, so removing it splits one component into exactly two. Tree edges have no alternative route; non-tree edges and cycle edges always have one." },
+  { type: "mcq", q: "What is the running time of the DFS-based bridge finder?", options: ["O(n + m)", "O(n * m)", "O(m log m)", "O(n^2)"], answer: 0, explain: "Each vertex and each edge is processed a constant number of times." }
+]} />

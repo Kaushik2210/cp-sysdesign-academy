@@ -1,0 +1,331 @@
+---
+title: Lazy Propagation
+track: cp
+module: range-queries
+order: 4
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/range-queries/segment-trees]
+tags: [segment-tree, lazy-propagation, range-update, range-query, data-structure]
+type: lesson
+problems: [m12-range-boost]
+furtherReading:
+  - title: cp-algorithms, Segment Tree (lazy propagation section)
+    url: https://cp-algorithms.com/data_structures/segment_tree.html
+  - title: CSES Problem Set, Range Update Queries
+    url: https://cses.fi/problemset/task/1651
+  - title: Codeforces EDU, Segment Tree (Part 2)
+    url: https://codeforces.com/edu/course/2
+---
+
+## Intuition
+
+A plain [segment tree](/cp/range-queries/segment-trees/) handles "change one position" and "ask about a range". Now the updates are ranges too: "add 5 to every element from `l` to `r`", interleaved with "what is the sum from `l` to `r`?".
+
+Doing the update element by element costs `O(n)`. The trick is to be **lazy**, like a manager who hands out a memo instead of walking to every desk. When an update covers a whole segment, write the memo at that segment's node ("everything under here gets `+5`, not yet delivered") and update the node's own sum immediately, because you know exactly how much it changes. Only when a later operation must look *inside* that segment do you deliver the memo to the two children, one level down. Work is paid for only where it is actually needed.
+
+## Definition
+
+Each node keeps two values:
+
+- `sum[node]`: the sum of its segment, **already including every update that stopped at this node or above and has been delivered here**.
+- `lazy[node]`: an add that this node's **children** have not received yet.
+
+Two helpers carry the whole idea:
+
+```text
+apply(node, v):   sum[node] += v * (length of the segment)
+                  lazy[node] += v
+
+push(node):       if lazy[node] != 0:
+                      apply(left,  lazy[node])
+                      apply(right, lazy[node])
+                      lazy[node] = 0
+```
+
+The two operations on node `[lo, hi]` for a request `[l, r]`:
+
+```text
+update(node, lo, hi, l, r, v):
+    if [lo, hi] is outside [l, r]:  return
+    if [lo, hi] is inside  [l, r]:  apply(node, v); return      # stop here, leave a memo
+    push(node)                                                  # about to look inside: deliver first
+    update(left, ...); update(right, ...)
+    sum[node] = sum[left] + sum[right]                          # rebuild from the children
+
+query(node, lo, hi, l, r):
+    if outside: return 0
+    if inside:  return sum[node]
+    push(node)                                                  # children must be up to date
+    return query(left, ...) + query(right, ...)
+```
+
+The same "two boundary paths" argument as the plain segment tree applies: at most about `4 log n` nodes are visited, so both operations are `O(log n)`.
+
+## Example, step by step
+
+Array `1 2 3 4 5 6 7 8` (so `n = 8`, root covers `[0, 7]`). Process `add 10 to positions 2..5`:
+
+| step | node | what happens |
+| --- | --- | --- |
+| 1 | `[0,7]` | partly covered: push (nothing to push), go down |
+| 2 | `[0,3]` | partly covered: go down |
+| 3 | `[0,1]` | outside, return |
+| 4 | `[2,3]` | **fully covered**: `sum = 7 + 2·10 = 27`, `lazy = 10`, stop |
+| 5 | `[4,7]` | partly covered: go down |
+| 6 | `[4,5]` | **fully covered**: `sum = 11 + 20 = 31`, `lazy = 10`, stop |
+| 7 | `[6,7]` | outside, return |
+| 8 | back up | `[0,3] = 3 + 27 = 30`, `[4,7] = 31 + 15 = 46`, root `= 76` |
+
+Only **two** nodes were tagged and no leaf was touched. Now ask `sum of positions 3..4`:
+
+1. Root `[0,7]` and `[0,3]` are partly covered: nothing pending, go down.
+2. `[2,3]` is partly covered and carries `lazy = 10`: **push** it. Leaves 2 and 3 become `13` and `14`, the memo is cleared.
+3. Leaf 3 is inside the query: `14`.
+4. On the right, `[4,7]` has nothing pending, but `[4,5]` has `lazy = 10`: push, leaf 4 becomes `15`.
+5. Answer `14 + 15 = 29`.
+
+The memo was delivered exactly along the path the query needed, and nowhere else.
+
+## Code
+
+The recursive layout is the standard form. `4 * n` slots are enough for the tree arrays.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+tree = [0] * (4 * n)
+lazy = [0] * (4 * n)
+
+def apply(node, lo, hi, v):
+    tree[node] += v * (hi - lo + 1)
+    lazy[node] += v
+
+def push(node, lo, hi):
+    if lazy[node]:
+        mid = (lo + hi) // 2
+        apply(2 * node, lo, mid, lazy[node])
+        apply(2 * node + 1, mid + 1, hi, lazy[node])
+        lazy[node] = 0
+
+def update(node, lo, hi, l, r, v):
+    if r < lo or hi < l:
+        return
+    if l <= lo and hi <= r:
+        apply(node, lo, hi, v)
+        return
+    push(node, lo, hi)
+    mid = (lo + hi) // 2
+    update(2 * node, lo, mid, l, r, v)
+    update(2 * node + 1, mid + 1, hi, l, r, v)
+    tree[node] = tree[2 * node] + tree[2 * node + 1]
+
+def query(node, lo, hi, l, r):
+    if r < lo or hi < l:
+        return 0
+    if l <= lo and hi <= r:
+        return tree[node]
+    push(node, lo, hi)
+    mid = (lo + hi) // 2
+    return query(2 * node, lo, mid, l, r) + query(2 * node + 1, mid + 1, hi, l, r)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> tree(4 * n), lazy(4 * n);
+
+void apply(int node, int lo, int hi, long long v) {
+    tree[node] += v * (hi - lo + 1);
+    lazy[node] += v;
+}
+void push(int node, int lo, int hi) {
+    if (lazy[node] != 0) {
+        int mid = (lo + hi) / 2;
+        apply(2 * node, lo, mid, lazy[node]);
+        apply(2 * node + 1, mid + 1, hi, lazy[node]);
+        lazy[node] = 0;
+    }
+}
+void update(int node, int lo, int hi, int l, int r, long long v) {
+    if (r < lo || hi < l) return;
+    if (l <= lo && hi <= r) { apply(node, lo, hi, v); return; }
+    push(node, lo, hi);
+    int mid = (lo + hi) / 2;
+    update(2 * node, lo, mid, l, r, v);
+    update(2 * node + 1, mid + 1, hi, l, r, v);
+    tree[node] = tree[2 * node] + tree[2 * node + 1];
+}
+long long query(int node, int lo, int hi, int l, int r) {
+    if (r < lo || hi < l) return 0;
+    if (l <= lo && hi <= r) return tree[node];
+    push(node, lo, hi);
+    int mid = (lo + hi) / 2;
+    return query(2 * node, lo, mid, l, r) + query(2 * node + 1, mid + 1, hi, l, r);
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] tree = new long[4 * n], lazy = new long[4 * n];
+
+static void apply(int node, int lo, int hi, long v) {
+    tree[node] += v * (hi - lo + 1);
+    lazy[node] += v;
+}
+static void push(int node, int lo, int hi) {
+    if (lazy[node] != 0) {
+        int mid = (lo + hi) / 2;
+        apply(2 * node, lo, mid, lazy[node]);
+        apply(2 * node + 1, mid + 1, hi, lazy[node]);
+        lazy[node] = 0;
+    }
+}
+static void update(int node, int lo, int hi, int l, int r, long v) {
+    if (r < lo || hi < l) return;
+    if (l <= lo && hi <= r) { apply(node, lo, hi, v); return; }
+    push(node, lo, hi);
+    int mid = (lo + hi) / 2;
+    update(2 * node, lo, mid, l, r, v);
+    update(2 * node + 1, mid + 1, hi, l, r, v);
+    tree[node] = tree[2 * node] + tree[2 * node + 1];
+}
+static long query(int node, int lo, int hi, int l, int r) {
+    if (r < lo || hi < l) return 0;
+    if (l <= lo && hi <= r) return tree[node];
+    push(node, lo, hi);
+    int mid = (lo + hi) / 2;
+    return query(2 * node, lo, mid, l, r) + query(2 * node + 1, mid + 1, hi, l, r);
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it against a brute force that really loops over the range:
+
+<CodeRunner language="python" code={`import random
+
+class LazySeg:
+    def __init__(self, a):
+        self.n = len(a)
+        self.sum = [0] * (4 * self.n)
+        self.lazy = [0] * (4 * self.n)
+        self._build(1, 0, self.n - 1, a)
+
+    def _build(self, node, lo, hi, a):
+        if lo == hi:
+            self.sum[node] = a[lo]
+            return
+        mid = (lo + hi) // 2
+        self._build(2 * node, lo, mid, a)
+        self._build(2 * node + 1, mid + 1, hi, a)
+        self.sum[node] = self.sum[2 * node] + self.sum[2 * node + 1]
+
+    def _apply(self, node, lo, hi, v):
+        self.sum[node] += v * (hi - lo + 1)
+        self.lazy[node] += v
+
+    def _push(self, node, lo, hi):
+        if self.lazy[node]:
+            mid = (lo + hi) // 2
+            self._apply(2 * node, lo, mid, self.lazy[node])
+            self._apply(2 * node + 1, mid + 1, hi, self.lazy[node])
+            self.lazy[node] = 0
+
+    def add(self, l, r, v, node=1, lo=0, hi=None):
+        if hi is None:
+            hi = self.n - 1
+        if r < lo or hi < l:
+            return
+        if l <= lo and hi <= r:
+            self._apply(node, lo, hi, v)
+            return
+        self._push(node, lo, hi)
+        mid = (lo + hi) // 2
+        self.add(l, r, v, 2 * node, lo, mid)
+        self.add(l, r, v, 2 * node + 1, mid + 1, hi)
+        self.sum[node] = self.sum[2 * node] + self.sum[2 * node + 1]
+
+    def query(self, l, r, node=1, lo=0, hi=None):
+        if hi is None:
+            hi = self.n - 1
+        if r < lo or hi < l:
+            return 0
+        if l <= lo and hi <= r:
+            return self.sum[node]
+        self._push(node, lo, hi)
+        mid = (lo + hi) // 2
+        return self.query(l, r, 2 * node, lo, mid) + self.query(l, r, 2 * node + 1, mid + 1, hi)
+
+a = [1, 2, 3, 4, 5, 6, 7, 8]
+t = LazySeg(a)
+t.add(2, 5, 10)
+print("sum of a[0..7] after adding 10 to a[2..5]:", t.query(0, 7))
+print("sum of a[3..4]:", t.query(3, 4))
+
+random.seed(5)
+n = 300
+a = [random.randint(-20, 20) for _ in range(n)]
+t = LazySeg(a)
+for _ in range(3000):
+    l = random.randint(0, n - 1)
+    r = random.randint(l, n - 1)
+    if random.random() < 0.5:
+        v = random.randint(-9, 9)
+        t.add(l, r, v)
+        for i in range(l, r + 1):
+            a[i] += v
+    else:
+        assert t.query(l, r) == sum(a[l:r + 1])
+print("3000 random operations agree with the O(n) brute force")
+`} />
+
+## Other combinations
+
+The skeleton stays the same; only `apply` (and what a tag means) changes.
+
+| range update | range query | `apply(node, v)` | tag combine |
+| --- | --- | --- | --- |
+| add `v` | sum | `sum += v * length` | `lazy += v` |
+| add `v` | max or min | `mx += v` (no length factor) | `lazy += v` |
+| assign `v` | sum | `sum = v * length` | `lazy = v` (overwrites, needs a "has tag" flag) |
+| assign `v`, then add | sum or max | a pair `(assign, add)` | newer assign clears the older add |
+
+A tag must be an operation you can **compose**: applying tag `A` then tag `B` to a node has to equal applying one combined tag. Adds compose by summing. Assigns compose by keeping the last one. If you cannot describe the composition, lazy propagation is not the right tool.
+
+## Pitfalls
+
+1. **Forgetting `push` before recursing.** Children are stale; the answer is silently wrong. Push in **both** `update` and `query`.
+2. **Forgetting to recompute after recursing in `update`.** Without `sum[node] = sum[left] + sum[right]` the ancestors keep their old sums.
+3. **Multiplying by the wrong length.** The factor is `hi - lo + 1` of the *node being applied to* (a child, inside `push`), not of its parent.
+4. **A sentinel for assign.** With "assign" tags, `0` is a legitimate value, so use a separate flag or `None`, not `if lazy[node]`.
+5. **Overflow.** A range add of `10^6` over `2·10^5` elements, repeated `2·10^5` times, needs 64-bit integers; in C++ and Java use `long long` / `long` for both `tree` and `lazy`.
+6. **Array size.** The recursive layout needs `4 * n` slots; `2 * n` is only enough for the bottom-up layout.
+7. **Python depth.** The recursion is only `log n` deep, so it is safe, but a Python version that must run hundreds of thousands of operations is slow; prefer an iterative or compiled solution at real scale.
+
+## Practice
+
+<Problem id="m12-range-boost" />
+
+## Problem ladder
+
+- [Range Update Queries](https://cses.fi/problemset/task/1651) (CSES): range add with point queries; a Fenwick tree suffices, a good contrast.
+- [Horrible Queries](https://www.spoj.com/problems/HORRIBLE/) (SPOJ HORRIBLE): range add with range sum, exactly this lesson.
+- [Circular RMQ](https://codeforces.com/problemset/problem/52/C) (Codeforces 52C, rating about 2200): range add with range minimum on a circular array.
+- [Range Updates and Sums](https://cses.fi/problemset/task/1735) (CSES): add and assign together; the tag composition from the table above.
+- [Count of Smaller Numbers After Self](https://leetcode.com/problems/count-of-smaller-numbers-after-self/) (LeetCode, hard): a stretch goal using the tree for counting.
+
+## Quiz
+
+<Quiz id="cp-m12-lazy-propagation" tags={["segment-tree", "lazy-propagation"]} questions={[
+  { type: "mcq", q: "What does a non-zero lazy[node] mean?", options: ["The node's own sum is out of date", "The node's own sum is correct but its children have not received this add yet", "The node is a leaf", "An error occurred"], answer: 1, explain: "apply() updates the node's sum immediately; only the children are behind until push() delivers the tag." },
+  { type: "mcq", q: "When must push(node) be called?", options: ["Only in update", "Only in query", "In both, just before recursing into the children", "Never, build handles it"], answer: 2, explain: "Any operation that descends needs up-to-date children, and the update also needs them before it rebuilds the parent's sum." },
+  { type: "predict", q: "A node covering 4 positions has sum 20 and receives apply(node, 3). What is its sum?", code: "length = 4\nsum_ = 20\nv = 3\nprint(sum_ + v * length)", options: ["23", "24", "32", "80"], answer: 2, explain: "A range sum grows by v for every element: 20 + 3 * 4 = 32." },
+  { type: "multi", q: "Which of these can be handled by lazy propagation?", options: ["range add with range sum", "range add with range max", "range assign with range sum", "range add with range median"], answer: [0, 1, 2], explain: "Sum, max and assign tags compose, so they work. A median cannot be derived from a node's summary, so a segment tree with a tag does not help." },
+  { type: "mcq", q: "What is the time complexity of one range update or range query with lazy propagation?", options: ["O(1)", "O(log n)", "O(sqrt n)", "O(n)"], answer: 1, explain: "Only the O(log n) nodes on the two boundary paths are visited, and each does O(1) work." }
+]} />

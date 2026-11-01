@@ -1,0 +1,105 @@
+{
+  "id": "m13-merge-crates",
+  "title": "Merge the Crates",
+  "source": {
+    "name": "Original wording; classic interval DP (compare LeetCode 1000, Minimum Cost to Merge Stones)"
+  },
+  "rating": 1700,
+  "tags": [
+    "dp",
+    "interval-dp",
+    "prefix-sums",
+    "optimization"
+  ],
+  "statement": "`n` crates stand in a row; crate `i` weighs `w[i]`. In one move you pick **two neighbouring piles** and merge them into one pile; the move costs the **sum of the two piles' weights** (and the new pile weighs that sum). Repeat until a single pile remains.\n\nFind the **minimum total cost** of merging everything into one pile.\n\n**Input.** First line: `n`. Second line: `w[1], ..., w[n]`.\n\n**Output.** The minimum total cost.",
+  "constraints": [
+    "1 ≤ n ≤ 200",
+    "1 ≤ w[i] ≤ 10^6",
+    "the answer can exceed 32 bits (up to about 10^9 times the number of merge levels), so use 64-bit integers"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "4\n4 1 1 4\n",
+      "output": "18\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n5\n",
+      "output": "0\n",
+      "hidden": false
+    },
+    {
+      "input": "2\n3 7\n",
+      "output": "10\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n2 2 2 2 2 2 2 2\n",
+      "output": "48\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n5 8 1\n",
+      "output": "23\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n20 15 6 4 12\n",
+      "output": "124\n",
+      "hidden": true
+    },
+    {
+      "input": "7\n3 8 9 2 11 20 6\n",
+      "output": "162\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n18 14 2 19 1 19 9 10\n",
+      "output": "273\n",
+      "hidden": true
+    },
+    {
+      "input": "9\n14 7 6 4 19 17 19 2 11\n",
+      "output": "301\n",
+      "hidden": true
+    },
+    {
+      "input": "200\n7 19 24 26 31 34 34 38 40 43 45 51 54 60 65 66 68 70 79 91 93 99 100 100 101 104 114 121 121 123 123 125 138 139 146 152 176 176 182 184 185 185 189 190 190 192 196 196 199 200 202 207 209 211 213 222 244 245 258 262 265 266 276 278 283 287 292 292 305 315 320 337 343 349 351 353 358 359 361 363 365 366 383 386 387 392 403 407 407 411 413 413 420 421 430 438 443 443 444 445 455 455 470 472 482 485 488 499 502 511 513 519 525 528 530 537 538 540 541 545 548 549 557 560 575 577 590 595 597 599 602 610 612 624 628 634 640 645 645 650 651 659 663 667 672 677 684 690 696 701 709 709 711 717 725 732 745 753 757 762 771 772 776 798 800 800 803 816 828 840 846 848 855 862 862 867 870 879 887 892 904 917 921 923 923 930 932 939 944 947 948 948 952 966 976 978 978 980 980 991\n",
+      "output": "694324\n",
+      "hidden": true
+    },
+    {
+      "input": "200\n51523 786737 722288 753020 439753 487024 266188 261115 932494 241948 118023 279210 967287 68374 976013 698096 593575 165459 186980 932612 677331 334327 59548 31436 522987 166051 632990 293619 44308 888245 510375 734452 31296 290535 803499 805878 4267 225794 662692 850986 474960 887493 693348 244654 464575 560513 450678 146639 372432 358918 271612 905826 857456 722662 9541 737044 398336 637897 671335 112423 184008 887168 841614 936455 651229 578184 678724 379658 292404 889721 885484 537742 275873 197497 271843 291260 550941 166858 364806 879462 832649 534631 519864 730505 524160 857063 142384 565147 199752 523376 425433 359959 916669 918012 798686 81370 405522 698362 687625 551944 204459 741321 169607 89847 53067 965682 398151 354695 247408 56960 542825 549895 891487 160293 206420 584777 379598 906658 998982 627472 647 552803 336636 805094 803506 22887 118921 994640 531339 719814 53950 845832 663049 865303 68291 103364 598183 69845 966109 187028 270185 529302 317864 983927 327794 953475 956971 431987 602939 652649 551114 775770 575699 348541 337871 708976 987540 831470 762270 54785 945219 245701 839728 536818 683901 998851 336948 712092 295042 3569 250063 254254 60159 123637 970834 329906 312837 932177 25036 982293 331455 118215 108181 951062 466774 864664 348363 963463 184005 167580 499911 298320 435000 413238 371249 146561 852769 423138 321683 246192\n",
+      "output": "741176061\n",
+      "hidden": true
+    },
+    {
+      "input": "200\n1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000\n",
+      "output": "1544000000\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Trying every order of merges explodes, but whatever the order, the last merge joins a prefix pile and a suffix pile of the segment. Think about the best cost of a segment on its own.",
+    "Let dp[i][j] be the cheapest way to turn crates i..j into one pile. The last merge splits the segment at some k: dp[i][j] = min over k of dp[i][k] + dp[k+1][j], plus the total weight of i..j for that final merge.",
+    "The total weight of i..j is a prefix-sum difference. Fill segments by increasing length so both halves are ready; there are O(n^2) segments and O(n) splits each."
+  ],
+  "editorial": "Look at the **last** merge of a segment `i..j`: it joins a pile built from `i..k` with a pile built from `k+1..j`, and costs the whole weight `W(i..j)` no matter how the halves were built. The two halves are independent sub-problems of the same kind, so `dp[i][j] = min over k in [i, j-1] of (dp[i][k] + dp[k+1][j]) + W(i..j)`, with `dp[i][i] = 0`. Compute segments in increasing length, and get `W` from prefix sums in `O(1)`. There are `O(n^2)` states and `O(n)` transitions, so the time is `O(n^3)` and the memory `O(n^2)`. This is **interval DP**: the state is a contiguous segment and the transition is a split point. For the real-scale version the Knuth optimisation (the best split is monotone) brings it down to `O(n^2)`. Use 64-bit integers: with 200 crates of weight `10^6` the total exceeds `2^31`.",
+  "complexity": {
+    "time": "O(n^3)",
+    "space": "O(n^2)"
+  },
+  "starter": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn = int(data[0])\nw = [int(x) for x in data[1:1 + n]]\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0];\nconst w = tok.slice(1, 1 + n);\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        // read n, then the n weights\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read n, then the n weights\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn = int(data[0])\nw = [int(x) for x in data[1:1 + n]]\npre = [0] * (n + 1)\nfor i in range(n):\n    pre[i + 1] = pre[i] + w[i]\nINF = float(\"inf\")\n# dp[i][j] = cheapest way to merge crates i..j into one pile\ndp = [[0] * n for _ in range(n)]\nfor length in range(2, n + 1):\n    for i in range(n - length + 1):\n        j = i + length - 1\n        best = INF\n        for k in range(i, j):                     # the last merge joins [i..k] and [k+1..j]\n            c = dp[i][k] + dp[k + 1][j]\n            if c < best:\n                best = c\n        dp[i][j] = best + pre[j + 1] - pre[i]     # that last merge costs the total weight\nprint(dp[0][n - 1])\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0];\nconst w = tok.slice(1, 1 + n);\nconst pre = new Array(n + 1).fill(0);\nfor (let i = 0; i < n; i++) pre[i + 1] = pre[i] + w[i];\nconst dp = Array.from({ length: n }, () => new Array(n).fill(0));\nfor (let len = 2; len <= n; len++) {\n  for (let i = 0; i + len <= n; i++) {\n    const j = i + len - 1;\n    let best = Infinity;\n    for (let k = i; k < j; k++) best = Math.min(best, dp[i][k] + dp[k + 1][j]);\n    dp[i][j] = best + pre[j + 1] - pre[i];\n  }\n}\nconsole.log(String(dp[0][n - 1]));\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StreamTokenizer in = new StreamTokenizer(new BufferedInputStream(System.in));\n        in.nextToken();\n        int n = (int) in.nval;\n        long[] pre = new long[n + 1];\n        for (int i = 0; i < n; i++) {\n            in.nextToken();\n            pre[i + 1] = pre[i] + (long) in.nval;\n        }\n        long[][] dp = new long[n][n];\n        for (int len = 2; len <= n; len++) {\n            for (int i = 0; i + len <= n; i++) {\n                int j = i + len - 1;\n                long best = Long.MAX_VALUE;\n                for (int k = i; k < j; k++) best = Math.min(best, dp[i][k] + dp[k + 1][j]);\n                dp[i][j] = best + pre[j + 1] - pre[i];\n            }\n        }\n        System.out.println(dp[0][n - 1]);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n;\n    scanf(\"%d\", &n);\n    vector<long long> pre(n + 1, 0);\n    for (int i = 0; i < n; i++) {\n        long long x;\n        scanf(\"%lld\", &x);\n        pre[i + 1] = pre[i] + x;\n    }\n    vector<vector<long long>> dp(n, vector<long long>(n, 0));\n    for (int len = 2; len <= n; len++) {\n        for (int i = 0; i + len <= n; i++) {\n            int j = i + len - 1;\n            long long best = LLONG_MAX;\n            for (int k = i; k < j; k++) best = min(best, dp[i][k] + dp[k + 1][j]);\n            dp[i][j] = best + pre[j + 1] - pre[i];\n        }\n    }\n    printf(\"%lld\\n\", dp[0][n - 1]);\n    return 0;\n}\n"
+  }
+}

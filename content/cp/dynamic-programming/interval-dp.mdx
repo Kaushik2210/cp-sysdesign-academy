@@ -1,0 +1,224 @@
+---
+title: Interval DP
+track: cp
+module: dynamic-programming
+order: 7
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack, cp/arrays-and-windows/prefix-sums]
+tags: [dp, interval-dp, prefix-sums, merging, palindrome]
+type: lesson
+problems: [m13-merge-crates]
+furtherReading:
+  - title: cp-algorithms, Knuth's Optimization
+    url: https://cp-algorithms.com/dynamic_programming/knuth-optimization.html
+  - title: CSES Problem Set, Removal Game
+    url: https://cses.fi/problemset/task/1097
+  - title: USACO Guide, Dynamic Programming on Ranges
+    url: https://usaco.guide/gold/dp-ranges
+---
+
+## Intuition
+
+Some problems let you shrink a row by repeatedly acting on **neighbours**: merge two adjacent piles, burst a balloon, parenthesise a product. The order matters a great deal, and there are exponentially many orders. But look at the **last** action. Whatever you did before, that final action splits the row into a left part and a right part which were handled **independently**, each as a smaller copy of the same problem.
+
+So the natural sub-problem is not a prefix (as in knapsack or LIS) but a **contiguous segment** `[i, j]`. The answer for a long segment is assembled from answers for shorter segments inside it. That is interval DP.
+
+## Definition
+
+State: `dp[i][j]` is the best value for the segment `i..j` considered on its own.
+
+Transition: try every **split point** `k` (or every choice of "which element is handled last") and combine the two halves:
+
+```text
+dp[i][j] = best over k in [i, j-1] of  combine( dp[i][k], dp[k+1][j] )  + cost(i, j)
+dp[i][i] = base case (often 0)
+```
+
+**Order of evaluation.** `dp[i][j]` needs strictly shorter segments, so iterate by increasing **length**:
+
+```text
+for length in 2..n:
+    for i in 0..n-length:
+        j = i + length - 1
+        compute dp[i][j]
+```
+
+Cost: `O(n^2)` states and `O(n)` transitions each, so `O(n^3)` time and `O(n^2)` memory, fine for `n` up to a few hundred.
+
+## Example, step by step
+
+**Merging crates.** Crates weigh `4 1 1 4`. Merging two neighbouring piles costs their combined weight. Find the cheapest way to end with one pile.
+
+Let `W(i, j)` be the total weight of segment `i..j`. The last merge of any segment joins a left and a right pile and costs `W(i, j)`, so
+
+```text
+dp[i][j] = min over k of ( dp[i][k] + dp[k+1][j] ) + W(i, j)
+```
+
+| segment | splits tried | result |
+| --- | --- | --- |
+| `[4,1]` | single split | `0 + 0 + 5 = 5` |
+| `[1,1]` | single split | `0 + 0 + 2 = 2` |
+| `[1,4]` | single split | `0 + 0 + 5 = 5` |
+| `[4,1,1]` | `0 + dp[1,1]=2`, `5 + 0` | `min(2, 5) + 6 = 8` |
+| `[1,1,4]` | `0 + 5`, `2 + 0` | `min(5, 2) + 6 = 8` |
+| `[4,1,1,4]` | `0 + 8`, `5 + 5`, `8 + 0` | `min(8, 10, 8) + 10 = 18` |
+
+The answer is `18`: merge the two 1s (cost 2), then the 4 with that pile (cost 6), then the last 4 (cost 10). The weights are easy to get wrong by hand, which is why `W` comes from [prefix sums](/cp/arrays-and-windows/prefix-sums/) in `O(1)`.
+
+A second shape of interval DP peels from **both ends** instead of splitting: the **longest palindromic subsequence** of a string.
+
+```text
+dp[i][j] = dp[i+1][j-1] + 2          if s[i] == s[j]      (both ends match; if i+1 > j-1 the middle is empty, so just 2)
+         = max(dp[i+1][j], dp[i][j-1])   otherwise        (drop one end)
+```
+
+Here there is no loop over `k`: each state has `O(1)` transitions, so the whole table is `O(n^2)`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+pre = [0]
+for x in w:
+    pre.append(pre[-1] + x)
+dp = [[0] * n for _ in range(n)]
+for length in range(2, n + 1):
+    for i in range(n - length + 1):
+        j = i + length - 1
+        best = min(dp[i][k] + dp[k + 1][j] for k in range(i, j))
+        dp[i][j] = best + pre[j + 1] - pre[i]
+answer = dp[0][n - 1]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> pre(n + 1, 0);
+for (int i = 0; i < n; i++) pre[i + 1] = pre[i] + w[i];
+vector<vector<long long>> dp(n, vector<long long>(n, 0));
+for (int len = 2; len <= n; len++)
+    for (int i = 0; i + len <= n; i++) {
+        int j = i + len - 1;
+        long long best = LLONG_MAX;
+        for (int k = i; k < j; k++) best = min(best, dp[i][k] + dp[k + 1][j]);
+        dp[i][j] = best + pre[j + 1] - pre[i];
+    }
+long long answer = dp[0][n - 1];
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] pre = new long[n + 1];
+for (int i = 0; i < n; i++) pre[i + 1] = pre[i] + w[i];
+long[][] dp = new long[n][n];
+for (int len = 2; len <= n; len++)
+    for (int i = 0; i + len <= n; i++) {
+        int j = i + len - 1;
+        long best = Long.MAX_VALUE;
+        for (int k = i; k < j; k++) best = Math.min(best, dp[i][k] + dp[k + 1][j]);
+        dp[i][j] = best + pre[j + 1] - pre[i];
+    }
+long answer = dp[0][n - 1];
+```
+
+</Tab>
+</Tabs>
+
+Check the table against a brute force that tries **every** order of merges, then try the palindrome variant:
+
+<CodeRunner language="python" code={`import random
+from functools import lru_cache
+
+def merge_cost(w):
+    n = len(w)
+    pre = [0]
+    for x in w:
+        pre.append(pre[-1] + x)
+    dp = [[0] * n for _ in range(n)]
+    for length in range(2, n + 1):
+        for i in range(n - length + 1):
+            j = i + length - 1
+            best = min(dp[i][k] + dp[k + 1][j] for k in range(i, j))
+            dp[i][j] = best + pre[j + 1] - pre[i]
+    return dp[0][n - 1]
+
+def brute(w):
+    @lru_cache(None)
+    def go(t):
+        if len(t) == 1:
+            return 0
+        return min(go(t[:i] + (t[i] + t[i + 1],) + t[i + 2:]) + t[i] + t[i + 1]
+                   for i in range(len(t) - 1))
+    return go(tuple(w))
+
+print("merge [4, 1, 1, 4]:", merge_cost([4, 1, 1, 4]))
+random.seed(1)
+for _ in range(300):
+    w = [random.randint(1, 20) for _ in range(random.randint(1, 8))]
+    assert merge_cost(w) == brute(w)
+print("300 random cases agree with the try-every-order brute force")
+
+def longest_palindromic_subsequence(s):
+    n = len(s)
+    dp = [[0] * n for _ in range(n)]
+    for i in range(n - 1, -1, -1):
+        dp[i][i] = 1
+        for j in range(i + 1, n):
+            if s[i] == s[j]:
+                dp[i][j] = dp[i + 1][j - 1] + 2 if i + 1 <= j - 1 else 2
+            else:
+                dp[i][j] = max(dp[i + 1][j], dp[i][j - 1])
+    return dp[0][n - 1] if n else 0
+
+print(longest_palindromic_subsequence("bbbab"), longest_palindromic_subsequence("character"))
+`} />
+
+## Recognising interval DP
+
+| signal in the statement | typical state and transition |
+| --- | --- |
+| merge or combine **adjacent** items, cost depends on the group | `dp[i][j]`, split at `k` (this lesson) |
+| parenthesise an expression, matrix-chain multiplication | `dp[i][j]`, split at the top-level operator `k` |
+| remove or burst items, reward depends on current neighbours | `dp[i][j]`, `k` is the item removed **last** |
+| string reducible from both ends (palindromes) | `dp[i][j]`, compare `s[i]` and `s[j]` |
+| two players alternately take from either end | `dp[i][j]` = best score difference for the player to move |
+
+For merge-type problems whose cost satisfies the **quadrangle inequality**, the best split `opt[i][j]` is monotone: `opt[i][j-1] <= opt[i][j] <= opt[i+1][j]`. Searching only that window brings the total to `O(n^2)` (Knuth's optimisation). You rarely need it at `n <= 500`; it matters at `n = 5000`.
+
+## Pitfalls
+
+1. **Wrong evaluation order.** Filling `i` then `j` in plain nested loops reads cells that are not computed yet. Go by increasing length, or by `i` descending and `j` ascending.
+2. **Off-by-one in the split.** With `dp[i][k] + dp[k+1][j]`, `k` runs from `i` to `j - 1`. Using `j` reads `dp[j+1][j]`, an empty segment.
+3. **Forgetting the merge cost.** `cost(i, j)` depends on the *whole* segment, not on how the halves were built; compute it from prefix sums.
+4. **Infinity arithmetic.** Initialising unused cells with `INF` and adding two of them overflows in C++ and Java; use a large-but-safe constant (`10^18` for `long long`) and only combine valid states.
+5. **Overflow of the answer.** Costs add up per merge level, so 200 crates of weight `10^6` exceed 32 bits. Use 64-bit integers.
+6. **Treating a segment as a prefix.** The sub-problem must be closed: the answer for `[i, j]` may not depend on what lies outside it. If it does, the state needs another dimension.
+
+## Practice
+
+<Problem id="m13-merge-crates" />
+
+## Problem ladder
+
+- [Removal Game](https://cses.fi/problemset/task/1097) (CSES): two players take from the ends, `dp[i][j]` is the best score difference.
+- [Minimum Cost to Merge Stones](https://leetcode.com/problems/minimum-cost-to-merge-stones/) (LeetCode 1000, hard): this lesson with `k` piles per merge.
+- [Burst Balloons](https://leetcode.com/problems/burst-balloons/) (LeetCode 312, hard): `k` is the balloon popped **last**.
+- [Longest Palindromic Subsequence](https://leetcode.com/problems/longest-palindromic-subsequence/) (LeetCode 516): the both-ends shape.
+- [Zuma](https://codeforces.com/problemset/problem/607/B) (Codeforces 607B, rating about 1900): minimum seconds to delete a palindromic row, a classic interval DP.
+
+## Quiz
+
+<Quiz id="cp-m13-interval-dp" tags={["dp", "interval-dp"]} questions={[
+  { type: "mcq", q: "Why does the DP state for merging neighbours become a segment [i, j] rather than a prefix?", options: ["Prefixes are slower", "The last merge splits the segment into two independent sub-segments", "Segments need less memory", "Because the input is sorted"], answer: 1, explain: "Whatever order you choose, the final merge joins a left pile and a right pile built independently from contiguous parts of the row." },
+  { type: "mcq", q: "In what order should dp[i][j] be filled?", options: ["By increasing segment length", "By decreasing segment length", "Random order", "Only the diagonal"], answer: 0, explain: "dp[i][j] depends on strictly shorter segments, so shorter ones must be ready first." },
+  { type: "predict", q: "For weights 3 7, what does the merge DP give?", code: "w = [3, 7]\nprint(w[0] + w[1])", options: ["3", "7", "10", "21"], answer: 2, explain: "There is one merge, and it costs the combined weight 3 + 7 = 10." },
+  { type: "mcq", q: "What are the time and memory of the basic merge DP on n items?", options: ["O(n) and O(n)", "O(n^2) and O(n)", "O(n^3) and O(n^2)", "O(2^n) and O(n)"], answer: 2, explain: "There are O(n^2) segments, O(n) split points per segment, and a table of O(n^2) cells." },
+  { type: "multi", q: "Which of these are naturally interval DP?", options: ["Matrix-chain multiplication order", "Bursting balloons for maximum coins", "Longest increasing subsequence of an array", "Longest palindromic subsequence of a string"], answer: [0, 1, 3], explain: "LIS uses a prefix-style state (or a patience-sorting array), not a segment." }
+]} />
