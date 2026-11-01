@@ -63,7 +63,7 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
         </nav>
         <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-black tracking-tight sm:text-4xl">{lesson.title}</h1>
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{lesson.title}</h1>
             <p className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
               <span className="rounded-full px-2.5 py-1 text-white" style={{ background: `hsl(var(--${DIFFICULTY_TINT[lesson.difficulty] ?? "accent"}))` }}>
                 {lesson.difficulty}
@@ -105,7 +105,7 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
             <span />
           )}
           {next && (
-            <Link href={next.href} className="inline-flex min-h-11 items-center gap-1 rounded-full bg-gradient-brand px-4 text-sm font-semibold text-white shadow-lg transition hover:translate-x-0.5 hover:shadow-xl">
+            <Link href={next.href} className="inline-flex min-h-11 items-center gap-1 rounded-full bg-gradient-brand px-4 text-sm font-semibold text-white transition hover:translate-x-0.5">
               {next.title} <ChevronRight size={16} aria-hidden />
             </Link>
           )}

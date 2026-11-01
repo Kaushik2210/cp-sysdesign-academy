@@ -4,43 +4,53 @@
 
 :root {
   --bg: 0 0% 100%;
-  --fg: 222 20% 12%;
-  --muted: 220 16% 95%;
-  --muted-fg: 220 10% 36%;
-  --border: 220 14% 88%;
-  --accent: 243 75% 50%;
+  --fg: 0 0% 4%;
+  --muted: 0 0% 96%;
+  --muted-fg: 0 0% 36%;
+  --border: 0 0% 87%;
+  --accent: 242 100% 42%;      /* electric ultramarine */
   --accent-fg: 0 0% 100%;
   --card: 0 0% 100%;
-  --hot: 316 80% 44%;
-  --cool: 195 90% 32%;
-  --sun: 28 92% 38%;
-  --leaf: 152 70% 28%;
-  --glow: 0.18;
+  --hot: 14 100% 40%;          /* vermilion */
+  --cool: 217 100% 40%;        /* cobalt */
+  --sun: 38 100% 28%;          /* ochre */
+  --leaf: 152 100% 22%;        /* pine */
 }
 
 .dark {
-  --bg: 224 24% 8%;
-  --fg: 220 20% 93%;
-  --muted: 223 20% 13%;
-  --muted-fg: 220 12% 68%;
-  --border: 222 16% 20%;
-  --accent: 239 84% 74%;
-  --accent-fg: 224 24% 8%;
-  --card: 224 22% 11%;
-  --hot: 316 90% 68%;
-  --cool: 190 95% 62%;
-  --sun: 38 96% 64%;
-  --leaf: 152 75% 56%;
-  --glow: 0.35;
+  --bg: 0 0% 4%;
+  --fg: 0 0% 96%;
+  --muted: 0 0% 10%;
+  --muted-fg: 0 0% 66%;
+  --border: 0 0% 19%;
+  --accent: 236 100% 76%;
+  --accent-fg: 0 0% 4%;
+  --card: 0 0% 6%;
+  --hot: 14 100% 62%;
+  --cool: 217 100% 70%;
+  --sun: 40 100% 60%;
+  --leaf: 152 70% 52%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
 body {
-  @apply bg-bg text-fg antialiased;
+  @apply bg-bg font-sans text-fg antialiased;
+  font-feature-settings: "ss01", "cv11";
+  overflow-x: clip;
 }
-
+::selection {
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-fg));
+}
+/* Editorial headings: medium weight, tight tracking, like a printed catalogue. */
+h1, h2 {
+  letter-spacing: -0.035em;
+}
 :focus-visible {
   outline: 2px solid hsl(var(--accent));
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -54,42 +64,6 @@ body {
   }
 }
 
-/* ---------- Maximalist layer: aurora, grid, gradient text, glow ---------- */
-body {
-  position: relative;
-  overflow-x: clip;
-}
-/* Slowly drifting colour wash behind everything. Pure decoration: pointer-events none, hidden in print. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: -20%;
-  z-index: -2;
-  pointer-events: none;
-  background:
-    radial-gradient(40% 35% at 15% 10%, hsl(var(--accent) / var(--glow)), transparent 70%),
-    radial-gradient(35% 30% at 85% 20%, hsl(var(--hot) / var(--glow)), transparent 70%),
-    radial-gradient(40% 35% at 70% 85%, hsl(var(--cool) / var(--glow)), transparent 70%),
-    radial-gradient(30% 30% at 10% 80%, hsl(var(--sun) / calc(var(--glow) * 0.7)), transparent 70%);
-  animation: aurora-drift 26s ease-in-out infinite alternate;
-}
-/* Faint engineering-paper grid over the wash. */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background-image:
-    linear-gradient(hsl(var(--fg) / 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, hsl(var(--fg) / 0.045) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: radial-gradient(ellipse at 50% 0%, black 20%, transparent 75%);
-}
-@keyframes aurora-drift {
-  from { transform: translate3d(-3%, -2%, 0) scale(1); }
-  to { transform: translate3d(3%, 3%, 0) scale(1.12); }
-}
 @keyframes marquee {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
@@ -98,63 +72,73 @@ body::after {
   from { opacity: 0; transform: translateY(14px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
-@keyframes sheen {
-  from { background-position: 0% 50%; }
-  to { background-position: 200% 50%; }
+
+/* ---------- Editorial design system ---------- */
+/* Tiny tracked uppercase label, the site's signature micro-typography. */
+.label {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-fg));
 }
+/* Legacy gradient helpers now resolve to flat colour. */
 .text-gradient {
-  background: linear-gradient(95deg, hsl(var(--accent)), hsl(var(--hot)) 35%, hsl(var(--sun)) 65%, hsl(var(--cool)));
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: sheen 9s linear infinite;
+  color: hsl(var(--accent));
 }
 .bg-gradient-brand {
-  background: linear-gradient(120deg, hsl(var(--accent)), hsl(var(--hot)));
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-fg));
 }
 .ring-glow {
-  box-shadow: 0 0 0 1px hsl(var(--accent) / 0.5), 0 10px 40px -10px hsl(var(--accent) / 0.55);
+  box-shadow: 0 0 0 2px hsl(var(--accent));
 }
-/* Cards that light up under the pointer. --mx/--my are set by SpotlightCard. */
+/* Circular outline arrow button that fills on hover; the parent link needs the `group` class. */
+.arrow-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 1px solid hsl(var(--fg));
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.group:hover .arrow-btn,
+.group:focus-visible .arrow-btn {
+  background: hsl(var(--accent));
+  border-color: hsl(var(--accent));
+  color: hsl(var(--accent-fg));
+  transform: rotate(45deg);
+}
+/* Cards: hairline border, flat, a blue edge on hover. */
 .spotlight {
   position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-}
-.spotlight::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  opacity: 0;
-  transition: opacity 0.25s ease;
-  background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 50%), hsl(var(--tint, var(--accent)) / 0.28), transparent 65%);
-}
-.spotlight:hover::before,
-.spotlight:focus-within::before {
-  opacity: 1;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
 .spotlight:hover,
 .spotlight:focus-within {
-  border-color: hsl(var(--tint, var(--accent)) / 0.8);
-  box-shadow: 0 12px 40px -14px hsl(var(--tint, var(--accent)) / 0.6);
+  border-color: hsl(var(--tint, var(--accent)));
 }
 .marquee-track {
   display: flex;
   width: max-content;
-  animation: marquee 40s linear infinite;
+  animation: marquee 60s linear infinite;
 }
 .marquee:hover .marquee-track {
   animation-play-state: paused;
 }
-
-@media print {
-  body::before,
-  body::after {
-    display: none !important;
-  }
+/* Gallery tile cover: solid colour block with a hairline frame. */
+.cover {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 3px;
+  transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.group:hover .cover {
+  transform: translateY(-3px);
 }
 
 /* Code blocks (rehype-pretty-code + shiki dual theme) */
@@ -187,11 +171,13 @@ code[data-theme*=" "] span {
 .prose h3 {
   scroll-margin-top: 6rem;
 }
-/* Section headings get a gradient rule on the left. */
+/* Section headings: a hairline above and medium weight. */
 .prose h2 {
-  border-left: 5px solid;
-  border-image: linear-gradient(to bottom, hsl(var(--accent)), hsl(var(--hot))) 1;
-  padding-left: 0.75rem;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 1.25rem;
+  margin-top: 3rem;
+  font-weight: 500;
+  letter-spacing: -0.03em;
 }
 
 @media print {

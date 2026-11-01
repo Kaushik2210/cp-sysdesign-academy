@@ -21,18 +21,18 @@ export function PathChecklist({ days }: { days: Day[] }) {
 
   return (
     <div className="mt-6">
-      <div className="rounded-2xl border border-border bg-card/80 p-4 backdrop-blur-sm">
+      <div className="rounded-md border border-border bg-card/80 p-4 backdrop-blur-sm">
         <p className="text-sm font-medium" role="status">
           {done}/{all.length} lessons complete{firstOpen ? ` · next up: day ${firstOpen}` : ""}
         </p>
         <div aria-hidden="true" className="mt-2 h-2.5 overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-700" style={{ width: `${all.length ? (done / all.length) * 100 : 0}%` }} />
+          <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${all.length ? (done / all.length) * 100 : 0}%` }} />
         </div>
       </div>
       <ol className="mt-4 space-y-3">
         {days.map((d) => (
-          <li key={d.day} className="rounded-2xl border border-border bg-card/80 p-4 backdrop-blur-sm transition hover:border-accent/60">
-            <h2 className="text-base font-extrabold tracking-tight">Day {d.day}</h2>
+          <li key={d.day} className="rounded-md border border-border bg-card/80 p-4 backdrop-blur-sm transition hover:border-accent/60">
+            <h2 className="text-base font-semibold tracking-tight">Day {d.day}</h2>
             <ul className="mt-1 space-y-1">
               {d.lessons.map((l) => (
                 <li key={l.id} className="flex items-center gap-2 text-sm">

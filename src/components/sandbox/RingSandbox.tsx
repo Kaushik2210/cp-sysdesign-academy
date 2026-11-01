@@ -84,7 +84,7 @@ export function RingSandbox() {
           viewBox="0 0 300 300"
           role="img"
           aria-label={`Hash ring with ${names.length} nodes and ${ring.points.length} virtual nodes. Colour shows which node owns each sampled key.`}
-          className="w-full max-w-sm rounded-2xl border border-border bg-card/80 shadow-lg ring-glow"
+          className="w-full max-w-sm rounded-md border border-border bg-card/80 ring-glow"
         >
           <circle cx="150" cy="150" r="110" fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2" />
           {ring.points.map((p, i) => {
@@ -107,8 +107,8 @@ export function RingSandbox() {
       </div>
 
       <div className="space-y-5">
-        <section aria-labelledby="rs-controls" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
-          <h2 id="rs-controls" className="text-base font-extrabold tracking-tight">
+        <section aria-labelledby="rs-controls" className="rounded-md border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow p-4">
+          <h2 id="rs-controls" className="text-base font-semibold tracking-tight">
             Controls
           </h2>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -176,8 +176,8 @@ export function RingSandbox() {
           </fieldset>
         </section>
 
-        <section aria-labelledby="rs-change" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
-          <h2 id="rs-change" className="text-base font-extrabold tracking-tight">
+        <section aria-labelledby="rs-change" className="rounded-md border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow p-4">
+          <h2 id="rs-change" className="text-base font-semibold tracking-tight">
             What the last change cost
           </h2>
           <div aria-live="polite" className="mt-2 text-sm">
@@ -196,8 +196,8 @@ export function RingSandbox() {
           </div>
         </section>
 
-        <section aria-labelledby="rs-load" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
-          <h2 id="rs-load" className="text-base font-extrabold tracking-tight">
+        <section aria-labelledby="rs-load" className="rounded-md border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow p-4">
+          <h2 id="rs-load" className="text-base font-semibold tracking-tight">
             Load per node
           </h2>
           <p className="mt-1 text-sm text-muted-fg">

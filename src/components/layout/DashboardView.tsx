@@ -75,24 +75,24 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
   return (
     <div className="mt-6 space-y-10">
       <section aria-label="Summary" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Spotlight tint="accent" tilt={5} className="p-4">
-          <div className="text-3xl font-black" style={num("accent")}>
+        <Spotlight tint="accent" className="p-4">
+          <div className="text-3xl font-semibold" style={num("accent")}>
             {Object.keys(completed).length}/{all.length}
           </div>
           <div className="text-sm text-muted-fg">lessons done</div>
         </Spotlight>
-        <Spotlight tint="leaf" tilt={5} className="p-4">
-          <div className="text-3xl font-black" style={num("leaf")}>{solved}</div>
+        <Spotlight tint="leaf" className="p-4">
+          <div className="text-3xl font-semibold" style={num("leaf")}>{solved}</div>
           <div className="text-sm text-muted-fg">problems solved</div>
         </Spotlight>
-        <Spotlight tint="sun" tilt={5} className="p-4">
-          <div className="text-3xl font-black" style={num("sun")}>
+        <Spotlight tint="sun" className="p-4">
+          <div className="text-3xl font-semibold" style={num("sun")}>
             {currentStreak(state.activity)} <span className="text-sm font-normal text-muted-fg">best {longestStreak(state.activity)}</span>
           </div>
           <div className="text-sm text-muted-fg">day streak</div>
         </Spotlight>
-        <Spotlight href="/review/" tint="hot" tilt={5} className="block p-4">
-          <div className="text-3xl font-black" style={num("hot")}>{due}</div>
+        <Spotlight href="/review/" tint="hot" className="block p-4">
+          <div className="text-3xl font-semibold" style={num("hot")}>{due}</div>
           <div className="text-sm text-muted-fg">cards to review</div>
         </Spotlight>
       </section>
@@ -100,14 +100,14 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
       <p className="text-muted-fg">About {Math.round(remaining / 60)} h of lesson material left.</p>
 
       <section aria-labelledby="cal">
-        <h2 id="cal" className="mb-3 text-xl font-extrabold tracking-tight">
+        <h2 id="cal" className="mb-3 text-xl font-semibold tracking-tight">
           Activity
         </h2>
         <StreakCalendar activity={state.activity} />
       </section>
 
       <section aria-labelledby="prog">
-        <h2 id="prog" className="mb-3 text-xl font-extrabold tracking-tight">
+        <h2 id="prog" className="mb-3 text-xl font-semibold tracking-tight">
           Progress by module
         </h2>
         <ul className="space-y-3">
@@ -137,7 +137,7 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
       </section>
 
       <section aria-labelledby="weak">
-        <h2 id="weak" className="mb-3 text-xl font-extrabold tracking-tight">
+        <h2 id="weak" className="mb-3 text-xl font-semibold tracking-tight">
           Weakest topics
         </h2>
         {weak.length === 0 ? (
@@ -157,14 +157,14 @@ export function DashboardView({ modules }: { modules: Mod[] }) {
       </section>
 
       <section aria-labelledby="ach">
-        <h2 id="ach" className="mb-3 text-xl font-extrabold tracking-tight">
+        <h2 id="ach" className="mb-3 text-xl font-semibold tracking-tight">
           Achievements
         </h2>
         <ul className="grid gap-2 sm:grid-cols-3">
           {achievements.map((a) => (
             <li
               key={a.id}
-              className={cn("rounded-xl border border-border p-3 text-sm transition", a.earned ? "border-sun bg-sun/10 shadow-[0_6px_24px_-10px_hsl(var(--sun))]" : "opacity-60")}
+              className={cn("rounded-md border border-border p-3 text-sm transition", a.earned ? "border-sun bg-sun/10 shadow-[0_6px_24px_-10px_hsl(var(--sun))]" : "opacity-60")}
             >
               <p className="font-medium">
                 {a.earned ? "★ " : "☆ "}

@@ -14,7 +14,7 @@ export default function PathsPage() {
       </p>
       <ul className="mt-8 grid gap-4 sm:grid-cols-2">
         {paths.map((p) => (
-          <li key={p.slug} className="rounded-xl border border-border bg-card p-5">
+          <li key={p.slug} className="rounded-md border border-border bg-card p-5">
             <h2 className="font-semibold">
               <Link href={`/paths/${p.slug}/`} className="hover:text-accent">
                 {p.title}

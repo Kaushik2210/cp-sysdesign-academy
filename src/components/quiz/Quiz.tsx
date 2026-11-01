@@ -56,8 +56,8 @@ export function Quiz({ id, tags = [], questions }: { id: string; tags?: string[]
   const score = questions.filter((q, i) => sameSet(picked[i], answerOf(q))).length;
 
   return (
-    <section aria-label="Quiz" className="not-prose my-8 rounded-2xl border border-border bg-card/80 p-5 shadow-lg backdrop-blur-sm">
-      <h3 className="mb-4 text-xl font-extrabold tracking-tight">
+    <section aria-label="Quiz" className="not-prose my-8 rounded-md border border-border bg-card/80 p-5 backdrop-blur-sm">
+      <h3 className="mb-4 text-xl font-semibold tracking-tight">
         <span className="text-gradient">Quiz</span>
       </h3>
       <ol className="space-y-6">
@@ -82,7 +82,7 @@ export function Quiz({ id, tags = [], questions }: { id: string; tags?: string[]
                       aria-checked={on}
                       onClick={() => toggle(qi, oi)}
                       className={cn(
-                        "flex min-h-11 w-full items-center gap-2 rounded-xl border border-border bg-bg/50 px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:bg-muted",
+                        "flex min-h-11 w-full items-center gap-2 rounded-md border border-border bg-bg/50 px-3 py-2 text-left text-sm transition hover:-translate-y-0.5 hover:bg-muted",
                         on && "border-accent bg-accent/10 shadow-[inset_4px_0_0_hsl(var(--accent))]",
                         submitted && ans.includes(oi) && "border-emerald-500 bg-emerald-500/10",
                         submitted && on && !ans.includes(oi) && "border-red-500 bg-red-500/10",
@@ -108,12 +108,12 @@ export function Quiz({ id, tags = [], questions }: { id: string; tags?: string[]
       </ol>
       <div className="mt-4 flex items-center gap-3">
         {!submitted ? (
-          <button type="button" onClick={submit} className="min-h-11 rounded-full bg-gradient-brand px-6 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl">
+          <button type="button" onClick={submit} className="min-h-11 rounded-full bg-gradient-brand px-6 text-sm font-semibold text-white transition hover:-translate-y-0.5">
             Check answers
           </button>
         ) : (
           <>
-            <p className="text-lg font-black" role="status">
+            <p className="text-lg font-semibold" role="status">
               Score: <span className="text-gradient">{score}/{questions.length}</span>
             </p>
             <button

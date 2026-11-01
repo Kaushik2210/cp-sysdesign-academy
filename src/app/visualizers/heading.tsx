@@ -1,7 +1,7 @@
 export function VizGalleryHeading({ count }: { count: number }) {
   return (
     <header>
-      <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
+      <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
         Algorithm <span className="text-gradient">visualizers</span>
       </h1>
       <p className="mt-3 max-w-2xl text-lg text-muted-fg">

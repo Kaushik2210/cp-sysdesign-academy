@@ -48,8 +48,8 @@ export function CacheSandbox() {
 
   return (
     <div className="mt-6 space-y-8">
-      <section aria-labelledby="cs-step" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
-        <h2 id="cs-step" className="text-lg font-extrabold tracking-tight">
+      <section aria-labelledby="cs-step" className="rounded-md border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow p-4">
+        <h2 id="cs-step" className="text-lg font-semibold tracking-tight">
           1. Step through evictions
         </h2>
         <fieldset className="mt-3">
@@ -86,7 +86,7 @@ export function CacheSandbox() {
                 setText(e.target.value);
                 reset();
               }}
-              className="mt-1 min-h-11 w-full rounded-xl border border-border bg-bg focus-visible:border-accent px-3 font-mono"
+              className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg focus-visible:border-accent px-3 font-mono"
             />
           </div>
           <div>
@@ -100,7 +100,7 @@ export function CacheSandbox() {
                 setCapacity(Number(e.target.value));
                 reset();
               }}
-              className="mt-1 min-h-11 rounded-xl border border-border bg-bg focus-visible:border-accent px-3"
+              className="mt-1 min-h-11 rounded-md border border-border bg-bg focus-visible:border-accent px-3"
             >
               {[1, 2, 3, 4, 5, 6].map((c) => (
                 <option key={c} value={c}>
@@ -171,8 +171,8 @@ export function CacheSandbox() {
         </div>
       </section>
 
-      <section aria-labelledby="cs-compare" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
-        <h2 id="cs-compare" className="text-lg font-extrabold tracking-tight">
+      <section aria-labelledby="cs-compare" className="rounded-md border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow p-4">
+        <h2 id="cs-compare" className="text-lg font-semibold tracking-tight">
           2. Compare policies on {LENGTH.toLocaleString("en-US")} accesses
         </h2>
         <p className="mt-1 text-sm text-muted-fg">{UNIVERSE.toLocaleString("en-US")} distinct keys. Change the traffic and the cache size and watch which policy wins.</p>
@@ -181,7 +181,7 @@ export function CacheSandbox() {
             <label htmlFor="cs-kind" className="block text-sm font-medium">
               Traffic
             </label>
-            <select id="cs-kind" value={kind} onChange={(e) => setKind(e.target.value as TraceKind)} className="mt-1 min-h-11 w-full rounded-xl border border-border bg-bg focus-visible:border-accent px-2">
+            <select id="cs-kind" value={kind} onChange={(e) => setKind(e.target.value as TraceKind)} className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg focus-visible:border-accent px-2">
               {KINDS.map((k) => (
                 <option key={k} value={k}>
                   {TRACE_LABEL[k]}

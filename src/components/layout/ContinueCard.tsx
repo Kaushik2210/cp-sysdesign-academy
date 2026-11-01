@@ -13,7 +13,7 @@ export function ContinueCard({ lessons }: { lessons: Record<string, { title: str
   return (
     <Link
       href={target.href}
-      className="mt-6 inline-flex flex-col rounded-xl border border-accent/50 bg-card px-5 py-3 hover:bg-muted"
+      className="mt-6 inline-flex flex-col rounded-md border border-accent/50 bg-card px-5 py-3 hover:bg-muted"
     >
       <span className="text-xs uppercase tracking-wide text-muted-fg">Continue where you left off</span>
       <span className="font-medium text-accent">{target.title}</span>

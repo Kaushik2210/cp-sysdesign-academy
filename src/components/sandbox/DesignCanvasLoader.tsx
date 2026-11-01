@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 const DesignCanvas = dynamic(() => import("./DesignCanvas"), {
   ssr: false,
   loading: () => (
-    <div role="status" className="mt-6 rounded-xl border border-border p-8 text-sm text-muted-fg">
+    <div role="status" className="mt-6 rounded-md border border-border p-8 text-sm text-muted-fg">
       Loading the design canvas...
     </div>
   ),

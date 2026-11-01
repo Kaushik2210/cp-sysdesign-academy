@@ -14,7 +14,7 @@ export interface ModuleCardData {
   lessons: { id: string; title: string; href: string; estMinutes: number }[];
 }
 
-/** A module on a track page: gradient number badge, progress bar from saved progress, and its lessons with check marks. */
+/** A module on a track page: tracked label, hairline progress from saved progress, and its lessons with check marks. */
 export function ModuleCard({ module: m, tint }: { module: ModuleCardData; tint: Tint }) {
   const completed = useProgress((s) => s.completed);
   const [mounted, setMounted] = useState(false);
@@ -24,34 +24,26 @@ export function ModuleCard({ module: m, tint }: { module: ModuleCardData; tint: 
   const minutes = m.lessons.reduce((n, l) => n + l.estMinutes, 0);
 
   return (
-    <Spotlight tint={tint} tilt={2} className="h-full p-5">
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden="true"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-sm font-black text-white shadow-md"
-          style={{ background: `linear-gradient(135deg, hsl(var(--${tint})), hsl(var(--accent)))` }}
-        >
-          {m.order}
+    <Spotlight tint={tint} className="h-full p-6">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="label">Module {String(m.order).padStart(2, "0")}</span>
+        <span className="label">
+          {m.lessons.length} lessons · {minutes} min
         </span>
-        <div className="min-w-0">
-          <h3 className="font-bold leading-snug">{m.title}</h3>
-          <p className="mt-0.5 text-xs text-muted-fg">
-            {m.lessons.length} lessons · about {minutes} min
-          </p>
-        </div>
       </div>
-      <p className="mt-3 text-sm text-muted-fg">{m.summary}</p>
+      <h3 className="mt-4 text-2xl font-medium leading-tight tracking-tight">{m.title}</h3>
+      <p className="mt-2 text-sm text-muted-fg">{m.summary}</p>
       <div
         role="progressbar"
         aria-label={`${m.title} progress`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
-        className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted"
+        className="mt-5 h-px bg-border"
       >
-        <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${pct}%`, background: `hsl(var(--${tint}))` }} />
+        <div className="h-[3px] -translate-y-px bg-accent transition-[width] duration-700" style={{ width: `${pct}%` }} />
       </div>
-      <ul className="mt-3 space-y-0.5 text-sm">
+      <ul className="mt-4 space-y-0.5 text-sm">
         {m.lessons.map((l) => {
           const isDone = mounted && !!completed[l.id];
           return (
@@ -64,7 +56,7 @@ export function ModuleCard({ module: m, tint }: { module: ModuleCardData; tint: 
                 {isDone && <Check size={10} />}
               </span>
               <span className="min-w-0">
-                <Link href={l.href} className="inline-flex min-h-8 items-center font-medium hover:underline" style={{ color: `hsl(var(--${tint}))` }}>
+                <Link href={l.href} className="inline-flex min-h-8 items-center font-medium underline-offset-4 hover:text-accent hover:underline">
                   {l.title}
                 </Link>{" "}
                 <span className="text-xs text-muted-fg">· {l.estMinutes} min</span>
