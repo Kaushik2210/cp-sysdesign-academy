@@ -1,0 +1,123 @@
+---
+title: Distributed Locks, Leases and Fencing Tokens
+track: sd
+module: consensus
+order: 3
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/consensus/raft-leader-election-and-log-replication", "sd/distributed-theory/time-clocks-and-ordering"]
+tags: [distributed-lock, lease, fencing-token, zookeeper, etcd, redlock, leader-election]
+type: lesson
+furtherReading:
+  - title: Kleppmann - How to do distributed locking
+    url: https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
+  - title: Burrows - The Chubby lock service for loosely-coupled distributed systems
+    url: https://research.google/pubs/the-chubby-lock-service-for-loosely-coupled-distributed-systems/
+  - title: Apache ZooKeeper recipes and solutions (locks, leader election)
+    url: https://zookeeper.apache.org/doc/current/recipes.html
+---
+
+## Intuition
+
+You run one job runner per cluster so a nightly invoice batch never runs twice. Two machines race to become "the" runner. A **distributed lock** picks a winner. The hard part is not granting the lock, it is what happens when the winner freezes (a long GC pause, a stalled VM) while its lock expires and another process takes over. The old holder then wakes up, still believing it holds the lock, and writes.
+
+## Locks need leases
+
+A lock held by a crashed client would block everyone forever, so locks carry a **lease**: a time limit after which the lock service considers it released unless the holder renews it. That makes locking depend on time, and time is unreliable (previous module).
+
+Typical building blocks:
+
+- **etcd / Consul / ZooKeeper**: consensus-backed. etcd uses leases attached to keys and revision numbers; ZooKeeper uses ephemeral sequential znodes (the holder is the smallest sequence number, others watch their predecessor to avoid a thundering herd).
+- **Redis `SET key value NX PX ttl`**: simple and fast for efficiency locks, but a single Redis (or async replicated) loses the lock on failover, so it is not safe for correctness. The multi-instance Redlock algorithm is contested for exactly the timing assumptions it makes.
+
+## Efficiency locks versus correctness locks
+
+| Purpose | Example | If the lock fails |
+| --- | --- | --- |
+| Efficiency | Avoid sending the same email twice, avoid duplicate work | Rare wasted work: acceptable. A Redis lock is fine |
+| Correctness | Only one writer to a shared file or record | Data corruption. Needs fencing tokens |
+
+Ask which one you are building before choosing the mechanism.
+
+## The pause problem and fencing tokens
+
+1. Client 1 acquires the lock (lease 30 s) and is paused for 40 s.
+2. The lease expires; client 2 acquires the lock and writes.
+3. Client 1 resumes, believes it still holds the lock, and writes, clobbering client 2.
+
+No check **by the client** can fix this, because the pause can occur between the check and the write. The fix is to make the **resource** reject stale holders: the lock service returns a **fencing token**, a number that increases on every grant. The client includes it with every write; the storage remembers the highest token seen and rejects lower ones.
+
+```python
+class Lock:
+    def __init__(self): self.token = 0
+    def acquire(self):
+        self.token += 1
+        return self.token
+
+class Storage:
+    def __init__(self): self.max_token, self.data = 0, {}
+    def write(self, token, k, v):
+        if token < self.max_token:
+            return "rejected (stale token %d < %d)" % (token, self.max_token)
+        self.max_token = token
+        self.data[k] = v
+        return "ok"
+
+lock, store = Lock(), Storage()
+t1 = lock.acquire()          # client 1 gets token 1, then pauses (GC)
+t2 = lock.acquire()          # lease expired; client 2 gets token 2
+print(store.write(t2, "f", "from-2"))
+print(store.write(t1, "f", "from-1"))   # client 1 wakes up late
+print(store.data)
+```
+
+In etcd the key's `mod_revision`, and in ZooKeeper the `zxid` or sequence number, serve as monotonic tokens. The storage must check the token, which means a plain object store with no check cannot be fenced; use a conditional write (compare-and-set on a version) in that case.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C1 as Client 1
+  participant LS as Lock service
+  participant C2 as Client 2
+  participant S as Storage
+  C1->>LS: acquire
+  LS-->>C1: token 33
+  Note over C1: long pause, lease expires
+  C2->>LS: acquire
+  LS-->>C2: token 34
+  C2->>S: write (34)
+  S-->>C2: ok
+  C1->>S: write (33)
+  S-->>C1: rejected, 33 < 34`} caption="A fencing token stops a paused client from corrupting data" />
+
+## Leader election with leases
+
+Leader election is a lock with a service role: whoever holds the lease is leader and must keep renewing it. Rules of thumb:
+
+- Renew at roughly one third of the lease time so one missed renewal is survivable.
+- The leader stops acting as leader **before** its lease could have expired by its own monotonic clock, with a safety margin for skew.
+- Every action the leader takes on external resources carries the fencing token (or epoch number).
+
+## Worked example
+
+A scheduler must run one nightly billing job. Use etcd: each instance tries to create `/locks/billing` with a lease of 20 s and keeps it alive. The winner reads the lock's revision as its token and passes it with each database write through a `WHERE last_token <= :token` update. A paused scheduler that wakes late has an old token and its updates affect zero rows. The job is also idempotent per billing day, so even if two runs overlapped, the second would find the work done.
+
+## Pitfalls
+
+- Treating a Redis `SET NX` lock as safe for correctness.
+- Checking "do I still hold the lock?" immediately before a write and assuming that is atomic.
+- Lease durations shorter than worst-case pauses, or no renewal logic.
+- Relying on synchronised wall clocks across machines to decide whose lease is valid.
+- Forgetting to release the lock on the normal path (use try/finally) and to handle release failure.
+- Not making the guarded operation idempotent as a second line of defence.
+
+## What would you choose and why?
+
+Two workers update the same row in a SQL database, and you want only one to act at a time. Would you use a distributed lock, a database row lock, optimistic concurrency with a version column, or a queue with a single consumer per key? Justify against the pause problem.
+
+## Quiz
+
+<Quiz id="sd-m12-locks-fencing" tags={["lock", "fencing"]} questions={[
+  { type: "mcq", q: "A client pauses for longer than its lease, then writes. What prevents corruption?", options: ["A check of the local clock before writing", "A fencing token validated by the resource, rejecting writes with a lower token than one already seen", "A longer lease", "A retry loop"], answer: 1, explain: "Only the resource can reliably reject stale holders, because a pause can occur between any client-side check and the write." },
+  { type: "mcq", q: "Which lock is acceptable for avoiding duplicate email sends (an efficiency lock)?", options: ["A single-node Redis SET NX PX lock", "No lock is ever acceptable", "Only a ZooKeeper lock", "Only 2PC"], answer: 0, explain: "A rare duplicate email is tolerable, so a cheap lock is a fair trade." },
+  { type: "multi", q: "What do fencing tokens require?", options: ["Tokens that increase with every lock grant", "The protected resource to check them", "Synchronised wall clocks", "Storing the highest token seen"], answer: [0, 1, 3], explain: "Monotonic tokens and a resource-side check are the whole mechanism; clock sync is not needed." },
+  { type: "mcq", q: "Why does ZooKeeper's lock recipe have each waiter watch only its predecessor?", options: ["To avoid a thundering herd when the lock is released", "To reduce disk use", "To avoid leases", "To make locks reentrant"], answer: 0, explain: "Only the next waiter wakes up instead of every waiter." }
+]} />

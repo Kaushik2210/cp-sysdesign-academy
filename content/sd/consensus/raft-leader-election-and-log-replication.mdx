@@ -1,0 +1,118 @@
+---
+title: Raft - Leader Election and Log Replication
+track: sd
+module: consensus
+order: 2
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/consensus/why-consensus-and-paxos"]
+tags: [raft, leader-election, log-replication, terms, etcd, consensus]
+type: lesson
+furtherReading:
+  - title: Ongaro and Ousterhout - In Search of an Understandable Consensus Algorithm (Raft)
+    url: https://raft.github.io/raft.pdf
+  - title: The Raft visualisation and resources
+    url: https://raft.github.io/
+  - title: etcd documentation - Learner design and Raft in etcd
+    url: https://etcd.io/docs/
+---
+
+## Intuition
+
+Raft makes consensus easier by electing **one leader**. All client writes go to the leader, which appends them to its log and copies them to followers. When a **majority** has stored an entry, the leader marks it **committed** and applies it. If the leader dies, followers hold an election.
+
+## The three roles and terms
+
+Each node is a **follower**, **candidate** or **leader**. Time is divided into **terms**, numbered with increasing integers. Each term has at most one leader. Terms act as a logical clock: any message with a stale term is rejected, and a node seeing a higher term steps down to follower.
+
+## Leader election
+
+1. Followers expect periodic **heartbeats** (empty AppendEntries) from the leader.
+2. If a follower hears nothing for a **randomised election timeout** (for example 150 to 300 ms), it becomes a candidate: increments its term, votes for itself and sends RequestVote to everyone.
+3. A node grants **at most one vote per term**, first come first served, and only to a candidate whose log is **at least as up to date** as its own (compare last log term, then last log index).
+4. A candidate with votes from a **majority** becomes leader and immediately sends heartbeats. If nobody wins (split vote), timeouts expire at different random moments and another round starts.
+
+Randomised timeouts are what make split votes rare and resolvable.
+
+```python
+def majority(n): return n // 2 + 1
+
+class Node:
+    def __init__(self, nid): self.id, self.term, self.voted_for = nid, 0, None
+    def request_vote(self, cand, cterm):
+        if cterm < self.term: return False
+        if cterm > self.term: self.term, self.voted_for = cterm, None
+        if self.voted_for in (None, cand):
+            self.voted_for = cand
+            return True
+        return False
+
+nodes = [Node(i) for i in range(5)]
+votes_a = sum(n.request_vote("A", 1) for n in nodes[:3])   # A asks nodes 0-2
+votes_b = sum(n.request_vote("B", 1) for n in nodes[2:])   # B asks nodes 2-4
+print("A votes", votes_a, "B votes", votes_b)  # node 2 votes only once
+print("A wins:", votes_a >= majority(5), "B wins:", votes_b >= majority(5))
+```
+
+The shared voter (node 2) can vote for only one candidate in a term, so two leaders in the same term are impossible. This is **election safety**.
+
+## Log replication
+
+The leader appends a command to its log, then sends `AppendEntries(prevLogIndex, prevLogTerm, entries, leaderCommit)` to followers. A follower accepts only if its log contains an entry at `prevLogIndex` with term `prevLogTerm`; otherwise it rejects and the leader backs up and retries with earlier entries until the logs match, then overwrites any conflicting suffix. This enforces the **log matching property**: if two logs have an entry with the same index and term, all preceding entries are identical.
+
+An entry is **committed** once stored on a majority. The leader advances its commit index and tells followers via later AppendEntries. Followers apply committed entries to their state machine in order.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant L as Leader
+  participant F1 as Follower 1
+  participant F2 as Follower 2
+  C->>L: set x=5
+  L->>L: append to log (index 7, term 3)
+  L->>F1: AppendEntries(7)
+  L->>F2: AppendEntries(7)
+  F1-->>L: ok
+  Note over L: 2 of 3 have it = majority, committed
+  L->>L: apply x=5
+  L-->>C: success
+  L->>F2: next heartbeat carries commit index 7`} caption="A write commits when a majority holds the entry" />
+
+## Safety rule that matters most
+
+A candidate can win only if its log contains **every committed entry**: the up-to-date vote check guarantees this, because any committed entry exists on a majority and any winning candidate got votes from a majority; those two majorities overlap at a node that would refuse to vote for an older log. Hence a new leader never loses committed data (**leader completeness**).
+
+Raft also does not commit entries from previous terms by counting replicas alone; the leader commits them indirectly once an entry from its **own** term reaches a majority. This avoids a subtle overwrite scenario in the paper's figure 8.
+
+## Practical details
+
+- **Reads**: serving reads from the leader's state alone can return stale data if it has been deposed without knowing. Linearizable reads confirm leadership first (a heartbeat round, or a **lease** based on bounded clock drift), or go through the log. Follower reads are faster but may be stale.
+- **Membership changes**: add or remove one node at a time (or use joint consensus) so two disjoint majorities never exist.
+- **Snapshots**: periodically compact the log into a snapshot so it does not grow forever and new nodes can catch up quickly.
+- **Disk**: a node must `fsync` its term, vote and log entries **before** replying, or a crash can break promises it made.
+
+<Complexity time="1 round trip to a majority per write" space="O(log size) until snapshotted" note="Write latency is set by the median-fastest follower, not the slowest" />
+
+## Worked example
+
+Five nodes, leader L in term 4. L is partitioned away with one follower; the other three cannot hear heartbeats. After randomised timeouts one of them becomes a candidate in term 5, gets two more votes (a majority of 3) and leads. Clients that reach the new leader keep working. The old leader still thinks it leads, but its writes can reach only 2 of 5 nodes, never a majority, so nothing it accepts commits. When the partition heals, it sees term 5, steps down and its uncommitted entries are overwritten by the new leader's log.
+
+## Pitfalls
+
+- Setting election timeouts too low relative to network latency or GC pauses, causing needless elections and unavailability.
+- Serving reads from a leader that may be stale.
+- Putting all members in one rack or availability zone.
+- Skipping fsync for speed.
+- Thinking Raft scales writes: all writes go through one leader. Scale by sharding across many Raft groups, as CockroachDB, TiKV and Spanner do.
+
+## What would you choose and why?
+
+A 3-node Raft group spans zones with 1 ms latency, and you move one node to another continent at 120 ms. What happens to write latency, to election behaviour and to heartbeat settings? Would you change the placement?
+
+## Quiz
+
+<Quiz id="sd-m12-raft" tags={["raft", "consensus"]} questions={[
+  { type: "mcq", q: "When is a Raft log entry committed?", options: ["When the leader writes it locally", "When it is stored on a majority of nodes", "When all followers acknowledge it", "When the client retries"], answer: 1, explain: "Majority storage guarantees any future leader's log contains it." },
+  { type: "mcq", q: "Why are election timeouts randomised?", options: ["To make clocks agree", "To make simultaneous candidacies and split votes unlikely and quickly resolved", "To prevent log replication", "To reduce disk use"], answer: 1, explain: "Nodes time out at different moments, so usually one becomes candidate first and wins." },
+  { type: "mcq", q: "A node has already voted in term 7. A second candidate asks for its vote in term 7. What happens?", options: ["It votes again", "It refuses, since each node votes at most once per term", "It becomes the leader", "It deletes its log"], answer: 1, explain: "One vote per term guarantees at most one leader per term." },
+  { type: "mcq", q: "How do large systems scale writes beyond one Raft leader?", options: ["Add more followers to one group", "Partition data across many independent Raft groups", "Turn off fsync", "Use even cluster sizes"], answer: 1, explain: "Each shard has its own group and leader; adding followers does not increase write throughput." }
+]} />

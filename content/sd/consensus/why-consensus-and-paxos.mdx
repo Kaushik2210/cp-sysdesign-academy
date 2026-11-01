@@ -1,0 +1,87 @@
+---
+title: Why Consensus, and the Idea Behind Paxos
+track: sd
+module: consensus
+order: 1
+difficulty: hard
+estMinutes: 25
+prerequisites: ["sd/distributed-theory/cap-theorem-and-pacelc"]
+tags: [consensus, paxos, flp, quorum, replicated-state-machine]
+type: lesson
+furtherReading:
+  - title: Lamport - Paxos Made Simple
+    url: https://lamport.azurewebsites.net/pubs/paxos-simple.pdf
+  - title: Fischer, Lynch and Paterson - Impossibility of Distributed Consensus with One Faulty Process
+    url: https://groups.csail.mit.edu/tds/papers/Lynch/jacm85.pdf
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 9 (Consensus)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Many hard problems reduce to "a group of machines must agree on one value, even if some crash": who is the leader, who owns this lock, which transaction commits next, what is the order of these log entries. That is **consensus**. If you solve it once, correctly, you can build everything above it, which is why etcd, ZooKeeper, Consul and Spanner all contain a consensus protocol.
+
+## Formal definition
+
+A consensus protocol lets a set of nodes each propose a value and guarantees:
+
+- **Agreement**: no two nodes decide different values.
+- **Validity**: the decided value was proposed by some node.
+- **Termination**: every non-faulty node eventually decides.
+
+**FLP impossibility (1985):** in a fully asynchronous network where even one node may crash, no deterministic protocol can guarantee all three. Practical protocols keep **safety** (agreement and validity) always, and get **liveness** (termination) only when the network is "well-behaved enough" for long enough, using timeouts and randomization.
+
+## The replicated state machine
+
+Consensus is used to agree on an **ordered log of commands**. Every replica applies the same commands in the same order to the same deterministic state machine, so all replicas hold the same state. A key-value store, a lock service and a metadata store are all state machines over such a log.
+
+## Majority quorums
+
+With **N = 2f + 1** nodes the protocol tolerates **f** crashes, because any two majorities overlap in at least one node, and that node carries knowledge of what was already decided.
+
+| Nodes | Majority | Failures tolerated |
+| --- | --- | --- |
+| 3 | 2 | 1 |
+| 5 | 3 | 2 |
+| 7 | 4 | 3 |
+
+Even cluster sizes waste a node: 4 nodes need 3 for a majority and still tolerate only 1 failure. Use odd sizes, usually 3 or 5. More nodes means more tolerance but slower writes (more acks) and more network traffic, so consensus clusters stay small and store small, critical data.
+
+## Single-decree Paxos in one page
+
+Roles: **proposers**, **acceptors**, **learners**. A proposer picks a unique, increasing proposal number `n`.
+
+1. **Prepare(n)**: the proposer asks a majority of acceptors to promise not to accept any proposal numbered below `n`. Each acceptor replies with the highest-numbered proposal it already accepted, if any.
+2. **Accept(n, v)**: if a majority promised, the proposer must propose the value of the highest-numbered accepted proposal reported in the replies; only if none was reported may it choose its own value. Acceptors accept unless they have promised a higher number.
+3. A value is **chosen** when a majority of acceptors have accepted it.
+
+The rule "adopt the highest already-accepted value" is what preserves agreement: once a value may have been chosen, any later proposer is forced to carry it forward, because its prepare majority overlaps the accepting majority. Multi-Paxos repeats this for each log slot and keeps a stable leader to skip the prepare step.
+
+<Callout type="note" title="Paxos vs Raft">
+Raft (next lesson) provides the same guarantees with a design aimed at understandability: strong leadership, explicit terms and a clear log-matching rule. Most new systems pick Raft; both rest on majority quorums.
+</Callout>
+
+## Worked example
+
+A 5-node cluster stores configuration. Two nodes die: 3 remain, a majority, so reads of the committed state and new writes still work. A third node dies: only 2 remain, no majority, so the cluster **stops accepting writes** (and linearizable reads). That is the CP choice from CAP: it refuses rather than risk two disagreeing halves. Meanwhile if the network splits 3/2, the 3-side keeps going and the 2-side cannot commit anything.
+
+## Pitfalls
+
+- Running a consensus cluster across a high-latency link: every commit needs a round trip to a majority.
+- Even-sized clusters and "stretching" over exactly two datacentres: losing the datacentre with the majority halts the system. Use three failure domains.
+- Storing bulk data in the consensus group instead of a pointer to it.
+- Assuming consensus makes the whole application fault tolerant. Clients still need timeouts, retries and idempotency.
+- Rolling your own protocol. Use a proven library or service.
+
+## What would you choose and why?
+
+You must store the single "current leader" record for a service spanning two regions. A 3-node etcd cluster fits in one region only. Where do you place the three (or five) members, what happens when a region is lost, and what would you accept as the trade-off?
+
+## Quiz
+
+<Quiz id="sd-m12-why-consensus" tags={["consensus", "paxos"]} questions={[
+  { type: "mcq", q: "A 5-node consensus cluster loses 3 nodes. What happens?", options: ["It continues normally", "It stops committing writes because no majority is available", "It elects the remaining 2 as a majority", "It becomes eventually consistent automatically"], answer: 1, explain: "A majority of 5 is 3. With only 2 alive, safety requires halting rather than risk divergence." },
+  { type: "mcq", q: "What does FLP say?", options: ["Consensus is impossible in any network", "No deterministic protocol can guarantee safety and termination in an asynchronous network with even one crash", "Majorities are unnecessary", "Clocks must be synchronised"], answer: 1, explain: "Practical systems preserve safety always and get liveness under reasonable timing assumptions." },
+  { type: "mcq", q: "Why are odd cluster sizes preferred?", options: ["They are faster", "An extra even node adds cost without tolerating more failures", "They need no leader", "Odd numbers avoid split votes entirely"], answer: 1, explain: "4 nodes tolerate 1 failure, the same as 3." },
+  { type: "multi", q: "Which are typical uses of a consensus service?", options: ["Leader election", "Distributed locks and leases", "Storing terabytes of user media", "Cluster configuration and membership"], answer: [0, 1, 3], explain: "Consensus groups hold small, critical metadata, not bulk data." }
+]} />

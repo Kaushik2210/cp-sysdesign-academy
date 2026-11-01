@@ -1,0 +1,1 @@
+{ "title": "Consensus and Coordination", "level": "Level 2: Intermediate", "order": 12, "summary": "Why consensus is needed, how Raft elects leaders and replicates logs, and how to use coordination services for locks, leases and fencing." }
