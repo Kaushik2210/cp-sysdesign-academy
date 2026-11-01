@@ -1,0 +1,129 @@
+---
+title: Time, Clocks and Ordering
+track: sd
+module: distributed-theory
+order: 3
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/distributed-theory/consistency-models-and-quorums"]
+tags: [clocks, lamport, vector-clocks, happens-before, ntp, truetime, ordering]
+type: lesson
+furtherReading:
+  - title: Lamport - Time, Clocks, and the Ordering of Events in a Distributed System
+    url: https://lamport.azurewebsites.net/pubs/time-clocks.pdf
+  - title: Corbett et al. - Spanner - Google's Globally-Distributed Database
+    url: https://research.google/pubs/spanner-googles-globally-distributed-database-2/
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 8 (Unreliable clocks)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+You cannot trust two machines to agree on what time it is. Their clocks drift (tens of milliseconds to seconds), NTP corrections can jump a clock backwards, and a paused process (a garbage collection or a VM freeze) can wake up believing it is still the earlier moment. So "which event came first?" cannot be answered by comparing timestamps from different machines.
+
+The fix is to stop asking about physical time and ask about **causality**: could event A have influenced event B?
+
+## Two kinds of clock
+
+- **Time-of-day clock**: wall-clock time, synchronised by NTP, can jump backwards. Fine for display and coarse expiry. Dangerous for ordering and for measuring durations.
+- **Monotonic clock**: only goes forward, meaningful only on one machine. Use it for timeouts and elapsed time.
+
+## Happens-before and Lamport clocks
+
+Lamport defined **A happens-before B** (written A → B) when:
+
+1. A and B are on the same process and A is earlier, or
+2. A is sending a message and B is its receipt, or
+3. there is some C with A → C and C → B (transitive).
+
+If neither A → B nor B → A, the events are **concurrent**.
+
+A **Lamport clock** is one integer per process:
+
+- before any local event or send: `t = t + 1`
+- on receiving a message stamped `m`: `t = max(t, m) + 1`
+
+**Guarantee:** if A → B then `L(A) < L(B)`. The converse is false: `L(A) < L(B)` does not mean A caused B. Break ties by process id to get a **total order** (used in distributed mutual exclusion and replicated logs).
+
+## Vector clocks
+
+To detect concurrency you need more. A **vector clock** keeps one counter per process. Rules: increment your own entry on each event; on receive, take the element-wise max and then increment your own entry.
+
+Compare two vectors `x` and `y`: `x` is before `y` if every entry of `x` is ≤ the matching entry of `y` and they differ; if neither dominates, the events are **concurrent**.
+
+```python
+class Lamport:
+    def __init__(self): self.t = 0
+    def local(self): self.t += 1; return self.t
+    def send(self): self.t += 1; return self.t
+    def recv(self, ts): self.t = max(self.t, ts) + 1; return self.t
+
+a, b = Lamport(), Lamport()
+a.local()            # a=1
+m = a.send()         # a=2, message stamped 2
+b.local()            # b=1
+print("b receives:", b.recv(m))   # max(1,2)+1 = 3
+
+def vc_merge(x, y, me):
+    out = [max(p, q) for p, q in zip(x, y)]
+    out[me] += 1
+    return out
+
+def compare(x, y):
+    le = all(p <= q for p, q in zip(x, y))
+    ge = all(p >= q for p, q in zip(x, y))
+    if x == y: return "equal"
+    if le: return "before"
+    if ge: return "after"
+    return "concurrent"
+
+print(compare([2, 0], [1, 1]))      # concurrent
+print(compare([1, 0], [2, 1]))      # before
+print(vc_merge([2, 0], [1, 1], 1))  # [2, 2]
+```
+
+<Complexity time="O(n) per comparison" space="O(n) per event" note="n = number of processes (or replicas) that can write" />
+
+Vector clocks grow with the number of writers. Real systems prune them or use dotted version vectors.
+
+## Physical-time approaches
+
+- **Hybrid logical clocks (HLC)**: combine a physical timestamp with a logical counter, so timestamps stay close to real time and still respect causality. Used by CockroachDB and others.
+- **TrueTime (Spanner)**: GPS and atomic clocks expose time as an interval `[earliest, latest]` with a known error bound (a few milliseconds). Spanner **waits out the uncertainty** before committing, so commit timestamps are consistent with real time. It buys linearizable transactions across the globe for the price of a short commit wait.
+- **Snowflake-style ids**: a timestamp plus machine id plus sequence gives roughly time-ordered unique ids with no coordination. Ordering across machines is approximate (clock skew), and a clock stepping backwards must be handled by refusing to issue ids until it catches up.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant A as Process A
+  participant B as Process B
+  A->>A: event a1 (L=1)
+  A->>B: send m (L=2)
+  B->>B: event b1 (L=1)
+  B->>B: receive m (L=3)
+  Note over A,B: a1 → recv(m) so 1 < 3. b1 and send(m) are concurrent even though 1 < 2.`} caption="Lamport timestamps respect causality but cannot prove it" />
+
+## Worked example: why last-write-wins is risky
+
+Two replicas accept writes to the same key. Replica 1 writes `x = A` at its local time 12:00:00.500. Replica 2 writes `x = B` at 12:00:00.300 by its own clock, but in real time 200 ms **after** replica 1's write; its clock is 400 ms slow. LWW keeps `A`, silently discarding the later write `B`. Nothing was reported as an error.
+
+Fixes: version vectors to detect the conflict and keep both; a single leader per key to order writes; or HLC/TrueTime-style timestamps if you need real-time order.
+
+## Pitfalls
+
+- Using wall-clock timestamps from different hosts to order events.
+- Measuring elapsed time with a time-of-day clock (NTP can step it back, giving negative durations).
+- Lease or lock expiry compared against a local clock after a long pause; use fencing tokens (monotonic numbers checked by the resource) instead of trusting the holder's belief.
+- Assuming Lamport order of two events means one caused the other.
+- Unbounded vector clock growth in systems with many writers.
+
+## What would you choose and why?
+
+You are building a collaborative notes app where two people can edit offline and sync later. Would you timestamp edits with the device clock, use version vectors or use a CRDT? What would the user see when two edits conflict?
+
+## Quiz
+
+<Quiz id="sd-m11-time-clocks" tags={["clocks", "ordering"]} questions={[
+  { type: "mcq", q: "Lamport clocks guarantee which of these?", options: ["L(A) < L(B) implies A caused B", "If A happens-before B then L(A) < L(B)", "Concurrent events have equal timestamps", "Timestamps match wall-clock time"], answer: 1, explain: "The implication goes only one way; equal or ordered timestamps do not prove causality." },
+  { type: "predict", q: "Vectors [2,0] and [1,1] are compared. What is the relationship?", code: "compare([2,0],[1,1])", options: ["before", "after", "concurrent", "equal"], answer: 2, explain: "Neither vector dominates: the first is larger in position 0, the second in position 1." },
+  { type: "mcq", q: "Which clock should you use to measure how long an operation took?", options: ["Time-of-day clock", "Monotonic clock", "NTP server time", "Lamport clock"], answer: 1, explain: "Time-of-day clocks can jump backwards or forwards when synchronised; monotonic clocks cannot." },
+  { type: "mcq", q: "What does Spanner's commit wait accomplish?", options: ["It lets replicas vote", "It waits out clock uncertainty so commit timestamps respect real-time order", "It compresses the log", "It avoids needing replicas"], answer: 1, explain: "TrueTime returns an uncertainty interval; waiting until it has passed guarantees later transactions get later timestamps." }
+]} />

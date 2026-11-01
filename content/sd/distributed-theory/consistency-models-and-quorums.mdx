@@ -1,0 +1,120 @@
+---
+title: Consistency Models and Quorums
+track: sd
+module: distributed-theory
+order: 2
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/distributed-theory/cap-theorem-and-pacelc"]
+tags: [consistency, linearizability, eventual-consistency, quorum, read-your-writes, dynamo]
+type: lesson
+furtherReading:
+  - title: Jepsen - Consistency Models map
+    url: https://jepsen.io/consistency
+  - title: DeCandia et al. - Dynamo, Amazon's Highly Available Key-value Store
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: Werner Vogels - Eventually Consistent
+    url: https://www.allthingsdistributed.com/2008/12/eventually_consistent.html
+  - title: Designing Data-Intensive Applications (Kleppmann), chapters 5 and 9
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+"Consistent" is not one thing. It is a ladder of promises about what a reader can see after a write. Stronger promises are easier for application code but cost latency and availability. The skill is picking the weakest model that keeps your product correct.
+
+## The ladder, strongest first
+
+| Model | Promise | Anomaly you must still handle |
+| --- | --- | --- |
+| **Linearizable** | Every operation appears to take effect at one instant between its start and end; all clients agree on a single order consistent with real time | None, but slow and unavailable under partition |
+| **Sequential** | All clients see operations in the same order, but that order need not match real time | A client may read data that is old in wall-clock terms |
+| **Causal** | If operation A could have influenced B, everyone sees A before B; unrelated writes may be seen in different orders | Concurrent writes appear in different orders on different replicas |
+| **Read-your-writes** (session guarantee) | After you write, your own later reads see it | Other users may still see old data |
+| **Monotonic reads** | Once you have seen a value, you never see an older one | Still stale compared with the leader |
+| **Eventual** | If writes stop, all replicas converge | Anything can be seen in the meantime |
+
+<Callout type="note" title="Isolation is a different axis">
+"Serializable" is about transactions touching many keys (ACID isolation). "Linearizable" is about a single object and recency. A database can be one, both or neither. Spanner gives both ("external consistency").
+</Callout>
+
+## Why replicas disagree: a concrete anomaly
+
+A user changes their display name on the leader, then reloads the page and the read goes to a lagging follower. They see the **old** name and think the save failed. That is a read-your-writes violation, and it is the most common consistency bug in production web apps.
+
+Remedies:
+
+- Read your own recent writes from the **leader** (for example for 10 seconds after a write).
+- Carry a **version or timestamp** in the session; a replica serves the read only if it has caught up to it.
+- Pin a user to one replica (sticky), noting this breaks on failover.
+
+## Quorums
+
+For a key stored on **N** replicas, a write succeeds after **W** acks and a read contacts **R** replicas, returning the newest version among them.
+
+**If W + R > N then every read quorum intersects every write quorum**, so a read sees at least one replica with the latest acknowledged write.
+
+Run it to see the rule hold on small clusters:
+
+```python
+import itertools
+
+def overlaps(n, w, r):
+    nodes = range(n)
+    return all(set(a) & set(b)
+               for a in itertools.combinations(nodes, w)
+               for b in itertools.combinations(nodes, r))
+
+for n, w, r in [(3, 2, 2), (3, 1, 1), (5, 3, 3), (5, 2, 2), (5, 1, 5)]:
+    print(n, w, r, "w+r>n:", w + r > n, "overlap:", overlaps(n, w, r))
+```
+
+| N | W | R | Effect |
+| --- | --- | --- | --- |
+| 3 | 2 | 2 | Balanced; tolerates 1 node down for both reads and writes |
+| 3 | 1 | 1 | Fast, no overlap guarantee: stale reads possible |
+| 5 | 3 | 3 | Tolerates 2 failures; common default |
+| 5 | 1 | 5 | Fast writes, reads fail if any node is down |
+| 3 | 3 | 1 | Fast reads, writes fail if any node is down |
+
+<Callout type="pitfall" title="Quorum does not mean linearizable">
+Even with W + R > N, you can see non-linearizable behaviour: a write that has reached only some replicas when a reader arrives (a partially-completed write), sloppy quorums and hinted handoff (writes accepted by nodes outside the key's home set), concurrent writes resolved by clock-based last-write-wins, and a replica restoring from stale data. Dynamo-style stores need extra mechanisms (read repair, anti-entropy, version vectors) for convergence, and still do not give linearizability by default.
+</Callout>
+
+## Resolving conflicts
+
+When two replicas accept concurrent writes you need a merge rule:
+
+- **Last-write-wins (LWW)**: highest timestamp wins. Simple, but silently drops a write and trusts clocks (see the clocks lesson).
+- **Version vectors**: detect that writes are concurrent and keep both as **siblings** for the app or user to merge (the Dynamo shopping cart).
+- **CRDTs**: data types whose merge is commutative, associative and idempotent (counters, sets, registers), so replicas converge without coordination.
+
+## Worked example
+
+A social app stores profile data on N=3 replicas across zones.
+
+- Profile reads for strangers: R=1, W=2. A stranger seeing a name that is a second old is fine.
+- The user's own profile page: read from the leader or use a session token with the last write version, giving read-your-writes.
+- Username uniqueness: needs a linearizable check (a conditional write on a single partition or a consensus-backed store). Eventual consistency would let two people claim the same name.
+- Like counts: use a CRDT counter or an async-aggregated count; exact real-time totals are not worth the cost.
+
+## Pitfalls
+
+- Equating "strong consistency" with "ACID".
+- Believing W + R > N alone gives linearizability.
+- Using wall-clock last-write-wins for data where losing writes is unacceptable.
+- Offering read-your-writes only on one app server, then losing it when the load balancer sends the next request elsewhere.
+- Forgetting that stronger consistency costs a cross-replica round trip on every operation.
+
+## What would you choose and why?
+
+Pick a consistency model for each: a bank balance shown on the app home screen, a "who is online" indicator, a collaborative document's cursor positions, a unique email at sign-up, and a leaderboard. State the anomaly you tolerate for each.
+
+## Quiz
+
+<Quiz id="sd-m11-consistency-quorums" tags={["consistency", "quorum"]} questions={[
+  { type: "mcq", q: "N=5, W=3, R=3. Which is true?", options: ["Reads and writes always overlap in at least one replica", "Reads can miss every acknowledged write", "The system is linearizable in all cases", "It tolerates 3 failures for writes"], answer: 0, explain: "3 + 3 > 5, so any read set shares at least one node with any write set. Writes still need 3 of 5 live, so only 2 failures are tolerated." },
+  { type: "mcq", q: "A user posts a comment and immediately cannot see it after refresh. Which guarantee is violated?", options: ["Linearizability across all users only", "Read-your-writes", "Durability", "Isolation"], answer: 1, explain: "The read hit a replica that had not yet applied the user's own write." },
+  { type: "multi", q: "Which can break linearizability even when W + R > N?", options: ["Sloppy quorums with hinted handoff", "Clock-based last-write-wins resolution of concurrent writes", "A write that is only partly propagated when a read begins", "Using three replicas instead of five"], answer: [0, 1, 2], explain: "Quorum intersection alone does not order concurrent or in-flight operations; Dynamo-style systems need additional mechanisms." },
+  { type: "mcq", q: "Which data needs a linearizable check?", options: ["Number of page views", "Uniqueness of a username", "A user's last-seen time", "A product recommendation list"], answer: 1, explain: "Uniqueness is a coordination problem: two concurrent claims must be ordered, which eventual consistency cannot do." }
+]} />

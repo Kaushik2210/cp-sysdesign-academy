@@ -1,0 +1,134 @@
+---
+title: Distributed Transactions, 2PC and Sagas
+track: sd
+module: distributed-theory
+order: 4
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/distributed-theory/consistency-models-and-quorums", "sd/databases-1/acid-and-transactions", "sd/queues-and-streaming/delivery-semantics-and-idempotency"]
+tags: [two-phase-commit, saga, transactions, outbox, idempotency, compensation]
+type: lesson
+furtherReading:
+  - title: Garcia-Molina and Salem - Sagas (1987)
+    url: https://www.cs.cornell.edu/andru/cs711/2002fa/reading/sagas.pdf
+  - title: Chris Richardson - Pattern Saga (microservices.io)
+    url: https://microservices.io/patterns/data/saga.html
+  - title: Chris Richardson - Transactional outbox (microservices.io)
+    url: https://microservices.io/patterns/data/transactional-outbox.html
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 9 (Distributed transactions)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Placing an order touches three services: reserve stock, charge the card, create the shipment. Each has its own database. You want all-or-nothing, but there is no single database to wrap in `BEGIN ... COMMIT`. Two families of answer exist: make the participants **agree atomically** (two-phase commit) or **undo** the earlier steps when a later one fails (saga).
+
+## Two-phase commit (2PC)
+
+A **coordinator** drives participants:
+
+1. **Prepare**: ask each participant "can you commit?" Each makes the change durable but not visible, holds its locks and votes yes or no.
+2. **Commit or abort**: if every vote is yes, tell everyone to commit; otherwise tell everyone to abort.
+
+Once a participant votes yes it has promised to commit if told to and **cannot unilaterally abort**.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Coordinator
+  participant S1 as Stock DB
+  participant S2 as Payment DB
+  C->>S1: prepare
+  C->>S2: prepare
+  S1-->>C: yes (locks held)
+  S2-->>C: yes (locks held)
+  C->>C: write COMMIT decision to log
+  C->>S1: commit
+  C->>S2: commit`} caption="Two-phase commit, happy path" />
+
+### The blocking problem
+
+If the coordinator crashes after participants vote yes but before sending the decision, participants are **in doubt**: they hold locks and cannot decide alone, because the coordinator may already have told another participant to commit. They block until it recovers. Consequences:
+
+- Locks held across network round trips cut throughput and raise latency.
+- A single coordinator failure can stall many rows or tables.
+- Participants must support the protocol (XA, or the database's native distributed transaction).
+
+2PC is used inside some databases (Spanner runs 2PC across Paxos groups, whose replicated coordinators avoid permanent blocking) and for XA between a database and a broker. It is a poor fit across independently owned microservices over unreliable networks.
+
+## Sagas
+
+A **saga** is a sequence of local transactions. Each step commits on its own. If step k fails, the saga runs **compensating transactions** for steps k-1 down to 1, in reverse order.
+
+- **Orchestration**: a central saga coordinator tells each service what to do and tracks state. Easier to reason about and monitor; the orchestrator is one more component to run.
+- **Choreography**: each service reacts to events and emits new ones. No central point, but the flow is spread across services and is hard to trace and to change.
+
+```python
+def run_saga(steps, fail_at=None):
+    """steps: list of (name, do, undo). fail_at: name of the step that fails."""
+    log, done = [], []
+    for name, do, undo in steps:
+        if name == fail_at:
+            log.append(f"FAIL {name}")
+            for n, u in reversed(done):
+                log.append(f"UNDO {n}")
+            return log
+        log.append(f"DO {name}")
+        done.append((name, undo))
+    log.append("COMMITTED")
+    return log
+
+steps = [("reserve_stock", 1, 1), ("charge_card", 1, 1), ("create_shipment", 1, 1)]
+print(run_saga(steps))
+print(run_saga(steps, fail_at="create_shipment"))
+```
+
+### What sagas give up
+
+Sagas are **atomic in outcome (eventually) but not isolated**. Other requests can see the intermediate state (stock reserved, card not yet charged). Countermeasures:
+
+- **Semantic locks**: mark records as `PENDING` so others know they are mid-saga.
+- **Commutative updates** that do not care about order.
+- **Reread values** before acting, and **versions** to detect change.
+- Order the steps so the hard-to-undo one (sending an email, shipping) runs **last**.
+
+Compensations must be **idempotent** and must be safe to run even if the forward step did not complete (the failure may have happened after the effect but before the ack). Some actions cannot be compensated (an email sent), so compensate semantically (send a correction) or avoid them until the end.
+
+## Making steps reliable: outbox and idempotency
+
+A service must update its database **and** publish an event atomically. Writing the DB row then calling the broker can crash between the two. The **transactional outbox** fixes it: write the business row and an `outbox` row in the same local transaction; a relay (polling or change-data-capture) publishes outbox rows to the broker and marks them sent. Delivery is at-least-once, so consumers deduplicate using an **idempotency key** (the saga id plus step).
+
+<TradeOffs caption="Choosing a cross-service consistency mechanism" rows={[
+  { option: "Single database / one service owns the data", pros: "Real ACID, simplest", cons: "Couples teams and scaling", chooseWhen: "You can draw the boundary so the invariant lives in one place" },
+  { option: "2PC / XA", pros: "Atomic and isolated", cons: "Blocking, locks across the network, low throughput, needs protocol support", chooseWhen: "Few trusted participants in one datacenter or inside a database engine" },
+  { option: "Saga with compensation", pros: "No distributed locks, scales, fits microservices", cons: "No isolation, compensation logic, complex failure handling", chooseWhen: "Long-running business workflows across services" },
+  { option: "Try-confirm-cancel (reservations)", pros: "Resources reserved with expiry, clean business semantics", cons: "Needs a reservation model in every service", chooseWhen: "Bookings, inventory, payments with holds" }
+]} />
+
+## Worked example
+
+Checkout saga: `reserve_stock` → `authorise_payment` → `create_shipment` → `capture_payment`.
+
+- Authorising rather than charging first gives a cheap, reversible hold; capture comes last.
+- If `create_shipment` fails: void the authorisation, release the stock. Both operations are idempotent and keyed by order id.
+- The orchestrator persists its state after each step. After a crash it reloads state and resumes or compensates. Each service call carries the idempotency key `order-123:authorise`, so retries do not double-charge.
+- Timeouts: if the payment service does not answer, the orchestrator retries with the same key; after the retry budget it compensates and marks the order failed, and a reconciliation job later checks for stuck payments.
+
+## Pitfalls
+
+- Using 2PC across public-network microservices and being surprised by lock waits.
+- Compensations that are not idempotent, or that assume the forward step finished.
+- Publishing events outside the database transaction (dual write).
+- Doing the irreversible step early in the saga.
+- No timeout or dead-letter path for a saga stuck mid-way.
+
+## What would you choose and why?
+
+A travel site books a flight, a hotel and a car from three independent suppliers whose APIs allow cancellation within 24 hours. Design the saga: what order do you run the steps, which are compensations, and what do you tell the user while it is in progress?
+
+## Quiz
+
+<Quiz id="sd-m11-distributed-transactions" tags={["saga", "2pc"]} questions={[
+  { type: "mcq", q: "Why can 2PC block?", options: ["Prepared participants cannot decide alone if the coordinator crashes before announcing the outcome", "The prepare message is too large", "It requires a quorum of three", "Databases do not support commit"], answer: 0, explain: "In-doubt participants hold locks until they learn the decision, because another participant may already have committed." },
+  { type: "mcq", q: "Which property do sagas lack compared with an ACID transaction?", options: ["Eventual atomicity", "Isolation", "Durability of each step", "Ability to retry"], answer: 1, explain: "Intermediate states are visible to other requests; semantic locks and careful step ordering mitigate this." },
+  { type: "multi", q: "Which practices make a saga step safe?", options: ["Idempotent forward and compensating actions", "Doing the irreversible action last", "Transactional outbox for publishing events", "Publishing to the broker after the DB commit with no outbox"], answer: [0, 1, 2], explain: "The last option is a dual write: a crash between the two leaves the systems inconsistent." },
+  { type: "mcq", q: "The orchestrator times out calling the payment service. What is the correct next move?", options: ["Assume it failed and move on", "Retry with the same idempotency key, then compensate if retries are exhausted", "Charge again with a new key", "Delete the order"], answer: 1, explain: "A timeout is ambiguous: the charge may have happened. The same key makes retries safe." }
+]} />

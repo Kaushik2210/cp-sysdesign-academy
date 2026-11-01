@@ -1,0 +1,1 @@
+{ "title": "Distributed Systems Theory", "level": "Level 2: Intermediate", "order": 11, "summary": "CAP and PACELC, consistency models and quorums, time and ordering, and distributed transactions with two-phase commit and sagas." }

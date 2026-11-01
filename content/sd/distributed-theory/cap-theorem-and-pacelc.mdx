@@ -1,0 +1,127 @@
+---
+title: CAP Theorem and PACELC
+track: sd
+module: distributed-theory
+order: 1
+difficulty: medium
+estMinutes: 25
+prerequisites: ["sd/databases-2/replication"]
+tags: [cap, pacelc, consistency, availability, partition, trade-offs]
+type: lesson
+furtherReading:
+  - title: Brewer - CAP Twelve Years Later - How the Rules Have Changed
+    url: https://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed/
+  - title: Gilbert and Lynch - Brewer's conjecture and the feasibility of consistent, available, partition-tolerant web services
+    url: https://dl.acm.org/doi/10.1145/564585.564601
+  - title: Abadi - Consistency Tradeoffs in Modern Distributed Database System Design (PACELC)
+    url: https://www.cs.umd.edu/~abadi/papers/abadi-pacelc.pdf
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 9
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Two data centres each hold a copy of your account balance. The link between them is cut. A customer withdraws money in data centre A. Now a second request arrives at data centre B. B has two honest options:
+
+1. **Answer using what it knows** (a possibly stale balance). The system stays up but may disagree with A.
+2. **Refuse until the link heals.** The system is correct but some users get errors.
+
+There is no third option that is both always answering and always correct. That forced choice, *when the network splits*, is the CAP theorem.
+
+## Formal definition
+
+CAP talks about three properties of a replicated data store:
+
+- **Consistency (C)**: here it means **linearizability**. Every read returns the most recent completed write, as if there were one copy.
+- **Availability (A)**: every request to a non-failing node gets a non-error response, without a guarantee it is the latest data.
+- **Partition tolerance (P)**: the system keeps operating when the network drops or delays arbitrarily many messages between nodes.
+
+**Theorem (Gilbert and Lynch, 2002):** in an asynchronous network, a system cannot provide C and A at the same time **during a partition**.
+
+<Callout type="pitfall" title="The 'pick two of three' myth">
+You do not choose P. Networks do partition (switch failures, GC pauses that look like partitions, misconfigured firewalls), so any distributed system must tolerate P. The real choice is **C or A while a partition is happening**. When there is no partition you can have both. "CA system" is only meaningful for a single node.
+</Callout>
+
+## What CAP does not say
+
+- It says nothing about latency. A system can be technically "available" and take 30 seconds to answer.
+- The C in CAP is linearizability, the strongest model. Many systems give up on that long before a partition and still call themselves "consistent" (see the next lesson).
+- It is about the behaviour **during** a partition, which is rare. Most of the time the trade-off that matters is different (next section).
+
+## PACELC: the trade-off you pay every day
+
+Daniel Abadi's refinement: **if** there is a **P**artition, choose **A** or **C**; **E**lse (normal operation), choose **L**atency or **C**onsistency.
+
+Why? To be consistent across replicas you must wait for them (a round trip, or a cross-region round trip of 70 to 150 ms). To be fast you answer from the nearest replica and let others catch up.
+
+| Class | During partition | Normal operation | Typical examples |
+| --- | --- | --- | --- |
+| PA/EL | Stay available | Prefer low latency | Cassandra and DynamoDB with default (eventual) reads, Riak |
+| PC/EC | Stay consistent | Pay latency for consistency | Spanner, single-leader relational with synchronous replicas, etcd and ZooKeeper |
+| PA/EC | Stay available | Prefer consistency | Some systems with tunable settings, such as MongoDB depending on write and read concerns |
+| PC/EL | Stay consistent | Prefer low latency | Rare; for example PNUTS |
+
+Most real databases are *tunable*: the same product can act as PA/EL or PC/EC depending on per-request settings. Do not label a product with one box in an interview; say "by default X, and with Y setting Z".
+
+<Diagram kind="mermaid" code={`flowchart TD
+  P{Partition now?} -->|yes| PC{Serve requests?}
+  PC -->|keep serving, may be stale| PA[Choose Availability]
+  PC -->|reject or block minority side| PCo[Choose Consistency]
+  P -->|no, normal operation| EL{Wait for replicas?}
+  EL -->|answer from nearest replica| L[Choose Latency]
+  EL -->|wait for quorum or leader| C[Choose Consistency]`} caption="The PACELC decision tree" />
+
+## Worked example
+
+You are designing a shopping service.
+
+- **Product catalogue reads**: a stale price for a few seconds is tolerable and reads are 1000 times more frequent than writes. Choose **PA/EL**: read from the nearest replica or cache.
+- **Cart**: users must always be able to add items (an error loses a sale). Choose availability; reconcile conflicting carts on merge (this is the famous Dynamo cart design).
+- **Inventory decrement at checkout**: overselling is costly. Choose **C**: a single leader per item, or a conditional write (`stock >= 1`), accepting that a partitioned minority cannot sell.
+- **Payment ledger**: consistency always, and idempotency keys for retries.
+
+One product, four different answers. That is the sign of a good design: the choice is made per operation and per data type, not once for the whole system.
+
+## Code: a toy CP vs AP replica pair
+
+```python
+class Replica:
+    def __init__(self): self.value, self.version = 0, 0
+
+def write(a, b, v, partitioned, mode):
+    """mode 'CP': refuse if the peer is unreachable. mode 'AP': write locally, sync later."""
+    if partitioned and mode == "CP":
+        return "error: cannot reach quorum"
+    a.value, a.version = v, a.version + 1
+    if not partitioned:
+        b.value, b.version = a.value, a.version
+    return "ok"
+
+a, b = Replica(), Replica()
+print(write(a, b, 10, partitioned=True, mode="CP"), a.value, b.value)   # error ... 0 0
+print(write(a, b, 10, partitioned=True, mode="AP"), a.value, b.value)   # ok 10 0  (B is stale)
+print(write(a, b, 11, partitioned=False, mode="AP"), a.value, b.value)  # ok 11 11
+```
+
+The AP mode accepted a write that B cannot see. After the partition heals the two sides must **reconcile** (last-write-wins, version vectors, or CRDTs, covered in later lessons).
+
+## Pitfalls
+
+- Saying "we choose CA". Say what you do during a partition.
+- Treating CAP as a product label rather than a per-operation choice.
+- Forgetting the latency half (PACELC): cross-region synchronous replication costs a round trip on every write.
+- Equating availability with uptime. CAP availability means every non-failed node answers.
+- Using "eventual consistency" with no plan for conflicts or for read-your-writes.
+
+## What would you choose and why?
+
+A global chat app stores message history in three regions. A trans-Atlantic cable fails. Should users on the isolated side still be able to send messages? What about editing their account email? Justify each as C or A and describe how you would reconcile afterwards.
+
+## Quiz
+
+<Quiz id="sd-m11-cap-pacelc" tags={["cap", "pacelc"]} questions={[
+  { type: "mcq", q: "In CAP, what does 'partition tolerance' realistically mean for a designer?", options: ["You may choose to omit it", "The system must keep working when the network splits, so the real choice is C or A during a partition", "The database must be sharded", "Every node must hold all the data"], answer: 1, explain: "Partitions happen in any distributed system; you cannot opt out. You choose consistency or availability while one is in progress." },
+  { type: "mcq", q: "Which statement about PACELC is correct?", options: ["It only applies during partitions", "Even with no partition there is a trade-off between latency and consistency", "It proves all systems must be eventually consistent", "It replaces the CAP theorem with a stronger one"], answer: 1, explain: "The ELC half describes the normal-operation trade-off: waiting for replicas costs latency." },
+  { type: "multi", q: "Which operations would you typically favour availability for?", options: ["Add item to a shopping cart", "Fetch a product description", "Decrement the last unit of stock", "Post a like on a video"], answer: [0, 1, 3], explain: "The last unit of stock needs a consistent decision to avoid overselling; the others tolerate temporary divergence." },
+  { type: "mcq", q: "A system returns errors on the minority side of a partition so no stale reads occur. In CAP terms it chose:", options: ["Availability", "Consistency", "Neither", "Latency only"], answer: 1, explain: "Refusing requests to keep a single up-to-date view is choosing consistency over availability." }
+]} />
