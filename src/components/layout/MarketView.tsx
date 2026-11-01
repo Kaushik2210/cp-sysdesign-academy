@@ -54,7 +54,7 @@ export function MarketView({ topics }: { topics: { id: string; title: string; in
 
       {shown.map((t) => (
         <section key={t.id} id={t.id} aria-labelledby={`${t.id}-h`} className="mt-10 scroll-mt-20">
-          <h2 id={`${t.id}-h`} className="flex items-center gap-3 text-2xl font-extrabold tracking-tight before:h-6 before:w-1.5 before:rounded-full before:bg-gradient-to-b before:from-accent before:to-hot before:content-['']">
+          <h2 id={`${t.id}-h`} className="flex items-center gap-3 text-2xl font-extrabold tracking-tight before:h-6 before:w-1.5 before:rounded-full before:bg-accent before:content-['']">
             {t.title}
           </h2>
           <ul className="mt-3 space-y-4">

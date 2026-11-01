@@ -60,7 +60,7 @@ export function RoadmapView({ phases }: { phases: PhaseView[] }) {
           </span>
         </div>
         <div role="progressbar" aria-label="Overall roadmap progress" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="mt-2 h-3 overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-700" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${pct}%` }} />
         </div>
       </div>
 
@@ -79,7 +79,7 @@ export function RoadmapView({ phases }: { phases: PhaseView[] }) {
                     {p.when} · ~{p.hoursPerWeek} h/week · {done}/{steps.length}
                   </span>
                   <span aria-hidden="true" className="basis-full overflow-hidden rounded-full bg-muted sm:ml-11">
-                    <span className="block h-1 rounded-full bg-gradient-to-r from-accent to-hot transition-[width] duration-700" style={{ width: `${steps.length ? (done / steps.length) * 100 : 0}%` }} />
+                    <span className="block h-1 rounded-full bg-accent transition-[width] duration-700" style={{ width: `${steps.length ? (done / steps.length) * 100 : 0}%` }} />
                   </span>
                 </summary>
 

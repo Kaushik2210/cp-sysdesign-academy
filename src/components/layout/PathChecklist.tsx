@@ -26,7 +26,7 @@ export function PathChecklist({ days }: { days: Day[] }) {
           {done}/{all.length} lessons complete{firstOpen ? ` · next up: day ${firstOpen}` : ""}
         </p>
         <div aria-hidden="true" className="mt-2 h-2.5 overflow-hidden rounded-full bg-muted">
-          <div className="h-full rounded-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-700" style={{ width: `${all.length ? (done / all.length) * 100 : 0}%` }} />
+          <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${all.length ? (done / all.length) * 100 : 0}%` }} />
         </div>
       </div>
       <ol className="mt-4 space-y-3">

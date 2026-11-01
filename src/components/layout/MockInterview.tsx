@@ -187,7 +187,7 @@ export function MockInterview({
             </div>
             <div className="min-w-0 flex-1">
               <div role="progressbar" aria-label="Interview time used" aria-valuenow={Math.min(100, Math.round((elapsed / total) * 100))} aria-valuemin={0} aria-valuemax={100} className="h-3 overflow-hidden rounded-full bg-muted">
-                <div className={cn("h-full rounded-full transition-[width] duration-1000 ease-linear", phase === "overtime" ? "bg-red-500" : "bg-gradient-to-r from-accent via-hot to-sun")} style={{ width: `${Math.min(100, (elapsed / total) * 100)}%` }} />
+                <div className={cn("h-full rounded-full transition-[width] duration-1000 ease-linear", phase === "overtime" ? "bg-red-500" : "bg-accent")} style={{ width: `${Math.min(100, (elapsed / total) * 100)}%` }} />
               </div>
             </div>
           </div>

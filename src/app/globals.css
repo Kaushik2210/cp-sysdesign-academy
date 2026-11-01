@@ -3,35 +3,40 @@
 @tailwind utilities;
 
 :root {
+  /* Gallery-editorial palette: paper white, ink, one electric blue. */
   --bg: 0 0% 100%;
-  --fg: 222 20% 12%;
-  --muted: 220 16% 95%;
-  --muted-fg: 220 10% 36%;
-  --border: 220 14% 88%;
-  --accent: 243 75% 50%;
+  --fg: 0 0% 4%;
+  --muted: 0 0% 96%;
+  --muted-fg: 0 0% 36%;
+  --border: 0 0% 88%;
+  --accent: 242 100% 42%;      /* #0400D8 */
   --accent-fg: 0 0% 100%;
   --card: 0 0% 100%;
-  --hot: 316 80% 44%;
-  --cool: 195 90% 32%;
-  --sun: 28 92% 38%;
-  --leaf: 152 70% 28%;
-  --glow: 0.18;
+  --hot: 3 72% 43%;            /* errors and pitfalls only */
+  --cool: 221 100% 40%;        /* the lighter blue */
+  --sun: 32 95% 32%;
+  --leaf: 152 68% 24%;
+  --glow: 0.1;
 }
 
 .dark {
-  --bg: 224 24% 8%;
-  --fg: 220 20% 93%;
-  --muted: 223 20% 13%;
-  --muted-fg: 220 12% 68%;
-  --border: 222 16% 20%;
-  --accent: 239 84% 74%;
-  --accent-fg: 224 24% 8%;
-  --card: 224 22% 11%;
-  --hot: 316 90% 68%;
-  --cool: 190 95% 62%;
-  --sun: 38 96% 64%;
-  --leaf: 152 75% 56%;
-  --glow: 0.35;
+  --bg: 0 0% 3%;
+  --fg: 0 0% 96%;
+  --muted: 0 0% 10%;
+  --muted-fg: 0 0% 68%;
+  --border: 0 0% 19%;
+  --accent: 238 100% 78%;
+  --accent-fg: 0 0% 3%;
+  --card: 0 0% 6%;
+  --hot: 4 90% 68%;
+  --cool: 217 100% 72%;
+  --sun: 38 96% 62%;
+  --leaf: 152 70% 54%;
+  --glow: 0.2;
+}
+
+html {
+  font-feature-settings: "ss01", "cv11";
 }
 
 body {
@@ -54,41 +59,19 @@ body {
   }
 }
 
-/* ---------- Maximalist layer: aurora, grid, gradient text, glow ---------- */
+/* ---------- Gallery layer: flat surfaces, hairlines, pills ---------- */
 body {
   position: relative;
   overflow-x: clip;
+  letter-spacing: -0.005em;
 }
-/* Slowly drifting colour wash behind everything. Pure decoration: pointer-events none, hidden in print. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: -20%;
-  z-index: -2;
-  pointer-events: none;
-  background:
-    radial-gradient(40% 35% at 15% 10%, hsl(var(--accent) / var(--glow)), transparent 70%),
-    radial-gradient(35% 30% at 85% 20%, hsl(var(--hot) / var(--glow)), transparent 70%),
-    radial-gradient(40% 35% at 70% 85%, hsl(var(--cool) / var(--glow)), transparent 70%),
-    radial-gradient(30% 30% at 10% 80%, hsl(var(--sun) / calc(var(--glow) * 0.7)), transparent 70%);
-  animation: aurora-drift 26s ease-in-out infinite alternate;
+h1, h2, h3 {
+  letter-spacing: -0.025em;
 }
-/* Faint engineering-paper grid over the wash. */
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background-image:
-    linear-gradient(hsl(var(--fg) / 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, hsl(var(--fg) / 0.045) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: radial-gradient(ellipse at 50% 0%, black 20%, transparent 75%);
-}
-@keyframes aurora-drift {
-  from { transform: translate3d(-3%, -2%, 0) scale(1); }
-  to { transform: translate3d(3%, 3%, 0) scale(1.12); }
+/* Headings are medium weight, like an editorial grotesque. */
+.font-black,
+.font-extrabold {
+  font-weight: 600;
 }
 @keyframes marquee {
   from { transform: translateX(0); }
@@ -98,30 +81,69 @@ body::after {
   from { opacity: 0; transform: translateY(14px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
-@keyframes sheen {
-  from { background-position: 0% 50%; }
-  to { background-position: 200% 50%; }
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
 }
+/* Legacy names kept so every page restyles at once: now flat blue, no gradients. */
 .text-gradient {
-  background: linear-gradient(95deg, hsl(var(--accent)), hsl(var(--hot)) 35%, hsl(var(--sun)) 65%, hsl(var(--cool)));
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: sheen 9s linear infinite;
+  color: hsl(var(--accent));
 }
 .bg-gradient-brand {
-  background: linear-gradient(120deg, hsl(var(--accent)), hsl(var(--hot)));
+  background: hsl(var(--accent));
+  color: hsl(var(--accent-fg)) !important;
 }
 .ring-glow {
-  box-shadow: 0 0 0 1px hsl(var(--accent) / 0.5), 0 10px 40px -10px hsl(var(--accent) / 0.55);
+  box-shadow: 0 0 0 2px hsl(var(--accent));
 }
-/* Cards that light up under the pointer. --mx/--my are set by SpotlightCard. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.75rem;
+  border-radius: 9999px;
+  border: 1px solid hsl(var(--fg));
+  padding: 0 1.25rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+.pill:hover {
+  background: hsl(var(--fg));
+  color: hsl(var(--bg));
+}
+.pill-solid {
+  background: hsl(var(--accent));
+  border-color: hsl(var(--accent));
+  color: hsl(var(--accent-fg));
+}
+.pill-solid:hover {
+  background: hsl(var(--fg));
+  border-color: hsl(var(--fg));
+  color: hsl(var(--bg));
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  border: 1px solid hsl(var(--border));
+  padding: 0.125rem 0.625rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  color: hsl(var(--muted-fg));
+}
+.eyebrow {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: hsl(var(--muted-fg));
+}
+/* Cards: hairline frame, flat; a faint blue wash follows the pointer. --mx/--my are set by Spotlight. */
 .spotlight {
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 .spotlight::before {
   content: "";
@@ -130,7 +152,7 @@ body::after {
   z-index: -1;
   opacity: 0;
   transition: opacity 0.25s ease;
-  background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 50%), hsl(var(--tint, var(--accent)) / 0.28), transparent 65%);
+  background: radial-gradient(360px circle at var(--mx, 50%) var(--my, 50%), hsl(var(--accent) / 0.1), transparent 65%);
 }
 .spotlight:hover::before,
 .spotlight:focus-within::before {
@@ -138,8 +160,22 @@ body::after {
 }
 .spotlight:hover,
 .spotlight:focus-within {
-  border-color: hsl(var(--tint, var(--accent)) / 0.8);
-  box-shadow: 0 12px 40px -14px hsl(var(--tint, var(--accent)) / 0.6);
+  border-color: hsl(var(--fg));
+}
+/* 16:9 art panel at the top of a gallery tile. */
+.tile-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+.tile-art > svg.tile-glyph {
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.spotlight:hover .tile-art > svg.tile-glyph {
+  transform: scale(1.08) rotate(6deg);
 }
 .marquee-track {
   display: flex;
@@ -149,12 +185,8 @@ body::after {
 .marquee:hover .marquee-track {
   animation-play-state: paused;
 }
-
-@media print {
-  body::before,
-  body::after {
-    display: none !important;
-  }
+.spin-slow {
+  animation: spin-slow 40s linear infinite;
 }
 
 /* Code blocks (rehype-pretty-code + shiki dual theme) */
@@ -174,11 +206,11 @@ body::after {
 }
 code[data-theme*=" "],
 code[data-theme*=" "] span {
-  color: var(--shiki-light);
+  color: var(--shiki-light, hsl(var(--fg)));
 }
 .dark code[data-theme*=" "],
 .dark code[data-theme*=" "] span {
-  color: var(--shiki-dark);
+  color: var(--shiki-dark, hsl(var(--fg)));
 }
 .prose a {
   @apply text-accent;
@@ -187,11 +219,10 @@ code[data-theme*=" "] span {
 .prose h3 {
   scroll-margin-top: 6rem;
 }
-/* Section headings get a gradient rule on the left. */
 .prose h2 {
-  border-left: 5px solid;
-  border-image: linear-gradient(to bottom, hsl(var(--accent)), hsl(var(--hot))) 1;
-  padding-left: 0.75rem;
+  margin-top: 3rem;
+  border-top: 1px solid hsl(var(--border));
+  padding-top: 1.25rem;
 }
 
 @media print {

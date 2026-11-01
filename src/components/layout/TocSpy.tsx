@@ -29,7 +29,7 @@ export function TocSpy({ headings }: { headings: { id: string; text: string; dep
         {headings.map((h) => {
           const on = active === h.id;
           return (
-            <li key={h.id} className={cn(h.depth === 3 ? "pl-6" : "pl-3", "-ml-px border-l-2 transition-colors", on ? "border-hot" : "border-transparent")}>
+            <li key={h.id} className={cn(h.depth === 3 ? "pl-6" : "pl-3", "-ml-px border-l-2 transition-colors", on ? "border-accent" : "border-transparent")}>
               <a
                 href={`#${h.id}`}
                 aria-current={on ? "location" : undefined}

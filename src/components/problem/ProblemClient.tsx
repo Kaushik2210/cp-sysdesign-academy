@@ -76,9 +76,9 @@ export function ProblemClient(p: ProblemClientProps) {
 
   return (
     <section aria-label={`Problem: ${p.title}`} className="not-prose my-8 overflow-hidden rounded-3xl border border-border bg-card/80 shadow-xl ring-glow backdrop-blur-sm">
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border bg-gradient-to-r from-accent/5 to-hot/5 p-4">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border bg-muted/50 p-4">
         <h3 className="text-gradient text-xl font-black tracking-tight">{p.title}</h3>
-        <span className="rounded-full bg-gradient-to-r from-accent/20 to-hot/20 px-2.5 py-0.5 text-xs font-semibold">rating ~{p.rating}</span>
+        <span className="rounded-full border border-border px-2.5 py-0.5 text-xs font-semibold">rating ~{p.rating}</span>
         {result?.solved && <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">✓ solved</span>}
         <span className="ml-auto flex gap-1">
           {p.tags.map((t) => (

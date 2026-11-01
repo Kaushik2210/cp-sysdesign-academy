@@ -107,11 +107,11 @@ export function SearchDialog() {
         type="button"
         onClick={() => setOpen(true)}
         aria-label="Search (Ctrl+K)"
-        className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm text-muted-fg hover:bg-muted"
+        className="flex min-h-11 items-center gap-2 rounded-full border border-border px-4 text-sm text-muted-fg transition hover:border-fg hover:text-fg"
       >
         <Search size={14} aria-hidden />
         <span className="hidden sm:inline">Search</span>
-        <kbd className="hidden rounded bg-muted px-1 text-xs sm:inline">Ctrl K</kbd>
+        <kbd className="hidden rounded-full bg-muted px-2 text-xs sm:inline">Ctrl K</kbd>
       </button>
       {open && (
         <div
@@ -121,7 +121,7 @@ export function SearchDialog() {
           className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-24"
           onMouseDown={(e) => e.target === e.currentTarget && close()}
         >
-          <div className="w-full max-w-xl rounded-xl border border-border bg-bg shadow-xl">
+          <div className="w-full max-w-xl rounded-2xl border border-border bg-bg shadow-2xl">
             <input
               ref={inputRef}
               value={query}

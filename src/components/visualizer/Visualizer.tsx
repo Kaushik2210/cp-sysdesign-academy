@@ -69,7 +69,7 @@ export function Visualizer({ name, input }: { name: VisualizerName; input?: stri
       onKeyDown={onKeyDown}
       className={cn(
         "not-prose my-6 rounded-2xl border bg-card/80 p-4 shadow-lg backdrop-blur-sm transition-shadow sm:p-5",
-        playing ? "border-hot ring-glow" : "border-border",
+        playing ? "border-accent ring-glow" : "border-border",
       )}
     >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -111,7 +111,7 @@ export function Visualizer({ name, input }: { name: VisualizerName; input?: stri
             {def.pseudocode.map((l, i) => (
               <div
                 key={i}
-                className={cn("whitespace-pre rounded px-1 transition-colors", i === step.line && "bg-gradient-to-r from-accent/30 to-hot/20 font-bold")}
+                className={cn("whitespace-pre rounded px-1 transition-colors", i === step.line && "bg-accent/15 font-bold")}
                 aria-current={i === step.line ? "step" : undefined}
               >
                 {l}

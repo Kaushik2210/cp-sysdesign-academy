@@ -141,7 +141,7 @@ export function LoadBalancerSandbox() {
                   <td className="p-2">
                     <div className="font-mono">{fmt(r.p99)}</div>
                     <div className="mt-0.5 h-1.5 w-28 overflow-hidden rounded bg-muted">
-                      <div className="h-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-500" style={{ width: `${(r.p99 / worstP99) * 100}%` }} />
+                      <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${(r.p99 / worstP99) * 100}%` }} />
                     </div>
                   </td>
                   <td className="p-2 font-mono">{r.workImbalance.toFixed(2)}x</td>
@@ -181,7 +181,7 @@ export function LoadBalancerSandbox() {
                 </span>
               </div>
               <div className="h-2.5 overflow-hidden rounded bg-muted">
-                <div className="h-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-500" style={{ width: `${maxWork ? (sel.work[i] / maxWork) * 100 : 0}%` }} />
+                <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${maxWork ? (sel.work[i] / maxWork) * 100 : 0}%` }} />
               </div>
             </li>
           ))}

@@ -48,7 +48,7 @@ export function TemplateTabs({ langs }: { langs: TemplateLang[] }) {
               onClick={() => setActive(i)}
               className={cn(
                 "-mb-px min-h-11 border-b-[3px] px-4 text-sm transition-colors",
-                i === active ? "border-hot font-bold text-fg" : "border-transparent text-muted-fg hover:border-border hover:text-fg",
+                i === active ? "border-accent font-bold text-fg" : "border-transparent text-muted-fg hover:border-border hover:text-fg",
               )}
             >
               {l.label}

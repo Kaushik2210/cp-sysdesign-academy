@@ -17,8 +17,8 @@ interface Props {
   "aria-label"?: string;
 }
 
-/** A card that glows under the pointer and leans slightly toward it. Both effects are skipped for reduced motion. */
-export function Spotlight({ children, href, tint = "accent", className, tilt = 3, ...rest }: Props) {
+/** A flat hairline card; a faint blue wash follows the pointer. Tilt is opt-in (default off) and skipped for reduced motion. */
+export function Spotlight({ children, href, tint = "accent", className, tilt = 0, ...rest }: Props) {
   const ref = useRef<HTMLElement | null>(null);
 
   const onMove = (e: PointerEvent<HTMLElement>) => {
@@ -40,7 +40,7 @@ export function Spotlight({ children, href, tint = "accent", className, tilt = 3
   };
 
   const props = {
-    className: cn("spotlight rounded-2xl border border-border bg-card/80 backdrop-blur-sm", className),
+    className: cn("spotlight rounded-xl border border-border bg-card", className),
     style: { "--tint": `var(--${tint})` } as CSSProperties,
     onPointerMove: onMove,
     onPointerLeave: onLeave,

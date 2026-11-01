@@ -23,9 +23,9 @@ type AlgoKey = keyof typeof ALGOS;
 
 const COUNT = 16;
 const TONE_CLASS: Record<Tone | "idle", string> = {
-  idle: "bg-gradient-to-t from-accent/70 to-cool/80",
-  accent: "bg-gradient-to-t from-sun to-hot",
-  good: "bg-gradient-to-t from-leaf/80 to-leaf",
+  idle: "bg-accent/80",
+  accent: "bg-fg",
+  good: "bg-leaf",
   bad: "bg-hot",
   muted: "bg-muted-fg/40",
 };

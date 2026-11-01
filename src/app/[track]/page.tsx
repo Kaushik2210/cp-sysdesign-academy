@@ -18,8 +18,8 @@ export async function generateMetadata({ params }: { params: Promise<{ track: st
   return { title: TRACK_META[track as Track]?.title ?? "Track" };
 }
 
-const TRACK_TINT: Record<Track, Tint> = { cp: "hot", sd: "cool" };
-const LEVEL_TINTS: Tint[] = ["leaf", "cool", "accent", "sun", "hot"];
+const TRACK_TINT: Record<Track, Tint> = { cp: "accent", sd: "accent" };
+const LEVEL_TINTS: Tint[] = ["accent"];
 
 export default async function TrackPage({ params }: { params: Promise<{ track: string }> }) {
   const { track } = await params;
@@ -33,11 +33,12 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <header className="rounded-3xl border border-border bg-card/70 p-6 backdrop-blur sm:p-8" style={{ ["--tint" as string]: `var(--${tint})` }}>
-        <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
-          <span className="text-gradient">{meta.title}</span>
+      <header className="border-b border-border pb-8" data-tint={tint}>
+        <h1 className="text-4xl font-medium leading-[1.05] tracking-tight sm:text-6xl">
+          <span aria-hidden="true" className="mr-3 text-accent">—</span>
+          {meta.title}
         </h1>
-        <p className="mt-3 max-w-2xl text-lg text-muted-fg">{meta.tagline}</p>
+        <p className="mt-4 max-w-2xl text-lg text-muted-fg">{meta.tagline}</p>
         <div className="mt-6 flex flex-wrap items-center gap-x-8 gap-y-4">
           <TrackProgress lessonIds={lessonIds} label={meta.title} />
           <p className="inline-flex items-center gap-2 text-sm text-muted-fg">
@@ -50,8 +51,8 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
       </header>
       {levels.map((level, li) => (
         <section key={level} className="mt-12">
-          <h2 className="mb-4 flex items-center gap-3 text-xl font-extrabold tracking-tight">
-            <span aria-hidden="true" className="h-6 w-1.5 rounded-full" style={{ background: `hsl(var(--${LEVEL_TINTS[li % LEVEL_TINTS.length]}))` }} />
+          <h2 className="mb-4 flex items-baseline gap-3 text-xl font-medium tracking-tight">
+            <span aria-hidden="true" className="text-sm tabular-nums text-muted-fg">{String(li + 1).padStart(2, "0")}</span>
             {level}
           </h2>
           <ul className="grid gap-4 sm:grid-cols-2">

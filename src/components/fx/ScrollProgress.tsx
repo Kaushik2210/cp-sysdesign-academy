@@ -2,7 +2,7 @@
 
 import { motion, useReducedMotion, useScroll, useSpring } from "framer-motion";
 
-/** A thin gradient bar along the top edge showing how far down the page you are. */
+/** A thin blue bar along the top edge showing how far down the page you are. */
 export function ScrollProgress() {
   const reduce = useReducedMotion();
   const { scrollYProgress } = useScroll();
@@ -10,7 +10,7 @@ export function ScrollProgress() {
   return (
     <motion.div
       aria-hidden="true"
-      className="no-print absolute inset-x-0 bottom-0 h-[3px] origin-left bg-gradient-to-r from-accent via-hot to-sun"
+      className="no-print absolute inset-x-0 bottom-[-1px] h-[2px] origin-left bg-accent"
       style={{ scaleX: reduce ? scrollYProgress : x }}
     />
   );

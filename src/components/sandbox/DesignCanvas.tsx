@@ -241,7 +241,7 @@ export default function DesignCanvas() {
             <span className="text-sm text-muted-fg">/ 100</span>
           </div>
           <div role="progressbar" aria-label="Design score" aria-valuenow={analysis.score} aria-valuemin={0} aria-valuemax={100} className="mt-1 h-2 overflow-hidden rounded bg-muted">
-            <div className="h-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-500" style={{ width: `${analysis.score}%` }} />
+            <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${analysis.score}%` }} />
           </div>
           <p className="mt-2 text-xs text-muted-fg">An automated checklist of common problems, not a verdict. A real review also weighs your requirements and scale.</p>
         </section>

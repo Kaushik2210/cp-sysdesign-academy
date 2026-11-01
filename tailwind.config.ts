@@ -20,8 +20,9 @@ const config = {
         sun: "hsl(var(--sun))",
         leaf: "hsl(var(--leaf))",
       },
+      borderRadius: { lg: "6px", xl: "8px", "2xl": "10px", "3xl": "12px" },
       fontFamily: {
-        sans: ["system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
+        sans: ['"Helvetica Neue"', "Helvetica", "Arial", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
     },

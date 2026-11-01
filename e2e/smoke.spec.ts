@@ -49,12 +49,12 @@ test("Ctrl+K search finds a lesson and navigates to it", async ({ page }) => {
   await expect(page).toHaveURL(/consistent-hashing/);
 });
 
-test("theme toggle switches between dark and light", async ({ page }) => {
+test("theme toggle switches between light and dark", async ({ page }) => {
   await page.goto("/");
   const html = page.locator("html");
-  await expect(html).toHaveClass(/dark/);
-  await page.getByRole("button", { name: /switch to light theme/i }).click();
   await expect(html).not.toHaveClass(/dark/);
+  await page.getByRole("button", { name: /switch to dark theme/i }).click();
+  await expect(html).toHaveClass(/dark/);
 });
 
 test("learning path page renders a daily checklist", async ({ page }) => {
