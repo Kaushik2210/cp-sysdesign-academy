@@ -51,8 +51,8 @@ export function LoadBalancerSandbox() {
 
   return (
     <div className="mt-6 space-y-6">
-      <section aria-labelledby="lb-setup" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
-        <h2 id="lb-setup" className="text-base font-extrabold tracking-tight">
+      <section aria-labelledby="lb-setup" className="rounded-md border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow p-4">
+        <h2 id="lb-setup" className="text-base font-semibold tracking-tight">
           Setup
         </h2>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
@@ -60,7 +60,7 @@ export function LoadBalancerSandbox() {
             <label htmlFor="lb-servers" className="block text-sm font-medium">
               Number of servers
             </label>
-            <select id="lb-servers" value={servers} onChange={(e) => setServers(Number(e.target.value))} className="mt-1 min-h-11 w-full rounded-xl border border-border bg-bg focus-visible:border-accent px-2">
+            <select id="lb-servers" value={servers} onChange={(e) => setServers(Number(e.target.value))} className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg focus-visible:border-accent px-2">
               {[2, 3, 4, 5, 6, 8].map((n) => (
                 <option key={n} value={n}>
                   {n}
@@ -72,7 +72,7 @@ export function LoadBalancerSandbox() {
             <label htmlFor="lb-preset" className="block text-sm font-medium">
               Server sizes
             </label>
-            <select id="lb-preset" value={preset} onChange={(e) => setPreset(e.target.value as SpeedPreset)} className="mt-1 min-h-11 w-full rounded-xl border border-border bg-bg focus-visible:border-accent px-2">
+            <select id="lb-preset" value={preset} onChange={(e) => setPreset(e.target.value as SpeedPreset)} className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg focus-visible:border-accent px-2">
               {(Object.keys(PRESET_LABEL) as SpeedPreset[]).map((p) => (
                 <option key={p} value={p}>
                   {PRESET_LABEL[p]}
@@ -91,7 +91,7 @@ export function LoadBalancerSandbox() {
             <label htmlFor="lb-clients" className="block text-sm font-medium">
               Distinct clients (for IP hash)
             </label>
-            <select id="lb-clients" value={clients} onChange={(e) => setClients(Number(e.target.value))} className="mt-1 min-h-11 w-full rounded-xl border border-border bg-bg focus-visible:border-accent px-2">
+            <select id="lb-clients" value={clients} onChange={(e) => setClients(Number(e.target.value))} className="mt-1 min-h-11 w-full rounded-md border border-border bg-bg focus-visible:border-accent px-2">
               {[8, 50, 200, 1000].map((n) => (
                 <option key={n} value={n}>
                   {n}
@@ -109,8 +109,8 @@ export function LoadBalancerSandbox() {
         </button>
       </section>
 
-      <section aria-labelledby="lb-results" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
-        <h2 id="lb-results" className="text-base font-extrabold tracking-tight">
+      <section aria-labelledby="lb-results" className="rounded-md border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow p-4">
+        <h2 id="lb-results" className="text-base font-semibold tracking-tight">
           Ranked by tail latency (p99)
         </h2>
         <p className="mt-1 text-sm text-muted-fg">
@@ -141,7 +141,7 @@ export function LoadBalancerSandbox() {
                   <td className="p-2">
                     <div className="font-mono">{fmt(r.p99)}</div>
                     <div className="mt-0.5 h-1.5 w-28 overflow-hidden rounded bg-muted">
-                      <div className="h-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-500" style={{ width: `${(r.p99 / worstP99) * 100}%` }} />
+                      <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${(r.p99 / worstP99) * 100}%` }} />
                     </div>
                   </td>
                   <td className="p-2 font-mono">{r.workImbalance.toFixed(2)}x</td>
@@ -153,8 +153,8 @@ export function LoadBalancerSandbox() {
         <p className="mt-2 text-xs text-muted-fg">Work imbalance is the busiest server&apos;s total work divided by the average: 1.00x is perfectly even.</p>
       </section>
 
-      <section aria-labelledby="lb-detail" className="rounded-2xl border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-lg p-4">
-        <h2 id="lb-detail" className="text-base font-extrabold tracking-tight">
+      <section aria-labelledby="lb-detail" className="rounded-md border border-border bg-card/80 shadow-sm backdrop-blur-sm transition-shadow p-4">
+        <h2 id="lb-detail" className="text-base font-semibold tracking-tight">
           Where did the work go?
         </h2>
         <fieldset className="mt-2">
@@ -181,7 +181,7 @@ export function LoadBalancerSandbox() {
                 </span>
               </div>
               <div className="h-2.5 overflow-hidden rounded bg-muted">
-                <div className="h-full bg-gradient-to-r from-accent via-hot to-sun transition-[width] duration-500" style={{ width: `${maxWork ? (sel.work[i] / maxWork) * 100 : 0}%` }} />
+                <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${maxWork ? (sel.work[i] / maxWork) * 100 : 0}%` }} />
               </div>
             </li>
           ))}

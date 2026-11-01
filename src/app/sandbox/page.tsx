@@ -48,7 +48,7 @@ const SANDBOXES: { href: string; title: string; body: string; icon: typeof Boxes
 export default function SandboxIndex() {
   return (
     <main className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
-      <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
+      <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
         <span className="text-gradient">Sandboxes</span>
       </h1>
       <p className="mt-3 max-w-2xl text-lg text-muted-fg">

@@ -31,7 +31,7 @@ export function VisualizerGallery({ items }: { items: VizMeta[] }) {
   const chip = (active: boolean) =>
     cn(
       "min-h-11 rounded-full border px-4 text-sm font-semibold transition hover:-translate-y-0.5",
-      active ? "border-transparent bg-gradient-brand text-white shadow-lg" : "border-border bg-card/70 hover:bg-muted",
+      active ? "border-transparent bg-gradient-brand text-white" : "border-border bg-card/70 hover:bg-muted",
     );
 
   return (
@@ -62,7 +62,7 @@ export function VisualizerGallery({ items }: { items: VizMeta[] }) {
       </p>
 
       {shown.length === 0 ? (
-        <p className="mt-8 rounded-2xl border border-dashed border-border p-8 text-center text-muted-fg">Nothing matches that filter. Clear it to see all visualizers.</p>
+        <p className="mt-8 rounded-md border border-dashed border-border p-8 text-center text-muted-fg">Nothing matches that filter. Clear it to see all visualizers.</p>
       ) : (
         <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {shown.map((m) => {

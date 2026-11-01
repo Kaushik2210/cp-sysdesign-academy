@@ -59,14 +59,14 @@ export function ReviewQueue() {
 
   if (!card) {
     return (
-      <p className="mt-8 rounded-2xl border border-dashed border-border bg-card/70 p-8 text-center text-lg" role="status">
-        <span className="text-gradient font-black">All caught up.</span> Nothing due. {Object.keys(cards).length} cards in your deck. Complete lessons and
+      <p className="mt-8 rounded-md border border-dashed border-border bg-card/70 p-8 text-center text-lg" role="status">
+        <span className="text-gradient font-semibold">All caught up.</span> Nothing due. {Object.keys(cards).length} cards in your deck. Complete lessons and
         quizzes to add more.
       </p>
     );
   }
   return (
-    <section className="mt-8 rounded-3xl border border-border bg-card/80 p-6 shadow-xl ring-glow backdrop-blur-sm" aria-live="polite">
+    <section className="mt-8 rounded-3xl border border-border bg-card/80 p-6 ring-glow backdrop-blur-sm" aria-live="polite">
       <p className="mb-3 flex items-center justify-between text-xs font-semibold uppercase tracking-widest text-muted-fg">
         <span>{due.length} due</span>
         <span className="hidden normal-case tracking-normal sm:inline">
@@ -76,7 +76,7 @@ export function ReviewQueue() {
       </p>
       <p className="whitespace-pre-wrap text-lg font-semibold">{card.prompt}</p>
       {reveal ? (
-        <div className="mt-5 animate-[pop-in_0.3s_ease-out] rounded-2xl border border-border bg-bg/60 p-4">
+        <div className="mt-5 animate-[pop-in_0.3s_ease-out] rounded-md border border-border bg-bg/60 p-4">
           <p className="text-sm">{card.answer}</p>
           {card.explanation && <p className="mt-2 text-sm text-muted-fg">{card.explanation}</p>}
           {card.href && (
@@ -106,7 +106,7 @@ export function ReviewQueue() {
         <button
           type="button"
           onClick={() => setReveal(true)}
-          className="mt-5 min-h-11 rounded-full bg-gradient-brand px-6 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl"
+          className="mt-5 min-h-11 rounded-full bg-gradient-brand px-6 text-sm font-semibold text-white transition hover:-translate-y-0.5"
         >
           Show answer
         </button>

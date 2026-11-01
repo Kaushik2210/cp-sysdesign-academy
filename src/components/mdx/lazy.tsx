@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 
 const Loading = ({ label }: { label: string }) => (
-  <div role="status" className="my-6 rounded-xl border border-border p-6 text-sm text-muted-fg">
+  <div role="status" className="my-6 rounded-md border border-border p-6 text-sm text-muted-fg">
     Loading {label}…
   </div>
 );

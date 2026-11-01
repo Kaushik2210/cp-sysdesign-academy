@@ -129,7 +129,7 @@ type DiagramProps =
 
 export function Diagram(props: DiagramProps) {
   return (
-    <figure className="not-prose my-6 rounded-xl border border-border bg-card p-3">
+    <figure className="not-prose my-6 rounded-md border border-border bg-card p-3">
       {props.kind === "mermaid" ? <MermaidDiagram code={props.code} /> : <FlowDiagram {...props} />}
       {props.caption && <figcaption className="mt-2 text-center text-xs text-muted-fg">{props.caption}</figcaption>}
     </figure>

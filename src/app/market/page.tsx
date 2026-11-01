@@ -54,13 +54,13 @@ export default function MarketPage() {
       </p>
 
       <section aria-labelledby="takeaways" className="mt-8">
-        <h2 id="takeaways" className="text-2xl font-extrabold tracking-tight">
+        <h2 id="takeaways" className="text-2xl font-semibold tracking-tight">
           Five takeaways <span className="text-sm font-normal text-muted-fg">(our interpretation of the findings below)</span>
         </h2>
         <ol className="mt-3 space-y-3">
           {TAKEAWAYS.map((t, i) => (
-            <li key={t.title} className="flex gap-4 rounded-2xl border border-border bg-card/80 p-5 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-hot/70">
-              <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-brand text-sm font-black text-white shadow-md">
+            <li key={t.title} className="flex gap-4 rounded-md border border-border bg-card/80 p-5 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-hot/70">
+              <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-gradient-brand text-sm font-semibold text-white">
                 {i + 1}
               </span>
               <div>
@@ -75,7 +75,7 @@ export default function MarketPage() {
         </ol>
       </section>
 
-      <p className="mt-6 rounded-xl border border-accent/50 p-4 text-sm">
+      <p className="mt-6 rounded-md border border-accent/50 p-4 text-sm">
         Want the plan these findings point to? See the{" "}
         <Link href="/roadmap/" className="font-medium text-accent underline">
           zero-to-elite roadmap
@@ -85,7 +85,7 @@ export default function MarketPage() {
 
       <MarketView topics={topics} />
 
-      <section aria-labelledby="caveats" className="mt-12 rounded-xl border border-border p-4 text-sm">
+      <section aria-labelledby="caveats" className="mt-12 rounded-md border border-border p-4 text-sm">
         <h2 id="caveats" className="text-lg font-bold">
           How to read this page
         </h2>

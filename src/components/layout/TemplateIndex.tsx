@@ -31,7 +31,7 @@ export function TemplateIndex({ templates }: { templates: TemplateCard[] }) {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="e.g. graph, modular, string"
-        className="mt-1 min-h-12 w-full rounded-full border border-border bg-card/70 px-5 shadow-sm backdrop-blur focus:border-accent focus:shadow-lg"
+        className="mt-1 min-h-12 w-full rounded-full border border-border bg-card/70 px-5 shadow-sm backdrop-blur focus:border-accent"
       />
       <p role="status" className="mt-3 text-sm text-muted-fg">
         {shown.length} of {templates.length} templates
@@ -39,8 +39,8 @@ export function TemplateIndex({ templates }: { templates: TemplateCard[] }) {
       <ul className="mt-2 grid gap-3 sm:grid-cols-2">
         {shown.map((t) => (
           <li key={t.slug}>
-            <Spotlight tint="cool" tilt={2} className="h-full p-5">
-              <h2 className="text-lg font-extrabold tracking-tight">
+            <Spotlight tint="cool" className="h-full p-5">
+              <h2 className="text-lg font-semibold tracking-tight">
                 <Link href={`/templates/${t.slug}/`} className="after:absolute after:inset-0 after:content-['']">
                   {t.title}
                 </Link>

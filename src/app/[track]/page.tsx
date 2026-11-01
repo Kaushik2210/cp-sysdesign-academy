@@ -34,7 +34,7 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
       <header className="rounded-3xl border border-border bg-card/70 p-6 backdrop-blur sm:p-8" style={{ ["--tint" as string]: `var(--${tint})` }}>
-        <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
+        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
           <span className="text-gradient">{meta.title}</span>
         </h1>
         <p className="mt-3 max-w-2xl text-lg text-muted-fg">{meta.tagline}</p>
@@ -50,7 +50,7 @@ export default async function TrackPage({ params }: { params: Promise<{ track: s
       </header>
       {levels.map((level, li) => (
         <section key={level} className="mt-12">
-          <h2 className="mb-4 flex items-center gap-3 text-xl font-extrabold tracking-tight">
+          <h2 className="mb-4 flex items-center gap-3 text-xl font-semibold tracking-tight">
             <span aria-hidden="true" className="h-6 w-1.5 rounded-full" style={{ background: `hsl(var(--${LEVEL_TINTS[li % LEVEL_TINTS.length]}))` }} />
             {level}
           </h2>

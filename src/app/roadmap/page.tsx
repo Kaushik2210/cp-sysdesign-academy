@@ -54,7 +54,7 @@ export default function RoadmapPage() {
       </p>
 
       <section aria-labelledby="timeline" className="mt-8">
-        <h2 id="timeline" className="text-2xl font-extrabold tracking-tight">
+        <h2 id="timeline" className="text-2xl font-semibold tracking-tight">
           Timeline
         </h2>
         <div className="mt-2 overflow-x-auto">

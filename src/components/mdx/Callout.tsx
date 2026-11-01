@@ -21,7 +21,7 @@ export function Callout({
 }) {
   const s = STYLES[type];
   return (
-    <aside role="note" className={cn("not-prose my-6 rounded-xl border border-l-[6px] p-4 shadow-sm", s.box)}>
+    <aside role="note" className={cn("not-prose my-6 rounded-md border border-l-[6px] p-4 shadow-sm", s.box)}>
       <p className="mb-1 flex items-center gap-2 text-sm font-bold">
         <s.Icon size={16} aria-hidden className={s.icon} />
         {title ?? LABELS[type]}

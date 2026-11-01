@@ -54,13 +54,13 @@ export function MarketView({ topics }: { topics: { id: string; title: string; in
 
       {shown.map((t) => (
         <section key={t.id} id={t.id} aria-labelledby={`${t.id}-h`} className="mt-10 scroll-mt-20">
-          <h2 id={`${t.id}-h`} className="flex items-center gap-3 text-2xl font-extrabold tracking-tight before:h-6 before:w-1.5 before:rounded-full before:bg-gradient-to-b before:from-accent before:to-hot before:content-['']">
+          <h2 id={`${t.id}-h`} className="flex items-center gap-3 text-2xl font-semibold tracking-tight">
             {t.title}
           </h2>
           <ul className="mt-3 space-y-4">
             {t.insights.map((i) => (
               <li key={i.id}>
-                <article className="rounded-2xl border border-border bg-card/80 p-5 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-cool/70 hover:shadow-[0_12px_32px_-14px_hsl(var(--cool))]">
+                <article className="rounded-md border border-border bg-card/80 p-5 backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:border-cool/70 hover:shadow-[0_12px_32px_-14px_hsl(var(--cool))]">
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className={cn("rounded-full border px-2 py-0.5", CONFIDENCE_STYLE[i.confidence])}>{CONFIDENCE_LABEL[i.confidence]}</span>
                     <span className="rounded-full border border-border px-2 py-0.5 text-muted-fg">{i.source.kind === "primary" ? "Primary data" : "Reported by a third party"}</span>

@@ -21,13 +21,17 @@ export const NAV: { href: string; label: string }[] = [
   { href: "/dashboard/", label: "Dashboard" },
 ];
 
-/** Main navigation pills. The current section is marked with aria-current and a gradient fill. */
+/** Section links as quiet text. The current section is marked with aria-current and a blue underline. */
 export function NavLinks() {
   const raw = usePathname() ?? "/";
   // Static export with trailingSlash: normalise so "/cp" and "/cp/" both match.
   const path = raw.endsWith("/") ? raw : `${raw}/`;
   return (
-    <div className="order-last -mx-1 flex w-full min-w-0 gap-1 overflow-x-auto px-1 pb-1 text-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:order-none lg:mx-0 lg:w-auto lg:flex-1 lg:[mask-image:linear-gradient(90deg,black_92%,transparent)]" role="group" aria-label="Sections">
+    <div
+      className="-mx-1 flex min-w-0 gap-5 overflow-x-auto px-1 text-[0.8125rem] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      role="group"
+      aria-label="Sections"
+    >
       {NAV.map((n) => {
         const active = path.startsWith(n.href);
         return (
@@ -36,8 +40,8 @@ export function NavLinks() {
             href={n.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex min-h-11 shrink-0 items-center whitespace-nowrap rounded-full px-3 transition hover:-translate-y-0.5",
-              active ? "bg-gradient-brand font-semibold text-white shadow-md" : "text-muted-fg hover:bg-muted hover:text-fg",
+              "relative inline-flex min-h-11 shrink-0 items-center whitespace-nowrap transition-colors after:absolute after:inset-x-0 after:bottom-1.5 after:h-px after:origin-left after:scale-x-0 after:bg-accent after:transition-transform hover:text-accent hover:after:scale-x-100",
+              active ? "font-medium text-accent after:scale-x-100" : "text-muted-fg",
             )}
           >
             {n.label}

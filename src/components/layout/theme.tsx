@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return (
-    <NextThemes attribute="class" defaultTheme="dark" enableSystem={false}>
+    <NextThemes attribute="class" defaultTheme="light" enableSystem={false}>
       {children}
     </NextThemes>
   );
@@ -16,13 +16,13 @@ export function ThemeToggle() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const isDark = !mounted || theme === "dark";
+  const isDark = mounted && theme === "dark";
   return (
     <button
       type="button"
       aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      className="rounded-md border border-border p-2 hover:bg-muted"
+      className="grid h-9 w-9 place-items-center rounded-full border border-border transition hover:border-fg hover:bg-muted"
     >
       {isDark ? <Sun size={16} aria-hidden /> : <Moon size={16} aria-hidden />}
     </button>

@@ -31,7 +31,7 @@ export default function CheatsheetsPage() {
         {SHEETS.map((s, i) => (
           <li key={s.href}>
             <Spotlight tint={TINTS[i % TINTS.length]} className="h-full p-5">
-              <h2 className="text-xl font-extrabold tracking-tight">
+              <h2 className="text-xl font-semibold tracking-tight">
                 <Link href={s.href} className="after:absolute after:inset-0 after:content-['']">
                   {s.title}
                 </Link>

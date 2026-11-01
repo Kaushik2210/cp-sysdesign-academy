@@ -75,10 +75,10 @@ export function ProblemClient(p: ProblemClientProps) {
   };
 
   return (
-    <section aria-label={`Problem: ${p.title}`} className="not-prose my-8 overflow-hidden rounded-3xl border border-border bg-card/80 shadow-xl ring-glow backdrop-blur-sm">
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border bg-gradient-to-r from-accent/5 to-hot/5 p-4">
-        <h3 className="text-gradient text-xl font-black tracking-tight">{p.title}</h3>
-        <span className="rounded-full bg-gradient-to-r from-accent/20 to-hot/20 px-2.5 py-0.5 text-xs font-semibold">rating ~{p.rating}</span>
+    <section aria-label={`Problem: ${p.title}`} className="not-prose my-8 overflow-hidden rounded-3xl border border-border bg-card/80 ring-glow backdrop-blur-sm">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-border bg-muted p-4">
+        <h3 className="text-gradient text-xl font-semibold tracking-tight">{p.title}</h3>
+        <span className="rounded-full bg-accent/10 text-accent px-2.5 py-0.5 text-xs font-semibold">rating ~{p.rating}</span>
         {result?.solved && <span className="rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">✓ solved</span>}
         <span className="ml-auto flex gap-1">
           {p.tags.map((t) => (
@@ -105,9 +105,9 @@ export function ProblemClient(p: ProblemClientProps) {
             <div key={i} className="text-sm">
               <p className="font-semibold">Example {i + 1}</p>
               <p className="text-xs text-muted-fg">Input</p>
-              <pre className="rounded-xl border border-border bg-bg p-2 font-mono text-xs">{e.input}</pre>
+              <pre className="rounded-md border border-border bg-bg p-2 font-mono text-xs">{e.input}</pre>
               <p className="text-xs text-muted-fg">Output</p>
-              <pre className="rounded-xl border border-border bg-bg p-2 font-mono text-xs">{e.output}</pre>
+              <pre className="rounded-md border border-border bg-bg p-2 font-mono text-xs">{e.output}</pre>
             </div>
           ))}
         </div>
@@ -129,7 +129,7 @@ export function ProblemClient(p: ProblemClientProps) {
           <button type="button" disabled={busy} onClick={runSamples} className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border bg-card px-4 text-sm font-medium transition hover:-translate-y-0.5 hover:border-accent hover:bg-muted disabled:opacity-60">
             <Play size={14} aria-hidden /> Run samples
           </button>
-          <button type="button" disabled={busy} onClick={submit} className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-gradient-brand px-5 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl disabled:opacity-60">
+          <button type="button" disabled={busy} onClick={submit} className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-gradient-brand px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5 disabled:opacity-60">
             <Send size={14} aria-hidden /> {busy ? "Judging…" : `Submit (${p.tests.length} tests)`}
           </button>
         </div>
@@ -147,7 +147,7 @@ export function ProblemClient(p: ProblemClientProps) {
             </ul>
           )}
           {report && (
-            <div className={cn("animate-[pop-in_0.3s_ease-out] rounded-2xl p-4 text-sm", VERDICT_STYLE[report.verdict])} role="status">
+            <div className={cn("animate-[pop-in_0.3s_ease-out] rounded-md p-4 text-sm", VERDICT_STYLE[report.verdict])} role="status">
               <p className="text-base font-bold">
                 Verdict: {report.verdict} ({report.passed}/{report.total} tests passed)
               </p>
@@ -216,7 +216,7 @@ export function ProblemClient(p: ProblemClientProps) {
 
         <div>
           {showEditorial ? (
-            <div className="prose prose-sm max-w-none rounded-2xl border border-border bg-bg/60 p-4 dark:prose-invert">
+            <div className="prose prose-sm max-w-none rounded-md border border-border bg-bg/60 p-4 dark:prose-invert">
               <h4>Editorial</h4>
               {p.editorial}
             </div>
