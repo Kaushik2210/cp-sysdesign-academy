@@ -1,0 +1,139 @@
+---
+title: "Case Study: Chat and Messaging"
+track: sd
+module: case-studies
+order: 3
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/news-feed", "sd/networking-and-apis/real-time-communication", "sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/databases-2/consistent-hashing"]
+tags: [case-study, chat, websocket, presence, ordering, delivery, idempotency, sync]
+type: case-study
+furtherReading:
+  - title: WhatsApp Engineering - Scaling to millions of simultaneous connections (Rick Reed talk)
+    url: https://www.youtube.com/watch?v=c12cYAUTXXs
+  - title: RFC 6455 - The WebSocket Protocol
+    url: https://www.rfc-editor.org/rfc/rfc6455
+  - title: The System Design Primer - Design a chat service (social-graph and messaging sections)
+    url: https://github.com/donnemartin/system-design-primer
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- 1:1 and group chats (groups up to ~500 members).
+- Send and receive text (media as an upload plus a link).
+- Delivery status: sent, delivered, read.
+- Online/last-seen presence.
+- Message history synced across a user's devices; offline users get messages when they return (plus push notification).
+
+**Non-functional**
+- Low latency for online recipients (p99 under about 300 ms end to end).
+- **Never lose an acknowledged message**; no duplicates shown; per-conversation order preserved.
+- Highly available; tolerate a server or zone failing mid-conversation.
+- Assume 500M DAU, each sending 40 messages a day.
+
+Out of scope here: end-to-end encryption (mention that it moves key management to clients and makes server-side search impossible), voice and video calls.
+
+## 2. Estimate
+
+- Messages: 500M × 40 = 20B/day ≈ **230,000 messages/s**, peak about 700,000/s.
+- Connections: if 20% of DAU are online at once, **100M concurrent connections**. A well-tuned server holds roughly 100,000 idle WebSockets (memory-bound: ~10 KB each ≈ 1 GB), so about **1,000 to 2,000 gateway servers**.
+- Storage: 20B × ~100 B ≈ 2 TB/day ≈ **730 TB/year** before replication. A write-heavy, append-mostly workload suits a wide-column or log-structured store partitioned by conversation.
+- Bandwidth: 230,000 msg/s × 100 B ≈ 23 MB/s of payload: tiny. Connection count, not bandwidth, is the scaling problem.
+
+## 3. Protocol and API
+
+Persistent **WebSocket** connections for sending and receiving (HTTP long-polling or SSE as fallbacks). Messages are small JSON or binary frames:
+
+```
+client -> server  { type: "send", convId, clientMsgId, body }
+server -> client  { type: "ack",  clientMsgId, convId, seq }
+server -> client  { type: "msg",  convId, seq, from, body, ts }
+client -> server  { type: "sync", convId, afterSeq }
+```
+
+Everything that is not real-time (create group, upload media, fetch history, account) is ordinary HTTPS.
+
+## 4. Ordering and exactly-once display
+
+Two key ideas:
+
+1. **Per-conversation sequence number.** The server assigns `seq` to each message in a conversation, monotonically. Clients display by `seq`. Order across different conversations is irrelevant, so there is no global ordering problem. All messages for one conversation are handled by one **shard owner**, which makes assigning `seq` a local increment.
+2. **Client-generated `clientMsgId` for idempotency.** If the ack is lost and the client retries, the server recognises the id and returns the original `seq` instead of storing a duplicate.
+
+```python
+class Conv:
+    def __init__(self): self.seq = 0; self.msgs = []; self.seen = {}
+    def send(self, client_id, text):
+        if client_id in self.seen:          # idempotent retry returns the original seq
+            return self.seen[client_id]
+        self.seq += 1
+        self.seen[client_id] = self.seq
+        self.msgs.append((self.seq, text))
+        return self.seq
+def sync(conv, last_seen): return [m for m in conv.msgs if m[0] > last_seen]
+
+c = Conv()
+print(c.send("m1", "hi"), c.send("m1", "hi"), c.send("m2", "yo"))  # 1 1 2
+print(sync(c, 1))                                                  # [(2, 'yo')]
+```
+
+The `sync` call is how reconnecting or newly added devices catch up: ask for everything after the last `seq` you hold. This makes delivery **at-least-once on the wire, exactly-once to the user**, and it means a lost push is never fatal.
+
+## 5. Architecture
+
+<Diagram kind="flow" caption="Gateways hold connections; a session directory routes to the right gateway; the message is stored before it is acked" nodes={[
+  { id: "dev", label: "Devices", x: 0, y: 90, role: "Hold one WebSocket each; reconnect with backoff and sync from the last seq.", failureModes: ["Mobile networks drop connections constantly", "Reconnect storm after an outage"], tradeoffs: ["Jittered exponential backoff protects the gateways"] },
+  { id: "gw", label: "Connection gateways", x: 200, y: 90, role: "Terminate WebSockets and authenticate; stateless apart from the open sockets. Register user to gateway in the session directory.", failureModes: ["Gateway crash drops its connections (clients reconnect elsewhere)", "Memory exhaustion from too many sockets"], tradeoffs: ["Separating connection handling from business logic lets each scale on its own metric"] },
+  { id: "dir", label: "Session directory (Redis)", x: 400, y: 20, role: "Maps userId to the gateways of their live devices, with TTL heartbeats.", failureModes: ["Stale entry sends to a dead gateway; fall back to offline path"], tradeoffs: ["Eventually consistent is acceptable because offline delivery backstops it"] },
+  { id: "chat", label: "Chat service (sharded by convId)", x: 400, y: 160, role: "Assigns seq, persists, then fans out to recipients' gateways.", failureModes: ["Shard owner failover must not reuse a seq"], tradeoffs: ["Single writer per conversation gives cheap ordering; failover via a lease or consensus-backed assignment"] },
+  { id: "store", label: "Message store", x: 600, y: 160, role: "Append-only log per conversation, partition key convId, clustering key seq. Replicated across zones.", failureModes: ["Hot partition for a huge group"], tradeoffs: ["Write before ack so acknowledged means durable"] },
+  { id: "push", label: "Push service (APNs/FCM)", x: 600, y: 20, role: "Notifies offline devices that new messages exist.", failureModes: ["Provider throttling", "Delivery not guaranteed"], tradeoffs: ["Push is only a nudge; the sync call fetches the real data"] }
+]} edges={[
+  { from: "dev", to: "gw", label: "WebSocket" }, { from: "gw", to: "chat", label: "send" }, { from: "chat", to: "store", label: "persist" }, { from: "chat", to: "dir", label: "lookup" }, { from: "chat", to: "gw", label: "deliver" }, { from: "chat", to: "push", label: "if offline" }
+]} />
+
+**Send path:** device → gateway → chat shard owner → persist (replicated) → ack with `seq` → look up recipients in the directory → push to their gateways → they ack delivery. If a recipient has no live connection, store only and send a push notification.
+
+## 6. Groups
+
+For a group of `G` members, one message becomes `G` deliveries. At ≤500 members, fan-out on write to each member's live connection is fine, but **store the message once** in the conversation log, not once per member. Per-member state is just a cursor (`lastDeliveredSeq`, `lastReadSeq`). That keeps storage proportional to messages, not messages × members. Very large channels (100k+ members) switch to pull or tiered fan-out as in the feed lesson.
+
+## 7. Presence
+
+Presence is expensive if naive: every status change fanned out to every contact. Cheaper practice:
+
+- Heartbeat from the client every ~30 s refreshes a TTL key; no heartbeat means offline after the TTL.
+- Do **not** push presence to everyone; subscribe only to the conversations currently on screen, and fetch last-seen lazily when a chat is opened.
+- Tolerate staleness of tens of seconds; nobody needs exact presence.
+
+## 8. Deep dives and trade-offs
+
+- **Gateway failure:** clients reconnect (jittered backoff) to any gateway and send `sync`; nothing acknowledged is lost because it was persisted first.
+- **Shard owner failover:** the new owner must continue `seq` from the stored maximum. Use a lease with fencing tokens or consensus-backed ownership so two owners never assign the same seq (previous module).
+- **Multi-region:** home each conversation to one region (by creator or majority of members) for ordering; replicate asynchronously for disaster recovery. Cross-region participants pay one hop.
+- **Read receipts:** batched and coalesced (send "read up to seq N") rather than per message.
+- **Retention and search:** hot recent history in the primary store; older data in cheaper storage; search through an asynchronously built index.
+- **Backpressure:** slow clients get buffered up to a limit, then are disconnected and resynced rather than letting the gateway's memory grow.
+
+## Pitfalls
+
+- Using HTTP polling for 100M users.
+- Global ordering instead of per-conversation sequence numbers.
+- Acking before persisting.
+- Storing a group message once per member.
+- Trusting push notifications for delivery rather than using them as a hint to sync.
+- Reconnect storms with no jitter.
+
+## What would you choose and why?
+
+You must add end-to-end encryption. What breaks in your design (server-side search, group key distribution, multi-device history, backups)? Which features do you drop or move to the client?
+
+## Quiz
+
+<Quiz id="sd-m17-chat-system" tags={["case-study", "chat", "websocket"]} questions={[
+  { type: "mcq", q: "What gives per-conversation order without a global clock?", options: ["Device timestamps", "A server-assigned monotonically increasing seq per conversation, handled by one shard owner", "Random UUIDs", "NTP"], answer: 1, explain: "Order only matters within a conversation, so a single writer per conversation suffices." },
+  { type: "mcq", q: "The ack for a sent message is lost and the client retries. How is a duplicate avoided?", options: ["The client waits forever", "The server deduplicates on the client-generated message id and returns the original seq", "The user sees both messages", "The retry is dropped silently"], answer: 1, explain: "Idempotency keys convert at-least-once delivery into exactly-once display." },
+  { type: "multi", q: "Which are good practices for a group message with 300 members?", options: ["Store the message once in the conversation log", "Keep per-member read and delivered cursors", "Store a full copy per member", "Use push notifications as the source of truth"], answer: [0, 1], explain: "Per-member copies multiply storage; push notifications are unreliable hints." },
+  { type: "mcq", q: "What is the dominant scaling constraint of the gateway tier?", options: ["Bandwidth", "Number of concurrent open connections (memory)", "Disk IOPS", "DNS lookups"], answer: 1, explain: "Payloads are tiny; holding 100M sockets requires many servers." }
+]} />

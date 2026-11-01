@@ -1,0 +1,141 @@
+---
+title: "Case Study: News Feed / Timeline"
+track: sd
+module: case-studies
+order: 2
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/url-shortener", "sd/databases-2/sharding-and-partitioning", "sd/queues-and-streaming/why-queues", "sd/databases-2/hot-keys-and-hot-partitions"]
+tags: [case-study, feed, fan-out, timeline, caching, ranking, celebrity-problem]
+type: case-study
+furtherReading:
+  - title: Raffi Krikorian - Timelines at Scale (InfoQ talk, Twitter)
+    url: https://www.infoq.com/presentations/Twitter-Timeline-Scalability/
+  - title: The System Design Primer - Design the Twitter timeline and search
+    url: https://github.com/donnemartin/system-design-primer
+  - title: "Designing Data-Intensive Applications (Kleppmann), chapter 1, describing load with the Twitter example"
+    url: https://dataintensive.net/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Users post short items (text, optional media).
+- Users follow others. The home feed shows recent posts from people they follow, newest first (ranking is a later extension).
+- Pagination (infinite scroll).
+
+**Non-functional**
+- Feed reads are far more frequent than posts and must feel instant (p99 under about 200 ms).
+- A new post should reach followers within seconds, not minutes.
+- Availability over strict consistency: seeing a post a few seconds late is fine.
+- Scale (assumed for estimates): 300M monthly users, 100M daily active users, 200M posts per day.
+
+## 2. Estimate
+
+- Posts: 200M/day ≈ **2,300 posts/s**, peak about 7,000/s.
+- Feed reads: each of 100M DAU opens the feed ~10 times: 1B/day ≈ **12,000 reads/s**, peak about 35,000/s.
+- Follow graph: average 200 followees. 100M users × 200 = 20B edges ≈ at 16 B per edge ≈ **320 GB**.
+- Fan-out volume: a post to 200 followers on average means 2,300 × 200 = **460,000 timeline inserts/s** if you push. A celebrity with 50M followers would mean 50M inserts for one post.
+- Post storage: 200M × ~300 B ≈ 60 GB/day ≈ 22 TB/year (media stored separately in object storage).
+
+## 3. API
+
+```
+POST /v1/posts            { text, mediaIds[] }  -> 201 { postId }
+GET  /v1/feed?cursor=...  -> { items: [...], nextCursor }
+POST /v1/follow/{userId}  DELETE to unfollow
+```
+
+Use **cursor** pagination (the id or time of the last item), never offset: new posts arriving would shift offsets and show duplicates.
+
+## 4. Fan-out: the central decision
+
+How does a post get into followers' feeds?
+
+| Approach | On post | On read | Good for | Bad for |
+| --- | --- | --- | --- | --- |
+| **Fan-out on read (pull)** | Store the post once | Fetch recent posts of every followee and merge | Celebrities, inactive users, cheap writes | Slow reads: ~200 lookups per feed open |
+| **Fan-out on write (push)** | Insert the post id into each follower's precomputed feed list | Read one list | Fast reads, the common case | Huge write amplification for celebrities, wasted work for inactive users |
+| **Hybrid** | Push for normal users; skip push for celebrities | Merge the precomputed list with celebrities' recent posts | Almost all real systems | More moving parts |
+
+Cost comparison for one author with `F` followers who posts `p` times a day, and readers who open the feed `r` times and follow `m` accounts:
+
+```python
+import heapq
+def feed_pull(follows, posts, user, k):
+    """fan-out on read: merge latest posts of everyone followed."""
+    cands = [p for f in follows[user] for p in posts[f][-k:]]
+    return heapq.nlargest(k, cands)
+def cost(followers, posts_per_day, reads_per_day, followees):
+    write = followers * posts_per_day      # push: timeline inserts per author per day
+    read = followees * reads_per_day       # pull: lookups per reader per day
+    return write, read
+posts = {"a": [(1, "a1"), (4, "a2")], "b": [(2, "b1"), (5, "b2")], "c": [(3, "c1")]}
+follows = {"u": ["a", "b", "c"]}
+print(feed_pull(follows, posts, "u", 3))        # [(5,'b2'), (4,'a2'), (3,'c1')]
+print(cost(200, 2, 50, 200))                    # (400, 10000): push is cheap for ordinary authors
+print(cost(50_000_000, 2, 50, 200))             # (100000000, 10000): push explodes for a celebrity
+```
+
+**Hybrid rule:** if an author has more than about 10,000 followers, mark them a celebrity and do **not** push. At read time, merge the user's precomputed feed with recent posts from the (few) celebrities they follow.
+
+## 5. Data model and storage
+
+- `posts(post_id, author_id, text, media, created_at)`: partition by `author_id` (keeps an author's posts together), ids time-sortable (Snowflake style: timestamp bits, machine id, sequence).
+- `follows(follower_id, followee_id)` and the reverse index `followers_of(followee_id)`. Sharded by the first key; both directions are stored because both queries are needed.
+- **Feed cache**: per user, a Redis list or sorted set of `(post_id, score)`, capped at about 800 entries. Only active users (seen in the last 30 days) get one; others are rebuilt on demand (pull) when they return.
+
+Feed items hold only ids. The read path **hydrates**: batch-fetch posts, authors, counts from caches, then assemble.
+
+## 6. Architecture
+
+<Diagram kind="flow" caption="Post path pushes ids to follower feeds asynchronously; read path hydrates cached ids" nodes={[
+  { id: "client", label: "Clients", x: 0, y: 90, role: "Post and scroll the feed.", failureModes: ["Retry creates duplicate posts without an idempotency key"], tradeoffs: ["Optimistic local insert of own post hides propagation delay"] },
+  { id: "post", label: "Post service", x: 200, y: 20, role: "Validates, stores the post, emits a post-created event.", failureModes: ["Event lost between DB write and publish"], tradeoffs: ["Transactional outbox makes write-and-publish atomic"] },
+  { id: "q", label: "Fan-out queue", x: 400, y: 20, role: "Decouples posting from timeline writes; partitioned by author.", failureModes: ["Backlog during viral events delays feeds"], tradeoffs: ["Eventual freshness, protects the post path"] },
+  { id: "fan", label: "Fan-out workers", x: 600, y: 20, role: "Look up followers (skipping celebrities and inactive users) and insert the post id into their feed lists in batches.", failureModes: ["Retries cause duplicates; dedupe on post id", "Slow follower lookup for large accounts"], tradeoffs: ["Batching and shard-aware writes cut round trips"] },
+  { id: "feed", label: "Feed cache (Redis)", x: 600, y: 160, role: "Per-user lists of recent post ids.", failureModes: ["Lost cache means rebuilding by pull", "Memory cost grows with users"], tradeoffs: ["Cap length and TTL; rebuild lazily"] },
+  { id: "read", label: "Feed service", x: 400, y: 160, role: "Reads the cached list, merges celebrity posts, hydrates, optionally ranks.", failureModes: ["Hydration fan-in latency (many cache lookups)"], tradeoffs: ["Parallel multi-gets and per-object caches keep p99 down"] }
+]} edges={[
+  { from: "client", to: "post", label: "POST" }, { from: "post", to: "q", label: "event" }, { from: "q", to: "fan" }, { from: "fan", to: "feed", label: "insert ids" }, { from: "client", to: "read", label: "GET feed" }, { from: "read", to: "feed" }
+]} />
+
+## 7. Deep dives
+
+**Ranking.** Chronological is the baseline. A ranked feed adds a scoring step over the ~800 candidates (recency, affinity with the author, engagement predicted by a model), then trims. Keep ranking in its own service so it can be iterated and degraded to chronological on failure.
+
+**Deletes and edits.** Feed lists hold ids, so deletes are cheap: hydration skips missing or tombstoned posts. A block or privacy change filters at read time as well.
+
+**Follow and unfollow.** Following only affects future pushes; backfill the last few posts of the new followee into the feed. Unfollowing filters at read time and lets stale ids age out.
+
+**Hot keys.** A celebrity's post object is read by millions: cache it in a replicated tier or per-region local cache; never rely on one key in one node.
+
+**Scale-out failure handling.** If the fan-out queue backs up, the feed degrades gracefully (older items) rather than failing. Prioritise active users' fan-out first.
+
+## 8. Bottlenecks and trade-offs
+
+- Write amplification (push) vs read latency (pull): the hybrid is the answer; name the threshold and justify it from the estimates.
+- Memory for feed cache: 100M active × 800 ids × 8 B = 640 GB, so shard across a Redis cluster; fewer entries for less active users.
+- Consistency: users may briefly miss a post. Show own posts immediately by merging locally.
+- Follower lookup for accounts with millions of followers is itself a heavy read, which is another reason to skip pushing for them.
+
+## Pitfalls
+
+- Choosing pure push or pure pull without discussing the celebrity case.
+- Using offset pagination on a changing list.
+- Storing full post bodies in every follower's feed.
+- Ignoring inactive users (wasted fan-out).
+- Doing ranking and fan-out in the same synchronous request.
+
+## What would you choose and why?
+
+The product adds "close friends" posts visible to 50 chosen people and a "following" feed that must show posts within one second for verified journalists only. How does each change your fan-out and priority handling?
+
+## Quiz
+
+<Quiz id="sd-m17-news-feed" tags={["case-study", "feed", "fan-out"]} questions={[
+  { type: "mcq", q: "Why not use pure fan-out on write for a celebrity with 50M followers?", options: ["Feeds would be empty", "One post causes tens of millions of timeline writes, delaying delivery and wasting capacity", "The follow graph is too small", "Redis cannot store ids"], answer: 1, explain: "Write amplification scales with follower count; the hybrid pulls celebrity posts at read time." },
+  { type: "mcq", q: "Which pagination method suits a feed that gains new items constantly?", options: ["Offset and limit", "Cursor based on the last seen id or time", "Random page numbers", "Download everything"], answer: 1, explain: "Offsets shift when new items arrive, producing duplicates or gaps." },
+  { type: "multi", q: "Which are sensible to store in each user's cached feed?", options: ["Post ids and a score", "Full post text and media for every item", "A capped number of recent entries", "Entries only for recently active users"], answer: [0, 2, 3], explain: "Store ids and hydrate from shared caches to avoid duplicating content across millions of lists." },
+  { type: "mcq", q: "A user unfollows an account. What is the cheapest correct handling?", options: ["Scan and rewrite the feed immediately", "Filter at read time and let old ids expire", "Delete the user's feed", "Ignore it"], answer: 1, explain: "Read-time filtering avoids a costly rewrite and ages out naturally." }
+]} />

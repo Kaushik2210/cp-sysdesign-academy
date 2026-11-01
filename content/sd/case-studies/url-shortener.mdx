@@ -1,0 +1,139 @@
+---
+title: "Case Study: URL Shortener"
+track: sd
+module: case-studies
+order: 1
+difficulty: medium
+estMinutes: 40
+prerequisites: ["sd/what-is-system-design/design-framework-in-depth", "sd/estimation/qps-storage-bandwidth", "sd/caching/caching-strategies", "sd/scalability/distributed-rate-limiting"]
+tags: [case-study, url-shortener, id-generation, base62, caching, redirects, analytics]
+type: case-study
+furtherReading:
+  - title: The System Design Primer - Design Pastebin.com (or Bit.ly)
+    url: https://github.com/donnemartin/system-design-primer
+  - title: RFC 9110 - HTTP Semantics (301, 302, 307, 308 redirects)
+    url: https://www.rfc-editor.org/rfc/rfc9110.html#name-redirection-3xx
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 6 (Partitioning)
+    url: https://dataintensive.net/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Create a short link for a long URL (optionally a custom alias and an expiry).
+- Visiting the short link redirects to the original URL.
+- Basic click analytics (count, referrer, country).
+
+**Non-functional**
+- Redirects must be very fast (p99 under about 50 ms server-side) and highly available: a dead link is a broken web page for someone else.
+- Reads vastly outnumber writes (assume 100:1).
+- Short codes must be unguessable enough not to leak private URLs, and unique.
+- Out of scope: user accounts UI, link previews, malware scanning (mention as extensions).
+
+## 2. Estimate
+
+Assume 100 million new links per month and a 100:1 read ratio.
+
+- Writes: 100M / (30 × 86,400 s) ≈ **40 writes/s**, peak maybe 120/s.
+- Reads: 10B per month ≈ **4,000 redirects/s**, peak maybe 12,000/s.
+- Storage: ~500 bytes per row (code, URL up to ~2 KB worst case but average ~200 B, metadata) × 100M × 12 months × 5 years ≈ 6B rows × 500 B = **3 TB**. Small enough for sharding by choice, not necessity.
+- Cache: the hot 20% of links serve most traffic. 20% of a day's reads: 4,000/s × 86,400 ≈ 350M reads/day; caching 20M hot rows × 500 B ≈ **10 GB** fits in one Redis node or a few.
+- Code length: 62^7 ≈ 3.5 trillion codes, far more than 6 billion. **7 characters** are enough.
+
+## 3. API
+
+```
+POST /v1/links   { "url": "...", "alias": "optional", "expiresAt": "optional" }
+  -> 201 { "code": "aZ3k9Qx", "shortUrl": "https://sho.rt/aZ3k9Qx" }
+GET  /{code}     -> 302 Location: <long url>      (404 if unknown, 410 if expired)
+GET  /v1/links/{code}/stats
+```
+
+Creation is rate limited per API key (see distributed rate limiting) and **idempotent** with a client-supplied key so retries do not mint duplicates.
+
+## 4. Data model
+
+`links(code PK, long_url, owner_id, created_at, expires_at)` and a separate append-only `clicks` stream. A key-value or wide-column store or a sharded SQL table all work: the access path is by primary key only, no joins.
+
+## 5. Generating the code (the core deep dive)
+
+| Strategy | How | Pros | Cons |
+| --- | --- | --- | --- |
+| Hash the URL (MD5/SHA, take 7 chars) | Deterministic | Same URL same code; no counter | Collisions need check-and-retry; leaks nothing but needs a unique index |
+| Random 7 chars | Pick randomly, insert if absent | Unguessable, no coordination | Collision retry; rare at low fill, grows with density |
+| **Counter + base62** | Take a unique integer, encode it | No collisions, short, fast | Sequential codes are guessable; needs a distributed counter |
+| Pre-generated key service | Offline job fills a pool of unused keys | Fast and collision-free at request time | Another service to run and make highly available |
+
+A good answer: **ranges of counter values handed to app servers** (each server leases, say, 10,000 ids from a coordinator such as etcd or a database sequence, then hands them out locally), mixed through a reversible scramble (a keyed permutation) before base62 encoding so codes are not sequential. Losing a server wastes at most one unused range, which is fine given 3.5 trillion codes.
+
+```python
+A = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+def enc(n):
+    if n == 0: return A[0]
+    s = []
+    while n: n, r = divmod(n, 62); s.append(A[r])
+    return "".join(reversed(s))
+def dec(s):
+    n = 0
+    for c in s: n = n * 62 + A.index(c)
+    return n
+for n in (0, 61, 62, 125, 3_500_000_000_000):
+    print(n, enc(n), dec(enc(n)) == n)   # 3.5e12 -> 7 chars, round trips
+```
+
+Custom aliases go through the same table with a uniqueness check (a conditional insert). Reserve a blocklist of words (`admin`, `api`) and profanity.
+
+## 6. High-level architecture
+
+<Diagram kind="flow" caption="Read path is cache-first; analytics is asynchronous" nodes={[
+  { id: "client", label: "Browsers", x: 0, y: 90, role: "Click short links.", failureModes: ["Link redirected through caches that ignore expiry"], tradeoffs: ["301 is cached by browsers (fewer hits, no analytics, hard to change); 302 gives control and counts"] },
+  { id: "cdn", label: "CDN / edge", x: 200, y: 90, role: "Optionally caches redirects for very hot links.", failureModes: ["Stale redirect after the owner edits or deletes a link"], tradeoffs: ["Very low latency at the cost of invalidation work"] },
+  { id: "app", label: "Redirect service", x: 400, y: 90, role: "Stateless: look up code, return 302. Emits a click event.", failureModes: ["Cache miss storm on a viral new link"], tradeoffs: ["Stateless so it scales horizontally behind a load balancer"] },
+  { id: "cache", label: "Redis cache", x: 600, y: 20, role: "Holds code to URL for hot links (about 10 GB).", failureModes: ["Node loss causes a DB spike", "Hot key"], tradeoffs: ["Look-aside with TTL; negative-cache 404s briefly to resist scanning"] },
+  { id: "db", label: "Links store (sharded)", x: 600, y: 160, role: "Source of truth keyed by code.", failureModes: ["Shard hot spot if keys are sequential and range-partitioned"], tradeoffs: ["Hash-partition on code for even load; replicas for reads and failover"] },
+  { id: "queue", label: "Click stream (Kafka)", x: 400, y: 200, role: "Buffers click events for aggregation.", failureModes: ["Lag delays stats"], tradeoffs: ["Analytics are eventually consistent so redirects never wait on them"] }
+]} edges={[
+  { from: "client", to: "cdn" }, { from: "cdn", to: "app", label: "miss" }, { from: "app", to: "cache", label: "1. lookup" }, { from: "app", to: "db", label: "2. on miss" }, { from: "app", to: "queue", label: "async click" }
+]} />
+
+## 7. Deep dives
+
+**Cache.** Look-aside with an LRU eviction policy and a TTL no longer than the link's remaining life. A viral link causes a stampede on first miss: use request coalescing (single flight) or a short lock per key. Negative caching of unknown codes for 30 to 60 seconds blunts enumeration attacks.
+
+**Redirect status.** `302` (or `307`) keeps every click flowing through you, enabling analytics and edits. `301` or `308` lets browsers cache forever, which saves load but loses control. Most services use 302 and put popular links behind the CDN with a short TTL.
+
+**Analytics.** Never write a counter row per click on the redirect path. Publish an event, aggregate in a stream processor into hourly buckets, and store those. Counts are approximate for a few seconds, which is fine.
+
+**Expiry and cleanup.** Reads check `expires_at`. A background job deletes old rows in batches; do not reuse expired codes immediately (old links floating around would open someone else's page).
+
+**Abuse.** Rate limit creation, scan target URLs against a phishing list, validate schemes (`http`/`https` only; reject `javascript:` and open-redirect chains), and allow takedown.
+
+**Availability.** Multi-region reads: replicate the links store and cache per region, route by latency DNS. Writes go to a primary region; they are rare, so cross-region latency is acceptable. A code allocated in one region never collides because ranges are disjoint.
+
+## 8. Bottlenecks and trade-offs
+
+- Hot partition if sequential codes are range-sharded: hash-shard or scramble.
+- Cache failure: keep replicas, protect the database with request coalescing and a circuit breaker.
+- Consistency: a freshly created link must redirect immediately for its creator. Read-your-writes by writing through the cache, or reading the primary for a few seconds.
+- What to say if pushed to scale 100×: the same design; add shards and cache nodes, move redirects to the edge.
+
+## Pitfalls
+
+- Using auto-increment ids directly (guessable, enumerates all links).
+- Putting the analytics write on the redirect path.
+- Choosing 301 and then wanting stats.
+- Forgetting expiry, abuse and idempotency.
+- Spending 20 minutes on the hash function instead of the read path.
+
+## What would you choose and why?
+
+The interviewer says: "links must be editable and deletable instantly, worldwide." What changes about your CDN use, cache TTLs and redirect status? Which consistency do you offer, and how do you purge caches?
+
+## Quiz
+
+<Quiz id="sd-m17-url-shortener" tags={["case-study", "url-shortener"]} questions={[
+  { type: "mcq", q: "How many base62 characters are enough for 6 billion links with room to spare?", options: ["4", "6", "7", "12"], answer: 2, explain: "62^7 is about 3.5 trillion; 62^6 is only about 57 billion, which is tight with scrambling and waste." },
+  { type: "mcq", q: "Why prefer 302 over 301 for a service with analytics?", options: ["302 is faster", "301 is cached by browsers so later clicks may never reach you", "301 is not supported", "302 is cryptographically safer"], answer: 1, explain: "A permanent redirect is cached; you lose counting and the ability to change the target." },
+  { type: "multi", q: "Which help the redirect path stay fast under a viral link?", options: ["Look-aside cache in front of the store", "Single-flight coalescing of concurrent misses", "Writing a click counter row synchronously", "A short-TTL CDN cache for hot links"], answer: [0, 1, 3], explain: "Synchronous per-click writes would put the database on the hot path." },
+  { type: "mcq", q: "Sequential counter ids become short codes. What security issue does this create and how is it addressed?", options: ["None", "Codes are guessable and enumerable; apply a reversible scramble or random allocation", "Codes are too long", "Collisions are frequent"], answer: 1, explain: "Anyone can walk the sequence. Permuting the id before encoding hides the order." }
+]} />
