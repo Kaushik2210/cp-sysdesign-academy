@@ -1,0 +1,290 @@
+---
+title: Strongly Connected Components
+track: cp
+module: graphs
+order: 8
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/graphs/bridges, cp/graphs/topological-sort]
+tags: [graph, scc, dfs, kosaraju, condensation, directed]
+type: lesson
+problems: [m11-mutual-reach]
+furtherReading:
+  - title: cp-algorithms, Strongly connected components and the condensation graph
+    url: https://cp-algorithms.com/graph/strongly-connected-components.html
+  - title: CSES Problem Set, Planets and Kingdoms
+    url: https://cses.fi/problemset/task/1683
+  - title: CSES Problem Set, Giant Pizza (2-SAT)
+    url: https://cses.fi/problemset/task/1684
+---
+
+## Intuition
+
+On an undirected map "can I get from `a` to `b`?" is symmetric, so the map splits into plain connected regions. On a **one-way** street map it is not: you can drive from `a` to `b` without being able to come back.
+
+Group junctions into **zones**: `a` and `b` share a zone when you can drive `a → b` **and** `b → a`. Inside a zone everything reaches everything. Between zones traffic only flows one way, and never in a circle, because a circle would merge the zones. So if you squash every zone into a single node, the result is a **directed acyclic graph** (DAG): the *condensation*. That is why this idea is so useful: it turns any messy directed graph into a DAG you can run DP or [topological sort](/cp/graphs/topological-sort/) on.
+
+## Definition
+
+A **strongly connected component** (SCC) is a maximal set of vertices in which every vertex can reach every other. Every vertex belongs to exactly one SCC (a lone vertex is an SCC of size 1).
+
+The condensation graph has one node per SCC and an edge `A → B` when some original edge goes from a vertex of `A` to a vertex of `B`. It has no cycles.
+
+## Kosaraju's algorithm
+
+Two depth-first passes, each `O(n + m)`.
+
+1. **Pass 1, original graph.** Run DFS from every unvisited vertex and append each vertex to `order` when it **finishes** (all its neighbours done). The last vertex to finish lies in a *source* zone: no other zone can drive into it.
+2. **Pass 2, reversed graph.** Take vertices in **decreasing** finish order. For each one not yet assigned, run DFS on the **reversed** graph (all edges flipped). Everything it reaches that is still unassigned is exactly one SCC.
+
+Why it works: in the reversed graph a zone's outgoing edges become incoming, so a search starting in the latest-finishing (source) zone cannot leak into any zone that is still unassigned. It collects its own zone and stops. Removing it exposes the next source zone, and so on.
+
+```text
+order = vertices by finish time        (pass 1)
+for v in reversed(order):              (pass 2)
+    if v is unassigned:
+        everything reachable from v in the reversed graph, still unassigned = one SCC
+```
+
+A bonus: the zones come out in **topological order** of the condensation. Zone 0 is a source, the next has edges only from earlier zones, and so on.
+
+## Example
+
+```text
+1 → 2 → 3 → 1        a cycle:        {1, 2, 3}
+3 → 4                a one-way link
+4 → 5 → 6 → 4        another cycle:  {4, 5, 6}
+6 → 7                7 on its own:   {7}
+```
+
+Three zones, joined as `{1,2,3} → {4,5,6} → {7}`. Only the zone with no incoming edge from outside, `{1,2,3}`, can finish last in pass 1.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def scc(n, edges):
+    g = [[] for _ in range(n + 1)]
+    rg = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        g[u].append(v)
+        rg[v].append(u)
+    seen = [False] * (n + 1)
+    nxt = [0] * (n + 1)
+    order = []
+    for s in range(1, n + 1):            # pass 1: record finishing order (explicit stack)
+        if seen[s]: continue
+        seen[s] = True
+        stack = [s]
+        while stack:
+            v = stack[-1]
+            if nxt[v] < len(g[v]):
+                to = g[v][nxt[v]]; nxt[v] += 1
+                if not seen[to]:
+                    seen[to] = True
+                    stack.append(to)
+            else:
+                stack.pop()
+                order.append(v)
+    comp = [0] * (n + 1)
+    count = 0
+    for s in reversed(order):            # pass 2: reversed graph, latest finisher first
+        if comp[s]: continue
+        count += 1
+        comp[s] = count
+        stack = [s]
+        while stack:
+            v = stack.pop()
+            for to in rg[v]:
+                if not comp[to]:
+                    comp[to] = count
+                    stack.append(to)
+    return count, comp                   # comp ids are in topological order of the condensation
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<int>> g, rg;
+vector<bool> seen;
+vector<int> order_, comp;
+
+void dfs1(int v) {
+    seen[v] = true;
+    for (int to : g[v]) if (!seen[to]) dfs1(to);
+    order_.push_back(v);                       // finished
+}
+void dfs2(int v, int c) {
+    comp[v] = c;
+    for (int to : rg[v]) if (!comp[to]) dfs2(to, c);
+}
+int scc(int n) {
+    seen.assign(n + 1, false);
+    comp.assign(n + 1, 0);
+    for (int s = 1; s <= n; s++) if (!seen[s]) dfs1(s);
+    int c = 0;
+    for (int i = n - 1; i >= 0; i--)
+        if (!comp[order_[i]]) dfs2(order_[i], ++c);
+    return c;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static List<Integer>[] g, rg;
+static boolean[] seen;
+static int[] comp;
+static List<Integer> order = new ArrayList<>();
+
+static void dfs1(int v) {
+    seen[v] = true;
+    for (int to : g[v]) if (!seen[to]) dfs1(to);
+    order.add(v);                               // finished
+}
+static void dfs2(int v, int c) {
+    comp[v] = c;
+    for (int to : rg[v]) if (comp[to] == 0) dfs2(to, c);
+}
+static int scc(int n) {
+    seen = new boolean[n + 1];
+    comp = new int[n + 1];
+    for (int s = 1; s <= n; s++) if (!seen[s]) dfs1(s);
+    int c = 0;
+    for (int i = order.size() - 1; i >= 0; i--)
+        if (comp[order.get(i)] == 0) dfs2(order.get(i), ++c);
+    return c;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it and compare with the slow definition (reachability both ways), then build the condensation and check it is a DAG:
+
+<CodeRunner language="python" code={`import random
+
+def scc(n, edges):
+    g = [[] for _ in range(n + 1)]
+    rg = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        g[u].append(v)
+        rg[v].append(u)
+    seen = [False] * (n + 1)
+    nxt = [0] * (n + 1)
+    order = []
+    for s in range(1, n + 1):
+        if seen[s]: continue
+        seen[s] = True
+        stack = [s]
+        while stack:
+            v = stack[-1]
+            if nxt[v] < len(g[v]):
+                to = g[v][nxt[v]]; nxt[v] += 1
+                if not seen[to]:
+                    seen[to] = True
+                    stack.append(to)
+            else:
+                stack.pop()
+                order.append(v)
+    comp = [0] * (n + 1)
+    count = 0
+    for s in reversed(order):
+        if comp[s]: continue
+        count += 1
+        comp[s] = count
+        stack = [s]
+        while stack:
+            v = stack.pop()
+            for to in rg[v]:
+                if not comp[to]:
+                    comp[to] = count
+                    stack.append(to)
+    return count, comp
+
+def slow(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        adj[u].append(v)
+    reach = []
+    for s in range(n + 1):
+        seen = {s}
+        st = [s]
+        while st:
+            x = st.pop()
+            for y in adj[x]:
+                if y not in seen:
+                    seen.add(y)
+                    st.append(y)
+        reach.append(seen)
+    return reach
+
+edges = [(1, 2), (2, 3), (3, 1), (3, 4), (4, 5), (5, 6), (6, 4), (6, 7)]
+count, comp = scc(7, edges)
+print("zones:", count, " zone of each vertex 1..7:", comp[1:])
+print("condensation edges:", sorted({(comp[u], comp[v]) for u, v in edges if comp[u] != comp[v]}))
+
+random.seed(4)
+for _ in range(500):
+    n = random.randint(1, 10)
+    es = [(random.randint(1, n), random.randint(1, n)) for _ in range(random.randint(0, 18))]
+    es = [(u, v) for u, v in es if u != v]
+    count, comp = scc(n, es)
+    reach = slow(n, es)
+    for a in range(1, n + 1):
+        for b in range(1, n + 1):
+            same = b in reach[a] and a in reach[b]
+            assert same == (comp[a] == comp[b]), (n, es)
+    # zone ids come out in topological order of the condensation
+    for u, v in es:
+        assert comp[u] <= comp[v]
+print("500 random digraphs agree with mutual reachability, and zone ids are topologically ordered")
+`} />
+
+## Using the condensation
+
+Once you have the zones, many "hard" directed-graph questions become DAG questions:
+
+| question | recipe |
+| --- | --- |
+| how many vertices can `v` reach? | DP over the condensation DAG, weighting each node by its zone size |
+| minimum edges to add so everything is strongly connected | with `s` zones with no incoming edge and `t` with no outgoing edge (and more than one zone), the answer is `max(s, t)` |
+| does a vertex have a path to every other? | its zone must be the unique source of the condensation |
+| 2-SAT | build the implication graph; the formula is unsatisfiable iff `x` and `not x` share a zone (Kosaraju's zone order also gives a satisfying assignment) |
+
+## Kosaraju or Tarjan?
+
+Tarjan's algorithm does the same job in **one** DFS using the `tin`/`low` idea from the [bridges](/cp/graphs/bridges/) lesson plus a stack. It is a little faster and gives zones in reverse topological order. Kosaraju is easier to reason about and to get right, which usually wins in contests.
+
+## Pitfalls
+
+1. **Forgetting to reverse the graph in pass 2.** Running pass 2 on the original graph merges zones that are only one-way connected.
+2. **Wrong order in pass 2.** It must be *decreasing finish time*; increasing order gives wrong zones.
+3. **Recursion depth.** A single cycle or path of `2·10^5` vertices overflows Python's (and sometimes C++'s) stack. Use an explicit stack.
+4. **Treating a zone as a cycle.** A zone of size 1 has no cycle at all (unless there is a self-loop, which does not matter for zones).
+5. **Assuming the condensation is a tree.** It is a DAG: several zones may feed the same one.
+6. **Building the condensation edges naively.** Skip edges inside a zone, and de-duplicate parallel zone-to-zone edges if the count matters.
+
+## Practice
+
+<Problem id="m11-mutual-reach" />
+
+## Problem ladder
+
+- [Planets and Kingdoms](https://cses.fi/problemset/task/1683) (CSES): label every vertex by its SCC, this lesson exactly.
+- [Coin Collector](https://cses.fi/problemset/task/1686) (CSES): longest-weight path over the condensation DAG.
+- [Giant Pizza](https://cses.fi/problemset/task/1684) (CSES): 2-SAT through SCCs.
+- [Strongly Connected Components](https://judge.yosupo.jp/problem/scc) (Library Checker): the large-input benchmark.
+
+## Quiz
+
+<Quiz id="cp-m11-scc" tags={["graph", "scc"]} questions={[
+  { type: "mcq", q: "What does the condensation of a directed graph look like?", options: ["A tree", "A DAG with one node per strongly connected component", "A complete graph", "A single cycle"], answer: 1, explain: "Collapsing each zone to a node leaves no cycles, otherwise the zones on the cycle would be one zone." },
+  { type: "mcq", q: "In Kosaraju's second pass, in which order are the start vertices taken, and on which graph is the DFS run?", options: ["Increasing finish time, original graph", "Decreasing finish time, reversed graph", "Decreasing finish time, original graph", "Any order, reversed graph"], answer: 1, explain: "The latest finisher is in a source zone; on the reversed graph its search cannot leave that zone." },
+  { type: "predict", q: "The graph 1 -> 2, 2 -> 3 (a path, no cycles) has how many strongly connected components?", code: "n = 3\nedges = [(1, 2), (2, 3)]\nprint(n)", options: ["1", "2", "3", "0"], answer: 2, explain: "Without a way back, every vertex is its own zone." },
+  { type: "multi", q: "Which statements about SCCs are true?", options: ["Every vertex is in exactly one SCC", "Two vertices in one SCC can reach each other", "The condensation can contain a cycle", "A DAG has n SCCs"], answer: [0, 1, 3], explain: "A cycle in the condensation would merge its zones, so the condensation is acyclic." }
+]} />
