@@ -49,12 +49,12 @@ test("Ctrl+K search finds a lesson and navigates to it", async ({ page }) => {
   await expect(page).toHaveURL(/consistent-hashing/);
 });
 
-test("theme toggle switches between dark and light", async ({ page }) => {
+test("theme toggle switches between light and dark", async ({ page }) => {
   await page.goto("/");
   const html = page.locator("html");
-  await expect(html).toHaveClass(/dark/);
-  await page.getByRole("button", { name: /switch to light theme/i }).click();
   await expect(html).not.toHaveClass(/dark/);
+  await page.getByRole("button", { name: /switch to dark theme/i }).click();
+  await expect(html).toHaveClass(/dark/);
 });
 
 test("learning path page renders a daily checklist", async ({ page }) => {
@@ -693,13 +693,14 @@ test.describe("interactive, maximalist UI", () => {
     await expect(page.getByRole("button", { name: "Play" })).toBeVisible();
   });
 
-  test("cards light up under the pointer", async ({ page }) => {
+  test("gallery tiles fill their arrow button on hover", async ({ page }) => {
     await page.goto("/");
     const tile = page.getByRole("link", { name: /Algorithm visualizers/ }).first();
     await tile.scrollIntoViewIfNeeded();
+    const arrow = tile.locator(".arrow-btn");
+    const before = await arrow.evaluate((el) => getComputedStyle(el).backgroundColor);
     await tile.hover();
-    const mx = await tile.evaluate((el) => (el as HTMLElement).style.getPropertyValue("--mx"));
-    expect(mx).toMatch(/px$/);
+    await expect.poll(() => arrow.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe(before);
   });
 
   test("marking a lesson complete celebrates with confetti", async ({ page }) => {
@@ -726,7 +727,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("118");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("121");
   });
 });
 
@@ -739,7 +740,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 68 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 71 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -838,6 +839,9 @@ test.describe("visualizer lessons", () => {
     ["/cp/trees/tree-dp-and-diameter/", "Tree DP", "Longest Chain"],
     ["/cp/dynamic-programming/bitmask-dp/", "Bitmask DP", "Task Matching"],
     ["/cp/range-queries/sparse-table/", "Sparse Tables", "Lowest in Range"],
+    ["/cp/range-queries/lazy-propagation/", "Lazy Propagation", "Range Boost"],
+    ["/cp/dynamic-programming/interval-dp/", "Interval DP", "Merge the Crates"],
+    ["/cp/graphs/bridges/", "Bridges and Low-Link", "Critical Links"],
   ];
   for (const [path, title, problem] of LESSONS) {
     test(`${title} has a practice problem and its visualizer where one exists`, async ({ page }) => {
@@ -845,7 +849,7 @@ test.describe("visualizer lessons", () => {
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
       await expect(page.getByRole("region", { name: `Problem: ${problem}` })).toBeVisible();
       // Only the first five lessons embed a visualizer; the rest have none yet.
-      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables"].includes(title)) {
+      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Bridges and Low-Link"].includes(title)) {
         await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
       }
     });
