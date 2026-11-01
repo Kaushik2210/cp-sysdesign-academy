@@ -46,10 +46,6 @@
   --grain: 0.1;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
 body {
   @apply bg-bg text-fg antialiased;
   position: relative;

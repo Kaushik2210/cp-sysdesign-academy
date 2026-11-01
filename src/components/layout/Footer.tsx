@@ -56,7 +56,7 @@ export function Footer() {
           </ul>
         </nav>
       </div>
-      <p aria-hidden="true" className="mt-10 select-none whitespace-nowrap text-center text-[22vw] font-extrabold leading-[0.8] tracking-[-0.06em] text-[hsl(var(--accent))] sm:text-[18vw]">
+      <p aria-hidden="true" className="mt-10 select-none whitespace-nowrap text-center text-[22vw] font-extrabold leading-[0.8] text-[hsl(var(--accent))] sm:text-[18vw]">
         CP×SD
       </p>
       <p className="mx-auto max-w-7xl px-4 pt-4 text-xs text-[#d4cdb8] sm:px-6">

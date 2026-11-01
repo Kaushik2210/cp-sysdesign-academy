@@ -7,7 +7,7 @@ import { Asterisk } from "@/components/fx/Asterisk";
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-30 border-b-[3px] border-border bg-bg/95 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b-[3px] border-border bg-bg">
       <nav
         aria-label="Main"
         className="mx-auto flex min-h-16 max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 sm:px-6"

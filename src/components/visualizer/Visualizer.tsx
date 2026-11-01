@@ -38,7 +38,7 @@ export function Visualizer({ name, input }: { name: VisualizerName; input?: stri
   const step = steps[idx];
   const last = steps.length - 1;
   const btn =
-    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-border bg-bg/60 transition hover:-translate-y-0.5 hover:bg-muted disabled:opacity-40 disabled:hover:translate-y-0";
+    "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-border bg-bg/60 transition-colors hover:bg-yellow hover:text-[#0d0d0d] disabled:opacity-40";
 
   const togglePlay = () => {
     if (idx >= last) setIdx(0);
