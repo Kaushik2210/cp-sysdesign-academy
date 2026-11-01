@@ -1,0 +1,208 @@
+---
+title: Interval DP
+track: cp
+module: dynamic-programming
+order: 7
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack, cp/arrays-and-windows/prefix-sums]
+tags: [dp, interval-dp, prefix-sums, merging]
+type: lesson
+problems: [m13-merge-the-piles]
+furtherReading:
+  - title: CSES Problem Set, Removal Game
+    url: https://cses.fi/problemset/task/1097
+  - title: cp-algorithms, Knuth's Optimization
+    url: https://cp-algorithms.com/dynamic_programming/knuth-optimization.html
+---
+
+## Intuition
+
+Some problems ask you to combine **neighbouring** items again and again: merge adjacent piles, split a string into palindromes, parenthesise a product of matrices, play a game from both ends of a row. The cost of the whole depends on the **order** of the steps, and trying all orders is exponential.
+
+The way out: look at the **last** step instead of the first. The last merge joins two blocks that were built independently, one from the left part of the interval and one from the right. So the answer for an interval is made from answers for two **shorter** intervals. That is a DP whose states are intervals.
+
+## Definition
+
+State: `dp[i][j]` = the best value for the items `i .. j`.
+
+Transition: try every split point `k` between the two final blocks:
+
+```text
+dp[i][j] = min over k in [i, j-1] of ( dp[i][k] + dp[k+1][j] ) + cost(i, j)
+dp[i][i] = 0
+```
+
+For **merging piles** `cost(i, j)` is the total weight `w[i] + ... + w[j]`, since the last merge pays for the whole interval. A prefix-sum array `pre` gives it in `O(1)`: `pre[j+1] - pre[i]`.
+
+**Order of evaluation.** `dp[i][j]` needs shorter intervals, so loop over the **length** first (2, 3, ..., n), then over the start `i`:
+
+```text
+for length in 2..n:
+    for i in 0..n-length:
+        j = i + length - 1
+        ...
+```
+
+There are `O(n^2)` states and `O(n)` transitions each: `O(n^3)` time, `O(n^2)` memory. That is comfortable for `n` up to about 400.
+
+## Example
+
+Piles `[2, 2, 1, 2]`. The tempting rule "always merge the lightest neighbouring pair" merges `(2,1)` first (3), giving `[2, 3, 2]`, then `(2,3)` (5), then `(5,2)` (7): total 15. The DP finds 14: merge `(1,2)` (3) to get `[2, 2, 3]`, then `(2,2)` (4), then `(4,3)` (7).
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+pre = [0] * (n + 1)
+for i in range(n):
+    pre[i + 1] = pre[i] + w[i]
+dp = [[0] * n for _ in range(n)]
+for length in range(2, n + 1):
+    for i in range(n - length + 1):
+        j = i + length - 1
+        best = min(dp[i][k] + dp[k + 1][j] for k in range(i, j))
+        dp[i][j] = best + pre[j + 1] - pre[i]
+answer = dp[0][n - 1]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> pre(n + 1, 0);
+for (int i = 0; i < n; i++) pre[i + 1] = pre[i] + w[i];
+vector<vector<long long>> dp(n, vector<long long>(n, 0));
+for (int len = 2; len <= n; len++)
+    for (int i = 0; i + len <= n; i++) {
+        int j = i + len - 1;
+        long long best = LLONG_MAX;
+        for (int k = i; k < j; k++) best = min(best, dp[i][k] + dp[k + 1][j]);
+        dp[i][j] = best + pre[j + 1] - pre[i];
+    }
+long long answer = dp[0][n - 1];
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] pre = new long[n + 1];
+for (int i = 0; i < n; i++) pre[i + 1] = pre[i] + w[i];
+long[][] dp = new long[n][n];
+for (int len = 2; len <= n; len++)
+    for (int i = 0; i + len <= n; i++) {
+        int j = i + len - 1;
+        long best = Long.MAX_VALUE;
+        for (int k = i; k < j; k++) best = Math.min(best, dp[i][k] + dp[k + 1][j]);
+        dp[i][j] = best + pre[j + 1] - pre[i];
+    }
+long answer = dp[0][n - 1];
+```
+
+</Tab>
+</Tabs>
+
+Run it, check it against every possible merge order, and watch the greedy rule lose:
+
+<CodeRunner language="python" code={`import random
+from functools import lru_cache
+
+def interval_dp(w):
+    n = len(w)
+    pre = [0] * (n + 1)
+    for i in range(n):
+        pre[i + 1] = pre[i] + w[i]
+    dp = [[0] * n for _ in range(n)]
+    for length in range(2, n + 1):
+        for i in range(n - length + 1):
+            j = i + length - 1
+            best = min(dp[i][k] + dp[k + 1][j] for k in range(i, j))
+            dp[i][j] = best + pre[j + 1] - pre[i]
+    return dp[0][n - 1]
+
+def all_orders(w):
+    # tries every possible sequence of adjacent merges
+    @lru_cache(None)
+    def go(state):
+        if len(state) == 1:
+            return 0
+        best = None
+        for i in range(len(state) - 1):
+            s = state[i] + state[i + 1]
+            cost = s + go(state[:i] + (s,) + state[i + 2:])
+            if best is None or cost < best:
+                best = cost
+        return best
+    return go(tuple(w))
+
+def greedy(w):
+    w = list(w)
+    total = 0
+    while len(w) > 1:
+        i = min(range(len(w) - 1), key=lambda i: w[i] + w[i + 1])
+        s = w[i] + w[i + 1]
+        total += s
+        w[i:i + 2] = [s]
+    return total
+
+print("[2, 2, 1, 2]: dp =", interval_dp([2, 2, 1, 2]), " greedy =", greedy([2, 2, 1, 2]))
+
+random.seed(2)
+for _ in range(300):
+    w = [random.randint(1, 9) for _ in range(random.randint(1, 7))]
+    assert interval_dp(w) == all_orders(w), w
+print("300 random cases agree with trying every merge order")
+
+wins = sum(1 for _ in range(500)
+           if greedy(w := [random.randint(1, 9) for _ in range(6)]) > interval_dp(w))
+print("greedy was strictly worse than the DP in", wins, "of 500 random 6-pile rows")
+`} />
+
+## Other interval DPs, same skeleton
+
+| problem | `dp[i][j]` means | transition |
+| --- | --- | --- |
+| merge piles | cheapest way to merge `i..j` | split at `k`, add `sum(i..j)` |
+| matrix-chain product | fewest multiplications for `A_i ... A_j` | split at `k`, add `p[i] * p[k+1] * p[j+1]` |
+| optimal game from both ends (CSES *Removal Game*) | best score difference for the current player on `i..j` | take `a[i]` or `a[j]`, then the opponent plays `dp[i+1][j]` or `dp[i][j-1]` |
+| palindrome partitioning | is `s[i..j]` a palindrome | `s[i] == s[j]` and `dp[i+1][j-1]` |
+| burst balloons | max coins for `i..j` where `k` is the **last** one burst | `a[i-1]*a[k]*a[j+1] + dp[i][k-1] + dp[k+1][j]` |
+
+When the natural split is the first or last item (the game), the transition has only two options and the whole DP is `O(n^2)`.
+
+## Speeding it up
+
+If the best split point is monotone (`opt[i][j-1] <= opt[i][j] <= opt[i+1][j]`), **Knuth's optimisation** restricts the loop over `k` and brings the total to `O(n^2)`. It holds for merging piles and optimal binary search trees; verify the condition before using it.
+
+## Pitfalls
+
+1. **Wrong loop order.** Looping `i` then `j` reads intervals you have not computed yet; iterate by **length**.
+2. **Off-by-one in the split.** `k` ranges over `i .. j-1`, and the two parts are `[i, k]` and `[k+1, j]`.
+3. **Forgetting the merge cost.** Without `+ sum(i..j)` the DP returns 0.
+4. **Overflow.** Costs add up to about `n` times the total weight; use 64-bit integers.
+5. **Trusting a greedy.** Local choices (lightest pair first) fail; if you cannot prove it with an exchange argument, use the DP.
+6. **Memory at large `n`.** The table is `n^2` entries; for `n = 5000` that is 25 million, so keep the array flat and use 32-bit values when possible.
+
+## Practice
+
+<Problem id="m13-merge-the-piles" />
+
+## Problem ladder
+
+- [Removal Game](https://cses.fi/problemset/task/1097) (CSES): the two-ended game, an `O(n^2)` interval DP.
+- [Burst Balloons](https://leetcode.com/problems/burst-balloons/) (LeetCode, hard): the "last one" trick.
+- [Minimum Cost to Merge Stones](https://leetcode.com/problems/minimum-cost-to-merge-stones/) (LeetCode, hard): merge exactly `k` at a time, a harder cousin of this lesson.
+- [Palindrome Partitioning II](https://leetcode.com/problems/palindrome-partitioning-ii/) (LeetCode, hard): interval palindrome table plus a 1D DP.
+- [Zuma](https://codeforces.com/problemset/problem/607/B) (Codeforces 607B, rating about 1900): remove palindromic substrings, a clean interval DP.
+
+## Quiz
+
+<Quiz id="cp-m13-interval-dp" tags={["dp", "interval-dp"]} questions={[
+  { type: "mcq", q: "Why do we reason about the LAST merge when defining the DP?", options: ["It is the cheapest", "It splits the interval into two independently solved shorter intervals", "It is always the heaviest pile", "It avoids prefix sums"], answer: 1, explain: "The last merge joins a block from the left part and a block from the right part, each solved on its own." },
+  { type: "mcq", q: "In which order must dp[i][j] be filled?", options: ["By increasing i, then j", "By decreasing j", "By increasing interval length", "Any order works"], answer: 2, explain: "dp[i][j] depends on strictly shorter intervals, so those must already be computed." },
+  { type: "predict", q: "For the piles [3, 7] (two piles), what is dp[0][1]?", code: "w = [3, 7]\nprint(sum(w))", options: ["3", "7", "10", "0"], answer: 2, explain: "There is only one merge, and it pays 3 + 7 = 10." },
+  { type: "mcq", q: "What are the time and memory of the standard merge-piles DP for n piles?", options: ["O(n) and O(n)", "O(n^2) and O(n)", "O(n^3) and O(n^2)", "O(2^n) and O(n)"], answer: 2, explain: "n^2 states, n transitions each, n^2 table entries." }
+]} />
