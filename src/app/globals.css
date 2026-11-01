@@ -356,25 +356,29 @@ h3 {
 .nav-link:nth-child(6n + 5):not([aria-current]):hover { background: hsl(var(--orange)); }
 .nav-link:nth-child(6n):not([aria-current]):hover { background: hsl(var(--lilac)); }
 
-/* Custom cursor: a blend-mode blob that grows over anything clickable. Hidden for touch and reduced motion. */
+/* Custom cursor: a pink ring with a hard shadow that grows over anything clickable. No blend modes, so it stays cheap to
+   paint. Hidden for touch and reduced motion; the real cursor always stays visible. */
 .cursor-blob {
   position: fixed;
-  left: -17px;
-  top: -17px;
+  left: -16px;
+  top: -16px;
   z-index: 9999;
-  height: 34px;
-  width: 34px;
+  height: 32px;
+  width: 32px;
   border-radius: 9999px;
-  background: #fff;
-  mix-blend-mode: difference;
+  border: 3px solid #0d0d0d;
+  background: hsl(var(--pink) / 0.35);
+  box-shadow: 3px 3px 0 #0d0d0d;
   pointer-events: none;
-  transition: width 0.2s, height 0.2s, left 0.2s, top 0.2s;
+  will-change: transform;
+  transition: width 0.2s, height 0.2s, left 0.2s, top 0.2s, background-color 0.2s;
 }
 .cursor-blob[data-hot="1"] {
-  left: -30px;
-  top: -30px;
-  height: 60px;
-  width: 60px;
+  left: -28px;
+  top: -28px;
+  height: 56px;
+  width: 56px;
+  background: hsl(var(--yellow) / 0.55);
 }
 .cursor-blob[hidden] {
   display: none;
