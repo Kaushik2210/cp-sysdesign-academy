@@ -1,0 +1,303 @@
+---
+title: Minimum-Cost Flow
+track: cp
+module: graphs
+order: 12
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/graphs/maximum-flow, cp/graphs/bellman-ford, cp/graphs/bipartite-matching]
+tags: [graph, min-cost-flow, successive-shortest-paths, spfa, assignment]
+type: lesson
+problems: [m11-delivery-plan]
+furtherReading:
+  - title: cp-algorithms, Minimum-cost flow
+    url: https://cp-algorithms.com/graph/min_cost_flow.html
+  - title: CSES Problem Set, Download Speed (max flow warm-up)
+    url: https://cses.fi/problemset/task/1694
+  - title: AtCoder Library Practice Contest, E - MinCostFlow
+    url: https://atcoder.jp/contests/practice2/tasks/practice2_e
+---
+
+## Intuition
+
+[Maximum flow](/cp/graphs/maximum-flow/) answers "how much can I send?" but ignores a question that matters in practice: **what does it cost?** A shipping network may have cheap slow routes and expensive fast ones. Two plans can both carry 10 parcels per day, one for 40 coins and one for 400.
+
+**Minimum-cost flow** asks for the cheapest way to send a given amount, or the cheapest way to send the *most* that is possible (min-cost max-flow). It also solves **assignment** problems: match workers to jobs when each pairing has a price, not merely "allowed or not".
+
+The method is a small upgrade of what you already know. Keep the residual graph with twin edges, and instead of augmenting along *any* path, always augment along the **cheapest** one.
+
+## Definitions
+
+Each edge `u → v` has a capacity `c` and a cost `w` per unit of flow. The cost of a flow is the sum of `w × flow` over all edges. In the residual graph every edge has a twin that carries the flow backwards:
+
+```text
+edge e:     u -> v     capacity c      cost  +w
+twin e^1:   v -> u     capacity 0      cost  -w         (undoing a unit refunds its cost)
+```
+
+Sending `d` units along `e` does `cap[e] -= d`, `cap[e ^ 1] += d`, exactly as in max flow, and the cost bookkeeping is automatic because the twin has cost `−w`.
+
+## Successive shortest paths
+
+```text
+repeat:
+    find the cheapest path from s to t in the residual graph (edges with cap > 0, weighted by cost)
+    if there is none: stop
+    push the bottleneck amount f along it
+    flow += f;   total_cost += f * (cost of that path)
+```
+
+**Why it is correct.** If you always augment along a shortest path, the current flow is a minimum-cost flow *for its value* after every step. The reason is that a flow has minimum cost if and only if its residual graph has **no negative-cost cycle**. A shortest-path augmentation never creates one. So when the algorithm ends, the flow is maximum, and among all maximum flows it is the cheapest.
+
+**Negative edges.** The residual graph contains twin edges of cost `−w`, so shortest paths must cope with negative weights. Two standard tools:
+
+| tool | idea | time per search |
+| --- | --- | --- |
+| **SPFA** (Bellman-Ford with a queue) | relax edges, re-queue improved vertices | `O(V · E)` worst case, usually near `O(E)` |
+| **Dijkstra with potentials** | keep a potential `h[v]` so reduced costs `w + h[u] − h[v]` stay non-negative | `O(E log V)` |
+
+SPFA is short and reliable for contest sizes. Use potentials when the graph is big or when an adversary can build a bad SPFA case.
+
+## Code (SPFA)
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from collections import deque
+
+def min_cost_flow(n, edges, s, t):                 # edges: (u, v, capacity, cost); vertices 1..n
+    to, cap, cost = [], [], []
+    adj = [[] for _ in range(n + 1)]
+    for u, v, c, w in edges:
+        adj[u].append(len(to)); to.append(v); cap.append(c); cost.append(w)
+        adj[v].append(len(to)); to.append(u); cap.append(0); cost.append(-w)
+    INF = 10 ** 18
+    flow = total = 0
+    while True:
+        dist = [INF] * (n + 1); dist[s] = 0
+        inq = [False] * (n + 1); pe = [-1] * (n + 1)
+        q = deque([s])
+        while q:                                   # SPFA
+            v = q.popleft(); inq[v] = False
+            for e in adj[v]:
+                if cap[e] > 0 and dist[v] + cost[e] < dist[to[e]]:
+                    dist[to[e]] = dist[v] + cost[e]; pe[to[e]] = e
+                    if not inq[to[e]]:
+                        inq[to[e]] = True; q.append(to[e])
+        if dist[t] == INF:
+            return flow, total
+        f = INF; v = t
+        while v != s:
+            e = pe[v]; f = min(f, cap[e]); v = to[e ^ 1]
+        v = t
+        while v != s:
+            e = pe[v]; cap[e] -= f; cap[e ^ 1] += f; v = to[e ^ 1]
+        flow += f
+        total += f * dist[t]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+struct MCMF {
+    int n;
+    vector<int> to;
+    vector<ll> cap, cost;
+    vector<vector<int>> adj;
+    MCMF(int n) : n(n), adj(n + 1) {}
+    void addEdge(int u, int v, ll c, ll w) {
+        adj[u].push_back(to.size()); to.push_back(v); cap.push_back(c); cost.push_back(w);
+        adj[v].push_back(to.size()); to.push_back(u); cap.push_back(0); cost.push_back(-w);
+    }
+    pair<ll, ll> run(int s, int t) {
+        const ll INF = LLONG_MAX / 4;
+        ll flow = 0, total = 0;
+        while (true) {
+            vector<ll> dist(n + 1, INF);
+            vector<int> pe(n + 1, -1);
+            vector<bool> inq(n + 1, false);
+            queue<int> q;
+            dist[s] = 0; q.push(s);
+            while (!q.empty()) {
+                int v = q.front(); q.pop(); inq[v] = false;
+                for (int e : adj[v])
+                    if (cap[e] > 0 && dist[v] + cost[e] < dist[to[e]]) {
+                        dist[to[e]] = dist[v] + cost[e]; pe[to[e]] = e;
+                        if (!inq[to[e]]) { inq[to[e]] = true; q.push(to[e]); }
+                    }
+            }
+            if (dist[t] == INF) return {flow, total};
+            ll f = INF;
+            for (int v = t; v != s; v = to[pe[v] ^ 1]) f = min(f, cap[pe[v]]);
+            for (int v = t; v != s; v = to[pe[v] ^ 1]) { cap[pe[v]] -= f; cap[pe[v] ^ 1] += f; }
+            flow += f; total += f * dist[t];
+        }
+    }
+};
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static int n;
+static int[] to;
+static long[] cap, cost;
+static List<Integer>[] adj;
+
+static long[] run(int s, int t) {                  // returns {flow, total cost}
+    final long INF = Long.MAX_VALUE / 4;
+    long flow = 0, total = 0;
+    while (true) {
+        long[] dist = new long[n + 1];
+        Arrays.fill(dist, INF);
+        int[] pe = new int[n + 1];
+        Arrays.fill(pe, -1);
+        boolean[] inq = new boolean[n + 1];
+        ArrayDeque<Integer> q = new ArrayDeque<>();
+        dist[s] = 0; q.add(s);
+        while (!q.isEmpty()) {
+            int v = q.poll(); inq[v] = false;
+            for (int e : adj[v])
+                if (cap[e] > 0 && dist[v] + cost[e] < dist[to[e]]) {
+                    dist[to[e]] = dist[v] + cost[e]; pe[to[e]] = e;
+                    if (!inq[to[e]]) { inq[to[e]] = true; q.add(to[e]); }
+                }
+        }
+        if (dist[t] == INF) return new long[]{flow, total};
+        long f = INF;
+        for (int v = t; v != s; v = to[pe[v] ^ 1]) f = Math.min(f, cap[pe[v]]);
+        for (int v = t; v != s; v = to[pe[v] ^ 1]) { cap[pe[v]] -= f; cap[pe[v] ^ 1] += f; }
+        flow += f; total += f * dist[t];
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, verify it against a brute force over every possible flow, and see the "refund" mechanism fix a bad early choice:
+
+<CodeRunner language="python" code={`import itertools, random
+from collections import deque
+
+def min_cost_flow(n, edges, s, t):
+    to, cap, cost = [], [], []
+    adj = [[] for _ in range(n + 1)]
+    for u, v, c, w in edges:
+        adj[u].append(len(to)); to.append(v); cap.append(c); cost.append(w)
+        adj[v].append(len(to)); to.append(u); cap.append(0); cost.append(-w)
+    INF = 10 ** 18
+    flow = total = 0
+    steps = []
+    while True:
+        dist = [INF] * (n + 1); dist[s] = 0
+        inq = [False] * (n + 1); pe = [-1] * (n + 1)
+        q = deque([s])
+        while q:
+            v = q.popleft(); inq[v] = False
+            for e in adj[v]:
+                if cap[e] > 0 and dist[v] + cost[e] < dist[to[e]]:
+                    dist[to[e]] = dist[v] + cost[e]; pe[to[e]] = e
+                    if not inq[to[e]]:
+                        inq[to[e]] = True; q.append(to[e])
+        if dist[t] == INF:
+            return flow, total, steps
+        f = INF; v = t; path = []
+        while v != s:
+            e = pe[v]; f = min(f, cap[e]); path.append(v); v = to[e ^ 1]
+        path.append(s)
+        v = t
+        while v != s:
+            e = pe[v]; cap[e] -= f; cap[e ^ 1] += f; v = to[e ^ 1]
+        flow += f
+        total += f * dist[t]
+        steps.append((path[::-1], f, dist[t]))
+
+def brute(n, edges, s, t):
+    best = None
+    for fl in itertools.product(*[range(c + 1) for _, _, c, _ in edges]):
+        bal = [0] * (n + 1)
+        for (u, v, c, w), x in zip(edges, fl):
+            bal[u] -= x; bal[v] += x
+        if any(bal[v] != 0 for v in range(1, n + 1) if v not in (s, t)):
+            continue
+        key = (-bal[t], sum(x * w for (u, v, c, w), x in zip(edges, fl)))
+        if best is None or key < best:
+            best = key
+    return -best[0], best[1]
+
+# The cheapest first path is 1-2-3-4 (cost 3). The second unit must then go 1-3, BACK along 3-2 (a refund of 1), then 2-4.
+edges = [(1, 2, 1, 1), (2, 3, 1, 1), (3, 4, 1, 1), (1, 3, 1, 5), (2, 4, 1, 5)]
+flow, total, steps = min_cost_flow(4, edges, 1, 4)
+print("flow", flow, "cost", total)
+for path, f, c in steps:
+    print("  augmented", f, "unit(s) along", path, "costing", c, "per unit")
+print("the second path goes 3 -> 2 against the original edge 2 -> 3: that is the refund (cost -1) in action")
+
+random.seed(23)
+for _ in range(300):
+    n = random.randint(2, 5)
+    es = []
+    for _ in range(random.randint(0, 7)):
+        u, v = random.randint(1, n), random.randint(1, n)
+        if u != v: es.append((u, v, random.randint(1, 2), random.randint(0, 5)))
+    f, c, _ = min_cost_flow(n, es, 1, n)
+    assert (f, c) == brute(n, es, 1, n), (n, es)
+print("300 random networks agree with trying every possible flow")
+`} />
+
+## Min-cost flow for assignment
+
+The classic application: `n` workers, `n` jobs, and a price `cost[i][j]` for worker `i` doing job `j`. Find the cheapest complete assignment.
+
+```text
+source -> worker i     capacity 1, cost 0
+worker i -> job j      capacity 1, cost cost[i][j]
+job j -> sink          capacity 1, cost 0
+```
+
+A max flow of value `n` is a perfect matching; the min-cost one is the cheapest. This is exactly [bipartite matching](/cp/graphs/bipartite-matching/) with prices. It is the weighted version, and the Hungarian algorithm solves it directly in `O(n³)`, but the flow model is far more flexible: add capacities greater than 1 (a worker can take 3 jobs), forbid pairs by omitting edges, or add intermediate nodes for rules.
+
+## What min-cost flow can model
+
+| problem | modelling |
+| --- | --- |
+| **assignment** with prices | the bipartite network above |
+| **transportation**: factories with supplies, shops with demands, route prices | source → factories (supply), shops → sink (demand), routes with cost per unit |
+| **k edge-disjoint cheapest paths** | capacity 1 on each edge, push exactly `k` units |
+| cheapest way to send **exactly F** units | stop after `F` units (the last augmentation may be partial) |
+| **k-th best** pairing structure, flows with lower bounds | extra nodes and edges (circulations with demands) |
+| **maximum weight** instead of minimum | negate the costs (the graph has negative edges, so use SPFA or add a constant) |
+
+## Pitfalls
+
+1. **Forgetting the twin cost `−w`.** Without negative costs on twins, undoing a choice is treated as free or impossible and the cost is wrong.
+2. **Dijkstra without potentials.** Plain Dijkstra fails on the negative residual edges. Use SPFA or Johnson-style potentials.
+3. **Infinite loops from negative cycles.** If the input itself has a negative-cost cycle, successive shortest paths is not valid; remove it or use cycle-cancelling.
+4. **Confusing max flow with min-cost max flow.** The algorithm stops when no augmenting path exists, giving the *maximum* flow; to send only `F` units, cap the total pushed.
+5. **Overflow.** Costs multiply by flow: use 64-bit integers and a large `INF` such as `10^18`, never `INT_MAX`.
+6. **Counting the cost of each augmentation wrongly.** Add `f × dist[t]`, where `dist[t]` is the *residual path* cost (it can be smaller than the sum of original edge costs when it cancels earlier flow).
+7. **Worst-case SPFA.** Adversarial graphs can make SPFA slow; switch to potentials with a heap when `n` and `m` are large.
+
+## Practice
+
+<Problem id="m11-delivery-plan" />
+
+## Problem ladder
+
+- [MinCostFlow](https://atcoder.jp/contests/practice2/tasks/practice2_e) (AtCoder Library Practice Contest E): a clean min-cost flow with an assignment flavour.
+- [Minimum Cost Flow](https://judge.yosupo.jp/problem/min_cost_b_flow) (Library Checker): the large-input version with node demands.
+- [Download Speed](https://cses.fi/problemset/task/1694) (CSES): plain maximum flow, to confirm the base before adding costs.
+
+## Quiz
+
+<Quiz id="cp-m11-min-cost-flow" tags={["graph", "min-cost-flow"]} questions={[
+  { type: "mcq", q: "What cost does the residual twin of an edge with cost w carry?", options: ["+w", "-w", "0", "infinity"], answer: 1, explain: "Cancelling a unit of flow along the edge refunds its cost, so the reverse edge costs minus w." },
+  { type: "mcq", q: "Why is it correct to always augment along a cheapest residual path?", options: ["It is the shortest in edges", "It never creates a negative-cost cycle, so the flow stays minimum-cost for its value", "It maximises capacity", "It avoids twins"], answer: 1, explain: "A flow is minimum-cost exactly when its residual graph has no negative cycle, and shortest-path augmentation preserves that." },
+  { type: "predict", q: "Two parallel pipes from s to t: capacity 2 at cost 5 per unit, and capacity 3 at cost 1 per unit. What is the min-cost max flow?", code: "flow = 2 + 3\ncost = 2 * 5 + 3 * 1\nprint(flow, cost)", options: ["5 13", "5 5", "3 3", "5 8"], answer: 0, explain: "Max flow is 5; both pipes are fully used, costing 3 units at 1 and 2 units at 5: 13 in total." },
+  { type: "multi", q: "Which statements about successive shortest paths are true?", options: ["The residual graph can contain negative edges", "SPFA or Dijkstra with potentials can find the shortest path", "The final flow is the maximum flow", "Plain Dijkstra without potentials is always safe"], answer: [0, 1, 2], explain: "Plain Dijkstra can fail on negative residual costs." }
+]} />
