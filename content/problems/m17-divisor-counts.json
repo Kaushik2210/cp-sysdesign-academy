@@ -1,0 +1,121 @@
+{
+  "id": "m17-divisor-counts",
+  "title": "Divisor Counts",
+  "source": {
+    "name": "Original exercise; classic technique (Miller-Rabin primality test and Pollard's rho factorisation)"
+  },
+  "rating": 2300,
+  "tags": [
+    "number-theory",
+    "miller-rabin",
+    "pollard-rho",
+    "factorization",
+    "divisors"
+  ],
+  "statement": "For each of `q` numbers `N`, find how many **positive divisors** it has. For example, `12` has the divisors `1, 2, 3, 4, 6, 12`, so the answer for `12` is `6`; a prime has exactly `2` divisors.\n\nThe numbers are large (up to `10^18`), so trying every divisor up to `sqrt(N)` is far too slow: that would take about `10^9` steps for each number.\n\n**Input.** First line: `q`. Then `q` lines, each with one number `N`.\n\n**Output.** For each number, its number of positive divisors, one per line.",
+  "constraints": [
+    "1 ≤ q ≤ 20",
+    "2 ≤ N ≤ 10^18",
+    "The number of divisors of any `N` in range is at most 103680, so answers fit in 32 bits, but `N` itself needs 64-bit integers (BigInt in JavaScript)"
+  ],
+  "timeLimitMs": 3000,
+  "tests": [
+    {
+      "input": "3\n12\n7\n36\n",
+      "output": "6\n2\n9\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n999999999999999989\n",
+      "output": "2\n",
+      "hidden": false
+    },
+    {
+      "input": "6\n2\n3\n4\n12\n2809\n148877\n",
+      "output": "2\n2\n3\n6\n3\n4\n",
+      "hidden": true
+    },
+    {
+      "input": "6\n3127\n8479\n576460752303423488\n450283905890997363\n1000000000000000000\n558545864083284007\n",
+      "output": "4\n4\n60\n38\n361\n22\n",
+      "hidden": true
+    },
+    {
+      "input": "6\n999999999999999989\n897612484786617600\n561\n41041\n825265\n2047\n",
+      "output": "2\n103680\n8\n16\n32\n4\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n3215031751\n999985999949\n",
+      "output": "8\n4\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n385940634304878353\n618954878292127381\n512537763905330927\n",
+      "output": "4\n4\n4\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n733445543723771803\n433698107925208661\n862069160138220173\n546020319876830737\n",
+      "output": "4\n4\n4\n4\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n556071423587669089\n305603465644541689\n540800818587608881\n",
+      "output": "3\n3\n3\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n830743457159230615\n102476850583730700\n53823134919083530\n99430947785627220\n217560422256329295\n",
+      "output": "3456\n20736\n3456\n3888\n6144\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n69404329958437\n33126243431\n712839902237\n",
+      "output": "6\n18\n4\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n118307887778626451\n183500052398585921\n316728677650019633\n199840288555271057\n",
+      "output": "8\n8\n8\n8\n",
+      "hidden": true
+    },
+    {
+      "input": "6\n393965363901567959\n126934552642386131\n405781059153465397\n646557033105219193\n408555232695640903\n468974722440571189\n",
+      "output": "2\n2\n2\n2\n2\n2\n",
+      "hidden": true
+    },
+    {
+      "input": "20\n545547422120936041\n642154781858198449\n628111783933320887\n73475154676423693\n20798775196664322\n313978634701735080\n647306339648963833\n579349972404571\n225207241162140983\n747347246093488519\n330310385430491449\n624229031048518921\n169982909689283849\n2411809\n99764982783883\n598559917359854450\n154573116039268469\n147597615352307951\n35264462326683954\n423558785868549467\n",
+      "output": "3\n3\n2\n8\n3456\n20736\n4\n8\n8\n16\n3\n3\n8\n3\n12\n6480\n8\n2\n2304\n4\n",
+      "hidden": true
+    },
+    {
+      "input": "20\n363682337959600421\n446547719991647797\n320712812950309733\n688115143595229607\n511523304471903601\n543178486355125223\n480804773686569181\n571324354269593567\n692381003440338701\n352452283731411397\n732875356365681799\n582897738729102469\n731819652639273287\n319822471142153689\n506731806376124711\n862017884697030041\n547214330286650849\n544088406208341691\n491692679214272069\n587097106706643571\n",
+      "output": "4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n4\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "The number of divisors depends only on the exponents in the prime factorisation: if N = p1^e1 * ... * pk^ek then it equals (e1 + 1) * ... * (ek + 1). So the task is to factor N.",
+    "Trial division needs about sqrt(N) = 10^9 steps. Use two randomised ideas instead. First, a fast primality test (Miller-Rabin with a fixed set of bases is exact below 3.18 * 10^23) so you know when to stop splitting. Second, Pollard's rho, which finds a factor p of N in about sqrt(p) steps by looking for a repeated value of x -> x*x + c modulo p, detected through gcd(|x - y|, N).",
+    "Multiplying two 64-bit numbers modulo N overflows, so use 128-bit arithmetic (C++ __int128, Python and JavaScript big integers) or a double-and-add multiplication. Split recursively: if N is prime, record it; otherwise find a factor d with Pollard's rho and factor d and N / d. If a gcd batch ever returns N itself, replay the batch step by step or try another constant c."
+  ],
+  "editorial": "The divisor count is `product of (e_i + 1)` over the prime factorisation, so we need to factor each `N <= 10^18`. Trial division would take up to `10^9` steps per number. Use **Miller-Rabin** to test primality: write `n - 1 = d * 2^s`; for a base `a`, `n` passes if `a^d = 1` or `a^(d 2^r) = -1 (mod n)` for some `r < s`; a composite number can pass only for few bases, and the first 12 primes as bases decide primality exactly for every `n` below `3.18 * 10^23`, so the test is deterministic here. For composites use **Pollard's rho**: iterate `x -> x^2 + c (mod n)`; modulo a prime factor `p` the sequence falls into a cycle after about `sqrt(p)` steps, and when two terms `x` and `y` (a tortoise and a hare moving at speeds 1 and 2) agree modulo `p` but not modulo `n`, `gcd(|x - y|, n)` reveals `p` or a multiple of it. Taking one gcd per 64 steps of the product of the differences makes it fast; if a batch overshoots and the gcd comes out as `n`, replay that batch one step at a time, and if that still fails pick a different `c`. Recurse on both parts until all pieces are prime. Products modulo a 60-bit number need 128-bit arithmetic: `unsigned __int128` in C++, big integers in Python and JavaScript, a double-and-add multiplication in Java. The expected work per number is about `N^(1/4)` steps (a few tens of thousands for `N = 10^18`), far below `sqrt(N)`.",
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(1)"
+  },
+  "starter": {
+    "python": "import sys\nfrom math import gcd\ndata = sys.stdin.read().split()\nq = int(data[0])\n# for each number: factor it (Miller-Rabin to stop, Pollard's rho to split), then multiply (exponent + 1)\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length);\nconst q = Number(tok[0]);\n// numbers reach 10^18: read them with BigInt(tok[i])\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));\n        // multiplication modulo n needs care: a * b overflows a long\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef unsigned long long ull;\nint main() {\n    int q;\n    scanf(\"%d\", &q);\n    // use unsigned __int128 for (a * b) % n\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\nfrom math import gcd\ndata = sys.stdin.read().split()\nq = int(data[0])\nBASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)      # deterministic for every n below 3.18 * 10^23, far above 10^18\n\ndef is_prime(n):\n    if n < 2:\n        return False\n    for p in BASES:\n        if n % p == 0:\n            return n == p\n    d, s = n - 1, 0\n    while d % 2 == 0:\n        d //= 2\n        s += 1\n    for a in BASES:\n        x = pow(a, d, n)\n        if x == 1 or x == n - 1:\n            continue\n        for _ in range(s - 1):\n            x = x * x % n\n            if x == n - 1:\n                break\n        else:\n            return False                                   # a witnesses that n is composite\n    return True\n\ndef pollard_rho(n):\n    \"\"\"Return a non-trivial factor of the odd composite n; products of differences are batched before each gcd.\"\"\"\n    c = 1\n    while True:\n        x = y = 2\n        g = 1\n        while g == 1:\n            xs, ys = x, y                                  # remember where this batch started\n            prod = 1\n            for _ in range(64):\n                x = (x * x + c) % n\n                y = (y * y + c) % n\n                y = (y * y + c) % n                        # y runs twice as fast: Floyd's cycle detection\n                prod = prod * abs(x - y) % n\n            g = gcd(prod, n)\n            if g == n:                                     # the batch overshot: every prime cycled inside it\n                x, y = xs, ys\n                g = 1\n                while g == 1:                              # replay it step by step to catch the first collision\n                    x = (x * x + c) % n\n                    y = (y * y + c) % n\n                    y = (y * y + c) % n\n                    g = gcd(abs(x - y), n)\n                break\n        if g != n:\n            return g\n        c += 1                                             # this polynomial failed (a cycle closed on all primes at once)\n\ndef factor(n, counts):\n    if n == 1:\n        return\n    if is_prime(n):\n        counts[n] = counts.get(n, 0) + 1\n        return\n    d = pollard_rho(n)\n    factor(d, counts)\n    factor(n // d, counts)\n\nout = []\nfor i in range(q):\n    n = int(data[1 + i])\n    counts = {}\n    for p in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47):     # strip tiny primes quickly\n        while n % p == 0:\n            counts[p] = counts.get(p, 0) + 1\n            n //= p\n    factor(n, counts)\n    divisors = 1\n    for e in counts.values():\n        divisors *= e + 1\n    out.append(divisors)\nprint(\"\\n\".join(map(str, out)))\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length);\nconst q = Number(tok[0]);\nconst BASES = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n];\nfunction gcd(a, b) { while (b) { [a, b] = [b, a % b]; } return a; }\nfunction powmod(b, e, m) {\n  let r = 1n; b %= m;\n  while (e > 0n) { if (e & 1n) r = r * b % m; b = b * b % m; e >>= 1n; }\n  return r;\n}\nfunction isPrime(n) {\n  if (n < 2n) return false;\n  for (const p of BASES) if (n % p === 0n) return n === p;\n  let d = n - 1n, s = 0;\n  while (d % 2n === 0n) { d /= 2n; s++; }\n  for (const a of BASES) {\n    let x = powmod(a, d, n);\n    if (x === 1n || x === n - 1n) continue;\n    let composite = true;\n    for (let i = 0; i < s - 1; i++) {\n      x = x * x % n;\n      if (x === n - 1n) { composite = false; break; }\n    }\n    if (composite) return false;\n  }\n  return true;\n}\nfunction abs(a) { return a < 0n ? -a : a; }\nfunction pollardRho(n) {\n  let c = 1n;\n  for (;;) {\n    let x = 2n, y = 2n, g = 1n;\n    while (g === 1n) {\n      const xs = x, ys = y;\n      let prod = 1n;\n      for (let i = 0; i < 64; i++) {\n        x = (x * x + c) % n;\n        y = (y * y + c) % n;\n        y = (y * y + c) % n;\n        prod = prod * abs(x - y) % n;\n      }\n      g = gcd(prod, n);\n      if (g === n) {\n        x = xs; y = ys; g = 1n;\n        while (g === 1n) {\n          x = (x * x + c) % n;\n          y = (y * y + c) % n;\n          y = (y * y + c) % n;\n          g = gcd(abs(x - y), n);\n        }\n        break;\n      }\n    }\n    if (g !== n) return g;\n    c += 1n;\n  }\n}\nfunction factor(n, counts) {\n  if (n === 1n) return;\n  if (isPrime(n)) { const k = n.toString(); counts.set(k, (counts.get(k) || 0) + 1); return; }\n  const d = pollardRho(n);\n  factor(d, counts);\n  factor(n / d, counts);\n}\nconst out = [];\nfor (let i = 0; i < q; i++) {\n  let n = BigInt(tok[1 + i]);\n  const counts = new Map();\n  for (const p of [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n, 41n, 43n, 47n]) {\n    while (n % p === 0n) { const k = p.toString(); counts.set(k, (counts.get(k) || 0) + 1); n /= p; }\n  }\n  factor(n, counts);\n  let divisors = 1;\n  for (const e of counts.values()) divisors *= e + 1;\n  out.push(divisors);\n}\nconsole.log(out.join(\"\\n\"));\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    static final long[] BASES = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};\n\n    // (a * b) mod m by double-and-add: every intermediate value stays below 2 * m <= 2 * 10^18 < 2^63\n    static long mulmod(long a, long b, long m) {\n        long result = 0;\n        a %= m;\n        while (b > 0) {\n            if ((b & 1) == 1) { result += a; if (result >= m) result -= m; }\n            a += a;\n            if (a >= m) a -= m;\n            b >>= 1;\n        }\n        return result;\n    }\n\n    static long powmod(long b, long e, long m) {\n        long r = 1;\n        b %= m;\n        while (e > 0) {\n            if ((e & 1) == 1) r = mulmod(r, b, m);\n            b = mulmod(b, b, m);\n            e >>= 1;\n        }\n        return r;\n    }\n\n    static long gcd(long a, long b) { while (b != 0) { long t = a % b; a = b; b = t; } return a; }\n\n    static boolean isPrime(long n) {\n        if (n < 2) return false;\n        for (long p : BASES) if (n % p == 0) return n == p;\n        long d = n - 1;\n        int s = 0;\n        while (d % 2 == 0) { d /= 2; s++; }\n        for (long a : BASES) {\n            long x = powmod(a, d, n);\n            if (x == 1 || x == n - 1) continue;\n            boolean composite = true;\n            for (int i = 0; i < s - 1; i++) {\n                x = mulmod(x, x, n);\n                if (x == n - 1) { composite = false; break; }\n            }\n            if (composite) return false;\n        }\n        return true;\n    }\n\n    static long pollardRho(long n) {\n        long c = 1;\n        while (true) {\n            long x = 2, y = 2, g = 1;\n            while (g == 1) {\n                long xs = x, ys = y;\n                long prod = 1;\n                for (int i = 0; i < 64; i++) {\n                    x = (mulmod(x, x, n) + c) % n;\n                    y = (mulmod(y, y, n) + c) % n;\n                    y = (mulmod(y, y, n) + c) % n;\n                    prod = mulmod(prod, Math.abs(x - y), n);\n                }\n                g = gcd(prod, n);\n                if (g == n) {\n                    x = xs; y = ys; g = 1;\n                    while (g == 1) {\n                        x = (mulmod(x, x, n) + c) % n;\n                        y = (mulmod(y, y, n) + c) % n;\n                        y = (mulmod(y, y, n) + c) % n;\n                        g = gcd(Math.abs(x - y), n);\n                    }\n                    break;\n                }\n            }\n            if (g != n) return g;\n            c++;\n        }\n    }\n\n    static void factor(long n, TreeMap<Long, Integer> counts) {\n        if (n == 1) return;\n        if (isPrime(n)) { counts.merge(n, 1, Integer::sum); return; }\n        long d = pollardRho(n);\n        factor(d, counts);\n        factor(n / d, counts);\n    }\n\n    public static void main(String[] args) throws IOException {\n        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));\n        StringTokenizer st = new StringTokenizer(br.readLine());\n        int q = Integer.parseInt(st.nextToken());\n        StringBuilder out = new StringBuilder();\n        long[] small = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47};\n        for (int i = 0; i < q; i++) {\n            long n = Long.parseLong(br.readLine().trim());\n            TreeMap<Long, Integer> counts = new TreeMap<>();\n            for (long p : small) while (n % p == 0) { counts.merge(p, 1, Integer::sum); n /= p; }\n            factor(n, counts);\n            long divisors = 1;\n            for (int e : counts.values()) divisors *= e + 1;\n            out.append(divisors).append('\\n');\n        }\n        System.out.print(out);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef unsigned long long ull;\ntypedef __uint128_t u128;\n\null mulmod(ull a, ull b, ull m) { return (u128)a * b % m; }\null powmod(ull b, ull e, ull m) {\n    ull r = 1;\n    b %= m;\n    while (e) {\n        if (e & 1) r = mulmod(r, b, m);\n        b = mulmod(b, b, m);\n        e >>= 1;\n    }\n    return r;\n}\nconst ull BASES[] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};\n\nbool is_prime(ull n) {\n    if (n < 2) return false;\n    for (ull p : BASES) if (n % p == 0) return n == p;\n    ull d = n - 1;\n    int s = 0;\n    while (d % 2 == 0) { d /= 2; s++; }\n    for (ull a : BASES) {\n        ull x = powmod(a, d, n);\n        if (x == 1 || x == n - 1) continue;\n        bool composite = true;\n        for (int i = 0; i < s - 1; i++) {\n            x = mulmod(x, x, n);\n            if (x == n - 1) { composite = false; break; }\n        }\n        if (composite) return false;\n    }\n    return true;\n}\n\null pollard_rho(ull n) {\n    ull c = 1;\n    while (true) {\n        ull x = 2, y = 2, g = 1;\n        while (g == 1) {\n            ull xs = x, ys = y;\n            ull prod = 1;\n            for (int i = 0; i < 64; i++) {\n                x = (mulmod(x, x, n) + c) % n;\n                y = (mulmod(y, y, n) + c) % n;\n                y = (mulmod(y, y, n) + c) % n;\n                prod = mulmod(prod, x > y ? x - y : y - x, n);\n            }\n            g = std::__gcd(prod, n);\n            if (g == n) {\n                x = xs; y = ys; g = 1;\n                while (g == 1) {\n                    x = (mulmod(x, x, n) + c) % n;\n                    y = (mulmod(y, y, n) + c) % n;\n                    y = (mulmod(y, y, n) + c) % n;\n                    g = std::__gcd(x > y ? x - y : y - x, n);\n                }\n                break;\n            }\n        }\n        if (g != n) return g;\n        c++;\n    }\n}\n\nvoid factor(ull n, map<ull, int>& counts) {\n    if (n == 1) return;\n    if (is_prime(n)) { counts[n]++; return; }\n    ull d = pollard_rho(n);\n    factor(d, counts);\n    factor(n / d, counts);\n}\n\nint main() {\n    int q;\n    scanf(\"%d\", &q);\n    while (q--) {\n        ull n;\n        scanf(\"%llu\", &n);\n        map<ull, int> counts;\n        for (ull p : {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47})\n            while (n % p == 0) { counts[p]++; n /= p; }\n        factor(n, counts);\n        long long divisors = 1;\n        for (auto& kv : counts) divisors *= kv.second + 1;\n        printf(\"%lld\\n\", divisors);\n    }\n    return 0;\n}\n"
+  }
+}
