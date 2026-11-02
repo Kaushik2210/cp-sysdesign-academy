@@ -1,0 +1,337 @@
+---
+title: Cross Product, Orientation and Polygons
+track: cp
+module: geometry
+order: 1
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/math-basics/gcd-and-lcm, cp/arrays-and-windows/prefix-sums]
+tags: [geometry, cross-product, orientation, polygon, point-in-polygon, shoelace]
+type: lesson
+problems: [m16-garden-fence]
+furtherReading:
+  - title: cp-algorithms, Basic Geometry
+    url: https://cp-algorithms.com/geometry/basic-geometry.html
+  - title: cp-algorithms, Oriented area of a triangle
+    url: https://cp-algorithms.com/geometry/oriented-triangle-area.html
+  - title: CSES Problem Set, Point in Polygon
+    url: https://cses.fi/problemset/task/2192
+---
+
+## Intuition
+
+Geometry problems have a reputation for being nasty, and almost all of the nastiness has one source: **floating-point numbers**. `0.1 + 0.2` is not `0.3`, two lines that should meet at a point miss by `1e-12`, and a comparison such as "are these three points on one line?" suddenly returns the wrong answer.
+
+The cure is simple and powerful: **stay in integers**. If the input coordinates are integers, then almost every question a contest asks (which side of a line? do two segments cross? is a point inside a polygon? how big is the area?) can be answered *exactly* with one operation, the **cross product**, which only multiplies and subtracts integers. No division, no square roots, no epsilons.
+
+This lesson builds the toolkit: vectors, the dot and cross product, orientation tests, segment intersection, polygon area, and point in polygon.
+
+## Points and vectors
+
+Treat a point `(x, y)` as a vector from the origin. The vector from point `a` to point `b` is `b − a = (bx − ax, by − ay)`.
+
+Two products of vectors `u = (ux, uy)` and `v = (vx, vy)` do all the work:
+
+```text
+dot(u, v)   = ux * vx + uy * vy         = |u| |v| cos(angle)      sign tells acute / right / obtuse
+cross(u, v) = ux * vy - uy * vx         = |u| |v| sin(angle)      sign tells which way v turns from u
+```
+
+- `cross(u, v) > 0`: `v` is **counter-clockwise** from `u` (a left turn).
+- `cross(u, v) < 0`: `v` is clockwise from `u` (a right turn).
+- `cross(u, v) = 0`: `u` and `v` are **parallel** (collinear if they share a point).
+- `|cross(u, v)|` is the area of the parallelogram spanned by `u` and `v`, so **half of it is the area of the triangle**.
+
+## Orientation: the one test to remember
+
+Given three points `a, b, c`, the **orientation** is the sign of
+
+```text
+cross(b - a, c - a)  =  (bx - ax)*(cy - ay) - (by - ay)*(cx - ax)
+```
+
+| sign | meaning |
+| --- | --- |
+| `> 0` | `a → b → c` turns **left** (counter-clockwise) |
+| `< 0` | turns **right** (clockwise) |
+| `= 0` | `a, b, c` are **collinear** |
+
+Everything below is built from this single function.
+
+## Is a point on a segment?
+
+`p` lies on the segment `ab` exactly when the orientation of `(a, b, p)` is `0` **and** `p` lies in the bounding box of `a` and `b`:
+
+```text
+cross(b - a, p - a) == 0   and   min(ax, bx) <= px <= max(ax, bx)   and   min(ay, by) <= py <= max(ay, by)
+```
+
+The collinearity test alone would accept points on the whole *line*; the bounding box restricts it to the segment.
+
+## Do two segments intersect?
+
+Segments `ab` and `cd` intersect when `c` and `d` are on **opposite sides** of line `ab`, and `a` and `b` are on opposite sides of line `cd`:
+
+```text
+d1 = orient(a, b, c)    d2 = orient(a, b, d)    d3 = orient(c, d, a)    d4 = orient(c, d, b)
+
+proper crossing:    d1 * d2 < 0   and   d3 * d4 < 0            (use signs, not the product, to avoid overflow)
+touching cases:     if some d is 0, check that point lies on the other segment (on_segment test)
+```
+
+Do the zero cases carefully: a segment can end exactly on another, or two segments can be collinear and overlap. A complete test is "proper crossing, or any endpoint lies on the other segment".
+
+## Polygon area: the shoelace formula
+
+For a polygon with corners `p0, p1, ..., p(n−1)` in order,
+
+```text
+2 * area = | sum over i of cross(p_i, p_(i+1)) |  =  | sum over i of ( x_i * y_(i+1) - x_(i+1) * y_i ) |
+```
+
+with indices taken modulo `n`. Keep the **doubled area**: it is always an integer, so there are no fractions. The signed sum is positive when the corners go counter-clockwise and negative when clockwise, which also tells you the orientation of the polygon.
+
+## Point in polygon: ray casting
+
+For a **simple** polygon (no self-intersections) and a point `p`:
+
+1. If `p` lies on some side: it is on the **boundary**.
+2. Otherwise cast a ray from `p` to the right (`+x`) and count how many sides it crosses. **Odd** means inside, **even** means outside.
+
+Corners that lie exactly on the ray would be counted twice or not at all. The standard fix is a **half-open rule**: count a side only if one endpoint is **strictly above** the ray's `y` and the other is **not**:
+
+```text
+for each side (a, b):
+    if (a.y > p.y) != (b.y > p.y):                        # the side straddles the line y = p.y
+        crossing is to the right of p  <=>  cross(b - a, p - a) has the sign of (b.y - a.y)
+        if so: toggle inside
+```
+
+The sign trick (positive for an upward side, negative for a downward side) avoids computing the intersection point with a division, so everything stays in integers.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def cross(o, a, b):                                     # orientation of o -> a -> b
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+def on_segment(a, b, p):
+    return cross(a, b, p) == 0 and min(a[0], b[0]) <= p[0] <= max(a[0], b[0]) and min(a[1], b[1]) <= p[1] <= max(a[1], b[1])
+
+def sign(x): return (x > 0) - (x < 0)
+
+def segments_intersect(a, b, c, d):
+    d1, d2 = sign(cross(a, b, c)), sign(cross(a, b, d))
+    d3, d4 = sign(cross(c, d, a)), sign(cross(c, d, b))
+    if d1 * d2 < 0 and d3 * d4 < 0:
+        return True                                     # they cross properly
+    return on_segment(a, b, c) or on_segment(a, b, d) or on_segment(c, d, a) or on_segment(c, d, b)
+
+def twice_area(poly):
+    n = len(poly)
+    return abs(sum(poly[i][0] * poly[(i + 1) % n][1] - poly[(i + 1) % n][0] * poly[i][1] for i in range(n)))
+
+def locate(poly, p):                                    # "INSIDE", "OUTSIDE" or "BOUNDARY"
+    n = len(poly)
+    inside = False
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        if on_segment(a, b, p):
+            return "BOUNDARY"
+        if (a[1] > p[1]) != (b[1] > p[1]):
+            c = cross(a, b, p)
+            if (b[1] > a[1] and c > 0) or (b[1] < a[1] and c < 0):
+                inside = not inside
+    return "INSIDE" if inside else "OUTSIDE"
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+typedef pair<ll, ll> P;
+ll cross(P o, P a, P b) { return (a.first - o.first) * (b.second - o.second) - (a.second - o.second) * (b.first - o.first); }
+int sgn(ll x) { return (x > 0) - (x < 0); }
+bool onSegment(P a, P b, P p) {
+    return cross(a, b, p) == 0 && min(a.first, b.first) <= p.first && p.first <= max(a.first, b.first)
+        && min(a.second, b.second) <= p.second && p.second <= max(a.second, b.second);
+}
+bool segmentsIntersect(P a, P b, P c, P d) {
+    int d1 = sgn(cross(a, b, c)), d2 = sgn(cross(a, b, d)), d3 = sgn(cross(c, d, a)), d4 = sgn(cross(c, d, b));
+    if (d1 * d2 < 0 && d3 * d4 < 0) return true;
+    return onSegment(a, b, c) || onSegment(a, b, d) || onSegment(c, d, a) || onSegment(c, d, b);
+}
+ll twiceArea(const vector<P>& poly) {
+    ll s = 0; int n = poly.size();
+    for (int i = 0; i < n; i++) s += poly[i].first * poly[(i + 1) % n].second - poly[(i + 1) % n].first * poly[i].second;
+    return llabs(s);
+}
+string locate(const vector<P>& poly, P p) {
+    int n = poly.size(); bool inside = false;
+    for (int i = 0; i < n; i++) {
+        P a = poly[i], b = poly[(i + 1) % n];
+        if (onSegment(a, b, p)) return "BOUNDARY";
+        if ((a.second > p.second) != (b.second > p.second)) {
+            ll c = cross(a, b, p);
+            if ((b.second > a.second && c > 0) || (b.second < a.second && c < 0)) inside = !inside;
+        }
+    }
+    return inside ? "INSIDE" : "OUTSIDE";
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long cross(long[] o, long[] a, long[] b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
+static boolean onSegment(long[] a, long[] b, long[] p) {
+    return cross(a, b, p) == 0 && Math.min(a[0], b[0]) <= p[0] && p[0] <= Math.max(a[0], b[0])
+        && Math.min(a[1], b[1]) <= p[1] && p[1] <= Math.max(a[1], b[1]);
+}
+static boolean segmentsIntersect(long[] a, long[] b, long[] c, long[] d) {
+    long d1 = Long.signum(cross(a, b, c)), d2 = Long.signum(cross(a, b, d));
+    long d3 = Long.signum(cross(c, d, a)), d4 = Long.signum(cross(c, d, b));
+    if (d1 * d2 < 0 && d3 * d4 < 0) return true;
+    return onSegment(a, b, c) || onSegment(a, b, d) || onSegment(c, d, a) || onSegment(c, d, b);
+}
+static long twiceArea(long[][] poly) {
+    long s = 0; int n = poly.length;
+    for (int i = 0; i < n; i++) s += poly[i][0] * poly[(i + 1) % n][1] - poly[(i + 1) % n][0] * poly[i][1];
+    return Math.abs(s);
+}
+static String locate(long[][] poly, long[] p) {
+    int n = poly.length; boolean inside = false;
+    for (int i = 0; i < n; i++) {
+        long[] a = poly[i], b = poly[(i + 1) % n];
+        if (onSegment(a, b, p)) return "BOUNDARY";
+        if ((a[1] > p[1]) != (b[1] > p[1])) {
+            long c = cross(a, b, p);
+            if ((b[1] > a[1] && c > 0) || (b[1] < a[1] && c < 0)) inside = !inside;
+        }
+    }
+    return inside ? "INSIDE" : "OUTSIDE";
+}
+```
+
+</Tab>
+</Tabs>
+
+Test every function against independent methods (exact fractions for the intersection point, and an angle-sum for point in polygon):
+
+<CodeRunner language="python" code={`import math, random
+from fractions import Fraction
+
+def cross(o, a, b):
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+def on_segment(a, b, p):
+    return cross(a, b, p) == 0 and min(a[0], b[0]) <= p[0] <= max(a[0], b[0]) and min(a[1], b[1]) <= p[1] <= max(a[1], b[1])
+
+def sign(x): return (x > 0) - (x < 0)
+
+def segments_intersect(a, b, c, d):
+    d1, d2 = sign(cross(a, b, c)), sign(cross(a, b, d))
+    d3, d4 = sign(cross(c, d, a)), sign(cross(c, d, b))
+    if d1 * d2 < 0 and d3 * d4 < 0:
+        return True
+    return on_segment(a, b, c) or on_segment(a, b, d) or on_segment(c, d, a) or on_segment(c, d, b)
+
+def twice_area(poly):
+    n = len(poly)
+    return abs(sum(poly[i][0] * poly[(i + 1) % n][1] - poly[(i + 1) % n][0] * poly[i][1] for i in range(n)))
+
+def locate(poly, p):
+    n = len(poly)
+    inside = False
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        if on_segment(a, b, p):
+            return "BOUNDARY"
+        if (a[1] > p[1]) != (b[1] > p[1]):
+            c = cross(a, b, p)
+            if (b[1] > a[1] and c > 0) or (b[1] < a[1] and c < 0):
+                inside = not inside
+    return "INSIDE" if inside else "OUTSIDE"
+
+def intersect_exact(a, b, c, d):
+    # independent: solve for the intersection point with exact fractions, then check it lies on both segments
+    r = (b[0] - a[0], b[1] - a[1]); s = (d[0] - c[0], d[1] - c[1])
+    den = r[0] * s[1] - r[1] * s[0]
+    if den == 0:
+        if cross(a, b, c) != 0: return False
+        return on_segment(a, b, c) or on_segment(a, b, d) or on_segment(c, d, a) or on_segment(c, d, b)
+    t = Fraction((c[0] - a[0]) * s[1] - (c[1] - a[1]) * s[0], den)
+    u = Fraction((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0], den)
+    return 0 <= t <= 1 and 0 <= u <= 1
+
+def locate_angles(poly, p):
+    n = len(poly)
+    for i in range(n):
+        if on_segment(poly[i], poly[(i + 1) % n], p): return "BOUNDARY"
+    tot = 0.0
+    for i in range(n):
+        ax, ay = poly[i][0] - p[0], poly[i][1] - p[1]
+        bx, by = poly[(i + 1) % n][0] - p[0], poly[(i + 1) % n][1] - p[1]
+        tot += math.atan2(ax * by - ay * bx, ax * bx + ay * by)
+    return "INSIDE" if abs(tot) > math.pi else "OUTSIDE"
+
+print("triangle (0,0) (4,0) (0,3): twice the area =", twice_area([(0, 0), (4, 0), (0, 3)]), "(area 6)")
+print("orientation of (0,0) (1,0) (1,1):", sign(cross((0, 0), (1, 0), (1, 1))), "(+1 = left turn)")
+print("crossing X:", segments_intersect((0, 0), (4, 4), (0, 4), (4, 0)), " touching T:", segments_intersect((0, 0), (4, 0), (2, 0), (2, 3)), " parallel:", segments_intersect((0, 0), (4, 0), (0, 1), (4, 1)))
+
+random.seed(31)
+for _ in range(3000):
+    pts = [(random.randint(-5, 5), random.randint(-5, 5)) for _ in range(4)]
+    assert segments_intersect(*pts) == intersect_exact(*pts), pts
+print("3000 random segment pairs agree with the exact-fraction intersection test")
+
+def star(n, R):
+    while True:
+        s = {(random.randint(-R, R), random.randint(-R, R)) for _ in range(n)} - {(0, 0)}
+        ps = sorted(s, key=lambda p: math.atan2(p[1], p[0]))
+        if len({round(math.atan2(p[1], p[0]), 12) for p in ps}) == len(ps) and len(ps) >= 3:
+            return ps
+
+for _ in range(300):
+    poly = star(random.randint(3, 10), 12)
+    for _ in range(40):
+        p = (random.randint(-14, 14), random.randint(-14, 14))
+        assert locate(poly, p) == locate_angles(poly, p), (poly, p)
+print("300 random star-shaped polygons: ray casting agrees with the angle-sum method at every query")
+`} />
+
+## Pitfalls
+
+1. **Using floating point.** `float` comparisons and `atan2` produce wrong answers on exact boundaries. Stay in integers; if the input has decimals, scale them up (multiply by `10^k`) first.
+2. **Overflow.** A cross product multiplies two differences; for coordinates up to `10^9` those reach `2·10^9`, and the product `4·10^18` is *just* inside `long long`. Beyond that, use `__int128` or Python integers. In JavaScript, plain numbers are exact only up to `2^53`: keep coordinates below about `10^6`, or use `BigInt`.
+3. **Multiplying signs of large crosses.** Compare `sign(a) * sign(b)` instead of `a * b`, since the product of two large crosses can overflow.
+4. **Forgetting the bounding-box check.** Collinear is not the same as on the segment.
+5. **Corner cases in ray casting.** Without the half-open rule `(a.y > p.y) != (b.y > p.y)`, rays that pass through corners are double counted. Horizontal sides must never count; the rule excludes them automatically.
+6. **Treating boundary as inside (or outside) by accident.** Decide the boundary behaviour explicitly and test it *before* the crossing count.
+7. **Assuming the polygon is counter-clockwise.** The shoelace sum changes sign with orientation; take the absolute value, or normalise the orientation once.
+8. **Self-intersecting polygons.** Ray casting and the shoelace area assume a *simple* polygon; for others they compute different things (even-odd fill, signed area).
+
+## Practice
+
+<Problem id="m16-garden-fence" />
+
+## Problem ladder
+
+- [Point in Polygon](https://cses.fi/problemset/task/2192) (CSES): this lesson exactly.
+- [Polygon Area](https://cses.fi/problemset/task/2191) (CSES): the shoelace formula.
+- [Line Segment Intersection](https://cses.fi/problemset/task/2190) (CSES): the full segment test with all the touching cases.
+- [Point Location Test](https://cses.fi/problemset/task/2189) (CSES): the orientation test on its own.
+
+## Quiz
+
+<Quiz id="cp-m16-cross-product" tags={["geometry", "cross-product"]} questions={[
+  { type: "mcq", q: "What does cross(b - a, c - a) > 0 tell you?", options: ["a, b, c are collinear", "a to b to c turns left (counter-clockwise)", "a to b to c turns right", "c is the midpoint"], answer: 1, explain: "A positive cross product means the second vector is counter-clockwise from the first: a left turn." },
+  { type: "mcq", q: "Why work in integers instead of floating point for geometry?", options: ["Integers are faster to print", "Floating point cannot decide exact questions like collinearity reliably, while integer cross products are exact", "Floating point cannot represent negatives", "It is required by the judge"], answer: 1, explain: "Exact predicates avoid epsilon comparisons and the wrong answers they cause on boundary cases." },
+  { type: "predict", q: "Triangle (0,0), (6,0), (0,4). What is twice its area from the shoelace formula?", code: "pts = [(0, 0), (6, 0), (0, 4)]\nn = len(pts)\nprint(abs(sum(pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1] for i in range(n))))", options: ["10", "12", "24", "48"], answer: 2, explain: "The area is 6 * 4 / 2 = 12, so twice the area is 24." },
+  { type: "multi", q: "Which are required for a correct on-segment test of p on segment ab?", options: ["cross(b - a, p - a) == 0", "p within the bounding box of a and b", "p must be an integer point only", "a and b must be distinct from p"], answer: [0, 1], explain: "Collinearity plus the bounding box is exactly the condition; endpoints are allowed." }
+]} />
