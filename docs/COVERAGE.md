@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 207 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 210 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -44,9 +44,9 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 10 Greedy | Complete (5) | 5 |
 | 11 Graphs: shortest paths and connectivity | Partial (9 lessons: Dijkstra, union-find, minimum spanning tree, topological sort, Bellman-Ford, bipartite graphs, maximum flow with Dinic, strongly connected components, bridges and articulation points; no min-cost flow, matching algorithms or block-cut trees yet) | 9 |
 | 12 Range queries and segment trees | Partial (4 lessons: segment tree, Fenwick tree, sparse table, lazy propagation; no persistent trees or sqrt decomposition yet) | 4 |
-| 13 Dynamic programming | Partial (8 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths, bitmask DP, interval DP, digit DP; no DP optimisations (convex hull trick, divide and conquer) lesson yet) | 8 |
-| 14 String matching | Partial (2 lessons: KMP, Z-function; no suffix structures yet) | 2 |
-| 15 Trees and ancestors | Partial (3 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter; no rerooting or heavy-light decomposition yet) | 3 |
+| 13 Dynamic programming | Partial (9 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths, bitmask DP, interval DP, digit DP, DP optimisations (convex hull trick, divide and conquer, Knuth); no Aliens trick or Li Chao tree implementation yet) | 9 |
+| 14 String matching | Partial (3 lessons: KMP, Z-function, suffix arrays with LCP; no suffix automaton, Aho-Corasick or hashing lesson yet) | 3 |
+| 15 Trees and ancestors | Partial (4 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter, heavy-light decomposition; no rerooting or centroid decomposition yet) | 4 |
 | 16-26 (Levels 2-3) | Planned | 0 |
 
 ## Track 2: System Design
