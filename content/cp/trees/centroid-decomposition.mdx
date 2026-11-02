@@ -1,0 +1,333 @@
+---
+title: Centroid Decomposition
+track: cp
+module: trees
+order: 6
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/trees/tree-dp-and-diameter, cp/trees/heavy-light-decomposition]
+tags: [trees, centroid-decomposition, divide-and-conquer, paths, counting]
+type: lesson
+problems: [m15-fixed-distance]
+furtherReading:
+  - title: cp-algorithms, Centroid Decomposition of a Tree
+    url: https://cp-algorithms.com/graph/centroid-decomposition.html
+  - title: CSES Problem Set, Fixed-Length Paths I
+    url: https://cses.fi/problemset/task/2080
+  - title: Codeforces, Ciel the Commander (problem 321C)
+    url: https://codeforces.com/problemset/problem/321/C
+---
+
+## Intuition
+
+Many tree questions are about **all paths**: how many paths have length exactly `K`, what is the longest path with a given property, which vertex is the nearest marked one. Starting a search from every vertex costs `O(n^2)`.
+
+Divide and conquer works on arrays by cutting in the middle. On a tree the right place to cut is the **centroid**, the vertex whose removal splits the tree into pieces that are all **at most half** as big. Every path in the tree then does one of two things: it **passes through the centroid**, or it lies **entirely inside one piece**. Paths through the centroid are easy to handle together, since they all share that one vertex. The other paths are the same problem on smaller trees, and each vertex is in only `log n` of those subproblems because pieces halve.
+
+## Definition
+
+A **centroid** of a tree with `m` vertices is a vertex `c` such that every component of the tree minus `c` has at most `m / 2` vertices. A centroid always exists: start anywhere and keep moving to a neighbour whose side holds more than `m / 2` vertices; the walk cannot go back and must stop.
+
+**Decomposition.**
+
+```text
+solve(component):
+    c = centroid of the component
+    count / aggregate all paths that pass through c        # cost: O(size of the component)
+    remove c
+    for each piece left:  solve(piece)
+```
+
+Every removal at least halves the component size, so the recursion has depth `O(log n)` and each vertex belongs to `O(log n)` components. If the work per component is linear in its size, the total is `O(n log n)`.
+
+The vertices picked as centroids form the **centroid tree**: each centroid's parent is the centroid of the component it was removed from. It has depth at most `log2(n) + 1`, and for any two vertices `u`, `v`, the path between them passes through their lowest common ancestor in the centroid tree.
+
+**Counting paths of length exactly `K` through `c`.** Keep `cnt[d]`, the number of vertices at depth `d` (distance from `c`) in the branches handled so far, starting with `cnt[0] = 1` for `c` itself. For each branch of `c`:
+
+1. For every vertex at depth `d` in the branch, add `cnt[K - d]` to the answer: these are partners in **earlier** branches or `c`.
+2. Only after the whole branch is scanned, add its depths into `cnt`.
+
+Step 2 must come after step 1, otherwise two vertices of the **same** branch would be paired, and their path does not go through `c`.
+
+## Example, step by step
+
+Tree with 5 vertices and edges `1-2, 1-3, 3-4, 3-5`; count pairs at distance `K = 2`.
+
+Root the component at 1: subtree sizes are `1: 5`, `3: 3`, others 1 or 1. The child `3` holds `3 > 5 / 2` vertices, so move to 3; its children hold 1 each, so the centroid is **3**.
+
+Branches of 3: `{1, 2}` (via 1), `{4}`, `{5}`. Depths from 3: vertex 1 at 1, vertex 2 at 2, vertices 4 and 5 at 1.
+
+| branch | scan | pairs found | `cnt` after the branch |
+| --- | --- | --- | --- |
+| start | | | `cnt[0] = 1` |
+| `{1, 2}` | vertex 1 (d = 1): `cnt[1] = 0`; vertex 2 (d = 2): `cnt[0] = 1` | 1: `(2, 3)` | `cnt[1] = 1`, `cnt[2] = 1` |
+| `{4}` | vertex 4 (d = 1): `cnt[1] = 1` | 1: `(1, 4)` | `cnt[1] = 2` |
+| `{5}` | vertex 5 (d = 1): `cnt[1] = 2` | 2: `(1, 5)`, `(4, 5)` | `cnt[1] = 3` |
+
+Four pairs, all through centroid 3. Then 3 is removed and the pieces `{1, 2}`, `{4}`, `{5}` are processed the same way; none contains a pair at distance 2. Answer: **4**.
+
+## Code
+
+Recursion on a path-shaped tree is `n` deep, so this version uses a stack of components and BFS.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+removed = [False] * (n + 1)
+par = [0] * (n + 1); sz = [0] * (n + 1)
+ans = 0
+stack = [1]
+while stack:
+    r = stack.pop()
+    comp = [r]; par[r] = 0
+    for v in comp:                                   # BFS the current component
+        for to in adj[v]:
+            if not removed[to] and to != par[v]:
+                par[to] = v; comp.append(to)
+    total = len(comp)
+    for v in comp: sz[v] = 1
+    for v in reversed(comp):
+        if par[v]: sz[par[v]] += sz[v]
+    c = r                                            # find the centroid
+    while True:
+        nxt = 0
+        for to in adj[c]:
+            if not removed[to] and to != par[c] and sz[to] * 2 > total:
+                nxt = to; break
+        if not nxt: break
+        c = nxt
+    cnt = [0] * (total + 1); cnt[0] = 1
+    for to in adj[c]:                                # paths through c, branch by branch
+        if removed[to]: continue
+        q = [(to, c, 1)]; depths = []
+        for v, p, d in q:
+            depths.append(d)
+            if 0 <= K - d <= total: ans += cnt[K - d]
+            for nb in adj[v]:
+                if not removed[nb] and nb != p: q.append((nb, v, d + 1))
+        for d in depths: cnt[d] += 1                 # after the branch has been counted
+    removed[c] = True
+    for to in adj[c]:
+        if not removed[to]: stack.append(to)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<bool> removed(n + 1, false);
+vector<int> par(n + 1), sz(n + 1), comp(n), qv(n), qp(n), qd(n);
+long long ans = 0;
+vector<int> stack_ = {1};
+while (!stack_.empty()) {
+    int r = stack_.back(); stack_.pop_back();
+    int total = 0;
+    comp[total++] = r; par[r] = 0;
+    for (int i = 0; i < total; i++)
+        for (int to : adj[comp[i]]) if (!removed[to] && to != par[comp[i]]) { par[to] = comp[i]; comp[total++] = to; }
+    for (int i = 0; i < total; i++) sz[comp[i]] = 1;
+    for (int i = total - 1; i >= 0; i--) if (par[comp[i]]) sz[par[comp[i]]] += sz[comp[i]];
+    int c = r;
+    while (true) {
+        int nxt = 0;
+        for (int to : adj[c]) if (!removed[to] && to != par[c] && sz[to] * 2 > total) { nxt = to; break; }
+        if (!nxt) break;
+        c = nxt;
+    }
+    vector<long long> cnt(total + 1, 0); cnt[0] = 1;
+    for (int first : adj[c]) {
+        if (removed[first]) continue;
+        int qs = 0; qv[qs] = first; qp[qs] = c; qd[qs] = 1; qs++;
+        for (int i = 0; i < qs; i++) {
+            int v = qv[i], p = qp[i], d = qd[i];
+            if (K - d >= 0 && K - d <= total) ans += cnt[K - d];
+            for (int nb : adj[v]) if (!removed[nb] && nb != p) { qv[qs] = nb; qp[qs] = v; qd[qs] = d + 1; qs++; }
+        }
+        for (int i = 0; i < qs; i++) cnt[qd[i]]++;
+    }
+    removed[c] = true;
+    for (int to : adj[c]) if (!removed[to]) stack_.push_back(to);
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+boolean[] removed = new boolean[n + 1];
+int[] par = new int[n + 1], sz = new int[n + 1], comp = new int[n], qv = new int[n], qp = new int[n], qd = new int[n];
+long ans = 0;
+ArrayDeque<Integer> stack = new ArrayDeque<>();
+stack.push(1);
+while (!stack.isEmpty()) {
+    int r = stack.pop(), total = 0;
+    comp[total++] = r; par[r] = 0;
+    for (int i = 0; i < total; i++)
+        for (int to : adj[comp[i]]) if (!removed[to] && to != par[comp[i]]) { par[to] = comp[i]; comp[total++] = to; }
+    for (int i = 0; i < total; i++) sz[comp[i]] = 1;
+    for (int i = total - 1; i >= 0; i--) if (par[comp[i]] != 0) sz[par[comp[i]]] += sz[comp[i]];
+    int c = r;
+    while (true) {
+        int nxt = 0;
+        for (int to : adj[c]) if (!removed[to] && to != par[c] && sz[to] * 2 > total) { nxt = to; break; }
+        if (nxt == 0) break;
+        c = nxt;
+    }
+    long[] cnt = new long[total + 1];
+    cnt[0] = 1;
+    for (int first : adj[c]) {
+        if (removed[first]) continue;
+        int qs = 0; qv[qs] = first; qp[qs] = c; qd[qs] = 1; qs++;
+        for (int i = 0; i < qs; i++) {
+            int v = qv[i], p = qp[i], d = qd[i];
+            if (K - d >= 0 && K - d <= total) ans += cnt[K - d];
+            for (int nb : adj[v]) if (!removed[nb] && nb != p) { qv[qs] = nb; qp[qs] = v; qd[qs] = d + 1; qs++; }
+        }
+        for (int i = 0; i < qs; i++) cnt[qd[i]]++;
+    }
+    removed[c] = true;
+    for (int to : adj[c]) if (!removed[to]) stack.push(to);
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it with a trace of the first example, and compare with a brute force that does a BFS from every vertex:
+
+<CodeRunner language="python" code={`import random
+
+def count_pairs(n, K, edges):
+    adj = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        adj[u].append(v)
+        adj[v].append(u)
+    removed = [False] * (n + 1)
+    par = [0] * (n + 1)
+    sz = [0] * (n + 1)
+    ans = 0
+    trace = []
+    stack = [1]
+    while stack:
+        r = stack.pop()
+        comp = [r]
+        par[r] = 0
+        for v in comp:
+            for to in adj[v]:
+                if not removed[to] and to != par[v]:
+                    par[to] = v
+                    comp.append(to)
+        total = len(comp)
+        for v in comp:
+            sz[v] = 1
+        for v in reversed(comp):
+            if par[v]:
+                sz[par[v]] += sz[v]
+        c = r
+        while True:
+            nxt = 0
+            for to in adj[c]:
+                if not removed[to] and to != par[c] and sz[to] * 2 > total:
+                    nxt = to
+                    break
+            if not nxt:
+                break
+            c = nxt
+        cnt = [0] * (total + 1)
+        cnt[0] = 1
+        found = 0
+        for to in adj[c]:
+            if removed[to]:
+                continue
+            q = [(to, c, 1)]
+            depths = []
+            for v, p, d in q:
+                depths.append(d)
+                if 0 <= K - d <= total:
+                    ans += cnt[K - d]
+                    found += cnt[K - d]
+                for nb in adj[v]:
+                    if not removed[nb] and nb != p:
+                        q.append((nb, v, d + 1))
+            for d in depths:
+                cnt[d] += 1
+        trace.append((sorted(comp), c, found))
+        removed[c] = True
+        for to in adj[c]:
+            if not removed[to]:
+                stack.append(to)
+    return ans, trace
+
+def brute_pairs(n, K, edges):
+    adj = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        adj[u].append(v)
+        adj[v].append(u)
+    total = 0
+    for s in range(1, n + 1):
+        dist = {s: 0}
+        q = [s]
+        for v in q:
+            for to in adj[v]:
+                if to not in dist:
+                    dist[to] = dist[v] + 1
+                    q.append(to)
+        total += sum(1 for d in dist.values() if d == K)
+    return total // 2
+
+ans, trace = count_pairs(5, 2, [(1, 2), (1, 3), (3, 4), (3, 5)])
+print("pairs at distance 2:", ans)
+for comp, c, found in trace:
+    print("component", comp, "centroid", c, "pairs through it:", found)
+
+random.seed(6)
+for _ in range(300):
+    n = random.randint(1, 40)
+    es = [(random.randint(1, v - 1), v) for v in range(2, n + 1)]
+    K = random.randint(1, 8)
+    assert count_pairs(n, K, es)[0] == brute_pairs(n, K, es)
+print("300 random trees agree with the brute force")
+`} />
+
+## What else the centroid tree gives you
+
+| task | idea |
+| --- | --- |
+| count paths of length `K` (this lesson) | `cnt` array per centroid |
+| count paths with length in `[L, R]` | the same, with a Fenwick tree over depths instead of `cnt[K - d]` |
+| nearest marked vertex, with marking updates | for each vertex store its distance to every centroid ancestor (`log n` values); marking `v` updates `best[c]` for each ancestor `c`, a query takes `min(best[c] + dist(v, c))` |
+| path with a maximum or minimum of some value | keep, per depth, the best value seen so far; combine with the current branch |
+| assign labels so that equal labels have a larger label on the path | the centroid tree depth gives the label (Codeforces 321C) |
+
+## Pitfalls
+
+1. **Counting a branch against itself.** Add a branch's depths to `cnt` only after scanning it. Otherwise pairs inside one branch (whose path avoids the centroid) are counted.
+2. **Forgetting the centroid itself.** `cnt[0] = 1` accounts for pairs `(c, v)`.
+3. **Using a non-centroid.** Splitting at an arbitrary vertex gives `O(n^2)` on a path; the half-size guarantee needs a real centroid.
+4. **Stale sizes.** After removing a vertex the subtree sizes must be recomputed for each component (they are, in the BFS pass above), not reused from the whole tree.
+5. **Array bounds.** Depths are below the component size, so `cnt` of length `total + 1` is enough; guard `K - d` against negative or too large.
+6. **Recursion depth.** The recursive version overflows on a path of `2·10^5` vertices when computing sizes. Use BFS order and an explicit stack, as above.
+7. **Overflow.** A star with `K = 2` has about `n^2 / 2` pairs: use 64-bit counts.
+
+## Practice
+
+<Problem id="m15-fixed-distance" />
+
+## Problem ladder
+
+- [Fixed-Length Paths I](https://cses.fi/problemset/task/2080) (CSES): exactly this lesson at `n = 2·10^5`.
+- [Fixed-Length Paths II](https://cses.fi/problemset/task/2081) (CSES): lengths in a range `[a, b]`, adding a Fenwick tree.
+- [Ciel the Commander](https://codeforces.com/problemset/problem/321/C) (Codeforces 321C, rating about 2100): the centroid tree depth is the answer.
+- [Xenia and Tree](https://codeforces.com/problemset/problem/342/E) (Codeforces 342E, rating about 2400): nearest red vertex with colouring updates.
+- [Tree Distance Counting (Frequency Table)](https://judge.yosupo.jp/problem/frequency_table_of_tree_distance) (Library Checker): all distance counts at once, centroid plus FFT.
+
+## Quiz
+
+<Quiz id="cp-m15-centroid" tags={["trees", "centroid-decomposition"]} questions={[
+  { type: "mcq", q: "What defines a centroid of a tree with m vertices?", options: ["The vertex with the most neighbours", "A vertex whose removal leaves components of at most m / 2 vertices", "The root of the DFS", "The middle vertex of the diameter, always"], answer: 1, explain: "The half-size guarantee is what makes the recursion depth logarithmic." },
+  { type: "mcq", q: "When counting paths through the centroid, why are a branch's depths added to cnt only after the branch is scanned?", options: ["To save memory", "So two vertices of the same branch are not paired (their path does not go through the centroid)", "Because BFS requires it", "To keep cnt sorted"], answer: 1, explain: "Pairs inside one branch are counted when that branch becomes its own component later." },
+  { type: "predict", q: "A tree has 1,000,000 vertices. Roughly how deep is the centroid tree at most?", code: "import math\nprint(int(math.log2(1_000_000)) + 1)", options: ["10", "20", "1000", "500000"], answer: 1, explain: "Each removal at least halves the component size, so there are at most about 20 levels." },
+  { type: "multi", q: "Which tasks suit centroid decomposition?", options: ["Count paths of a given length", "Nearest marked vertex with updates", "Single-source shortest paths on a weighted graph", "Paths whose length lies in a range (with a Fenwick tree)"], answer: [0, 1, 3], explain: "Shortest paths on general graphs are not tree path-counting problems." },
+  { type: "mcq", q: "What is the total time of centroid decomposition with linear work per component?", options: ["O(n)", "O(n log n)", "O(n^2)", "O(n log^2 n) always"], answer: 1, explain: "O(log n) levels, each touching every vertex a constant number of times." }
+]} />

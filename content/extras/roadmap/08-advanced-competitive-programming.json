@@ -36,10 +36,13 @@
     { "kind": "lesson", "ref": "cp/graphs/strongly-connected-components" },
     { "kind": "lesson", "ref": "cp/graphs/two-sat" },
     { "kind": "lesson", "ref": "cp/graphs/maximum-flow" },
+    { "kind": "lesson", "ref": "cp/graphs/min-cost-flow" },
     { "kind": "lesson", "ref": "cp/dynamic-programming/digit-dp" },
     { "kind": "lesson", "ref": "cp/dynamic-programming/convex-hull-trick" },
+    { "kind": "lesson", "ref": "cp/dynamic-programming/divide-and-conquer-optimization" },
     { "kind": "lesson", "ref": "cp/trees/rerooting" },
     { "kind": "lesson", "ref": "cp/trees/heavy-light-decomposition" },
+    { "kind": "lesson", "ref": "cp/trees/centroid-decomposition" },
     { "kind": "lesson", "ref": "cp/dynamic-programming/longest-increasing-subsequence" },
     { "kind": "lesson", "ref": "cp/string-matching/z-function" },
     { "kind": "lesson", "ref": "cp/string-matching/manacher" },
@@ -49,7 +52,7 @@
     { "kind": "external", "title": "AtCoder", "url": "https://atcoder.jp/", "type": "practice", "note": "High-quality problems; the ABC and ARC contests are excellent for steady growth." },
     { "kind": "external", "title": "Codeforces EDU", "url": "https://codeforces.com/edu/courses", "type": "course", "note": "Step-by-step courses on segment trees, binary search and more, with practice problems." },
     { "kind": "external", "title": "cp-algorithms", "url": "https://cp-algorithms.com/", "type": "docs", "note": "The reference for every advanced algorithm you will need." },
-    { "kind": "planned", "title": "Trees, segment trees, advanced DP, graphs II, strings II, geometry and contest strategy", "note": "CP modules 16 to 26 are not written on this site yet (modules 11 to 15 cover Dijkstra, union-find, spanning trees, topological sort, Bellman-Ford, bipartite graphs, bridges, strongly connected components, 2-SAT, maximum flow, segment trees with lazy propagation, Fenwick trees, sparse tables, knapsack, coin change, LIS, edit distance, grid paths, interval DP, digit DP, the convex hull trick, bitmask DP, LCA, Euler tours, tree DP, rerooting, heavy-light decomposition, KMP, the Z-function, Manacher's algorithm and suffix arrays only). Learn them from cp-algorithms and Codeforces EDU, and use the pattern library to connect them to the signals you already know." },
+    { "kind": "planned", "title": "Trees, segment trees, advanced DP, graphs II, strings II, geometry and contest strategy", "note": "CP modules 16 to 26 are not written on this site yet (modules 11 to 15 cover Dijkstra, union-find, spanning trees, topological sort, Bellman-Ford, bipartite graphs, bridges, strongly connected components, 2-SAT, maximum flow, min-cost flow, segment trees with lazy propagation, Fenwick trees, sparse tables, knapsack, coin change, LIS, edit distance, grid paths, interval DP, digit DP, the convex hull trick, divide and conquer optimisation, bitmask DP, LCA, Euler tours, tree DP, rerooting, heavy-light decomposition, centroid decomposition, KMP, the Z-function, Manacher's algorithm and suffix arrays only). Learn them from cp-algorithms and Codeforces EDU, and use the pattern library to connect them to the signals you already know." },
     { "kind": "project", "title": "A contest-and-upsolve habit with a rating target", "brief": "Compete in at least two rated contests a month. After each, upsolve at least two problems and add the technique to a personal notebook with the signal that reveals it. Track your rating every month.", "deliverable": "A public or private log of contests, upsolves and rating, with targets of about 1600, then 1900, then 2100 or higher over time." }
   ],
   "exit": [
