@@ -1,0 +1,261 @@
+---
+title: Divide and Conquer DP Optimization
+track: cp
+module: dynamic-programming
+order: 10
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack, cp/dynamic-programming/convex-hull-trick]
+tags: [dp, divide-and-conquer-optimization, partition, quadrangle-inequality, prefix-sums]
+type: lesson
+problems: [m13-truck-loads]
+furtherReading:
+  - title: cp-algorithms, Divide and Conquer DP
+    url: https://cp-algorithms.com/dynamic_programming/divide-and-conquer-dp.html
+  - title: Codeforces, Ciel and Gondolas (problem 321E)
+    url: https://codeforces.com/problemset/problem/321/E
+  - title: LeetCode 1478, Allocate Mailboxes
+    url: https://leetcode.com/problems/allocate-mailboxes/
+---
+
+## Intuition
+
+A classic family of DPs **partitions a sequence into `k` consecutive groups**: split a row of crates into `k` loads, cut an array into `k` segments, place `k` mailboxes along a street. The state is `dp[j][i]`, the best cost for the first `i` items in `j` groups:
+
+```text
+dp[j][i] = min over p < i of ( dp[j-1][p] + cost(p, i) )
+```
+
+That is `O(k n^2)`. But often the best split point behaves in an orderly way: when `i` grows, the best `p` never moves left. If you know the best `p` for the **middle** `i`, then the best `p` for every smaller `i` is at or before it, and for every larger `i` at or after it. That lets a divide and conquer fill a whole layer in `O(n log n)`.
+
+## Definition
+
+Let `opt[j][i]` be a split point `p` that achieves the minimum for `dp[j][i]`. The optimisation applies when
+
+```text
+opt[j][i]  <=  opt[j][i+1]            (monotone optimal split)
+```
+
+A sufficient condition is the **quadrangle inequality** on the cost: for `a <= b <= c <= d`,
+
+```text
+cost(a, c) + cost(b, d)  <=  cost(a, d) + cost(b, c)
+```
+
+("crossing intervals cost no more than nested ones"). For `cost(p, i) = (S[i] - S[p])^2` with non-decreasing prefix sums `S` this is true: the difference of the two sides is `2 (S[d] - S[c]) (S[b] - S[a]) >= 0`. That is why the practice problem needs non-negative weights.
+
+**Algorithm for one layer.**
+
+```text
+compute(lo, hi, optlo, opthi):          # fill dp[j][lo..hi]; best p lies in [optlo, opthi]
+    if lo > hi: return
+    mid = (lo + hi) / 2
+    best p = argmin over p in [optlo, min(mid - 1, opthi)] of dp[j-1][p] + cost(p, mid)
+    dp[j][mid] = that minimum
+    compute(lo, mid - 1, optlo, bestp)
+    compute(mid + 1, hi, bestp, opthi)
+```
+
+At each depth of the recursion the scanned ranges `[optlo, opthi]` overlap in at most one point, so a depth costs `O(n)` in total. There are `O(log n)` depths, so one layer costs `O(n log n)` and the whole DP `O(k n log n)`. The recursion is only `log n` deep, which is safe in every language.
+
+## Example, step by step
+
+Crates `4 1 1 4`, `k = 2` loads. Prefix sums `S = [0, 4, 5, 6, 10]`.
+
+Layer 1 (one load): `dp1[i] = S[i]^2 = [0, 16, 25, 36, 100]`.
+
+Layer 2, the best last split `p` for each `i`:
+
+| `i` | candidates `p` and cost `dp1[p] + (S[i] - S[p])^2` | best | `opt` |
+| --- | --- | --- | --- |
+| 2 | `p = 1`: `16 + 1 = 17` | 17 | 1 |
+| 3 | `p = 1`: `16 + 4 = 20`; `p = 2`: `25 + 1 = 26` | 20 | 1 |
+| 4 | `p = 1`: `16 + 36 = 52`; `p = 2`: `25 + 25 = 50`; `p = 3`: `36 + 16 = 52` | **50** | 2 |
+
+`opt = 1, 1, 2` never decreases. With D&C, computing `i = 3` first (the middle of `2..4`) finds `opt = 1`; then `i = 2` only looks at `p <= 1` and `i = 4` only at `p >= 1`, skipping nothing it needs. The answer is **50**: loads `4 1 | 1 4` cost `5^2 + 5^2`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+INF = 4 * 10 ** 18
+prev = [INF] * (n + 1)
+prev[0] = 0
+for j in range(1, k + 1):
+    cur = [INF] * (n + 1)
+
+    def compute(lo, hi, optlo, opthi):
+        if lo > hi:
+            return
+        mid = (lo + hi) // 2
+        best, bp = INF, -1
+        for p in range(optlo, min(mid - 1, opthi) + 1):
+            if prev[p] < INF:
+                v = prev[p] + (pre[mid] - pre[p]) ** 2
+                if v < best:
+                    best, bp = v, p
+        cur[mid] = best
+        compute(lo, mid - 1, optlo, bp)
+        compute(mid + 1, hi, bp, opthi)
+
+    compute(j, n, j - 1, n - 1)
+    prev = cur
+answer = prev[n]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+const long long INF = LLONG_MAX / 4;
+vector<long long> pre, prev_, cur_;
+
+void compute(int lo, int hi, int optlo, int opthi) {
+    if (lo > hi) return;
+    int mid = (lo + hi) / 2;
+    long long best = INF;
+    int bp = -1;
+    for (int p = optlo; p <= min(mid - 1, opthi); p++) {
+        if (prev_[p] < INF) {
+            long long d = pre[mid] - pre[p], v = prev_[p] + d * d;
+            if (v < best) { best = v; bp = p; }
+        }
+    }
+    cur_[mid] = best;
+    compute(lo, mid - 1, optlo, bp);
+    compute(mid + 1, hi, bp, opthi);
+}
+// prev_.assign(n + 1, INF); prev_[0] = 0;
+// for j in 1..k: cur_.assign(n + 1, INF); compute(j, n, j - 1, n - 1); prev_ = cur_;
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] pre, prev, cur;
+static final long INF = Long.MAX_VALUE / 4;
+
+static void compute(int lo, int hi, int optlo, int opthi) {
+    if (lo > hi) return;
+    int mid = (lo + hi) / 2;
+    long best = INF;
+    int bp = -1;
+    for (int p = optlo; p <= Math.min(mid - 1, opthi); p++) {
+        if (prev[p] < INF) {
+            long d = pre[mid] - pre[p], v = prev[p] + d * d;
+            if (v < best) { best = v; bp = p; }
+        }
+    }
+    cur[mid] = best;
+    compute(lo, mid - 1, optlo, bp);
+    compute(mid + 1, hi, bp, opthi);
+}
+// prev = new long[n + 1]; fill INF; prev[0] = 0;
+// for (int j = 1; j <= k; j++) { cur = new long[n + 1]; fill INF; compute(j, n, j - 1, n - 1); prev = cur; }
+```
+
+</Tab>
+</Tabs>
+
+Compare with the plain `O(k n^2)` DP on random inputs:
+
+<CodeRunner language="python" code={`import random
+
+def split_dc(a, k):
+    n = len(a)
+    pre = [0]
+    for x in a:
+        pre.append(pre[-1] + x)
+    INF = float("inf")
+    prev = [0] + [INF] * n
+    for j in range(1, k + 1):
+        cur = [INF] * (n + 1)
+
+        def compute(lo, hi, optlo, opthi):
+            if lo > hi:
+                return
+            mid = (lo + hi) // 2
+            best, bp = INF, -1
+            for p in range(optlo, min(mid - 1, opthi) + 1):
+                if prev[p] < INF:
+                    v = prev[p] + (pre[mid] - pre[p]) ** 2
+                    if v < best:
+                        best, bp = v, p
+            cur[mid] = best
+            compute(lo, mid - 1, optlo, bp)
+            compute(mid + 1, hi, bp, opthi)
+
+        compute(j, n, j - 1, n - 1)
+        prev = cur
+    return prev[n]
+
+def split_slow(a, k):
+    n = len(a)
+    pre = [0]
+    for x in a:
+        pre.append(pre[-1] + x)
+    INF = float("inf")
+    prev = [0] + [INF] * n
+    for j in range(1, k + 1):
+        cur = [INF] * (n + 1)
+        for i in range(j, n + 1):
+            cur[i] = min(prev[p] + (pre[i] - pre[p]) ** 2 for p in range(j - 1, i) if prev[p] < INF)
+        prev = cur
+    return prev[n]
+
+print("crates 4 1 1 4 in 2 loads:", split_dc([4, 1, 1, 4], 2), "(slow DP:", split_slow([4, 1, 1, 4], 2), ")")
+
+random.seed(6)
+for _ in range(300):
+    n = random.randint(1, 25)
+    k = random.randint(1, n)
+    a = [random.randint(0, 20) for _ in range(n)]
+    assert split_dc(a, k) == split_slow(a, k)
+print("300 random inputs: divide and conquer equals the O(k n^2) DP")
+`} />
+
+## Choosing among DP optimisations
+
+| optimisation | needs | time | typical shape |
+| --- | --- | --- | --- |
+| **divide and conquer** (this lesson) | monotone `opt` (quadrangle inequality); layers `dp[j][...]` | `O(k n log n)` | partition into `k` groups |
+| **Knuth** | quadrangle inequality plus monotone `opt[i][j-1] <= opt[i][j] <= opt[i+1][j]` | `O(n^2)` instead of `O(n^3)` | interval DP such as optimal merging or optimal BST |
+| **convex hull trick** | cost splits into a product of a `j` part and an `i` part | `O(n)` or `O(n log n)` | `dp[i] = min dp[j] + b[j] a[i]` |
+| **Aliens trick** (lambda optimisation) | convex in `k` | `O(n log C)` per run | `k` huge, replace the layer by a penalty per group |
+| **monotone queue** | cost depends on `i - j` windows | `O(n)` | sliding-window minimum |
+
+When both D&C and the hull trick apply, the hull trick is faster (`O(n)` per layer), but D&C asks only for the monotonicity, not for an algebraic identity.
+
+## Pitfalls
+
+1. **Applying it without monotonicity.** Check the quadrangle inequality, or at least compare against the slow DP on random small inputs, as the demo does. A cost like `(S[i] - S[p])^2` with **negative** weights breaks it.
+2. **Wrong ranges for `p`.** Layer `j` needs `p >= j - 1` (at least `j - 1` items before the last group) and `p <= i - 1` (a non-empty last group).
+3. **`INF` in the scan.** Skip states with `prev[p] == INF`, otherwise adding to `INF` overflows in C++ and Java.
+4. **Boundary of the recursion.** The left call uses `[optlo, bestp]` and the right call `[bestp, opthi]`; both include `bestp` because ties are possible.
+5. **Using one array for two layers.** Layer `j` reads layer `j - 1` while writing; keep two arrays and swap.
+6. **Overflow.** The cost reaches `(sum of all weights)^2`, so use 64-bit integers.
+7. **Forgetting the exactly-`k` constraint.** If at most `k` groups are allowed, take the minimum over all layers (or note that more groups never cost more here).
+
+## Practice
+
+<Problem id="m13-truck-loads" />
+
+## Problem ladder
+
+- [Allocate Mailboxes](https://leetcode.com/problems/allocate-mailboxes/) (LeetCode 1478, hard): partition DP with a median-based cost; D&C optimisation fits.
+- [Array Division](https://cses.fi/problemset/task/1085) (CSES): a related partition problem solved by binary search on the answer, a useful contrast.
+- [Ciel and Gondolas](https://codeforces.com/problemset/problem/321/E) (Codeforces 321E, rating about 2600): the classic D&C optimisation with a 2D prefix-sum cost.
+- [Yet Another Minimization Problem](https://codeforces.com/problemset/problem/868/F) (Codeforces 868F, rating about 2700): D&C where `cost(l, r)` is maintained with a moving window.
+
+## Quiz
+
+<Quiz id="cp-m13-dc-optimization" tags={["dp", "divide-and-conquer-optimization"]} questions={[
+  { type: "mcq", q: "What property of opt[j][i] makes divide and conquer optimisation valid?", options: ["It is constant", "It never decreases as i increases", "It equals i - 1", "It is always the median"], answer: 1, explain: "If the best split for the middle i is p, smaller i have their best split at most p and larger i at least p." },
+  { type: "mcq", q: "What is the time to fill one layer by divide and conquer?", options: ["O(n)", "O(n log n)", "O(n^2)", "O(n sqrt n)"], answer: 1, explain: "Each recursion depth scans O(n) split points in total, and there are O(log n) depths." },
+  { type: "predict", q: "For prefix sums S = [0, 4, 5, 6, 10] what does splitting after crate 2 (p = 2) into loads of 5 and 5 cost?", code: "S = [0, 4, 5, 6, 10]\np, i = 2, 4\nprint(S[p] ** 2 + (S[i] - S[p]) ** 2)", options: ["25", "50", "52", "100"], answer: 1, explain: "The first load weighs 5 (cost 25) and the second weighs 10 - 5 = 5 (cost 25): total 50." },
+  { type: "multi", q: "Which conditions can break the optimisation?", options: ["Negative weights with squared segment sums", "A cost that does not satisfy the quadrangle inequality", "Using INF states without skipping them", "Computing the middle state first"], answer: [0, 1, 2], explain: "Evaluating the middle first is exactly what the algorithm does." },
+  { type: "mcq", q: "Total time of the k-layer DP with divide and conquer?", options: ["O(n)", "O(k n)", "O(k n log n)", "O(k n^2)"], answer: 2, explain: "k layers, each O(n log n)." }
+]} />
