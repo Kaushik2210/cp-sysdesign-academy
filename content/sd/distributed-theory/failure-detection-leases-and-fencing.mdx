@@ -1,0 +1,210 @@
+---
+title: Failure Detection, Leases and Fencing
+track: sd
+module: distributed-theory
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/distributed-theory/consistency-models-and-quorums", "sd/databases-2/read-replicas-and-failover"]
+tags: [failure-detection, heartbeats, timeouts, leases, fencing-tokens, split-brain, gossip, partial-failure]
+type: lesson
+furtherReading:
+  - title: Kleppmann, How to do distributed locking (leases and fencing tokens)
+    url: https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
+  - title: Das, Gupta, Motivala, SWIM, Scalable Weakly-consistent Infection-style Process Group Membership Protocol
+    url: https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf
+  - title: Wikipedia, Failure detector
+    url: https://en.wikipedia.org/wiki/Failure_detector
+  - title: Kleppmann, Designing Data-Intensive Applications, chapter 8 (the trouble with distributed systems)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+On one machine a program either runs or it crashes, and the operating system tells you which. In a distributed system **parts fail while the rest keep going**, and the only evidence you get is the absence of an answer. A request to another node returns nothing. Is the node dead? Is the network broken? Is the node alive but busy in a long garbage-collection pause? Did it process your request and only the reply got lost? From where you stand these four situations look identical.
+
+This ambiguity is the root of most hard distributed-systems problems. Everything in this lesson, timeouts, heartbeats, leases, fencing tokens, exists to make *safe decisions anyway* when you cannot know.
+
+## Partial failure and the limits of knowing
+
+A **timeout** is the only tool you have: after waiting long enough, you *decide* the other side has failed. It is a guess, never a fact. Too short, and you wrongly declare healthy nodes dead (false suspicion), possibly triggering expensive failovers and duplicate work. Too long, and real failures go unnoticed while clients hang.
+
+A famous result (Fischer, Lynch and Paterson, "FLP") shows that in a fully asynchronous system, where message delays have no bound, no deterministic algorithm can guarantee consensus if even one node may crash. Real systems escape it by assuming the network is *usually* timely (partial synchrony) and using timeouts, accepting that they will occasionally be wrong, and designing so that being wrong is **safe**.
+
+## Failure detectors
+
+A **failure detector** is a module that tells you which nodes it currently *suspects* have failed. Two properties pull against each other:
+
+- **Completeness:** a node that really failed is eventually suspected by everyone.
+- **Accuracy:** a node that is alive is not suspected.
+
+You cannot have perfect versions of both over an unreliable network, so you tune the balance.
+
+### Heartbeats and timeouts
+
+Each node sends a small "I'm alive" message every interval `T_h` to its monitor (or to everyone). If no heartbeat arrives within a timeout `T_o`, the monitor suspects it. Typical choices keep `T_o` at several multiples of `T_h` so one lost or delayed packet is not fatal. The trade-off is direct: a short timeout detects crashes quickly and raises false alarms; a long one is stable and slow.
+
+### Adaptive detectors (phi accrual)
+
+Instead of a fixed timeout, an **accrual** detector keeps the history of heartbeat inter-arrival times and outputs a continuous *suspicion level* `phi`: how unlikely it is that this much silence is normal given recent behaviour. The application chooses its own threshold (for example "suspect when phi exceeds 8"). Cassandra and Akka use this idea, because it adapts to networks whose latency varies.
+
+### Gossip and SWIM
+
+Pinging every node from every node costs `n²` messages. **Gossip** and **SWIM**-style protocols scale detection: each node periodically probes one random peer; if that peer does not answer, it asks a few other nodes to probe it **indirectly** (so one broken link does not cause a false alarm), and only then marks it *suspect* and later *dead*. Membership changes spread by gossip with `O(log n)` rounds and constant per-node load.
+
+## Measuring the timeout trade-off
+
+The simulation sends one heartbeat per second whose delay has random jitter plus occasional 1% slow spikes (a stand-in for pauses and congestion), and counts how often a *healthy* node would be suspected for various timeouts.
+
+<CodeRunner language="python" code={`import random
+
+def detector(timeout, trials_beats=200000, seed=3):
+    rng = random.Random(seed)
+    interval = 1.0
+    # heartbeat delay = 0.2s base + lognormal jitter; occasionally a slow spike (a GC pause or congestion)
+    def delay():
+        d = 0.2 + rng.lognormvariate(-1.5, 0.7)
+        if rng.random() < 0.01: d += rng.uniform(1.0, 4.0)
+        return d
+    false_alarms = 0
+    prev_arrival = delay()
+    for i in range(1, trials_beats):
+        arrival = i * interval + delay()
+        gap = arrival - prev_arrival
+        if gap > timeout: false_alarms += 1        # the node was alive but looked dead for a while
+        prev_arrival = arrival
+    return false_alarms / trials_beats
+
+print("Heartbeat every 1.0 s, delays with random jitter and 1% slow spikes. Timeout measured since the previous heartbeat arrived.")
+print("  timeout (s)   false suspicions per 1000 heartbeats   time to notice a real crash (at most, s)")
+for t in (1.5, 2.0, 3.0, 5.0, 8.0):
+    rate = detector(t)
+    print(f"  {t:>10}   {1000 * rate:>34.1f}   {t:>38.1f}")
+`} />
+
+A local run printed, per 1,000 heartbeats from a healthy node: **57.0** false suspicions with a 1.5-second timeout, 17.3 at 2 seconds, 7.3 at 3 seconds, 0.3 at 5 seconds and 0.0 at 8 seconds, while the time to notice a real crash grows in step with the timeout (a crashed node is noticed at most one timeout after its last heartbeat). A cluster that must fail over in under 3 seconds therefore lives with false alarms every few minutes, and the failover logic must be safe when the detector is wrong.
+
+## Leases: locks that expire
+
+A distributed **lock** held by a client that then crashes would block everyone forever. A **lease** is a lock with an expiry: the holder owns the resource only until a deadline, and must renew before then. If the holder dies, the lease simply runs out and another client can take over. Leases power leader election, exclusive access to a file or partition, and cache invalidation promises.
+
+But a lease has a subtle trap. The holder decides "I still hold the lease" by comparing its own clock to the deadline, and nothing forces it to *notice* that time has passed. Consider:
+
+1. Client A acquires the lease, checks it is still valid, and starts to write to storage.
+2. A suffers a long **pause**: a stop-the-world garbage collection, a virtual machine suspended for migration, a page-fault storm.
+3. The lease expires; client B acquires it and writes.
+4. A wakes up, still **believing** it holds the lease (its check ran before the pause), and writes too.
+
+Two clients now believe they have exclusive access, and A's stale write may overwrite B's newer one.
+
+<Diagram kind="mermaid" caption="A pause makes a lease holder act after its lease has expired. Fencing tokens let storage reject the stale write" code={`sequenceDiagram
+  participant A as Client A
+  participant L as Lock service
+  participant B as Client B
+  participant S as Storage
+  A->>L: acquire lease
+  L-->>A: granted, token 33, ttl 10
+  Note over A: long GC pause begins
+  Note over L: lease expires
+  B->>L: acquire lease
+  L-->>B: granted, token 34
+  B->>S: write (token 34)
+  S-->>B: accepted
+  Note over A: pause ends, A still believes it holds the lease
+  A->>S: write (token 33)
+  S-->>A: REJECTED, 33 is lower than the highest token seen (34)`} />
+
+## Fencing tokens
+
+The fix is not a better timeout; no timeout can make a paused process notice the pause. The fix is to make the **resource** check the holder's right to act. Every time the lock service grants a lease it also returns a number that **increases with every grant**, the **fencing token**. The client attaches the token to each request to the storage service, and the storage service remembers the highest token it has seen and **rejects any request with a lower one**. A's stale write carries token 33; storage has already seen 34 and rejects it. Safety no longer depends on clocks or on A noticing anything.
+
+The simulation replays exactly this scenario with and without fencing:
+
+<CodeRunner language="python" code={`def lock_scenario(use_fencing):
+    log = []
+    storage = {"value": "initial", "max_token": 0}
+    now = [0]
+    def write(client, token, value):
+        if use_fencing and token < storage["max_token"]:
+            log.append(f"t={now[0]:>2}  storage REJECTS {client} (token {token} < {storage['max_token']})")
+            return
+        storage["max_token"] = max(storage["max_token"], token)
+        storage["value"] = value
+        log.append(f"t={now[0]:>2}  storage accepts {client}'s write: value = {value!r} (token {token})")
+    lease_ttl = 10
+    # t=0: A takes the lease (token 33) and then freezes for 15 time units (a long GC pause or VM stall)
+    token_a = 33; lease_expires = now[0] + lease_ttl
+    log.append(f"t={now[0]:>2}  A acquires the lease, token {token_a}, expires at t={lease_expires}; then A freezes")
+    now[0] = 11
+    log.append(f"t={now[0]:>2}  lease expired; B acquires it, token 34")
+    token_b = 34
+    write("B", token_b, "written by B")
+    now[0] = 15
+    log.append(f"t={now[0]:>2}  A wakes up, still believes it holds the lease, and writes")
+    write("A", token_a, "written by A (STALE)")
+    return storage["value"], log
+
+for fencing in (False, True):
+    value, log = lock_scenario(fencing)
+    print(("WITH" if fencing else "WITHOUT"), "fencing tokens -> final value:", repr(value))
+    for line in log: print("   ", line)
+`} />
+
+A local run ended with the value **'written by A (STALE)'** without fencing, so the older client overwrote the newer one, and with **'written by B'** with fencing, where storage rejected token 33 because it had already seen 34.
+
+## Split brain and how to avoid it
+
+**Split brain** is two nodes (or two halves of a cluster) each believing it is the leader and each accepting writes. It happens when a failure detector wrongly declares the leader dead, or when a partition separates the cluster. Defences, from cheapest to strongest:
+
+- **Quorum-based leadership:** a node is leader only while a **majority** acknowledges it; the minority side cannot form a majority and must step down. This is how consensus protocols work (next module).
+- **Leases with fencing tokens** on every downstream write, as above.
+- **Fencing the old leader** (STONITH, "shoot the other node in the head"): power it off or cut its storage access before promoting a replacement.
+- **Prefer to be unavailable than wrong** for data that must not diverge: block writes on the minority side.
+
+## Retries, timeouts and idempotency
+
+Because a timeout does not tell you whether the request ran, retrying can execute an operation twice. Make operations **idempotent** (safe to repeat) using a unique request id the server remembers, and pair retries with **exponential backoff and jitter** so that many clients retrying together do not become a new outage. Set every network call's timeout explicitly; the default is often "wait forever".
+
+## Trade-offs
+
+<TradeOffs caption="Failure detection and exclusion mechanisms" rows={[
+  { option: "Short fixed heartbeat timeout", pros: "Fast failover", cons: "Frequent false suspicions under jitter or pauses", chooseWhen: "Stable low-latency networks and cheap, safe failover" },
+  { option: "Long fixed timeout", pros: "Stable, few false alarms", cons: "Slow to notice real crashes; clients hang", chooseWhen: "Expensive failover that must not trigger spuriously" },
+  { option: "Accrual detector (phi)", pros: "Adapts to network behaviour; each consumer chooses its threshold", cons: "More state and tuning; harder to explain", chooseWhen: "Networks with variable latency, large clusters" },
+  { option: "Gossip / SWIM membership", pros: "Scales to thousands of nodes; indirect probes cut false positives", cons: "Eventual, not instant, agreement on membership", chooseWhen: "Large peer-to-peer style clusters" },
+  { option: "Lease without fencing", pros: "Simple; self-healing when the holder dies", cons: "Unsafe if the holder can pause or its clock misbehaves", chooseWhen: "Only when a duplicate action is harmless" },
+  { option: "Lease with fencing tokens", pros: "Safe against pauses, delays and clock errors", cons: "The protected resource must check tokens", chooseWhen: "Anything where two writers would corrupt data" },
+  { option: "Majority-quorum leadership", pros: "No two leaders at once; survives minority failures", cons: "Needs a consensus protocol and 2f + 1 nodes", chooseWhen: "Replicated state machines, metadata stores" }
+]} />
+
+## Failure modes
+
+- **False failover:** the detector suspects a healthy primary; the new primary and old primary both write.
+- **Lease expiry during a pause** with no fencing: stale writes land after another client took over.
+- **Retry storm:** timeouts trigger synchronised retries that overload the recovering service.
+- **Detector blind spot:** a node answers heartbeats but its disk is failing or its worker threads are stuck; probe the real function, not just a ping.
+- **Clock jump** moves a lease deadline unexpectedly; rely on monotonic clocks locally and fencing for safety.
+- **Asymmetric partition:** A can reach B but B cannot reach A; both sides disagree about who is alive.
+
+## Pitfalls
+
+- Treating a timeout as proof of failure.
+- Using a distributed lock to guard a resource that does not check fencing tokens.
+- Assuming a process that checked its lease a moment ago still holds it.
+- Retrying non-idempotent operations.
+- Using one timeout value for all calls regardless of their normal latency.
+- Detecting failure with a health-check endpoint that does not exercise real dependencies.
+
+## What would you choose and why?
+
+A cluster of 5 stateless workers processes jobs, and exactly one worker at a time may run the nightly billing run, which writes to a payments database. Design how the leader is chosen, what happens when the leader's machine freezes for 20 seconds in the middle of the run, and what the payments database must do to stay correct. Which of your choices would change if the run were safe to execute twice?
+
+## Quiz
+
+<Quiz id="sd-m11-failure-detection" tags={["failure-detection", "leases", "fencing", "split-brain"]} questions={[
+  { type: "mcq", q: "Why can a timeout never prove that a node has failed?", options: ["Timeouts are random", "A slow node, a paused node, a lost reply and a crashed node all look the same from outside", "Networks never fail", "Nodes ignore timeouts"], answer: 1, explain: "Silence is ambiguous; a timeout is only a decision to act as if the node failed." },
+  { type: "mcq", q: "What is the main trade-off when choosing a heartbeat timeout?", options: ["Memory versus CPU", "Fast detection of real crashes versus fewer false suspicions of healthy nodes", "Security versus speed", "Throughput versus storage"], answer: 1, explain: "A short timeout notices crashes quickly but suspects healthy nodes during jitter and pauses; a long one does the opposite." },
+  { type: "mcq", q: "How do fencing tokens prevent a stale lease holder from corrupting data?", options: ["They make the client's clock accurate", "The storage service rejects any request whose token is lower than the highest token it has seen", "They shorten the lease", "They encrypt the request"], answer: 1, explain: "Tokens increase with every lease grant, so the resource itself can refuse the older holder regardless of what the old holder believes." },
+  { type: "multi", q: "Which help avoid split brain?", options: ["Requiring a majority quorum to act as leader", "Fencing tokens on writes", "Powering off the old leader before promoting a replacement", "Using a shorter heartbeat timeout only"], answer: [0, 1, 2], explain: "A shorter timeout alone increases false failovers; it does not make two leaders impossible." },
+  { type: "mcq", q: "Why should retried operations be idempotent?", options: ["To save bandwidth", "Because a timeout does not say whether the first attempt already ran, so a retry may execute it twice", "Because servers cannot count", "To avoid backoff"], answer: 1, explain: "Idempotency (for example a unique request id) makes duplicate executions harmless." }
+]} />
