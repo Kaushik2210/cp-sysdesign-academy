@@ -1,0 +1,239 @@
+---
+title: Distributed Search Architecture
+track: sd
+module: search-systems
+order: 3
+difficulty: hard
+estMinutes: 50
+prerequisites: ["sd/search-systems/ranking-tf-idf-and-bm25", "sd/databases-2/sharding-and-partitioning", "sd/microservice-patterns/sagas-and-the-transactional-outbox"]
+tags: [search, sharding, scatter-gather, replicas, segments, near-real-time, hedged-requests, deep-pagination, reindexing, elasticsearch]
+type: lesson
+furtherReading:
+  - title: Elastic, Elasticsearch Guide (distributed search execution and shards)
+    url: https://www.elastic.co/guide/index.html
+  - title: Dean and Barroso, The Tail at Scale
+    url: https://research.google/pubs/the-tail-at-scale/
+  - title: Barroso, Dean and Holzle, Web Search for a Planet, the Google Cluster Architecture
+    url: https://research.google/pubs/web-search-for-a-planet-the-google-cluster-architecture/
+  - title: Apache Lucene
+    url: https://lucene.apache.org/
+---
+
+## Intuition
+
+One machine can search a few tens of gigabytes of text comfortably. A product catalogue, a log archive or the web is thousands of times larger, and it must answer thousands of queries per second. As with databases, the answer is to **split the index into pieces on many machines** and combine their answers. Search adds two twists that ordinary key-value sharding does not have: a query usually **touches every shard**, and the answer is a **ranked list** that has to be merged correctly.
+
+This lesson covers how an index is divided, how a query is executed across shards, how new documents become searchable quickly, and the performance problems that come with scatter-gather, especially tail latency and deep pagination.
+
+## Splitting the index: shards and replicas
+
+There are two ways to partition an inverted index:
+
+- **Document-partitioned (by document):** each shard holds a complete index for a *subset of the documents*. A query must go to every shard, because any shard might hold matching documents. This is what Elasticsearch, OpenSearch, Solr and the large web engines use.
+- **Term-partitioned (by term):** each shard holds the full postings lists for a *subset of the terms*. A query touches only the shards owning its terms, but those lists are huge and multi-term queries must ship long lists between machines, and indexing a document updates many shards. It is rarely used.
+
+Document partitioning is simpler, balances load by spreading documents, and keeps each shard independently searchable.
+
+**Shards** give capacity (data size and indexing throughput). **Replicas** are extra copies of each shard that give **availability** (a node can fail) and **read throughput** (queries can go to any copy). A typical layout: 12 primary shards, each with 2 replicas, spread so that copies of one shard are on different nodes and zones.
+
+**Routing.** A document is assigned to a shard by hashing its id (or a routing key), so it can be found or updated later. Because that hash depends on the shard count, the number of primary shards is fixed when the index is created; changing it means splitting or **reindexing** into a new index.
+
+## Executing a query: scatter-gather
+
+A query is run in two phases:
+
+1. **Query phase (scatter):** a **coordinating node** sends the query to one copy (primary or replica) of every shard. Each shard searches its local index and returns only the **ids and scores of its top `k`** matches.
+2. **Merge (gather):** the coordinator merges the per-shard lists into a global top `k`.
+3. **Fetch phase:** it asks the owning shards for the actual **document contents** (and snippets) of just those top `k` documents, and returns the page.
+
+Splitting it like this keeps the heavy data movement small: shards send tiny `(id, score)` pairs, and full documents are fetched only for the winners.
+
+<Diagram kind="mermaid" caption="Scatter-gather: every shard returns its local top results; the coordinator merges them and then fetches only the winning documents" code={`sequenceDiagram
+  participant C as Client
+  participant K as Coordinating node
+  participant S1 as Shard 1
+  participant S2 as Shard 2
+  participant S3 as Shard 3
+  C->>K: search "python tutorial", top 10
+  par query phase
+    K->>S1: search, top 10
+  and
+    K->>S2: search, top 10
+  and
+    K->>S3: search, top 10
+  end
+  S1-->>K: ids and scores
+  S2-->>K: ids and scores
+  S3-->>K: ids and scores
+  Note over K: merge, keep the global top 10
+  K->>S1: fetch documents 7 and 42
+  K->>S3: fetch documents 5, 19 and 88
+  S1-->>K: documents
+  S3-->>K: documents
+  K-->>C: page of 10 results`} />
+
+### How many results must each shard return?
+
+To get the exact global top `k`, each shard must return its own top `k`: any document in the global top `k` must be in the top `k` of its own shard, so returning fewer can drop a winner. Returning exactly `k` from each of `n` shards means the coordinator merges `n * k` candidates. Fetching fewer per shard saves work but gives approximate results unless documents are spread randomly and you accept a small error. The simulation below measures that trade-off.
+
+## Tail latency: waiting for the slowest shard
+
+Because a query waits for **all** shards, its latency is the **maximum** of the shard latencies. A shard that is slow 1% of the time (a segment merge, a garbage-collection pause, a cold cache) looks harmless alone, but across 100 shards almost every query meets at least one slow shard. Mitigations from *The Tail at Scale*:
+
+- **Hedged requests:** if a shard has not answered within, say, the 95th percentile time, send the same sub-query to **another replica** and take whichever answers first.
+- **Replica selection:** prefer the replica with the fewest in-flight requests or shortest recent response time.
+- **Timeouts with partial results:** return what the responsive shards found and flag the response as partial, rather than waiting forever.
+- **Fewer, larger shards** reduce the fan-out; avoid over-sharding.
+- **Caching** frequent queries and filter results.
+
+<CodeRunner language="python" code={`import random, math
+
+# --- 1. scatter-gather: a query goes to every shard and waits for the slowest one ---
+def shard_latency(rng):
+    # typical 10 ms, with a heavy tail (lognormal) and an occasional 1% slow event (a merge, a GC pause, a cold cache)
+    t = rng.lognormvariate(math.log(10), 0.35)
+    if rng.random() < 0.01:
+        t += rng.uniform(50, 200)
+    return t
+
+def percentile(xs, p):
+    xs = sorted(xs)
+    return xs[min(len(xs) - 1, int(p * len(xs)))]
+
+def query_latency(rng, shards, hedge_after=None):
+    worst = 0.0
+    for _ in range(shards):
+        t = shard_latency(rng)
+        if hedge_after is not None and t > hedge_after:
+            # ask a second replica of the same shard after waiting hedge_after ms and take whichever answers first
+            t = min(t, hedge_after + shard_latency(rng))
+        worst = max(worst, t)
+    return worst
+
+rng = random.Random(17)
+Q = 3000
+print("each shard answers in about 10 ms (heavy tail); the query waits for the slowest of its shards. latencies in ms")
+print("  shards   median   99th percentile   99th with a hedged second replica after 25 ms")
+for n in (1, 5, 20, 50, 100):
+    plain = [query_latency(rng, n) for _ in range(Q)]
+    hedged = [query_latency(rng, n, hedge_after=25) for _ in range(Q)]
+    print(f"  {n:>6}   {percentile(plain, 0.5):>6.1f}   {percentile(plain, 0.99):>15.1f}   {percentile(hedged, 0.99):>40.1f}")
+
+# --- 2. merging top-k: how many results must each shard return? ---
+def recall_for(shards, k, fetch, trials, seed):
+    r = random.Random(seed)
+    exact = 0
+    for _ in range(trials):
+        docs = [(r.random(), r.randrange(shards)) for _ in range(shards * 200)]       # (score, shard) for each document
+        truth = set(sorted(range(len(docs)), key=lambda i: -docs[i][0])[:k])
+        returned = set()
+        for s in range(shards):
+            mine = sorted((i for i, d in enumerate(docs) if d[1] == s), key=lambda i: -docs[i][0])[:fetch]
+            returned.update(mine)
+        merged = set(sorted(returned, key=lambda i: -docs[i][0])[:k])
+        if merged == truth: exact += 1
+    return exact / trials
+
+print()
+print("10 shards, global top 10. fraction of queries whose merged top 10 is EXACTLY the true top 10")
+print("  results fetched per shard   exact top 10")
+for fetch in (1, 2, 3, 4, 5, 10):
+    print(f"  {fetch:>25}   {100 * recall_for(10, 10, fetch, 100, 5):>10.1f}%")
+`} />
+
+A local run printed, for query latencies in milliseconds where each shard answers in about 10 ms with a heavy tail: with **1 shard** the median was 10.0 and the 99th percentile 58.8; with **20 shards** the median was 20.0 and the 99th percentile **202.0**; and with **100 shards** the median rose to **104.9** and the 99th percentile to **211.6**, because nearly every query hit a slow shard. With **hedged requests** (a second replica asked after 25 ms) the 99th percentile fell to **44.6 ms at 20 shards and 68.7 ms at 100 shards**, a cut of about three quarters for a little extra load. For the merge experiment with 10 shards and a global top 10, fetching only **1** result per shard produced the exact top 10 in **0.0%** of queries, **2** per shard in 43.0%, **3** in 89.0%, **4** in 99.0%, and **5 or more** in **100.0%** of the 100 trials. Fetching the full `k` from every shard is always exact; fetching fewer is a latency-versus-accuracy trade.
+
+## Making new documents searchable: segments and near-real-time
+
+A Lucene-style index is made of immutable **segments**, each a small self-contained inverted index. Immutability makes segments fast to read, easy to cache and safe to share, but it means you cannot edit one in place. Instead:
+
+- New documents go into an **in-memory buffer** and are written to the **transaction log** (translog) for durability.
+- A periodic **refresh** (by default about once a second) turns the buffer into a new searchable segment. This is why search is **near real time**: a document is typically visible about a second after it is indexed, not instantly.
+- A **commit** (flush) fsyncs segments to disk and trims the translog.
+- **Merging:** many small segments are merged in the background into fewer large ones, which keeps queries fast (fewer segments to search) but costs I/O and CPU, and can cause the latency blips that hedging hides.
+- **Deletes and updates:** a delete marks the document in a bitmap; an update is a delete plus a new insert. The space is reclaimed when segments merge.
+
+If a user adds a product and immediately searches for it, they may not see it. Options: refresh the index explicitly for that write (costly in volume), read the item from the primary database for the user who just wrote it, or design the interface to tolerate a short delay.
+
+## Keeping the index in sync with the source of truth
+
+The search index is a **derived copy** of data that lives in a database. It must be populated and kept current:
+
+- **Dual writes** from the application are unreliable (see the outbox lesson); a crash between the two writes leaves them different.
+- **Transactional outbox or change data capture** from the database into an indexing pipeline gives a reliable, replayable stream; the indexer applies each change idempotently (use the document id, and a version to ignore stale updates).
+- **Bulk reindexing** builds a brand-new index from the source, needed for analyzer, mapping or shard-count changes. Do it behind an **alias**: build `products_v2` while `products_v1` serves traffic, then switch the alias atomically.
+
+Treat the index as **rebuildable**. If it is lost or corrupted, you reindex from the database.
+
+## Deep pagination
+
+Asking for page 1,000 of 10 results (`from = 10,000, size = 10`) is expensive: **every shard** must find and sort its top 10,010 hits and send them to the coordinator, which merges `n * 10,010` entries to discard all but 10. Cost and memory grow with the offset. Practical defences:
+
+- **Cap the depth** (many engines refuse beyond about 10,000 results).
+- **Cursor-style pagination** (`search_after`): the next page starts after the sort key of the last result, so no shard sorts the skipped prefix.
+- **Scroll or point-in-time snapshots** for exporting everything, not for user browsing.
+- Encourage **better filtering** instead of paging through thousands of results; users rarely go past page 3.
+
+## Capacity and operations
+
+- **Shard size:** keep shards in a healthy range (often tens of gigabytes). Too small and fixed overheads, memory and fan-out dominate; too large and recovery, rebalancing and merges are slow.
+- **Hot and cold tiers:** recent data on fast nodes, old data on cheaper ones, with time-based indices rolled over by size or age (common for logs).
+- **Memory:** search relies on the operating system file cache for segments; leave generous RAM beyond the JVM heap.
+- **Cluster state:** a small set of master-eligible nodes (using consensus) manages shard allocation; keep them separate from heavy data nodes.
+- **Statistics:** each shard computes document frequencies locally, so small or skewed shards can score the same document differently; fix with more balanced shards or a global-statistics query mode.
+
+<Diagram kind="flow" caption="The path of data and queries in a typical search deployment" nodes={[
+  { id: "src", label: "Source database", x: 0, y: 80, role: "System of record. Changes flow out through an outbox or change data capture.", failureModes: ["An update event is lost, so the index drifts"], tradeoffs: ["Reliable pipeline needed; search stays derived and rebuildable"] },
+  { id: "pipe", label: "Indexing pipeline", x: 190, y: 80, role: "Transforms changes into documents and applies them idempotently to the index.", failureModes: ["Backlog during a bulk load", "Poison documents"], tradeoffs: ["Decouples the database from the search cluster"] },
+  { id: "idx", label: "Sharded index with replicas", x: 400, y: 80, role: "Primary shards and replicas holding immutable segments, refreshed about every second.", failureModes: ["Segment merges slow a shard", "Node loss triggers shard recovery"], tradeoffs: ["Capacity and availability versus fan-out and cost"] },
+  { id: "coord", label: "Coordinating node", x: 600, y: 80, role: "Scatters queries to a copy of each shard, merges the results, fetches documents.", failureModes: ["Waits for the slowest shard", "Deep pages blow up memory"], tradeoffs: ["Hedge, time out and cap depth to bound latency"] },
+  { id: "cli", label: "Clients", x: 780, y: 80, role: "Send queries; see results about a second after a write.", failureModes: ["Read-your-writes gap right after an update"], tradeoffs: ["Near real time is cheaper than real time"] }
+]} edges={[
+  { from: "src", to: "pipe", label: "changes" }, { from: "pipe", to: "idx", label: "index" }, { from: "cli", to: "coord", label: "query" }, { from: "coord", to: "idx", label: "scatter" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Design choices in a distributed search system" rows={[
+  { option: "Document-partitioned shards", pros: "Balanced load; each shard searchable alone; simple indexing", cons: "Every query fans out to all shards; tail latency grows with shard count", chooseWhen: "Almost always" },
+  { option: "More shards", pros: "More parallelism for indexing and large searches", cons: "Higher fan-out and per-shard overhead; harder to change later", chooseWhen: "A large index growing quickly, sized with headroom" },
+  { option: "More replicas", pros: "Read throughput and availability", cons: "More storage and indexing work", chooseWhen: "Query-heavy workloads and strict availability goals" },
+  { option: "Hedged requests", pros: "Large p99 reduction for modest extra load", cons: "Extra traffic; needs idempotent reads and a tuned delay", chooseWhen: "High fan-out with latency targets at p99" },
+  { option: "Near-real-time refresh interval", pros: "Short intervals make documents searchable sooner", cons: "More tiny segments and merge work", chooseWhen: "Tune per index: seconds for products, longer for bulk logs" },
+  { option: "Dual write to the index", pros: "Simple to code", cons: "Drifts from the database after any failure", chooseWhen: "Almost never; use outbox or change data capture" }
+]} />
+
+## Failure modes
+
+- **Slow shard** drags every query to its p99; hedging and replica selection mask it.
+- **Node loss:** replicas are promoted and missing copies rebuilt, using disk and network; plan spare capacity so recovery does not overload the cluster.
+- **Split brain in cluster state** if too few master-eligible nodes or a bad quorum configuration.
+- **Index drift** from the source of truth because events were lost or applied out of order.
+- **Mapping or analyzer change** needing a full reindex with no alias strategy, causing downtime.
+- **Deep pagination or huge aggregations** exhausting memory on coordinating nodes.
+- **Hot shard** because of a skewed routing key (for example all documents of one tenant).
+- **Runaway merges or a slow disk** causing indexing backpressure.
+
+## Pitfalls
+
+- Choosing the shard count casually; it cannot be changed in place.
+- Treating the search cluster as the primary database.
+- Expecting read-after-write consistency from near-real-time search.
+- Letting users page to thousands of results.
+- Over-sharding small indices, which makes every query slower.
+- Forgetting to reindex through an alias, so analyzer changes require downtime.
+- Putting all copies of a shard in one failure domain.
+
+## What would you choose and why?
+
+You run search over 400 million log lines per day with a 14-day retention, queried mostly for the last hour, and a separate product search with 20 million items that must show new listings within a few seconds. Compare how you would shard and replicate each, how the refresh interval, indexing path and index layout would differ, and which tail-latency mitigations you would turn on for the product search.
+
+## Quiz
+
+<Quiz id="sd-m14-distributed-search" tags={["search", "sharding", "scatter-gather", "tail-latency"]} questions={[
+  { type: "mcq", q: "Why must a search query usually go to every shard in a document-partitioned index?", options: ["Shards are replicas", "Any shard might hold matching documents, since documents are spread across shards by id", "To balance memory", "Because of caching"], answer: 1, explain: "Documents are assigned by hashing their id, not by their content, so matches can be on any shard." },
+  { type: "mcq", q: "To guarantee the exact global top k, how many results must each shard return?", options: ["1", "k / number of shards", "k", "All of them"], answer: 2, explain: "A document in the global top k must be in the top k of its own shard; returning fewer can lose a winner (the simulation showed 0% exact at 1 result per shard)." },
+  { type: "mcq", q: "How do hedged requests reduce tail latency?", options: ["By caching results", "By sending a slow sub-query to a second replica after a delay and using whichever answers first", "By removing shards", "By lowering the refresh interval"], answer: 1, explain: "At 100 shards the p99 dropped from about 212 ms to about 69 ms in the simulation." },
+  { type: "multi", q: "Why is search 'near real time'?", options: ["New documents sit in a buffer until a refresh creates a searchable segment, about once a second", "Segments are immutable, so documents are not editable in place", "The index is always read from disk only", "Deletes are tracked and reclaimed during merges"], answer: [0, 1, 3], explain: "Refresh makes new documents visible after a short delay rather than instantly." },
+  { type: "mcq", q: "Why is deep pagination (from = 10,000) expensive?", options: ["Documents are large", "Every shard must find and sort its top 10,010 hits for the coordinator to merge and discard all but 10", "The network is slow", "Replicas must be rebuilt"], answer: 1, explain: "Cost grows with the offset; use search_after or cap the depth." }
+]} />
