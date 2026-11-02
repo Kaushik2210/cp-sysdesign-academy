@@ -55,7 +55,7 @@ The cost is a larger ring (more memory and slightly slower lookup, `O(log V)` wi
 
 The program below builds a ring with 10 nodes and 100,000 keys, then adds an 11th node and counts how many keys changed owner, comparing against `mod N`.
 
-<CodeRunner language="python" code={`import bisect, hashlib
+<CodeRunner language="python" timeoutMs={30000} code={`import bisect, hashlib
 
 def h(s):
     return int(hashlib.md5(s.encode()).hexdigest(), 16) % (2**32)

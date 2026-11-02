@@ -74,11 +74,11 @@ With `n` replicas, a write waits for `w` acknowledgements and a read asks `r` re
 
 The program replicates a write to 5 replicas, each applying it after an independent random delay. A write is acknowledged when `w` replicas have it. A reader starts the moment the acknowledgement arrives and asks `r` random replicas. We count reads that miss the write.
 
-<CodeRunner language="python" code={`import random
+<CodeRunner language="python" timeoutMs={30000} code={`import random
 
 random.seed(7)
 N = 5
-TRIALS = 200000
+TRIALS = 40000
 
 def stale_rate(w, r):
     stale = 0
@@ -102,9 +102,9 @@ Running this exact program with Python 3.13 produced:
 
 | `w` | `r` | `w + r > n`? | stale reads |
 | --- | --- | --- | --- |
-| 1 | 1 | no | 80.01% |
-| 1 | 3 | no | 40.09% |
-| 2 | 2 | no | 29.94% |
+| 1 | 1 | no | 80.06% |
+| 1 | 3 | no | 39.47% |
+| 2 | 2 | no | 30.00% |
 | 3 | 3 | yes | 0.00% |
 | 2 | 4 | yes | 0.00% |
 | 4 | 2 | yes | 0.00% |
@@ -143,7 +143,7 @@ A ride-sharing app stores driver locations (updated every 3 seconds), trip state
 <Quiz id="sd-m11-consistency-models" tags={["consistency", "cap", "pacelc"]} questions={[
   { type: "mcq", q: "Which model guarantees that once a write is acknowledged, every later read sees it?", options: ["Eventual", "Causal", "Linearizable", "Read-your-writes"], answer: 2, explain: "Linearizability makes the system behave like one copy where each operation takes effect at a single instant between its start and end." },
   { type: "mcq", q: "What does PACELC add to CAP?", options: ["A fourth property", "The trade-off between latency and consistency when there is no partition", "A way to avoid partitions", "A replacement for quorums"], answer: 1, explain: "Even without partitions, coordinating replicas costs latency, so the choice is latency versus consistency (the ELC part)." },
-  { type: "predict", q: "n = 5, w = 2, r = 2 under the lesson's model. What is the chance that a read right after the acknowledgement misses the write?", code: "from math import comb\nn, w, r = 5, 2, 2\nprint(comb(n - w, r) / comb(n, r))", options: ["0.0", "0.3", "0.4", "0.8"], answer: 1, explain: "C(3,2) / C(5,2) = 3/10 = 0.3, which matches the measured 29.94%." },
+  { type: "predict", q: "n = 5, w = 2, r = 2 under the lesson's model. What is the chance that a read right after the acknowledgement misses the write?", code: "from math import comb\nn, w, r = 5, 2, 2\nprint(comb(n - w, r) / comb(n, r))", options: ["0.0", "0.3", "0.4", "0.8"], answer: 1, explain: "C(3,2) / C(5,2) = 3/10 = 0.3, which matches the measured 30.00%." },
   { type: "multi", q: "Which statements are true?", options: ["w + r > n makes every read quorum overlap every acknowledged write quorum", "Eventual consistency promises that reads are never stale", "Causal consistency preserves cause and effect", "CAP only constrains behaviour during network partitions"], answer: [0, 2, 3], explain: "Eventual consistency only promises convergence once writes stop; reads can be stale in the meantime." },
   { type: "mcq", q: "A user posts a comment and does not see it after a refresh. Which guarantee fixes exactly this?", options: ["Linearizability for all users", "Read-your-writes (a session guarantee)", "Higher replication factor", "Longer cache TTL"], answer: 1, explain: "Read-your-writes only has to hold for the writer, so it can be cheap, for example by reading that user's data from the primary for a while." }
 ]} />

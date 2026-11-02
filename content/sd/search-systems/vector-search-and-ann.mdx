@@ -1,0 +1,184 @@
+---
+title: Vector Search and Approximate Nearest Neighbours
+track: sd
+module: search-systems
+order: 4
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/search-systems/ranking-tf-idf-and-bm25", "sd/search-systems/scatter-gather-search-and-tail-latency"]
+tags: [vector-search, embeddings, ann, ivf, lsh, hnsw, recall, hybrid-search, rag]
+type: lesson
+furtherReading:
+  - title: "Malkov and Yashunin, Efficient and robust approximate nearest neighbor search using HNSW graphs"
+    url: https://arxiv.org/abs/1603.09320
+  - title: "Jégou, Douze, Schmid, Product quantization for nearest neighbor search"
+    url: https://ieeexplore.ieee.org/document/5432202
+  - title: "Faiss: a library for efficient similarity search (documentation)"
+    url: https://github.com/facebookresearch/faiss/wiki
+  - title: "Cormack, Clarke, Buettcher, Reciprocal Rank Fusion outperforms Condorcet and individual rank learning methods"
+    url: https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf
+---
+
+## Intuition
+
+Keyword search matches **words**. A user who types "how do I get my money back" will not match a page titled "Refund policy" unless some word overlaps. **Semantic search** matches **meaning**: a model turns text (or an image, or a song) into an **embedding**, a vector of a few hundred numbers placed so that similar meanings are close together. Searching becomes: embed the query, find the **nearest vectors**.
+
+Finding the exact nearest vectors means comparing the query with every stored vector, which is `O(n * d)` per query (`d` is the number of dimensions). With a hundred million vectors that is far too slow, so real systems use **approximate nearest neighbour (ANN)** search: they may miss a few of the true nearest vectors in exchange for looking at a small fraction of the data. The trade is measured as **recall**: of the true top `k`, what fraction did we return?
+
+## Definition
+
+- **Embedding:** a fixed-length vector produced by a model. Distance or similarity between two vectors reflects similarity of the originals.
+- **Similarity measures:** Euclidean (L2) distance, cosine similarity (angle, ignores length) and inner product. For normalised vectors cosine and inner product give the same ranking.
+- **Exact (flat) search:** compare against everything. Perfect recall, cost linear in `n`. Fine up to roughly hundreds of thousands of vectors, and it is the baseline every ANN index is measured against.
+- **Recall@k:** the share of the true top `k` neighbours that the ANN search returned. Typical targets are 0.9 to 0.99.
+
+**The main ANN families:**
+
+| family | idea | knob that trades recall for speed |
+| --- | --- | --- |
+| **IVF** (inverted file) | Cluster the vectors (k-means). Store each vector in its nearest cluster. At query time, search only the `nprobe` clusters closest to the query. | `nprobe` |
+| **LSH** (locality-sensitive hashing) | Hash vectors with random hyperplanes so that near vectors tend to share a bit signature. Search the buckets the query falls into, over several tables. | number of tables, bits per signature |
+| **HNSW** (graph) | Build a layered "small world" graph where each vector links to near neighbours. Search by greedy walks from a coarse layer down to the fine one. | `efSearch` (breadth of the walk) |
+| **PQ** (product quantization) | Compress each vector into a few bytes by quantising sub-vectors; compare using lookup tables. | number of sub-quantisers; often combined with IVF |
+
+Memory matters: one million 768-dimensional float32 vectors take `1,000,000 * 768 * 4` bytes, about 3 GB, before any index structure, which is why compression (PQ, 8-bit or binary quantisation) and disk-based indexes exist.
+
+## Code: IVF and LSH against exact search
+
+The program creates 2,000 synthetic 16-dimensional vectors in 20 groups of similar items, picks 25 queries, and computes the exact top 10 as ground truth. It builds an IVF index (a few k-means steps) and LSH indexes with different numbers of tables, and reports recall@10 and the share of vectors actually compared.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import math, random
+
+random.seed(2)
+DIM, N, CLUSTERS, QUERIES = 16, 2000, 20, 25
+
+centres = [[random.gauss(0, 1) for _ in range(DIM)] for _ in range(CLUSTERS)]
+vectors = []
+for i in range(N):
+    c = centres[i % CLUSTERS]
+    vectors.append([x + random.gauss(0, 0.35) for x in c])
+
+def dist2(a, b):
+    return sum((x - y) ** 2 for x, y in zip(a, b))
+
+def exact_top(q, k=10):
+    return sorted(range(N), key=lambda i: dist2(q, vectors[i]))[:k]
+
+queries = []
+for _ in range(QUERIES):
+    c = random.choice(centres)
+    queries.append([x + random.gauss(0, 0.35) for x in c])
+truth = [set(exact_top(q)) for q in queries]
+
+# IVF: cluster the vectors (a few k-means steps), then search only the nearest few clusters
+means = random.sample(vectors, CLUSTERS)
+for _ in range(3):
+    groups = [[] for _ in range(CLUSTERS)]
+    for i, v in enumerate(vectors):
+        groups[min(range(CLUSTERS), key=lambda c: dist2(v, means[c]))].append(i)
+    for c, g in enumerate(groups):
+        if g:
+            means[c] = [sum(vectors[i][d] for i in g) / len(g) for d in range(DIM)]
+lists = groups
+
+def ivf_search(q, nprobe, k=10):
+    near = sorted(range(CLUSTERS), key=lambda c: dist2(q, means[c]))[:nprobe]
+    candidates = [i for c in near for i in lists[c]]
+    return sorted(candidates, key=lambda i: dist2(q, vectors[i]))[:k], len(candidates)
+
+# LSH: random hyperplanes give each vector a short bit signature; nearby vectors tend to share signatures
+def make_tables(tables, bits):
+    planes = [[[random.gauss(0, 1) for _ in range(DIM)] for _ in range(bits)] for _ in range(tables)]
+    def sig(t, v):
+        return tuple(sum(p * x for p, x in zip(plane, v)) > 0 for plane in planes[t])
+    buckets = []
+    for t in range(tables):
+        table = {}
+        for i, v in enumerate(vectors):
+            table.setdefault(sig(t, v), []).append(i)
+        buckets.append(table)
+    return sig, buckets
+
+def lsh_search(q, sig, buckets, k=10):
+    candidates = set()
+    for t, table in enumerate(buckets):
+        candidates.update(table.get(sig(t, q), []))
+    return sorted(candidates, key=lambda i: dist2(q, vectors[i]))[:k], len(candidates)
+
+def report(name, search):
+    recall = scanned = 0
+    for q, t in zip(queries, truth):
+        found, examined = search(q)
+        recall += len(t & set(found)) / 10
+        scanned += examined
+    print(f" {name:30s} {100 * recall / QUERIES:6.1f}%      {100 * scanned / QUERIES / N:6.1f}%")
+
+print(f"{N} vectors of {DIM} dimensions in {CLUSTERS} groups, {QUERIES} queries, exact top-10 as the truth")
+print(" method                          recall@10   share of vectors compared")
+report("exact scan (brute force)", lambda q: (exact_top(q), N))
+for nprobe in (1, 2, 4):
+    report(f"IVF, {nprobe} of {CLUSTERS} clusters probed", lambda q, n=nprobe: ivf_search(q, n))
+for tables, bits in ((4, 8), (8, 8), (12, 8)):
+    sig, buckets = make_tables(tables, bits)
+    report(f"LSH, {tables} tables x {bits} bits", lambda q, s=sig, b=buckets: lsh_search(q, s, b))
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| method | recall@10 | share of vectors compared |
+| --- | --- | --- |
+| exact scan (brute force) | 100.0% | 100.0% |
+| IVF, 1 of 20 clusters probed | 91.6% | 5.6% |
+| IVF, 2 of 20 clusters probed | 98.8% | 11.0% |
+| IVF, 4 of 20 clusters probed | 100.0% | 21.8% |
+| LSH, 4 tables x 8 bits | 82.4% | 5.5% |
+| LSH, 8 tables x 8 bits | 97.2% | 8.7% |
+| LSH, 12 tables x 8 bits | 99.6% | 10.3% |
+
+Both methods show the same trade-off curve: **comparing about 5 to 11% of the vectors buys 82 to 99% recall**, and raising the knob (`nprobe` or the number of tables) moves along it. Probing 2 of 20 clusters reached 98.8% recall while comparing 11% of the data, about 9 times less distance computation than the exact scan; four probes reached 100% on these queries at 22%. For LSH, more tables raise recall because a true neighbour only has to land in the same bucket in *one* of them, at the cost of more candidates. The data are synthetic and unusually clean (tight groups of similar vectors, only 16 dimensions), so these ratios flatter ANN. Real embeddings have hundreds of dimensions, less clustered structure and more overlap, and recall at a given speed is lower. Always measure recall on **your** vectors and queries against an exact baseline.
+
+## In a production system
+
+- **Filters.** Real queries combine vector similarity with filters (language, tenant, price). *Post-filtering* (search, then filter) can leave too few results; *pre-filtering* inside the index is more complex and slower. Test selective filters explicitly.
+- **Hybrid search.** Combine BM25 (exact terms, names, codes) with vector similarity (meaning). A simple robust fusion is **reciprocal rank fusion**: `score(d) = sum over rankers of 1 / (k + rank(d))` with `k` around 60, which needs no score calibration between systems.
+- **Retrieval for LLM applications (RAG).** Chunk documents, embed the chunks, retrieve the top few by vector (often hybrid), and put them in the prompt. Retrieval quality limits answer quality; evaluate recall of the retrieval step on its own.
+- **Updates.** IVF and PQ are trained on a sample and degrade as the data drifts (retrain periodically); HNSW supports incremental inserts but deletions and updates are more awkward. Many systems keep a small fresh index next to a large static one and merge.
+- **Embedding model changes** invalidate every stored vector: switching models means re-embedding and re-indexing everything, so version the vectors and keep the old index until the new one is ready.
+- **Sharding.** Vector indexes shard like any other: scatter the query, merge top `k` lists, and suffer the same tail latency problem (previous lesson).
+
+## Trade-offs
+
+<TradeOffs caption="Vector search approaches" rows={[
+  { option: "Exact (flat) search", pros: "Perfect recall; simplest; no training", cons: "Linear cost per query", chooseWhen: "Up to a few hundred thousand vectors, or as the ground truth for evaluation" },
+  { option: "IVF (with or without PQ)", pros: "Large speed-up with a tunable `nprobe`; works well with compression", cons: "Needs training; recall drops as data drifts; cluster boundary misses", chooseWhen: "Large static or slowly changing collections, memory-limited deployments" },
+  { option: "HNSW graph", pros: "Excellent recall and speed; incremental inserts", cons: "High memory use; slower to build; awkward deletes", chooseWhen: "Interactive, latency-sensitive search with enough RAM" },
+  { option: "LSH", pros: "Simple; provable guarantees; good for very high dimensions or streaming", cons: "Many tables needed for high recall; usually beaten by IVF or HNSW in practice", chooseWhen: "Near-duplicate detection and simple prototypes" },
+  { option: "Vector extension in an existing database (pgvector and similar)", pros: "No new system; transactional with the data", cons: "Scale and index options are more limited", chooseWhen: "Moderate scale and a strong preference for one datastore" },
+  { option: "Dedicated vector database or search engine", pros: "Built-in ANN, filtering, replication, sharding", cons: "Another system to operate; synchronisation with the source of truth", chooseWhen: "Hundreds of millions of vectors or heavy filtering needs" }
+]} />
+
+## Pitfalls
+
+- Never measuring recall: a "fast" index that silently returns the wrong neighbours.
+- Tuning on queries that are easier than production traffic (synthetic or deduplicated).
+- Ignoring filters until launch, when selective filters make recall collapse.
+- Forgetting that cosine and L2 need matching normalisation between indexing and querying.
+- Changing the embedding model in place, so queries and stored vectors live in different spaces.
+- Treating semantic search as a replacement for keyword search: exact identifiers, error codes and rare names still need lexical matching.
+- Under-estimating memory: HNSW needs the vectors and the graph resident in RAM.
+
+## What would you choose and why?
+
+A support site has 400,000 help articles chunked into 3 million passages, embedded with a 768-dimension model. Users type questions in natural language, but also paste error codes like `E-4412`. Would you use exact search, IVF or HNSW? How would you combine it with keyword search so the error code still works, and how would you decide that your recall is good enough?
+
+## Quiz
+
+<Quiz id="sd-m14-vector-search" tags={["vector-search", "ann", "embeddings"]} questions={[
+  { type: "mcq", q: "What does recall@10 measure for an ANN index?", options: ["Query speed", "The share of the true 10 nearest neighbours that the index returned", "Memory use", "The number of clusters"], answer: 1, explain: "It compares the approximate result with the exact top 10." },
+  { type: "mcq", q: "In IVF, what does increasing nprobe do?", options: ["Reduces recall and speeds up search", "Searches more clusters: higher recall, more vectors compared", "Rebuilds the index", "Changes the embedding"], answer: 1, explain: "More probed clusters means more candidates examined and a better chance of containing the true neighbours." },
+  { type: "predict", q: "One million 768-dimension float32 vectors: roughly how much memory do the raw vectors need?", code: "print(1_000_000 * 768 * 4 / 1e9)", options: ["About 0.3 GB", "About 3 GB", "About 30 GB", "About 300 GB"], answer: 1, explain: "1,000,000 x 768 x 4 bytes = 3.07 GB before any index overhead." },
+  { type: "multi", q: "Which are good practices for production vector search?", options: ["Measure recall against exact search on your own queries", "Combine vector and keyword search for exact identifiers", "Switch the embedding model in place without re-indexing", "Test queries with selective filters"], answer: [0, 1, 3], explain: "Vectors from different models live in different spaces; re-embed and re-index everything on a model change." },
+  { type: "mcq", q: "What does reciprocal rank fusion do?", options: ["Averages vector lengths", "Combines rankings from several rankers using 1 / (k + rank), without calibrating scores", "Compresses vectors", "Shards the index"], answer: 1, explain: "It merges ranked lists from BM25 and vector search by rank position, so their score scales need not match." }
+]} />

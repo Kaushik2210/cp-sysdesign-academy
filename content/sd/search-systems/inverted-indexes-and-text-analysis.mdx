@@ -1,0 +1,199 @@
+---
+title: Inverted Indexes and Text Analysis
+track: sd
+module: search-systems
+order: 1
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/databases-1/indexes-and-query-plans", "sd/databases-2/sharding-and-partitioning"]
+tags: [search, inverted-index, lucene, elasticsearch, tokenization, analyzers, posting-lists, segments]
+type: lesson
+furtherReading:
+  - title: "Manning, Raghavan, Schütze, Introduction to Information Retrieval (free online), chapters 1 to 2"
+    url: https://nlp.stanford.edu/IR-book/
+  - title: "Elasticsearch Guide, Text analysis"
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis.html
+  - title: "Apache Lucene, Core concepts and index file formats"
+    url: https://lucene.apache.org/core/
+  - title: "Designing Data-Intensive Applications (Kleppmann), chapter 3 (full-text search and fuzzy indexes)"
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+The index at the back of a textbook lists words and the pages they appear on. To find "quorum" you do not read the book: you look up the word and jump to the pages. A search engine does the same with documents. Instead of storing, for each document, its words (the **forward** index you get from the documents themselves), it stores for each **word** the list of documents that contain it. That list is a **posting list**, and the whole structure is an **inverted index**.
+
+A database `LIKE '%quorum%'` query has to look at every row. An inverted index goes straight to the rows (documents) containing the word, and multi-word queries become **set operations on sorted lists**.
+
+## Definition
+
+**Pipeline from text to index.**
+
+1. **Tokenize:** split text into tokens (words), handling punctuation and languages without spaces.
+2. **Normalise (analyze):** lowercase, strip accents, remove **stop words** (`the`, `of`) if wanted, **stem** or lemmatise (`running`, `runs` become `run`), expand synonyms, and for partial matching generate **n-grams** or edge n-grams. The **same analysis must be applied to the query**, or the terms will not match.
+3. **Index:** for each term, store its **posting list**: the sorted document ids that contain it, usually with the term frequency in each document and, for phrase queries, the **positions** of the term.
+
+```text
+dictionary            posting lists (sorted by document id)
+  "cache"      ->     [3, 8, 21, 40, 77, ...]
+  "quorum"     ->     [8, 77]
+  "sharding"   ->     [2, 8, 9, 77, 90]
+```
+
+**Boolean queries** are list operations:
+
+- `quorum AND sharding`: intersect `[8, 77]` and `[2, 8, 9, 77, 90]` giving `[8, 77]`.
+- `cache OR quorum`: union.
+- `NOT`: difference.
+
+Because the lists are **sorted**, intersection is a linear merge. Start with the **shortest** list and probe the others (or use skip pointers or binary search), so the cost depends on the rare term, not the common one.
+
+**Phrase queries** (`"leader election"`) intersect the lists and then check that the positions are consecutive.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  D[Documents] --> T[Tokenizer]
+  T --> A[Analyzer: lowercase, stem, stop words]
+  A --> I[Inverted index: term to posting list]
+  Q[Query text] --> QA[Same analyzer]
+  QA --> L[Look up posting lists]
+  I --> L
+  L --> M[Merge: AND, OR, phrase]
+  M --> R[Candidate documents, then ranking]`} caption="Indexing and querying share the analysis step; ranking (next lesson) runs on the candidates" />
+
+## How real engines store it
+
+Lucene (inside Elasticsearch, OpenSearch and Solr) writes the index as **immutable segments**:
+
+- New documents go into an in-memory buffer; periodically (the Elasticsearch default *refresh* is about once a second) the buffer is written as a new **segment** and becomes searchable. That is why search is **near-real-time**, not instant.
+- A search runs over **all segments** and merges the results.
+- **Deletes** mark a document as deleted in a bitmap; the data is dropped when segments are **merged** in the background into larger ones.
+- **Updates** are delete plus insert.
+- A **write-ahead log** (the *translog*) makes acknowledged writes durable before they are in a segment.
+
+Immutability makes segments cache-friendly and lock-free to read, at the cost of merge work and delayed visibility.
+
+## Code: how much less data does the index read?
+
+The program generates 8,000 documents with Zipf-like word frequencies (a few words are everywhere, most are rare), builds the inverted index, and answers AND queries two ways: by scanning every document, and by intersecting posting lists shortest first. Both methods must return identical results (the program asserts that).
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+from collections import defaultdict
+
+random.seed(5)
+VOCAB = 5000
+DOCS = 8000
+
+weights = [1 / (r + 1) for r in range(VOCAB)]
+docs = []
+for _ in range(DOCS):
+    length = random.randint(20, 60)
+    docs.append(random.choices(range(VOCAB), weights, k=length))
+
+doc_sets = [set(words) for words in docs]         # for the no-index baseline
+total_words = sum(len(words) for words in docs)
+
+index = defaultdict(list)
+for doc_id, words in enumerate(docs):
+    for w in set(words):
+        index[w].append(doc_id)
+
+def scan_and(terms):
+    hits = [d for d, ws in enumerate(doc_sets) if all(t in ws for t in terms)]
+    return hits, total_words
+
+def index_and(terms):
+    lists = sorted((index[t] for t in terms), key=len)
+    result, read = lists[0], len(lists[0])
+    for lst in lists[1:]:
+        s = set(lst)
+        read += len(lst)
+        result = [d for d in result if d in s]
+    return result, read
+
+print("posting list length (documents containing the word) out of", DOCS)
+for r in (0, 1, 10, 100, 1000, 4000):
+    print(f"  word rank {r:5d}: {len(index[r]):6d} documents")
+
+random.seed(6)
+queries = [random.sample(range(VOCAB), 3) for _ in range(30)]
+queries += [[0, 1, 2], [0, 5, 50]] + [[random.randrange(30), random.randrange(30)] for _ in range(10)]
+scan_cost = idx_cost = 0
+for q in queries:
+    a, sc = scan_and(q)
+    b, ic = index_and(q)
+    assert a == b
+    scan_cost += sc
+    idx_cost += ic
+print()
+print(f"{len(queries)} AND queries; every answer checked equal between the two methods")
+print(f"scan:  {scan_cost / len(queries):10.0f} words read per query (every word of all {DOCS} documents)")
+print(f"index: {idx_cost / len(queries):10.0f} posting entries read per query")
+print(f"the index reads {scan_cost / idx_cost:.0f} times fewer items")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| word rank (popularity) | documents containing it (of 8,000) |
+| --- | --- |
+| 0 (most common) | 7,824 |
+| 1 | 6,959 |
+| 10 | 2,565 |
+| 100 | 324 |
+| 1,000 | 30 |
+| 4,000 | 8 |
+
+| method (42 AND queries, answers identical) | items read per query |
+| --- | --- |
+| scan every document | 321,413 words |
+| intersect posting lists, shortest first | 2,030 posting entries |
+
+The index read **158 times fewer items**, and the gap grows with the collection because the scan reads everything while the index reads only the lists of the query terms. The posting-list lengths show why order matters: a query that includes the most common word would read a list of about 7,800 entries, so the intersection starts from the rarest term and only *probes* the long list. (The two units are not identical work: a posting entry is a single integer in a compact sorted list, while scanning reads every word of every document; the comparison shows the shape of the saving, not a wall-clock ratio.)
+
+## Beyond exact words
+
+| need | technique |
+| --- | --- |
+| match `run` when the text says `running` | stemming or lemmatisation at index and query time |
+| type-ahead and prefix search | edge n-grams, or an FST/trie over the dictionary |
+| typo tolerance | edit-distance automata over the dictionary, or n-gram overlap |
+| exact phrases | positions in the posting lists |
+| filters (price, date, category) | doc-values or bitsets combined with the term lists |
+| other languages | language-specific analyzers (CJK needs word segmentation) |
+
+## Trade-offs
+
+<TradeOffs caption="Where to run text search" rows={[
+  { option: "SQL LIKE or regex", pros: "No new system; works for tiny tables", cons: "Scans rows; no ranking; no linguistics", chooseWhen: "Small datasets and admin lookups" },
+  { option: "Built-in full-text index in the database (Postgres tsvector, MySQL FULLTEXT)", pros: "One system and transactional consistency; decent ranking", cons: "Limited analyzers and scaling; shares load with the OLTP workload", chooseWhen: "Moderate search needs next to the data" },
+  { option: "Dedicated search engine (Elasticsearch, OpenSearch, Solr)", pros: "Rich analysis, ranking, facets, horizontal scaling", cons: "Another system to run; index is a copy that must be kept in sync; near-real-time visibility", chooseWhen: "Search is a core feature or the dataset is large" },
+  { option: "Hosted search service", pros: "No operations; tuned relevance features", cons: "Cost and vendor coupling", chooseWhen: "Small team that wants product search quickly" }
+]} />
+
+## Keeping the index in sync
+
+The search index is a **derived copy**. The source of truth stays in the primary database, and a pipeline updates the index: change data capture or an outbox publishing events, a consumer indexing them, and a way to **rebuild** the whole index from scratch (new analyzer, new field) into a new index and then switch an **alias** to it. Plan for lag (search shows data a few seconds old), for retries that must be idempotent (index by document id), and for deletes.
+
+## Pitfalls
+
+- Using different analyzers at index and query time, so terms never match.
+- Treating the search index as the source of truth.
+- Indexing everything with high-cardinality analyzed fields, making the index large and slow.
+- Not planning a reindex path: every analyzer change forces one.
+- Expecting read-your-writes: a refresh interval means a new document may take a second to appear.
+- Deep pagination (`from = 100000`) which makes every shard produce and sort a huge window (see the scatter-gather lesson).
+
+## What would you choose and why?
+
+A marketplace has 30 million listings in PostgreSQL. Buyers search by free text, filter by category and price, and expect new listings to show up within about 10 seconds. Would you start with the database's full-text search or a dedicated engine? What is the synchronisation path, and what happens to search when the indexing consumer falls an hour behind?
+
+## Quiz
+
+<Quiz id="sd-m14-inverted-indexes" tags={["search", "inverted-index"]} questions={[
+  { type: "mcq", q: "What does an inverted index map?", options: ["Documents to their words", "Each term to the list of documents containing it", "Queries to results", "Users to documents"], answer: 1, explain: "The 'inversion' is from document-to-words to word-to-documents." },
+  { type: "mcq", q: "Why intersect posting lists starting from the shortest one?", options: ["It is alphabetical", "The cost depends on the rare term, because every candidate must be in the shortest list", "Long lists cannot be read", "It improves ranking"], answer: 1, explain: "The result can be no larger than the shortest list, so probing the long lists for its entries is cheap." },
+  { type: "predict", q: "Posting lists: cache = [3, 8, 21], quorum = [8, 77]. What does cache AND quorum return?", code: "cache = {3, 8, 21}\nquorum = {8, 77}\nprint(sorted(cache & quorum))", options: ["[3, 8, 21, 77]", "[8]", "[]", "[3, 21]"], answer: 1, explain: "Only document 8 appears in both lists." },
+  { type: "multi", q: "Which are true about Lucene-style segment indexes?", options: ["New documents become searchable only after the next refresh", "Segments are immutable and merged in the background", "Deletes physically remove the document immediately", "The query must use the same analysis as indexing"], answer: [0, 1, 3], explain: "Deletes mark documents as deleted; the space is reclaimed at merge time." },
+  { type: "mcq", q: "Which is the right source of truth for product data when you also run a search engine?", options: ["The search index", "The primary database, with the index derived from it", "Both equally", "The cache"], answer: 1, explain: "The index is a derived, rebuildable copy." }
+]} />

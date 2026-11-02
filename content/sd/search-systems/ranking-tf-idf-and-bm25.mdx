@@ -1,0 +1,186 @@
+---
+title: Ranking with TF-IDF and BM25
+track: sd
+module: search-systems
+order: 2
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/search-systems/inverted-indexes-and-text-analysis"]
+tags: [search, ranking, tf-idf, bm25, relevance, evaluation, precision, ndcg]
+type: lesson
+furtherReading:
+  - title: "Robertson and Zaragoza, The Probabilistic Relevance Framework: BM25 and Beyond"
+    url: https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf
+  - title: "Manning, Raghavan, Schütze, Introduction to Information Retrieval, chapters 6 and 8"
+    url: https://nlp.stanford.edu/IR-book/
+  - title: "Elasticsearch Guide, Similarity (BM25) and relevance scoring"
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/index-modules-similarity.html
+  - title: "Elastic blog, Practical BM25: how shards affect relevance scoring"
+    url: https://www.elastic.co/blog/practical-bm25-part-1-how-shards-affect-relevance-scoring-in-elasticsearch
+---
+
+## Intuition
+
+A query like `distributed lock timeout` can match thousands of documents. The engine must put the best ten first. A first idea is to count how often the query words appear in a document. That fails in two ways:
+
+1. **Common words dominate.** A document that says "the" a hundred times is not more relevant to a query containing "the".
+2. **Long documents win unfairly.** A long document mentions every word more often simply because it has more words.
+
+Two fixes give the classic scoring functions. **Inverse document frequency (IDF)** down-weights words that appear in many documents, so rare, informative words count more. **Length normalisation** and **term-frequency saturation** stop long documents and repeated words from running away with the score. BM25 combines all of this and is the default in Lucene, Elasticsearch and OpenSearch.
+
+## Definition
+
+For a collection of `N` documents, let `n(t)` be the number of documents containing term `t`, `f(t, d)` the number of times `t` occurs in document `d`, `|d|` the length of `d` in words and `avgdl` the average document length.
+
+**TF-IDF:**
+
+```text
+score(d, q) = sum over query terms t of   f(t, d) * idf(t)
+idf(t)      = ln( 1 + (N - n(t) + 0.5) / (n(t) + 0.5) )
+```
+
+**BM25:**
+
+```text
+score(d, q) = sum over t of   idf(t) * f * (k1 + 1) / ( f + k1 * (1 - b + b * |d| / avgdl) )      with f = f(t, d)
+```
+
+- `k1` (typically 1.2 to 2) controls **term-frequency saturation**: the contribution of a term grows with `f` but flattens out, so the tenth occurrence adds much less than the first.
+- `b` (typically 0.75) controls **length normalisation**: with `b = 1` a document twice as long as average is penalised fully, with `b = 0` length is ignored.
+- A term absent from a document contributes nothing.
+
+Intuition for the saturation: if `f` is huge the fraction approaches `idf * (k1 + 1)`, a ceiling per term, so no single word can drown the others.
+
+## Measuring relevance
+
+Ranking quality needs **judgements**: for sample queries, which documents are relevant. Common metrics:
+
+| metric | what it measures |
+| --- | --- |
+| precision@k | fraction of the top `k` results that are relevant |
+| recall@k | fraction of all relevant documents found in the top `k` |
+| MRR | average of `1 / rank` of the first relevant result |
+| nDCG | graded relevance, with higher positions weighted more |
+
+Offline metrics on a judged set, plus online measurement (click-through, reformulation rate, A/B tests), guide changes. Tuning relevance by feel on three favourite queries is how search quality quietly regresses.
+
+## Code: four rankers on queries with common words
+
+The program builds 600 synthetic documents about 10 topics with very different lengths (16 to about 300 words). Each document mixes topic words with common background words. A query has **one topical word and two very common words**, and a result is relevant when the document is about the query's topic. It scores every document with four functions and reports precision@10 over 200 queries.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import math, random
+from collections import Counter
+
+random.seed(3)
+TOPICS, TOPIC_WORDS, BACKGROUND = 10, 25, 400
+topic_vocab = [[f"t{t}w{i}" for i in range(TOPIC_WORDS)] for t in range(TOPICS)]
+background = [f"b{i}" for i in range(BACKGROUND)]
+bg_weights = [1 / (i + 1) for i in range(BACKGROUND)]
+
+docs, labels = [], []
+for _ in range(600):
+    t = random.randrange(TOPICS)
+    length = int(random.lognormvariate(4.0, 0.6)) + 10
+    words = [random.choice(topic_vocab[t]) if random.random() < 0.12 else random.choices(background, bg_weights)[0]
+             for _ in range(length)]
+    docs.append(Counter(words))
+    labels.append(t)
+
+N = len(docs)
+df = Counter(w for d in docs for w in d)
+doc_len = [sum(d.values()) for d in docs]
+avg_len = sum(doc_len) / N
+
+def idf(w):
+    return math.log(1 + (N - df[w] + 0.5) / (df[w] + 0.5))
+
+def score_count(d, q):
+    return sum(1 for w in q if w in docs[d])
+
+def score_tf(d, q):
+    return sum(docs[d][w] for w in q)
+
+def score_tfidf(d, q):
+    return sum(docs[d][w] * idf(w) for w in q)
+
+def score_bm25(d, q, k1=1.2, b=0.75):
+    s = 0.0
+    for w in q:
+        f = docs[d][w]
+        if f:
+            s += idf(w) * f * (k1 + 1) / (f + k1 * (1 - b + b * doc_len[d] / avg_len))
+    return s
+
+def evaluate(score, queries, k=10):
+    precision = 0.0
+    for q, topic in queries:
+        ranked = sorted(range(N), key=lambda d: (-score(d, q), d))[:k]
+        precision += sum(labels[d] == topic for d in ranked) / k
+    return precision / len(queries)
+
+queries = []
+for _ in range(200):
+    t = random.randrange(TOPICS)
+    q = random.sample(topic_vocab[t], 1) + random.sample(background[:30], 2)
+    queries.append((q, t))
+
+print(f"{N} documents, lengths {min(doc_len)} to {max(doc_len)} words (average {avg_len:.0f}), 200 queries")
+print("each query: one topical word plus two very common words; relevant = same topic")
+print(" ranking function              precision@10")
+for name, fn in (("count of matched query words", score_count), ("raw term frequency", score_tf), ("TF-IDF", score_tfidf), ("BM25 (k1=1.2, b=0.75)", score_bm25)):
+    print(f" {name:30s} {100 * evaluate(fn, queries):6.1f}%")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| ranking function | precision@10 |
+| --- | --- |
+| count of matched query words | 58.3% |
+| raw term frequency | 16.8% |
+| TF-IDF | 74.9% |
+| BM25 (`k1 = 1.2`, `b = 0.75`) | **99.0%** |
+
+The ordering tells the story. **Raw term frequency is the worst** (16.8%, close to the 10% chance level for 10 topics): the two very common query words appear many times in every long document, drowning the single topical word. Counting matched words is better because it ignores repeats, but it cannot tell the rare topical word from a common one (58.3%). **TF-IDF** weights the rare word properly (74.9%) but still favours long documents that repeat it. **BM25** adds saturation and length normalisation and finds the right topic for 99% of the top-10 slots. The data are synthetic and constructed to stress the failure modes, so the absolute numbers are not a prediction for your corpus; the lesson is *which mechanism fixes which failure*. On an easier query mix (change the query line to two topical words plus one common word and run it again) the figures become 97.8% for the simple count, 40.6% for raw term frequency, 98.2% for TF-IDF and 100.0% for BM25: the more the query helps, the less the ranking function matters.
+
+## Beyond BM25
+
+- **Field boosts:** a match in the title counts more than in the body (BM25F).
+- **Phrase and proximity boosts:** terms close together score higher.
+- **Freshness, popularity, personalisation:** blended in as extra signals.
+- **Learning to rank:** a model (gradient boosted trees or a neural network) re-ranks the top few hundred BM25 candidates using many features, trained on click or judgement data.
+- **Hybrid with vectors:** combine lexical and semantic scores (next-but-one lesson).
+- **Shard-local statistics:** IDF is computed per shard by default, so on small or skewed shards the scores are slightly inconsistent; a distributed-frequency query mode fixes that at extra cost.
+
+## Trade-offs
+
+<TradeOffs caption="How to rank search results" rows={[
+  { option: "BM25 on the text fields", pros: "Strong baseline; no training data; fast; explainable", cons: "No understanding of meaning or user intent; tuning `k1`, `b`, boosts by hand", chooseWhen: "First version of almost any search feature" },
+  { option: "BM25 plus business signals (boosts, freshness)", pros: "Simple way to reflect the business", cons: "Weights are guesses; interactions are hard to reason about", chooseWhen: "Catalogues and content sites" },
+  { option: "Learning to rank on top of BM25 candidates", pros: "Optimises for what users click or buy", cons: "Needs data, feature pipelines and evaluation discipline", chooseWhen: "Large traffic and a clear relevance metric" },
+  { option: "Semantic (vector) ranking", pros: "Matches meaning, not just words", cons: "Needs embeddings, an ANN index and tuning; harder to explain", chooseWhen: "Natural-language queries, questions, recommendations" }
+]} />
+
+## Pitfalls
+
+- Ranking by raw term counts.
+- Tuning relevance against a few anecdotal queries instead of a judged set with a metric.
+- Ignoring that analysis choices (stemming, stop words) change scores as much as the formula.
+- Over-boosting recency or popularity until results stop matching the query.
+- Comparing scores across different queries or indexes: BM25 scores are only meaningful for ranking within one query.
+- Hiding a ranking change behind a deploy with no A/B test or rollback.
+
+## What would you choose and why?
+
+Your documentation site search returns a very long "changelog" page first for almost every query, because it repeats every product word hundreds of times. Which BM25 parameter would you inspect first? What judged queries would you assemble to check a fix, and how would you know it did not hurt other queries?
+
+## Quiz
+
+<Quiz id="sd-m14-ranking-bm25" tags={["search", "bm25", "relevance"]} questions={[
+  { type: "mcq", q: "What does IDF do?", options: ["Rewards long documents", "Gives rarer terms more weight than terms appearing in many documents", "Counts words in a query", "Removes stop words"], answer: 1, explain: "A word found in nearly every document tells you little, so its inverse document frequency is low." },
+  { type: "mcq", q: "Which BM25 parameter controls length normalisation?", options: ["k1", "b", "N", "avgdl"], answer: 1, explain: "b scales how strongly a document longer than average is penalised; k1 controls term-frequency saturation." },
+  { type: "predict", q: "With k1 = 1.2, b = 0 and idf = 1, the term score is f * 2.2 / (f + 1.2). Which is larger, the score for f = 1 or the score contribution gained by going from f = 10 to f = 20?", code: "k1 = 1.2\nscore = lambda f: f * (k1 + 1) / (f + k1)\nprint(round(score(1), 2), round(score(20) - score(10), 2))", options: ["f = 1: 1.0 against 0.11 gained", "The same", "f = 10 to 20 gains more", "They are both 0"], answer: 0, explain: "The first occurrence scores 1.0, whereas going from 10 to 20 occurrences adds only about 0.11: saturation." },
+  { type: "multi", q: "Why did raw term frequency perform worst in the lesson's measurements?", options: ["Common words repeat many times in long documents and drown the rare topical word", "It ignores document length", "It does not account for how rare a word is", "It uses too few documents"], answer: [0, 1, 2], explain: "It has neither IDF nor length normalisation, so frequent filler words decide the ranking." },
+  { type: "mcq", q: "How should you judge a change to relevance?", options: ["Look at three queries", "Evaluate on a judged query set with a metric, then A/B test", "Ask the team", "Check the page load time"], answer: 1, explain: "Offline metrics on many judged queries plus online experiments prevent silent regressions." }
+]} />

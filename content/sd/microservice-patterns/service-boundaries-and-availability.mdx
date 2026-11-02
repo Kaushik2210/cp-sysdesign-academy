@@ -1,0 +1,142 @@
+---
+title: Service Boundaries and Availability
+track: sd
+module: microservice-patterns
+order: 1
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/distributed-theory/distributed-commit-and-sagas", "sd/load-balancing/reverse-proxies-and-api-gateways"]
+tags: [microservices, monolith, service-boundaries, data-ownership, availability, graceful-degradation, bounded-context]
+type: lesson
+furtherReading:
+  - title: "Fowler, Microservices (the original article)"
+    url: https://martinfowler.com/articles/microservices.html
+  - title: "Fowler, MonolithFirst"
+    url: https://martinfowler.com/bliki/MonolithFirst.html
+  - title: "Newman, Building Microservices (O'Reilly)"
+    url: https://samnewman.io/books/building_microservices_2nd_edition/
+  - title: "Amazon Builders' Library, Avoiding fallback in distributed systems"
+    url: https://aws.amazon.com/builders-library/avoiding-fallback-in-distributed-systems/
+---
+
+## Intuition
+
+A monolith deploys as one unit: one codebase, usually one database, one release. That is simple, fast (calls are function calls) and consistent (one transaction). Its costs show up as teams multiply: everyone's changes ship together, a bug anywhere can take everything down, and one component's scaling needs force scaling of the whole.
+
+**Microservices** split the system into independently deployable services owned by separate teams, each with its own data. The benefit is **organisational and operational independence**; the price is that every call that used to be a function call becomes a network call that can fail, be slow, or return stale data, and every operation that used to be a transaction becomes a distributed one. Microservices do not remove complexity: they move it from the code into the network and the organisation.
+
+## What makes a good boundary
+
+- **Bounded contexts.** Split along business capabilities where the language differs: "customer" in billing (a payer with invoices) is not "customer" in support (a person with tickets). A service owns one context and its vocabulary.
+- **Data ownership.** Each service owns its data and exposes it only through its API or events. Two services sharing one database are coupled through its schema: that is a distributed monolith with extra network hops.
+- **High cohesion, low coupling.** Things that change together should live together. If most features require coordinated changes in three services, the boundaries are wrong.
+- **Team alignment (Conway's law).** A system's structure mirrors the communication structure of the organisation that builds it. A service should be ownable by one team.
+- **Independent deployability.** If you cannot release a service without releasing another, it is not independent.
+
+**Warning signs of a distributed monolith:** synchronous call chains that must all succeed, shared databases, lock-step releases, a "common" library that every service must upgrade together, and chatty services that exchange dozens of calls per request.
+
+## The availability cost of dependencies
+
+Suppose a request needs `k` services, each independently available a fraction `a` of the time, and **all** are required. The request succeeds only if all are up:
+
+```text
+availability = a^k
+```
+
+Every additional hard dependency multiplies in another factor below 1. Two defences:
+
+- **Reduce hard dependencies** by making some optional: use a cached or default answer when a service is down (*graceful degradation*), render the page without the recommendations box.
+- **Make dependencies more available** with redundancy, timeouts and the resilience patterns in the next lesson.
+
+## Code: how fast does availability decay?
+
+Each service is up 99.9% of the time ("three nines": about 8.8 hours of downtime a year). The program computes `a^k` exactly, checks it by simulation, and compares ten required dependencies with a design where six of them have fallbacks.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+random.seed(4)
+
+def chain_availability(a, required, optional=0, with_fallback=True, trials=200000):
+    ok = 0
+    for _ in range(trials):
+        if all(random.random() < a for _ in range(required)):
+            if with_fallback or all(random.random() < a for _ in range(optional)):
+                ok += 1
+    return ok / trials
+
+print("each service is up 99.9% of the time, failures independent")
+print(" hard dependencies   exact (a^k)   simulated   downtime per year")
+for k in (1, 3, 5, 10, 20, 40):
+    exact = 0.999 ** k
+    sim = chain_availability(0.999, k)
+    print(f" {k:10d}          {100 * exact:8.3f}%   {100 * sim:8.3f}%   {365 * 24 * (1 - exact):7.1f} hours")
+
+print()
+print("10 dependencies; the last 6 can be made optional with a fallback (cached or default answer)")
+for label, req, opt, fb in (("all 10 required", 10, 0, False), ("4 required, 6 optional with fallbacks", 4, 6, True)):
+    exact = 0.999 ** req
+    print(f" {label:40s} {100 * exact:7.3f}%   {365 * 24 * (1 - exact):6.1f} hours down per year")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| hard dependencies `k` | exact `0.999^k` | simulated | downtime per year |
+| --- | --- | --- | --- |
+| 1 | 99.900% | 99.903% | 8.8 hours |
+| 3 | 99.700% | 99.706% | 26.3 hours |
+| 5 | 99.501% | 99.486% | 43.7 hours |
+| 10 | 99.004% | 99.011% | 87.2 hours |
+| 20 | 98.019% | 98.016% | 173.5 hours |
+| 40 | 96.077% | 96.135% | 343.7 hours |
+
+| design (10 dependencies) | availability | downtime per year |
+| --- | --- | --- |
+| all 10 required | 99.004% | 87.2 hours |
+| 4 required, 6 optional with fallbacks | 99.601% | 35.0 hours |
+
+A request that touches 10 services that are each "three nines" is itself only about two nines, an order of magnitude more downtime than any single service. Forty hard dependencies cost two weeks of downtime a year. Making six of the ten optional cut downtime from 87 hours to 35. The simulation matches the formula, and it **assumes failures are independent**. Real failures are correlated (one bad deploy, one shared database, one network incident), which usually makes things worse than `a^k`.
+
+<Callout type="tip" title="Count your hard dependencies">
+For each user-facing request, list every service that must answer for it to succeed. That number, not the number of services in the system, drives the request's availability. Draw the dependency graph and ask of each edge: "what does the user see if this fails?" If the answer is "an error", look for a fallback.
+</Callout>
+
+## Splitting a monolith: practical path
+
+1. **Start with a modular monolith.** Clear module boundaries and APIs inside one deployable unit, one database with separate schemas per module. You learn where the real boundaries are at low cost.
+2. **Extract when a boundary hurts**: a module that needs independent scaling, a different release cadence, a different technology, or a team that is blocked.
+3. **Strangle gradually.** Route a slice of traffic to the new service behind a facade, move its data, then retire the old code.
+4. **Never share the database.** Move data ownership with the service, and replace joins with API calls, events or a read model (see CQRS).
+
+## Trade-offs
+
+<TradeOffs caption="Monolith or microservices" rows={[
+  { option: "Modular monolith", pros: "One deploy, in-process calls, ACID transactions, simple operations", cons: "All teams release together; scaling and failure are shared", chooseWhen: "Small and medium teams, early products, unclear boundaries" },
+  { option: "Microservices", pros: "Independent deploys and scaling; fault isolation; team autonomy", cons: "Network failures, distributed transactions, operational overhead, versioning and observability burden", chooseWhen: "Many teams, clear bounded contexts, proven need for independent scaling or release" },
+  { option: "Service-based (a few coarse services)", pros: "Most of the independence at a fraction of the complexity", cons: "Services are larger and share more context", chooseWhen: "Mid-sized organisations moving away from a monolith" },
+  { option: "Serverless functions", pros: "No servers to run; scales to zero", cons: "Cold starts, limits, hard local testing, many tiny coupled pieces", chooseWhen: "Spiky or event-driven glue work" }
+]} />
+
+## Pitfalls
+
+- Splitting by technical layer (a "database service", a "UI service") instead of by business capability.
+- Splitting too early, before the domain is understood, so every feature crosses three services.
+- A shared database or shared "domain model" library that couples releases.
+- Synchronous chains of hard dependencies, with no fallbacks and no timeouts.
+- Underestimating operations: each service needs deployment, monitoring, alerting, on-call ownership and version management.
+- Treating microservices as a goal rather than a means to organisational independence.
+
+## What would you choose and why?
+
+A team of 12 runs a monolithic e-commerce site. Search is slow and needs its own scaling, checkout is critical and must not go down when the recommendations feature misbehaves, and three other teams are about to join. Which pieces would you extract first, and which would you leave in the monolith? For each extracted service, what is the fallback when it is down?
+
+## Quiz
+
+<Quiz id="sd-m13-service-boundaries" tags={["microservices", "availability", "boundaries"]} questions={[
+  { type: "predict", q: "A request needs 10 services, each 99.9% available. What is the approximate availability of the request?", code: "print(round(0.999 ** 10 * 100, 2))", options: ["99.9%", "99.0%", "90.0%", "10%"], answer: 1, explain: "0.999^10 = 0.99004, about 99.0%: roughly 87 hours of downtime a year instead of 8.8." },
+  { type: "mcq", q: "Which is the clearest sign of a distributed monolith?", options: ["Services have separate repositories", "Several services read and write the same database tables", "Services communicate over HTTP", "Each service has a health endpoint"], answer: 1, explain: "A shared schema couples services at the data level and forces coordinated changes and releases." },
+  { type: "mcq", q: "Why start with a modular monolith?", options: ["It is always faster at runtime", "You learn the real boundaries cheaply before paying the distribution cost", "Microservices are deprecated", "It needs no tests"], answer: 1, explain: "Boundaries drawn too early are expensive to change across services; inside a monolith they are cheap to move." },
+  { type: "multi", q: "Which reduce the availability cost of dependencies?", options: ["Fallbacks or cached answers for non-critical services", "Adding more required dependencies", "Timeouts, so a slow dependency does not hold the caller", "Removing a hard dependency from the critical path"], answer: [0, 2, 3], explain: "Each hard dependency multiplies in another availability factor below 1." },
+  { type: "mcq", q: "What does Conway's law suggest?", options: ["Services should be as small as possible", "System structure tends to mirror the communication structure of the organisation", "Databases must be shared", "Teams should own layers, not capabilities"], answer: 1, explain: "Align service boundaries with team ownership, or the organisation will fight the architecture." }
+]} />

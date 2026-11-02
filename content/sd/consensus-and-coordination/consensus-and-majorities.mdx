@@ -66,7 +66,7 @@ Others: ZAB (ZooKeeper), Viewstamped Replication, and Byzantine protocols such a
 
 Each node is up independently with probability `p`. The cluster works while a majority is up. The program computes the exact probability with the binomial formula and checks it by simulation.
 
-<CodeRunner language="python" code={`import random
+<CodeRunner language="python" timeoutMs={30000} code={`import random
 from math import comb
 
 random.seed(1)

@@ -1,0 +1,1 @@
+{ "title": "Microservice Patterns", "level": "Level 2: Intermediate Systems", "order": 13, "summary": "Where to draw service boundaries and what splitting costs in availability, how retries amplify load and circuit breakers contain it, CQRS and event sourcing, and evolving APIs and events without breaking consumers." }

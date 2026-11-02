@@ -1,0 +1,189 @@
+---
+title: Evolving APIs and Events Safely
+track: sd
+module: microservice-patterns
+order: 4
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/networking-and-apis/api-styles-rest-graphql-grpc", "sd/microservice-patterns/cqrs-and-event-sourcing"]
+tags: [schema-evolution, backward-compatibility, forward-compatibility, contracts, versioning, protobuf, avro, consumer-driven-contracts]
+type: lesson
+furtherReading:
+  - title: "Protocol Buffers, Updating a message type (compatibility rules)"
+    url: https://protobuf.dev/programming-guides/proto3/#updating
+  - title: "Confluent, Schema Evolution and Compatibility"
+    url: https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html
+  - title: "Pact, consumer-driven contract testing"
+    url: https://docs.pact.io/
+  - title: "Kleppmann, Designing Data-Intensive Applications, chapter 4 (encoding and evolution)"
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+In a system of independent services you can never deploy every producer and consumer at the same instant. During a rollout, old and new versions run side by side; data written yesterday is read tomorrow; a mobile app released last year still calls your API. So every interface (REST payloads, gRPC messages, queue events, database rows) must tolerate **two versions at once**.
+
+Two directions matter:
+
+- **Backward compatible:** a **new** reader can read data written by an **old** writer. (Needed when you deploy consumers first or replay old events.)
+- **Forward compatible:** an **old** reader can read data written by a **new** writer. (Needed when you deploy producers first, or old clients keep running.)
+
+A change that is both is **fully compatible** and can be deployed in any order. A change that is neither is **breaking**, and needs a new version or a multi-step migration.
+
+## The rules of thumb
+
+Model a record as fields with a type, a *required* flag and an optional default. A reader accepts a record if each field it requires is present (or has a default) with the right type, and it ignores unknown fields. Then:
+
+- **Backward:** every field the new reader requires must be present in every old record. So a field added as required needs a **default** in the new schema; an optional field made required breaks old data.
+- **Forward:** every field the old reader requires must still be present in new records. So you cannot remove a required field, and new records must keep sending what old readers need.
+- **Types** may only widen on the reading side (an `int` can be read as a `float`, not the other way).
+- **Renaming** a field is a removal plus an addition, and is therefore breaking unless you keep both for a while (or use aliases, as Avro does).
+
+## Code: classify the common changes
+
+The program defines a base schema and nine typical changes. For each change it **predicts** compatibility with the rules above, then **checks** by generating 200 random old records and 200 random new records and actually parsing them with the other version's reader.
+
+<CodeRunner language="python" code={`import random
+
+random.seed(6)
+
+def read(schema, record):
+    out = {}
+    for name, (typ, required, default) in schema.items():
+        if name in record:
+            value = record[name]
+            if typ == "float" and isinstance(value, int) and not isinstance(value, bool):
+                value = float(value)
+            if not ((typ == "int" and isinstance(value, int) and not isinstance(value, bool)) or (typ == "float" and isinstance(value, float)) or (typ == "str" and isinstance(value, str))):
+                return None
+            out[name] = value
+        elif default is not None:
+            out[name] = default
+        elif required:
+            return None
+    return out
+
+def sample(schema, n=200):
+    make = {"int": lambda: random.randint(-5, 5), "float": lambda: random.random(), "str": lambda: random.choice(["a", "b", "c"])}
+    records = []
+    for _ in range(n):
+        r = {}
+        for name, (typ, required, default) in schema.items():
+            if required or random.random() < 0.5:
+                r[name] = make[typ]()
+        records.append(r)
+    return records
+
+def predicted(old, new):
+    def ok_types(a, b):
+        return a == b or (a == "int" and b == "float")
+    backward = all(
+        (n in old and ok_types(old[n][0], new[n][0]) and (old[n][1] or not new[n][1] or new[n][2] is not None))
+        or (n not in old and (new[n][2] is not None or not new[n][1]))
+        for n in new)
+    forward = all(
+        (n in new and ok_types(new[n][0], old[n][0]) and (new[n][1] or not old[n][1] or old[n][2] is not None))
+        or (n not in new and (old[n][2] is not None or not old[n][1]))
+        for n in old)
+    return backward, forward
+
+def actual(old, new):
+    backward = all(read(new, r) is not None for r in sample(old))
+    forward = all(read(old, r) is not None for r in sample(new))
+    return backward, forward
+
+base = {"id": ("int", True, None), "name": ("str", True, None), "score": ("int", False, None)}
+changes = {
+    "add optional field":                  {**base, "note": ("str", False, None)},
+    "add required field, no default":      {**base, "email": ("str", True, None)},
+    "add required field with default":     {**base, "email": ("str", True, "n/a")},
+    "remove optional field":               {k: v for k, v in base.items() if k != "score"},
+    "remove required field":               {k: v for k, v in base.items() if k != "name"},
+    "rename a field (name -> title)":      {("title" if k == "name" else k): v for k, v in base.items()},
+    "widen score int -> float":            {**base, "score": ("float", False, None)},
+    "narrow id int -> str":                {**base, "id": ("str", True, None)},
+    "make optional field required":        {**base, "score": ("int", True, None)},
+}
+agree = 0
+print(" change                                backward    forward    verdict")
+print("                                       (new reads old)  (old reads new)")
+for label, new in changes.items():
+    pb, pf = predicted(base, new)
+    ab, af = actual(base, new)
+    agree += (pb, pf) == (ab, af)
+    verdict = "safe both ways" if ab and af else "backward only" if ab else "forward only" if af else "BREAKING"
+    print(f" {label:37s} {'yes' if ab else 'NO ':9s}   {'yes' if af else 'NO ':9s}  {verdict}")
+print(f"rules of thumb agree with real reads in {agree} of {len(changes)} cases")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| change | backward (new reads old) | forward (old reads new) | verdict |
+| --- | --- | --- | --- |
+| add optional field | yes | yes | safe both ways |
+| add required field, no default | **no** | yes | forward only |
+| add required field with default | yes | yes | safe both ways |
+| remove optional field | yes | yes | safe both ways |
+| remove required field | yes | **no** | backward only |
+| rename a field | **no** | **no** | breaking |
+| widen `score` int to float | yes | **no** | backward only |
+| narrow `id` int to str | **no** | **no** | breaking |
+| make an optional field required | **no** | yes | forward only |
+
+The rules of thumb agreed with real parsing in all 9 cases. A note on how that number was reached: the first draft of the rules in this lesson predicted that making an optional field required was safe in both directions, and the check disagreed (8 of 9). The reason is that old records may legitimately omit an optional field, so a reader that now requires it fails on them. The rule above includes that clause because the test found it. That is the case for **testing compatibility mechanically** instead of reasoning about it.
+
+The safe habit is visible in the table: **adding an optional field, or a required field with a default, is the only change that is safe in both directions.** Everything else needs a plan.
+
+## How to change a field safely: expand and contract
+
+For a rename or a type change, use several deployable steps, never one:
+
+1. **Expand:** add the new field alongside the old, optional. Writers send **both**.
+2. **Migrate:** deploy readers that prefer the new field and fall back to the old one. Backfill stored data.
+3. **Contract:** once no reader depends on the old field (check with metrics, or after all old clients are retired), stop writing it, then remove it in a later release.
+
+For HTTP APIs, additive changes go in place; breaking changes get a **new version** (`/v2/orders`, a header, or a new gRPC package) and a published deprecation timeline.
+
+## Tools
+
+- **Schema formats with rules built in:** Protocol Buffers (never reuse a field number; new fields optional with defaults), Avro (writer and reader schemas resolved by name with defaults and aliases), JSON Schema with `additionalProperties` policy.
+- **Schema registry** (Confluent and others): producers register schemas; the registry **rejects** changes that violate the topic's compatibility mode (backward, forward, full, or transitive variants).
+- **Consumer-driven contracts** (Pact): each consumer records the fields it actually uses; the provider's CI verifies it still honours every consumer's contract before release. This finds breaking changes without a shared integration environment.
+- **Tolerant reader:** consumers ignore unknown fields and unknown enum values (map them to a safe default) instead of failing.
+- **Upcasters** for event-sourced data: translate old event versions to the current shape at read time.
+
+## Trade-offs
+
+<TradeOffs caption="Handling interface change" rows={[
+  { option: "Additive-only changes (never remove or repurpose)", pros: "Safe in both directions; no coordination", cons: "Interfaces accumulate legacy fields", chooseWhen: "Public APIs and long-lived events" },
+  { option: "Expand and contract migrations", pros: "Allows renames and type changes with no downtime", cons: "Takes several releases; needs tracking of who still uses the old field", chooseWhen: "Internal APIs and database columns" },
+  { option: "New API version", pros: "Clean break; old clients keep working", cons: "Two versions to maintain; clients must migrate", chooseWhen: "Unavoidable breaking changes to public APIs" },
+  { option: "Schema registry with enforced compatibility", pros: "Breaking changes are blocked before they reach production", cons: "Central dependency; discipline to evolve in compatible steps", chooseWhen: "Event streams with many independent consumers" },
+  { option: "Consumer-driven contract tests", pros: "Provider knows exactly what consumers need", cons: "Test maintenance; needs consumer participation", chooseWhen: "Service-to-service APIs inside one organisation" }
+]} />
+
+## Pitfalls
+
+- Renaming a field "because it is cleaner", which breaks every consumer at once.
+- Adding a required field with no default.
+- Reusing a field number or a name with a new meaning.
+- Strict readers that fail on unknown fields or enum values, so any addition becomes a breaking change.
+- Treating events as internal and changing them freely, although other teams replay them for years.
+- Removing a field before checking that nothing reads it (use usage metrics, not guesses).
+- Deploying a producer change before consumers, when the change is only backward compatible.
+
+## What would you choose and why?
+
+An `order.created` event has a `price` field in dollars as a float, consumed by 12 services you do not own. You need cents as an integer because of rounding errors. Which steps do you take, in what order, and how do you know when it is safe to stop sending the old field?
+
+## Quiz
+
+<Quiz id="sd-m13-evolving-apis" tags={["schema-evolution", "compatibility", "contracts"]} questions={[
+  { type: "mcq", q: "What does backward compatible mean?", options: ["Old readers can read new data", "New readers can read data written by old writers", "Both directions are always fine", "Only the database can read it"], answer: 1, explain: "Backward compatible: a new schema can read old data. Forward compatible is the opposite." },
+  { type: "mcq", q: "Which change is safe in both directions?", options: ["Renaming a field", "Adding a required field with no default", "Adding an optional field", "Narrowing a type"], answer: 2, explain: "Old readers ignore the unknown optional field, and new readers can read old data that lacks it." },
+  { type: "predict", q: "Old records may omit the optional field score. A new reader makes score required. What happens when it reads an old record without score?", code: "record = {'id': 1, 'name': 'a'}   # old record, no score\nscore_required = True\nprint('rejected' if score_required and 'score' not in record else 'accepted')", options: ["accepted", "rejected", "default is used", "it depends on the type"], answer: 1, explain: "A required field without a default makes the record unreadable, so making an optional field required is backward-incompatible." },
+  { type: "multi", q: "Which practices support safe evolution?", options: ["Tolerant readers that ignore unknown fields", "Expand and contract migrations for renames", "A schema registry that rejects incompatible changes", "Reusing a field number for a new meaning"], answer: [0, 1, 2], explain: "Never reuse a field identifier with a new meaning." },
+  { type: "mcq", q: "What is the safest way to rename a field used by many consumers?", options: ["Rename it in place and announce it", "Add the new field, send both, migrate readers, then remove the old one later", "Delete the old field first", "Create a new service"], answer: 1, explain: "Expand and contract keeps both versions working while consumers move." }
+]} />

@@ -56,7 +56,7 @@ Keep the lock service for **coordination**, not for data; its throughput is limi
 
 Client A takes a lock with a 10 second lease (token 1) and then pauses for a random, exponentially distributed time before writing. If the pause exceeds the lease, the lock service gives the lock to client B (token 2), which writes. A then wakes up and writes. The storage either accepts every write (no fencing) or compares the token with the highest it has seen (fencing).
 
-<CodeRunner language="python" code={`import random
+<CodeRunner language="python" timeoutMs={30000} code={`import random
 
 random.seed(9)
 LEASE = 10.0
