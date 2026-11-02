@@ -1,0 +1,260 @@
+---
+title: Sagas and the Transactional Outbox
+track: sd
+module: microservice-patterns
+order: 2
+difficulty: hard
+estMinutes: 50
+prerequisites: ["sd/microservice-patterns/service-boundaries-and-communication", "sd/consensus-and-coordination/two-phase-commit-and-coordination", "sd/queues-and-streaming/delivery-semantics-and-idempotency"]
+tags: [saga, orchestration, choreography, compensation, transactional-outbox, cdc, idempotent-consumer, exactly-once, dual-write]
+type: lesson
+furtherReading:
+  - title: Garcia-Molina and Salem, Sagas (SIGMOD 1987)
+    url: https://www.cs.cornell.edu/andru/cs711/2002fa/reading/sagas.pdf
+  - title: Richardson, Saga pattern
+    url: https://microservices.io/patterns/data/saga.html
+  - title: Richardson, Transactional outbox pattern
+    url: https://microservices.io/patterns/data/transactional-outbox.html
+  - title: Debezium documentation (change data capture)
+    url: https://debezium.io/documentation/
+---
+
+## Intuition
+
+When one business operation touches several services, each with its own database, you have two problems to solve at once.
+
+1. **Multi-step consistency.** Place an order = reserve stock, charge the card, create the shipment. If the card fails, the stock reservation must be undone. There is no single database transaction spanning all three.
+2. **Reliable messaging.** After a service commits to its own database it must tell the others. Writing to the database and then publishing to a broker are two separate systems; a crash between the two steps leaves them disagreeing.
+
+A **saga** answers the first problem and the **transactional outbox** answers the second. Together with **idempotent consumers** they make a multi-service workflow that is correct in the presence of crashes, retries and duplicate messages, without locking every service for the duration.
+
+## Sagas
+
+A saga is a sequence of **local transactions**, each in one service and each committed immediately. If step `k` fails, the saga runs **compensating transactions** for the steps already completed, in reverse order, to undo their business effect.
+
+```text
+reserve stock -> charge payment -> create shipment
+     |               |                  |
+ release stock   refund payment    cancel shipment      (compensations, in reverse)
+```
+
+A compensation is a **semantic undo**, not a database rollback: the original step really happened and may have been visible. "Refund" is a new payment, "cancel shipment" is a new status. Some actions cannot be undone (an email sent, a physical item shipped); design the order so such steps come **late**, after every step that can still fail.
+
+### Kinds of steps
+
+- **Compensatable steps** can be undone (reserve stock, authorise a payment hold).
+- **The pivot transaction** is the point of no return: if it succeeds, the saga will complete; if it fails, the saga compensates everything before it. Charging the card is often the pivot.
+- **Retriable steps** come after the pivot and must eventually succeed (create the shipment, send the confirmation); they are retried until they do.
+
+### Coordinating a saga
+
+**Orchestration.** A central **orchestrator** (a saga manager or workflow engine) holds the state machine: it tells each service what to do, waits for the outcome and decides the next step or the compensations. Easy to understand, test and monitor; the orchestrator is a component to operate and must itself be reliable (state persisted, steps idempotent).
+
+**Choreography.** There is no coordinator. Each service reacts to events: Orders publishes `OrderPlaced`, Inventory reserves stock and publishes `StockReserved`, Payments charges and publishes `PaymentCharged`, and so on; failure events trigger compensations. Fully decoupled, but the overall flow is spread across many services, so it is harder to see, debug and change, and risks cyclic dependencies.
+
+<Diagram kind="mermaid" caption="An orchestrated saga. The payment step fails, so the orchestrator compensates the completed step" code={`sequenceDiagram
+  participant O as Orchestrator
+  participant I as Inventory
+  participant P as Payments
+  participant S as Shipping
+  O->>I: reserve stock
+  I-->>O: reserved
+  O->>P: charge card
+  P-->>O: FAILED (card declined)
+  Note over O: failure: compensate completed steps in reverse
+  O->>I: release stock (compensation)
+  I-->>O: released
+  Note over O: saga ends in a clean compensated state
+  Note over S: shipping was never started`} />
+
+### What sagas do not give you: isolation
+
+A saga is atomic only **eventually**. While it runs, other transactions can see its intermediate state (stock reserved but not yet paid). Countermeasures:
+
+- **Semantic locks:** a flag such as `status = PENDING` that tells others the record is mid-saga.
+- **Commutative updates:** design operations so their order does not matter (add or subtract amounts rather than set values).
+- **Reread before write:** verify a value has not changed before acting on it.
+- **Versioning or "pessimistic view":** reorder steps so the riskiest, least reversible ones happen last.
+
+### Rules for reliable sagas
+
+- Every step and every compensation must be **idempotent** (safe to run twice), because messages repeat and orchestrators retry.
+- Compensations must be **retried until they succeed**; a compensation that fails and is dropped leaves the system inconsistent.
+- Persist the saga's state (which steps finished) so a crashed orchestrator can resume.
+- Give each saga a **correlation id** and put it in every message and log line.
+- Put a **timeout** on every step so a silent service does not hang the saga forever.
+
+## The dual-write problem and the transactional outbox
+
+A service often needs to do two things: change its own data and announce the change. The tempting code is:
+
+```text
+BEGIN; insert order; COMMIT;        -- step 1: the database
+publish OrderPlaced to the broker   -- step 2: a different system
+```
+
+There is no transaction spanning both. Crash between them and the order exists but **nobody is told**. Swap the order (publish first) and a crash leaves an **event for an order that does not exist**. Retrying is not a fix on its own, because the process that would retry is the one that crashed.
+
+The **transactional outbox** removes the second system from the critical path. In the **same database transaction** as the business change, insert a row into an **outbox table** describing the event. A separate **relay** then reads the outbox and publishes to the broker, marking rows as sent.
+
+```text
+BEGIN;
+  insert into orders ...
+  insert into outbox (event_id, type, payload) ...    -- same atomic commit
+COMMIT;
+
+relay (separate process): read unsent outbox rows -> publish -> mark sent
+```
+
+Two ways to run the relay: **polling** the outbox table periodically, or **change data capture (CDC)**, where a tool such as Debezium reads the database's transaction log and emits the outbox inserts as events with very low latency and no polling load.
+
+The relay can crash after publishing but before marking the row, so it will publish again: delivery is **at-least-once**. That is why consumers must be idempotent.
+
+### The idempotent consumer (the inbox side)
+
+A consumer that receives `OrderPlaced` twice must not apply its effect twice. Record the **event id** of every processed message in the consumer's own database, **in the same transaction** as the effect, and skip ids already seen. At-least-once delivery plus an idempotent consumer gives **effectively exactly-once** processing.
+
+## Putting numbers on it
+
+The simulation compares three designs under a 1% chance that the service crashes around its two steps (before the first, or between them, equally likely), computing losses and phantoms by comparing what the database holds with what the broker received. It then adds an at-least-once relay with a 1% duplicate rate, a consumer with and without de-duplication, and finally a three-step saga with random step failures where compensations themselves can fail.
+
+<CodeRunner language="python" code={`import random
+
+rng = random.Random(11)
+ORDERS = 100000
+CRASH = 0.01          # chance that the service crashes between its two steps
+RELAY_DUP = 0.01      # chance that the outbox relay crashes after publishing but before marking the row as sent
+
+# Each design is two steps. A crash can strike before step 1, between the steps, or after step 2 (all equally likely
+# at the crash rate below). We then compare what the database says with what the broker received.
+def outcome(design, crash_point):
+    """Return (order_exists_in_db, event_on_broker) after a crash at the given point (0 = before step 1, 1 = between, 2 = no crash)."""
+    if design == "commit then publish":
+        order = crash_point >= 1
+        event = crash_point >= 2
+    elif design == "publish then commit":
+        event = crash_point >= 1
+        order = crash_point >= 2
+    else:                                   # outbox: the order row and the event row are ONE atomic commit; the relay publishes later
+        order = event = crash_point >= 2 or crash_point == 1    # a crash after the commit never loses the event row
+        if crash_point == 0: order = event = False
+    return order, event
+
+for design in ("commit then publish", "publish then commit", "transactional outbox"):
+    r = random.Random(21)
+    lost = phantom = 0
+    for _ in range(ORDERS):
+        point = 2
+        if r.random() < CRASH:
+            point = r.choice([0, 1])        # crash before the first step, or between the two steps
+        order, event = outcome(design, point)
+        if order and not event: lost += 1           # a committed order with no event: downstream never hears about it
+        if event and not order: phantom += 1        # an event for an order that does not exist
+    print(f"{design:<22}: {ORDERS} orders, crash chance {CRASH:.0%} -> events LOST: {lost:>4}   PHANTOM events: {phantom:>4}")
+
+# the outbox relay is at-least-once: it can crash after publishing but before marking the row as sent
+published = duplicates = 0
+for _ in range(ORDERS):
+    published += 1
+    if rng.random() < RELAY_DUP:
+        published += 1
+        duplicates += 1
+print("outbox relay (at-least-once):", duplicates, "duplicate deliveries,", published, "messages on the broker for", ORDERS, "orders")
+
+# --- consumer without and with idempotency (de-duplication by event id) ---
+def consume(events, idempotent):
+    seen, applied = set(), 0
+    for eid in events:
+        if idempotent:
+            if eid in seen: continue
+            seen.add(eid)
+        applied += 1               # e.g. add loyalty points, charge a card, send an email
+    return applied
+stream = []
+for eid in range(ORDERS):
+    stream.append(eid)
+    if rng.random() < RELAY_DUP: stream.append(eid)
+print("consumer applying every message :", consume(stream, False), "effects for", ORDERS, "orders (duplicates cause double effects)")
+print("consumer with event-id de-dupe  :", consume(stream, True), "effects for", ORDERS, "orders")
+
+# --- a saga: reserve inventory -> charge payment -> create shipment, with compensations ---
+print()
+STEPS = ["reserve inventory", "charge payment", "create shipment"]
+FAIL = {"reserve inventory": 0.02, "charge payment": 0.08, "create shipment": 0.05}
+def run_saga(rng, retry_compensations):
+    done = []
+    for s in STEPS:
+        if rng.random() < FAIL[s]:
+            # step failed: undo the completed steps in reverse order
+            for c in reversed(done):
+                ok = rng.random() > 0.05            # a compensation itself fails 5% of the time
+                while not ok and retry_compensations:
+                    ok = rng.random() > 0.05        # retry until it works (compensations are idempotent)
+                if not ok:
+                    return "INCONSISTENT"           # one compensation never ran: money or stock left hanging
+            return "compensated"
+        done.append(s)
+    return "completed"
+for retry in (True, False):
+    r = random.Random(5)
+    counts = {"completed": 0, "compensated": 0, "INCONSISTENT": 0}
+    for _ in range(ORDERS):
+        counts[run_saga(r, retry)] += 1
+    print("saga, compensations", "retried until they succeed" if retry else "attempted once only      ", counts)
+`} />
+
+A local run over 100,000 orders printed: **commit then publish** lost **498** events (committed orders nobody heard about) and created no phantoms; **publish then commit** lost none but created **498 phantom events**; the **transactional outbox** produced **0 lost and 0 phantom** events. The at-least-once relay then delivered **1,005 duplicates** (101,005 messages for 100,000 orders): a consumer applying every message produced **100,945 effects** (some orders handled twice), while the consumer with event-id de-duplication produced exactly **100,000**. For the saga, with compensations **retried until they succeed**, 85,672 sagas completed, 14,328 ended cleanly compensated and **0 were inconsistent**; with compensations **attempted only once**, **845 sagas were left inconsistent**, which is the cost of not retrying a failed undo.
+
+<Diagram kind="flow" caption="A reliable workflow across services: outbox plus saga plus idempotent consumers" nodes={[
+  { id: "tx", label: "Local transaction + outbox row", x: 0, y: 80, role: "The service commits its change and the event row atomically.", failureModes: ["Outbox table grows if the relay stalls"], tradeoffs: ["One extra write per change; removes the dual-write bug"] },
+  { id: "relay", label: "Relay or CDC", x: 210, y: 80, role: "Reads the outbox and publishes each event at least once.", failureModes: ["Duplicates after a crash between publish and mark", "Lag under load"], tradeoffs: ["Polling is simple; CDC is low latency but needs infrastructure"] },
+  { id: "broker", label: "Broker / log", x: 410, y: 80, role: "Delivers events to subscribers, possibly more than once and with partitions ordering.", failureModes: ["Reordering across partitions", "Poison messages"], tradeoffs: ["Durable and decoupled; consumers must handle redelivery"] },
+  { id: "cons", label: "Idempotent consumer", x: 610, y: 80, role: "Records event ids with its effect in one transaction and skips repeats.", failureModes: ["Dedupe table growth", "Effects outside the database are not covered"], tradeoffs: ["Turns at-least-once into effectively-once"] },
+  { id: "comp", label: "Compensation on failure", x: 610, y: 160, role: "A later step failed: publish compensating commands for earlier steps.", failureModes: ["Compensation failing and being dropped"], tradeoffs: ["Retried until success, idempotent"] }
+]} edges={[
+  { from: "tx", to: "relay" }, { from: "relay", to: "broker" }, { from: "broker", to: "cons" }, { from: "cons", to: "comp", label: "step fails" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Choices when coordinating across services" rows={[
+  { option: "Orchestrated saga", pros: "Flow is explicit, observable and easy to change in one place", cons: "A coordinator to build and operate; risk of becoming a god service", chooseWhen: "Workflows with several steps and compensations" },
+  { option: "Choreographed saga", pros: "No central component; services stay decoupled", cons: "Flow is implicit and hard to trace; cyclic dependencies", chooseWhen: "Short flows with few participants" },
+  { option: "Transactional outbox", pros: "No lost or phantom events; works with any broker", cons: "Extra table and relay; at-least-once delivery", chooseWhen: "Any service that updates its database and must publish an event" },
+  { option: "CDC relay (log tailing)", pros: "Low latency, no polling load, captures every commit", cons: "Operational dependency on connector infrastructure", chooseWhen: "High volume or low-latency event publishing" },
+  { option: "Polling publisher", pros: "Simple, no extra infrastructure", cons: "Polling delay and load on the database", chooseWhen: "Moderate volume, simple stack" },
+  { option: "Idempotent consumer with event ids", pros: "Safe under duplicates and replays", cons: "Needs a dedupe store; does not cover external side effects by itself", chooseWhen: "Every consumer of at-least-once messages" }
+]} />
+
+## Failure modes
+
+- **Lost event** from a dual write: the order is committed but the event never published.
+- **Phantom event** from publishing before committing: downstream reacts to an order that does not exist.
+- **Duplicate delivery** after a relay crash or a consumer timeout: double charge, double email.
+- **Compensation failure:** the undo itself fails and is not retried, leaving stock locked or money taken.
+- **Saga hangs:** a step never answers; without timeouts the saga sits forever.
+- **Out-of-order events:** a cancel event arrives before the create event; consumers need ordering per aggregate or version checks.
+- **Outbox backlog:** the relay is down and the table fills; alert on the age of the oldest unsent row.
+
+## Pitfalls
+
+- Publishing to a broker inside the business transaction code path and hoping both succeed.
+- Writing compensations that are not idempotent, or that assume the original step fully completed.
+- Using non-idempotent external calls (a payment API) without an idempotency key.
+- Treating a saga as isolated and building features on its intermediate states.
+- Letting the dedupe store grow forever; expire ids once the redelivery window has passed.
+- Making the orchestrator stateless in memory so a restart forgets running sagas.
+
+## What would you choose and why?
+
+A ride-hailing service must, when a trip ends, (1) mark the trip complete, (2) charge the rider through an external payment API that supports idempotency keys, (3) pay the driver, and (4) send a receipt. Decide which step is the pivot, how you would publish "trip completed" reliably, what happens if the process crashes after the payment API call but before recording the result, and which steps must be idempotent.
+
+## Quiz
+
+<Quiz id="sd-m13-saga-outbox" tags={["saga", "transactional-outbox", "idempotent-consumer"]} questions={[
+  { type: "mcq", q: "What problem does the transactional outbox solve?", options: ["Slow queries", "The dual-write problem: updating the database and publishing an event cannot be made atomic across two systems", "Large messages", "Schema migrations"], answer: 1, explain: "Writing the event to an outbox table in the same transaction makes the change and the event atomic; a relay publishes it afterwards." },
+  { type: "mcq", q: "Why must consumers be idempotent when using an outbox with a relay?", options: ["The broker corrupts messages", "The relay can crash after publishing but before marking the row sent, so the event is delivered at least once and may repeat", "Consumers are slow", "Events are encrypted"], answer: 1, explain: "At-least-once delivery means duplicates; recording processed event ids makes the effect happen once." },
+  { type: "mcq", q: "What is a compensating transaction in a saga?", options: ["A database rollback of an earlier step", "A new business action that semantically undoes a completed step, such as a refund", "A retry of the failed step", "A distributed lock"], answer: 1, explain: "The earlier step really committed and may have been visible, so the undo is another action, not a rollback." },
+  { type: "multi", q: "Which statements about sagas are true?", options: ["Intermediate states can be visible to other transactions", "Compensations should be retried until they succeed", "A saga gives the same isolation as a single ACID transaction", "Steps and compensations should be idempotent"], answer: [0, 1, 3], explain: "Sagas are atomic only eventually; isolation needs extra techniques like semantic locks." },
+  { type: "mcq", q: "In the simulation, what happened when compensations were attempted only once?", options: ["Nothing changed", "Hundreds of sagas ended inconsistent, because a failed undo was never retried", "All sagas completed", "The broker failed"], answer: 1, explain: "845 of 100,000 sagas were left inconsistent, versus 0 when compensations were retried until success." }
+]} />
