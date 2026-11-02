@@ -1,0 +1,245 @@
+---
+title: Closest Pair and Sweep Lines
+track: cp
+module: geometry
+order: 3
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/geometry/cross-product-and-polygons, cp/geometry/convex-hull]
+tags: [geometry, closest-pair, divide-and-conquer, sweep-line, nearest-neighbour]
+type: lesson
+problems: [m16-closest-pair]
+furtherReading:
+  - title: cp-algorithms, Finding the nearest pair of points
+    url: https://cp-algorithms.com/geometry/nearest_points.html
+  - title: CSES Problem Set, Minimum Euclidean Distance
+    url: https://cses.fi/problemset/task/2194
+  - title: cp-algorithms, Search for a pair of intersecting segments
+    url: https://cp-algorithms.com/geometry/intersecting_segments.html
+---
+
+## Intuition
+
+Given `n` points, which two are closest? Checking every pair costs `O(n²)`, hopeless for `n = 2·10^5`. The structure of the plane lets you do it in `O(n log n)`, with two classic ideas that reach far beyond this one problem:
+
+1. **Divide and conquer.** Split the points by a vertical line, solve each half, then handle the pairs that *straddle* the line. The trick is that straddling pairs can only matter near the line, and "near" turns out to contain only a handful of candidates per point.
+2. **Sweep line.** Slide a vertical line across the plane from left to right, and maintain a small set of "active" points in a sorted structure. Each new point only needs to look at a few neighbours in that set.
+
+## Divide and conquer
+
+1. **Sort** the points by `x`.
+2. **Recurse** on the left half and the right half. Let `δ` be the smaller of the two best distances found.
+3. A pair with one point in each half can beat `δ` only if **both points lie within `δ` of the dividing line**. Collect those points into the **strip**.
+4. **Sort the strip by `y`.** For each point, compare it only with the following points whose `y` is within `δ`. Update `δ` when a closer pair appears.
+
+**Why step 4 is cheap: the packing argument.** Take a point `p` in the strip and look at the rectangle `δ` wide on each side of the line (width `2δ`) and `δ` high above `p`. Every point inside it is at least `δ` away from every other point *of the same half*, so at most four points fit in each `δ × δ` square, at most **8 points** in the whole rectangle, and only about 7 of them can be other points. So each strip point is compared with a constant number of successors. The strip pass is linear after sorting.
+
+```text
+T(n) = 2 T(n/2) + O(n log n)   when the strip is sorted each time   ->  O(n log^2 n)
+T(n) = 2 T(n/2) + O(n)         when you merge by y like merge sort  ->  O(n log n)
+```
+
+**Work with squared distances.** Compare `dx² < best` instead of taking square roots; everything stays an exact integer.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def closest_pair_sq(points):                       # squared distance of the closest pair (n >= 2)
+    pts = sorted(points)
+    def solve(l, r):
+        if r - l <= 3:                             # brute force on tiny ranges
+            return min((pts[i][0] - pts[j][0]) ** 2 + (pts[i][1] - pts[j][1]) ** 2
+                       for i in range(l, r) for j in range(i + 1, r))
+        m = (l + r) // 2
+        midx = pts[m][0]
+        best = min(solve(l, m), solve(m, r))
+        strip = sorted((p for p in pts[l:r] if (p[0] - midx) ** 2 < best), key=lambda p: p[1])
+        for i in range(len(strip)):
+            j = i + 1
+            while j < len(strip) and (strip[j][1] - strip[i][1]) ** 2 < best:
+                d = (strip[i][0] - strip[j][0]) ** 2 + (strip[i][1] - strip[j][1]) ** 2
+                if d < best: best = d
+                j += 1
+        return best
+    return solve(0, len(pts))
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+typedef pair<ll, ll> P;
+vector<P> pts;                                      // sorted by x
+ll d2(const P& a, const P& b) { return (a.first - b.first) * (a.first - b.first) + (a.second - b.second) * (a.second - b.second); }
+ll solve(int l, int r) {
+    if (r - l <= 3) {
+        ll best = LLONG_MAX;
+        for (int i = l; i < r; i++) for (int j = i + 1; j < r; j++) best = min(best, d2(pts[i], pts[j]));
+        return best;
+    }
+    int m = (l + r) / 2;
+    ll midx = pts[m].first;
+    ll best = min(solve(l, m), solve(m, r));
+    vector<P> strip;
+    for (int i = l; i < r; i++) if ((pts[i].first - midx) * (pts[i].first - midx) < best) strip.push_back(pts[i]);
+    sort(strip.begin(), strip.end(), [](const P& a, const P& b) { return a.second < b.second; });
+    for (size_t i = 0; i < strip.size(); i++)
+        for (size_t j = i + 1; j < strip.size() && (strip[j].second - strip[i].second) * (strip[j].second - strip[i].second) < best; j++)
+            best = min(best, d2(strip[i], strip[j]));
+    return best;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[][] pts;                                // sorted by x
+static long d2(long[] a, long[] b) { return (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]); }
+static long solve(int l, int r) {
+    if (r - l <= 3) {
+        long best = Long.MAX_VALUE;
+        for (int i = l; i < r; i++) for (int j = i + 1; j < r; j++) best = Math.min(best, d2(pts[i], pts[j]));
+        return best;
+    }
+    int m = (l + r) / 2;
+    long midx = pts[m][0];
+    long best = Math.min(solve(l, m), solve(m, r));
+    List<long[]> strip = new ArrayList<>();
+    for (int i = l; i < r; i++) if ((pts[i][0] - midx) * (pts[i][0] - midx) < best) strip.add(pts[i]);
+    strip.sort((a, b) -> Long.compare(a[1], b[1]));
+    for (int i = 0; i < strip.size(); i++)
+        for (int j = i + 1; j < strip.size() && (strip.get(j)[1] - strip.get(i)[1]) * (strip.get(j)[1] - strip.get(i)[1]) < best; j++)
+            best = Math.min(best, d2(strip.get(i), strip.get(j)));
+    return best;
+}
+```
+
+</Tab>
+</Tabs>
+
+Check it against the all-pairs search, count how many comparisons the strip really needs, and compare with a second algorithm (a grid, which is the idea behind the randomised linear-time method):
+
+<CodeRunner language="python" code={`import random
+
+def closest_pair_sq(points):
+    pts = sorted(points)
+    stats = {"strip_checks": 0}
+    def solve(l, r):
+        if r - l <= 3:
+            return min((pts[i][0] - pts[j][0]) ** 2 + (pts[i][1] - pts[j][1]) ** 2
+                       for i in range(l, r) for j in range(i + 1, r))
+        m = (l + r) // 2
+        midx = pts[m][0]
+        best = min(solve(l, m), solve(m, r))
+        strip = sorted((p for p in pts[l:r] if (p[0] - midx) ** 2 < best), key=lambda p: p[1])
+        for i in range(len(strip)):
+            j = i + 1
+            while j < len(strip) and (strip[j][1] - strip[i][1]) ** 2 < best:
+                stats["strip_checks"] += 1
+                d = (strip[i][0] - strip[j][0]) ** 2 + (strip[i][1] - strip[j][1]) ** 2
+                if d < best: best = d
+                j += 1
+        return best
+    return solve(0, len(pts)), stats["strip_checks"]
+
+def brute(points):
+    return min((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 for i, a in enumerate(points) for b in points[i + 1:])
+
+def grid_method(points):
+    # a different algorithm: bucket the points into a grid whose cell size is the current best distance
+    import math
+    pts = points[:]
+    random.shuffle(pts)
+    best = (pts[0][0] - pts[1][0]) ** 2 + (pts[0][1] - pts[1][1]) ** 2
+    def build(upto, cell):
+        g = {}
+        for p in pts[:upto]:
+            g.setdefault((p[0] // cell, p[1] // cell), []).append(p)
+        return g
+    cell = max(1, math.isqrt(best))
+    grid = build(2, cell)
+    for i in range(2, len(pts)):
+        p = pts[i]
+        cx, cy = p[0] // cell, p[1] // cell
+        improved = False
+        for gx in range(cx - 2, cx + 3):
+            for gy in range(cy - 2, cy + 3):
+                for q in grid.get((gx, gy), []):
+                    d = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2
+                    if d < best:
+                        best = d; improved = True
+        if improved:
+            cell = max(1, math.isqrt(best)); grid = build(i + 1, cell)
+        else:
+            grid.setdefault((cx, cy), []).append(p)
+    return best
+
+print("points (0,0) (3,4) (10,10) (1,1):", closest_pair_sq([(0, 0), (3, 4), (10, 10), (1, 1)])[0], "(squared distance 2 between (0,0) and (1,1))")
+
+random.seed(29)
+for _ in range(500):
+    n = random.randint(2, 25)
+    p = [(random.randint(-15, 15), random.randint(-15, 15)) for _ in range(n)]
+    assert closest_pair_sq(p)[0] == brute(p) == grid_method(p), p
+print("500 random sets: divide and conquer, the grid method and the all-pairs search agree")
+
+for n in (1000, 4000):
+    p = [(random.randint(-10 ** 6, 10 ** 6), random.randint(-10 ** 6, 10 ** 6)) for _ in range(n)]
+    best, checks = closest_pair_sq(p)
+    print("n =", n, ": strip comparisons in total =", checks, "(", round(checks / n, 2), "per point; all pairs would be", n * (n - 1) // 2, ")")
+`} />
+
+## Sweep lines
+
+A **sweep line** replaces a 2D problem with a 1D problem that changes over time: imagine a vertical line moving left to right. Events happen at specific `x` values; between events nothing changes. You keep a data structure for what the line currently crosses.
+
+| problem | events | structure for the active set |
+| --- | --- | --- |
+| **closest pair** | each point | a set ordered by `y`; look at the few points with `y` within `δ`, discard those with `x` more than `δ` behind |
+| do any two segments **intersect**? (Shamos-Hoey) | segment start and end | a set ordered by the `y` at the sweep position; only **adjacent** segments need testing |
+| **area of a union of rectangles** | rectangle left and right edges | a segment tree over `y` that counts covered length |
+| **skyline** or maximum overlap | interval starts and ends | a multiset of active heights, or a counter |
+| nearest **neighbour queries** offline | points and queries, sorted by `x` | an ordered set keyed by `y` |
+
+### The sweep version of closest pair
+
+Process points in order of `x`. Keep an ordered set `active` of the points whose `x` is within `δ` of the current point, keyed by `y`. For each new point `p`:
+
+1. Remove points from `active` whose `x` is more than `δ` behind `p` (they can never help again).
+2. Look up the points in `active` with `y` in `[p.y − δ, p.y + δ]`: at most a constant number by the same packing argument.
+3. Update `δ` with any closer pair, then insert `p`.
+
+It is the same idea as the divide and conquer strip, seen from a moving viewpoint, and runs in `O(n log n)` with a balanced tree.
+
+## Pitfalls
+
+1. **Taking square roots.** Compare squared distances: `dx² < best` is exact. A `sqrt` followed by a floating-point comparison invites off-by-epsilon errors.
+2. **Forgetting duplicates.** Two identical points give distance `0`; make sure the strip logic and the base case do not skip them (the strict `<` against `best` still keeps `0` as the minimum).
+3. **Using `<=` in the strip filter incorrectly.** Points with `dx² = best` cannot improve a squared distance of `best`; `<` is enough and keeps the strip small.
+4. **Sorting by `y` inside the strip but comparing `x` too.** Use the sort only to bound the `y` window; the actual distance uses both coordinates.
+5. **Degenerate inputs.** If all points share an `x`, the strip contains everything; the `y`-window cut still keeps the pass cheap, but a naive implementation without it degrades to `O(n²)`.
+6. **Recursion depth.** The depth is `log n`, fine; but copying subarrays at every level (as in the Python version) costs memory, so slice sparingly for big inputs.
+7. **Overflow.** Squared distances reach `8·10^12` for coordinates up to `10^6`, so use 64-bit integers.
+
+## Practice
+
+<Problem id="m16-closest-pair" />
+
+## Problem ladder
+
+- [Minimum Euclidean Distance](https://cses.fi/problemset/task/2194) (CSES): this lesson exactly, at `2·10^5` points.
+- [Line Segment Intersection](https://cses.fi/problemset/task/2190) (CSES): the segment test from the first geometry lesson; the sweep version scales it to many segments.
+
+## Quiz
+
+<Quiz id="cp-m16-closest-pair" tags={["geometry", "closest-pair"]} questions={[
+  { type: "mcq", q: "In the divide and conquer closest-pair algorithm, why do we only look at points within delta of the dividing line?", options: ["Points far from the line are duplicates", "A crossing pair with a point farther than delta from the line is already farther apart than delta", "The strip is sorted", "It saves memory only"], answer: 1, explain: "If one point is more than delta from the dividing line, the other point (on the other side) is more than delta away from it, so the pair cannot beat delta." },
+  { type: "mcq", q: "How many comparisons does each strip point need, thanks to the packing argument?", options: ["All other strip points", "A constant number (about 7)", "log n", "n / 2"], answer: 1, explain: "Within a delta by 2*delta rectangle only a constant number of points fit, since points of the same half are at least delta apart." },
+  { type: "predict", q: "Points (0, 0) and (3, 4). What is their squared distance?", code: "a, b = (0, 0), (3, 4)\nprint((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)", options: ["5", "7", "25", "49"], answer: 2, explain: "dx = 3, dy = 4, so the squared distance is 9 + 16 = 25 (the distance is 5)." },
+  { type: "multi", q: "Which are true about sweep lines?", options: ["They turn a 2D problem into a 1D problem that changes over time", "They process events in sorted order of x", "They need an ordered data structure for the active set", "They only work for points, never for segments"], answer: [0, 1, 2], explain: "Sweep lines handle segments, rectangles and intervals as well, for example the segment intersection and rectangle union problems." }
+]} />
