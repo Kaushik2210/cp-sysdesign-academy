@@ -1,0 +1,313 @@
+---
+title: Strongly Connected Components
+track: cp
+module: graphs
+order: 8
+difficulty: hard
+estMinutes: 50
+prerequisites: [cp/graphs/topological-sort]
+tags: [graphs, scc, tarjan, kosaraju, condensation, 2-sat, dfs]
+type: lesson
+problems: [m11-connect-towns]
+furtherReading:
+  - title: cp-algorithms, Strongly connected components and the condensation graph
+    url: https://cp-algorithms.com/graph/strongly-connected-components.html
+  - title: cp-algorithms, 2-SAT
+    url: https://cp-algorithms.com/graph/2SAT.html
+  - title: CSES Problem Set, Planets and Kingdoms
+    url: https://cses.fi/problemset/task/1683
+---
+
+## Intuition
+
+In an undirected graph, "connected" is simple: two vertices are connected or not. In a **directed** graph, there are two different questions: can you get from `a` to `b`, and can you also get back? If each can reach the other, `a` and `b` are in the same **strongly connected component** (SCC): think of a group of cities where you can drive from any city to any other, following one-way roads.
+
+Why care? Because the components are the *real* nodes of the graph. If you squeeze every component into a single vertex, the leftover graph has **no cycles at all**: a DAG. Almost every hard directed-graph problem (dependency loops, reachability, 2-SAT, "can everything be reached") becomes easy once you work on that DAG instead of the messy original.
+
+## Definition
+
+- Vertices `u` and `v` are **strongly connected** if there is a path `u -> v` **and** a path `v -> u`.
+- This is an equivalence relation, so the vertices split into disjoint **strongly connected components**.
+- The **condensation** (component graph) has one vertex per SCC and an edge `A -> B` when some original edge goes from a vertex in `A` to a vertex in `B`. It is always a **DAG**: a cycle among components would merge them into one.
+- In the condensation a **source** component has no incoming edge and a **sink** component has no outgoing edge.
+
+## Tarjan's algorithm (one DFS)
+
+Run a DFS and keep a stack of vertices that are "still open". For each vertex store:
+
+- `tin[u]`: discovery time (the order the DFS first reached it).
+- `low[u]`: the smallest `tin` reachable from `u`'s DFS subtree using tree edges plus **at most one** edge to a vertex that is still **on the stack**.
+
+Processing an edge `u -> v`:
+
+```text
+if v not visited:   dfs(v);  low[u] = min(low[u], low[v])
+else if v on stack: low[u] = min(low[u], tin[v])       # back edge into an open component
+else:               ignore                              # v already belongs to a finished component
+```
+
+After all edges of `u` are processed, if `low[u] == tin[u]` then no vertex in `u`'s subtree can reach anything discovered earlier that is still open: `u` is the **root** of an SCC. Pop the stack down to `u`; those vertices are exactly that component.
+
+Everything runs in `O(n + m)`. The components come out in a useful order: Tarjan finishes a component only after every component reachable from it, so **component ids are a reverse topological order of the condensation** (id `0` is a sink).
+
+## Kosaraju's algorithm (two DFS passes)
+
+1. Run DFS on the graph and record vertices in order of **finishing time**.
+2. Build the **reverse graph** (every edge flipped).
+3. Process vertices in **decreasing finishing time**; each DFS in the reverse graph that starts at an unassigned vertex collects exactly one SCC.
+
+Same complexity, easier to prove, but needs the reverse graph. Tarjan uses one pass and no extra graph; many people use it for speed and memory.
+
+## Example, step by step
+
+Graph: `0 -> 1 -> 2 -> 0`, `2 -> 3`, `3 -> 4 -> 5 -> 3`.
+
+- DFS from 0: `tin` = 0, then 1 (tin 1), then 2 (tin 2). Edge `2 -> 0`: 0 is on the stack, so `low[2] = tin[0] = 0`. Edge `2 -> 3`: visit 3 (tin 3), then 4 (tin 4), 5 (tin 5). Edge `5 -> 3` goes back to 3, which is on the stack: `low[5] = 3`, so `low[4] = 3`.
+- Back at 3: `low[3] = 3 = tin[3]`, so 3 is a root. Pop 5, 4, 3: component `{3, 4, 5}`.
+- Back at 2: `low[2] = 0`, it is not a root. Back at 1: `low[1] = 0`. Back at 0: `low[0] = 0 = tin[0]`: pop 2, 1, 0: component `{0, 1, 2}`.
+- The edge `2 -> 3` joins the two components, so the condensation is `{0,1,2} -> {3,4,5}`: one source, one sink.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import sys
+sys.setrecursionlimit(10000)
+
+tin = [-1] * n
+low = [0] * n
+on_stack = [False] * n
+comp = [-1] * n
+stack = []
+timer = ncomp = 0
+
+def dfs(u):
+    global timer, ncomp
+    tin[u] = low[u] = timer
+    timer += 1
+    stack.append(u)
+    on_stack[u] = True
+    for v in adj[u]:
+        if tin[v] < 0:
+            dfs(v)
+            low[u] = min(low[u], low[v])
+        elif on_stack[v]:
+            low[u] = min(low[u], tin[v])
+    if low[u] == tin[u]:                   # root of a component
+        while True:
+            w = stack.pop()
+            on_stack[w] = False
+            comp[w] = ncomp
+            if w == u:
+                break
+        ncomp += 1
+
+for u in range(n):
+    if tin[u] < 0:
+        dfs(u)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int timer_ = 0, ncomp = 0;
+vector<int> tin(n, -1), low(n), comp(n, -1), stk;
+vector<bool> on_stack(n, false);
+
+void dfs(int u) {
+    tin[u] = low[u] = timer_++;
+    stk.push_back(u);
+    on_stack[u] = true;
+    for (int v : adj[u]) {
+        if (tin[v] < 0) { dfs(v); low[u] = min(low[u], low[v]); }
+        else if (on_stack[v]) low[u] = min(low[u], tin[v]);
+    }
+    if (low[u] == tin[u]) {                // root of a component
+        while (true) {
+            int w = stk.back(); stk.pop_back();
+            on_stack[w] = false;
+            comp[w] = ncomp;
+            if (w == u) break;
+        }
+        ncomp++;
+    }
+}
+// for (int u = 0; u < n; u++) if (tin[u] < 0) dfs(u);
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static int timer = 0, ncomp = 0;
+static int[] tin, low, comp;
+static boolean[] onStack;
+static ArrayDeque<Integer> stack = new ArrayDeque<>();
+
+static void dfs(int u) {
+    tin[u] = low[u] = timer++;
+    stack.push(u);
+    onStack[u] = true;
+    for (int v : adj[u]) {
+        if (tin[v] < 0) { dfs(v); low[u] = Math.min(low[u], low[v]); }
+        else if (onStack[v]) low[u] = Math.min(low[u], tin[v]);
+    }
+    if (low[u] == tin[u]) {                // root of a component
+        while (true) {
+            int w = stack.pop();
+            onStack[w] = false;
+            comp[w] = ncomp;
+            if (w == u) break;
+        }
+        ncomp++;
+    }
+}
+// run dfs from every unvisited vertex, inside a thread with a large stack for deep graphs
+```
+
+</Tab>
+</Tabs>
+
+The demo checks Tarjan against Kosaraju on random graphs, computes sources and sinks of the condensation, and uses components to solve **2-SAT**:
+
+<CodeRunner language="python" code={`import itertools, random, sys
+sys.setrecursionlimit(10000)
+
+def tarjan(n, adj):
+    tin, low, comp = [-1] * n, [0] * n, [-1] * n
+    on, st, t, c = [False] * n, [], [0], [0]
+    def dfs(u):
+        tin[u] = low[u] = t[0]; t[0] += 1
+        st.append(u); on[u] = True
+        for v in adj[u]:
+            if tin[v] < 0:
+                dfs(v); low[u] = min(low[u], low[v])
+            elif on[v]:
+                low[u] = min(low[u], tin[v])
+        if low[u] == tin[u]:
+            while True:
+                w = st.pop(); on[w] = False; comp[w] = c[0]
+                if w == u: break
+            c[0] += 1
+    for u in range(n):
+        if tin[u] < 0: dfs(u)
+    return comp, c[0]
+
+def kosaraju(n, adj):
+    order, seen = [], [False] * n
+    def dfs1(u):
+        seen[u] = True
+        for v in adj[u]:
+            if not seen[v]: dfs1(v)
+        order.append(u)
+    for u in range(n):
+        if not seen[u]: dfs1(u)
+    radj = [[] for _ in range(n)]
+    for u in range(n):
+        for v in adj[u]: radj[v].append(u)
+    comp, c = [-1] * n, 0
+    def dfs2(u):
+        comp[u] = c
+        for v in radj[u]:
+            if comp[v] < 0: dfs2(v)
+    for u in reversed(order):
+        if comp[u] < 0:
+            dfs2(u); c += 1
+    return comp, c
+
+def same_partition(a, b):
+    return all((a[i] == a[j]) == (b[i] == b[j]) for i in range(len(a)) for j in range(len(a)))
+
+random.seed(4)
+for _ in range(300):
+    n = random.randint(1, 9)
+    adj = [[] for _ in range(n)]
+    for _ in range(random.randint(0, 14)):
+        adj[random.randrange(n)].append(random.randrange(n))
+    (c1, k1), (c2, k2) = tarjan(n, adj), kosaraju(n, adj)
+    assert k1 == k2 and same_partition(c1, c2)
+print("Tarjan and Kosaraju found the same components on 300 random graphs")
+
+n = 6
+adj = [[1], [2], [0, 3], [4], [5], [3]]       # cycle 0-1-2, cycle 3-4-5, one road between them
+comp, k = tarjan(n, adj)
+print("components:", k, "labels:", comp)
+src = [c for c in range(k) if not any(comp[u] != comp[v] and comp[v] == c for u in range(n) for v in adj[u])]
+snk = [c for c in range(k) if not any(comp[u] == c and comp[v] != c for u in range(n) for v in adj[u])]
+print("sources:", src, "sinks:", snk, "-> new roads needed:", max(len(src), len(snk)))
+
+# 2-SAT: each clause is (a or b); literal +i means x_i, -i means not x_i (variables 1..n)
+def two_sat(n, clauses):
+    node = lambda lit: 2 * (abs(lit) - 1) + (0 if lit > 0 else 1)
+    g = [[] for _ in range(2 * n)]
+    for a, b in clauses:
+        g[node(-a)].append(node(b))          # if a is false then b must hold
+        g[node(-b)].append(node(a))          # if b is false then a must hold
+    comp, _ = tarjan(2 * n, g)
+    for i in range(n):
+        if comp[2 * i] == comp[2 * i + 1]:
+            return None                       # x and not x in the same component: contradiction
+    return [comp[2 * i] < comp[2 * i + 1] for i in range(n)]   # Tarjan numbers sinks first
+
+def brute(n, clauses):
+    for bits in itertools.product([False, True], repeat=n):
+        ok = all((bits[abs(a) - 1] == (a > 0)) or (bits[abs(b) - 1] == (b > 0)) for a, b in clauses)
+        if ok: return True
+    return False
+
+for _ in range(500):
+    n = random.randint(1, 5)
+    clauses = [(random.choice([-1, 1]) * random.randint(1, n), random.choice([-1, 1]) * random.randint(1, n)) for _ in range(random.randint(1, 8))]
+    ans = two_sat(n, clauses)
+    assert (ans is not None) == brute(n, clauses)
+    if ans is not None:
+        assert all((ans[abs(a) - 1] == (a > 0)) or (ans[abs(b) - 1] == (b > 0)) for a, b in clauses)
+print("2-SAT agrees with brute force on 500 random formulas, and every assignment it returns satisfies the clauses")
+print(two_sat(2, [(1, 2), (-1, 2), (1, -2)]))      # x1 = True, x2 = True
+print(two_sat(1, [(1, 1), (-1, -1)]))              # contradiction: None
+`} />
+
+## What SCCs are used for
+
+- **Make a digraph strongly connected** with the fewest new edges: after condensing, the answer is `max(sources, sinks)` (or `0` if there is only one component). This is the practice problem.
+- **Reachability and "can everyone reach X?"**: work on the condensation DAG with DP in topological order, for example counting reachable vertices or finding the maximum collectable weight along a path of components.
+- **2-SAT**: each variable `x` becomes two vertices `x` and `not x`. A clause `(a or b)` adds the implications `not a -> b` and `not b -> a`. The formula is unsatisfiable exactly when some `x` and `not x` land in the same SCC. Otherwise set `x` true when its component comes **later** in topological order, which with Tarjan means a **smaller** component id.
+- **Dependency cycles**: detect circular dependencies and list which items are tangled together.
+- **Reducing a graph before DP**: DP on a general digraph is ill-defined with cycles, but DP on the condensation is fine.
+
+## Pitfalls
+
+1. **Updating `low` from a vertex that is no longer on the stack.** An edge to a vertex of a finished component must be ignored. Without the `on_stack` test, separate components merge.
+2. **Using `low[v]` instead of `tin[v]` for a back edge.** Both happen to work for SCC but `tin[v]` is the standard and is required for the related bridge and articulation algorithms.
+3. **Forgetting to start a DFS from every unvisited vertex.** One call only covers what is reachable from one start.
+4. **Recursion depth.** A chain of `10^5` vertices overflows a default stack. Raise the limit, run in a big-stack thread, or write the DFS iteratively.
+5. **Assuming component ids are in topological order.** Tarjan gives **reverse** topological order; Kosaraju as written above gives forward topological order. Check which you have before using it.
+6. **Counting a component with no edges as "not a source or sink".** An isolated vertex is both a source and a sink, so it counts on both sides in `max(sources, sinks)`.
+7. **Ignoring duplicate edges and self-loops.** They are harmless for SCC but can inflate degree counts if you count edges between components rather than testing presence.
+8. **Confusing SCC with connected components** of the undirected version: those ignore edge direction and give a different answer.
+
+## Practice
+
+<Problem id="m11-connect-towns" />
+
+## Problem ladder
+
+- [Flight Routes Check](https://cses.fi/problemset/task/1682) (CSES): is the graph a single SCC? Print a violating pair.
+- [Planets and Kingdoms](https://cses.fi/problemset/task/1683) (CSES): label every vertex with its component.
+- [Giant Pizza](https://cses.fi/problemset/task/1684) (CSES): a full 2-SAT instance.
+- [Coin Collector](https://cses.fi/problemset/task/1686) (CSES): condense, then longest weighted path in the DAG.
+- [SCC](https://atcoder.jp/contests/practice2/tasks/practice2_g) (AtCoder Library Practice Contest G): print the components in topological order.
+- [Checkposts](https://codeforces.com/problemset/problem/427/C) (Codeforces 427C, rating about 1700): cheapest vertex per component and counting ways.
+
+## Quiz
+
+<Quiz id="cp-m11-scc" tags={["scc", "tarjan", "condensation"]} questions={[
+  { type: "mcq", q: "What is true of the graph obtained by contracting every strongly connected component to one vertex?", options: ["It is a tree", "It is a directed acyclic graph", "It is complete", "It can contain cycles"], answer: 1, explain: "A cycle among components would make their vertices mutually reachable, so they would be one component." },
+  { type: "mcq", q: "In Tarjan's algorithm, when do you pop a component off the stack?", options: ["When low[u] equals tin[u]", "When tin[u] is zero", "When the stack is empty", "After every edge"], answer: 0, explain: "low[u] == tin[u] means nothing in u's subtree reaches an earlier open vertex, so u roots a component." },
+  { type: "predict", q: "A DAG has 3 source components, 2 sink components and more than one component in total. What is the minimum number of new edges to make it strongly connected?", code: "sources, sinks = 3, 2\nprint(max(sources, sinks))", options: ["2", "3", "5", "1"], answer: 1, explain: "Each source needs an incoming edge, each sink an outgoing one; one new edge covers one of each, so max(3, 2) = 3." },
+  { type: "mcq", q: "In 2-SAT with SCCs, when is the formula unsatisfiable?", options: ["When there are more clauses than variables", "When some variable and its negation are in the same strongly connected component", "When any clause has two equal literals", "When the graph has a cycle"], answer: 1, explain: "Then x implies not x and not x implies x, a contradiction." },
+  { type: "multi", q: "Which statements are true?", options: ["Tarjan's algorithm runs in O(n + m)", "Kosaraju's algorithm needs the reverse graph", "Component ids from Tarjan are in reverse topological order", "An isolated vertex is neither a source nor a sink"], answer: [0, 1, 2], explain: "An isolated vertex has no incoming and no outgoing edges, so it is both a source and a sink." }
+]} />
