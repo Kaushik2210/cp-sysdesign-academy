@@ -1,0 +1,200 @@
+---
+title: Consistency Models and Quorums
+track: sd
+module: distributed-theory
+order: 2
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/distributed-theory/time-clocks-and-ordering", "sd/databases-2/replication"]
+tags: [consistency, linearizability, causal-consistency, eventual-consistency, quorum, cap, pacelc, session-guarantees]
+type: lesson
+furtherReading:
+  - title: Jepsen, Consistency Models (a map of the hierarchy)
+    url: https://jepsen.io/consistency
+  - title: Aphyr, Strong consistency models
+    url: https://aphyr.com/posts/313-strong-consistency-models
+  - title: Abadi, Consistency Tradeoffs in Modern Distributed Database System Design (PACELC)
+    url: https://www.cs.umd.edu/~abadi/papers/abadi-pacelc.pdf
+  - title: DeCandia et al., Dynamo, Amazon's Highly Available Key-value Store (SOSP 2007)
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: Brewer, CAP Twelve Years Later - How the Rules Have Changed
+    url: https://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed/
+---
+
+## Intuition
+
+When data is stored on several machines, a read can return one of several values: the newest, an older one, or something that no client ever wrote in that order. A **consistency model** is the *contract* that says which of those answers the system is allowed to give. A strict contract is easy for programmers (the system behaves like a single machine) but costs latency and availability. A loose contract is fast and always available but pushes reasoning about stale and conflicting data onto application code.
+
+There is no single "best" level. The skill is knowing the main levels, what each one costs, and which operations in your system need which.
+
+## The ladder of models
+
+From strongest to weakest, the models you will meet most often:
+
+**Linearizability** (strong consistency). Every operation appears to take effect **instantly at one point** between its start and its end, and all clients see operations in the same order, which matches **real time**: if operation A finished before operation B started, every client sees A before B. The system behaves as if there were one copy of the data. This is what a single-node database or a well-used lock gives you.
+
+**Sequential consistency.** All clients see operations in the **same single order**, and each client's own operations appear in the order it issued them, but that order need not match real time. Weaker than linearizability because a later operation may be placed "before" an earlier one by another client.
+
+**Causal consistency.** Operations that are **causally related** (one could have influenced the other, see the previous lesson) are seen in the same order by everyone; concurrent operations may be seen in different orders by different clients. It is the strongest model that can be achieved **without** giving up availability during a network partition.
+
+**Session guarantees** (client-centric, often layered on weaker systems): *read-your-writes* (you see your own writes), *monotonic reads* (reads never go backward in time), *monotonic writes* (your writes are applied in order), *writes-follow-reads* (a write that depends on something you read is ordered after it). Cheap to provide with sticky routing or a version token carried by the client.
+
+**Eventual consistency.** If writes stop, all replicas **eventually** converge to the same value. It promises nothing about what you read in the meantime, which can be stale, out of order or different from what another client reads. Fast and highly available; conflicts must be resolved (last-write-wins, vector clocks with merges, or conflict-free data types).
+
+<Diagram kind="flow" caption="Consistency models: stronger models cost more latency and availability" nodes={[
+  { id: "lin", label: "Linearizable", x: 0, y: 80, role: "One-copy illusion that also respects real-time order.", failureModes: ["Unavailable on the minority side of a partition", "Every operation pays coordination round trips"], tradeoffs: ["Simplest to reason about; highest latency, lowest availability"] },
+  { id: "seq", label: "Sequential", x: 170, y: 80, role: "One global order that preserves each client's order but not real time.", failureModes: ["Stale-looking reads relative to the wall clock"], tradeoffs: ["Still needs global agreement on the order"] },
+  { id: "causal", label: "Causal", x: 340, y: 80, role: "Causally related operations seen in the same order everywhere.", failureModes: ["Concurrent writes can be seen in different orders", "Needs dependency tracking metadata"], tradeoffs: ["Strongest model that stays available under partitions"] },
+  { id: "session", label: "Session guarantees", x: 510, y: 80, role: "Read-your-writes, monotonic reads and writes for one client.", failureModes: ["Lost when the client switches to a server that has not caught up"], tradeoffs: ["Cheap with sticky sessions or a version token"] },
+  { id: "event", label: "Eventual", x: 680, y: 80, role: "Replicas converge if writes stop; no promise before that.", failureModes: ["Stale and conflicting reads", "Conflict resolution is the application's problem"], tradeoffs: ["Lowest latency, highest availability"] }
+]} edges={[
+  { from: "lin", to: "seq" }, { from: "seq", to: "causal" }, { from: "causal", to: "session" }, { from: "session", to: "event" }
+]} />
+
+## CAP and PACELC, stated precisely
+
+The **CAP theorem** says that when a network **partition** separates replicas, a system cannot be both **linearizable (consistent)** and **available**: the side that cannot reach the others must either refuse to answer (choose consistency) or answer with possibly stale data (choose availability). Two points are routinely misunderstood:
+
+- CAP is about the behaviour **during a partition**. It is not a permanent menu of "pick two of three"; a system with no partition can be both consistent and available.
+- "Available" in CAP means *every* non-failing node answers every request, which is stricter than "is mostly up".
+
+**PACELC** extends the idea: if there is a **P**artition, choose **A** or **C**; **E**lse (no partition), choose **L**atency or **C**onsistency. Even a healthy system faces a trade-off: keeping replicas strongly consistent needs extra round trips on every write, which costs latency. This is why a geo-replicated database that offers linearizable writes has higher write latency than one that acknowledges after a local write and replicates in the background.
+
+## Quorums, recapped and sharpened
+
+In a leaderless or quorum-replicated store with `n` replicas of each key, a write is acknowledged after `w` replicas confirm it and a read asks `r` replicas and returns the newest value among the answers (judged by a version or timestamp). The rule from the replication lesson:
+
+```text
+if w + r > n, every read quorum overlaps every completed write quorum in at least one replica
+```
+
+so a read that starts after a write completes always contacts at least one replica that has the new value. Typical settings for `n = 3`:
+
+| w | r | w + r | read after a completed write | notes |
+| --- | --- | --- | --- | --- |
+| 1 | 1 | 2 | may be stale | fastest, weakest |
+| 2 | 2 | 4 | always sees it | balanced, tolerates one slow or failed replica on each path |
+| 3 | 1 | 4 | always sees it | fast reads, writes need every replica |
+| 1 | 3 | 4 | always sees it | fast writes, reads need every replica |
+
+### What quorums do **not** give you
+
+A quorum overlap guarantees that a read *after a completed write* sees it. It does **not** make the system linearizable. The gap is an operation **in progress**: a write that has reached only some replicas, not yet enough to complete. Two readers during that window can see the new value first and then the old one, a **new-old inversion**:
+
+<Diagram kind="mermaid" caption="n = 3, w = 2, r = 2. A write has reached only replica 1 so far. Reader 1 happens to include replica 1, reader 2 does not" code={`sequenceDiagram
+  participant W as Writer
+  participant R1 as Replica 1
+  participant R2 as Replica 2
+  participant R3 as Replica 3
+  participant X as Reader 1
+  participant Y as Reader 2
+  W->>R1: write v2 (arrived)
+  W-->>R2: write v2 (still in flight)
+  W-->>R3: write v2 (still in flight)
+  X->>R1: read
+  X->>R2: read
+  Note over X: sees v2 on replica 1, returns v2
+  Y->>R2: read
+  Y->>R3: read
+  Note over Y: both still have v1, returns v1 (older than what X saw)`} />
+
+This is also why sloppy quorums (accepting writes on stand-in nodes during failures, with *hinted handoff* to repair later) trade the overlap guarantee away for availability. To get true linearizability from replicated data you need a consensus protocol or a single leader that serialises operations (the next module).
+
+### Repair mechanisms
+
+Replicas drift, so quorum stores repair them: **read repair** (a read that finds a stale replica writes the new value back), **anti-entropy** (background comparison of replicas using Merkle trees), and **hinted handoff** (a stand-in node holds writes for a down replica and forwards them on recovery). Conflicts that remain are settled by last-write-wins, by vector clocks that surface siblings for the application to merge, or by **conflict-free replicated data types (CRDTs)** whose merge operation is designed to converge automatically.
+
+## Simulating the guarantees
+
+The simulation below checks both claims for `n = 3`: first the staleness of a read after a **completed** write for several `(w, r)` choices against the exact formula `C(n - w, r) / C(n, r)`, then the new-old inversion for a write still **in progress** with `w = 2, r = 2`.
+
+<CodeRunner language="python" code={`import random
+from math import comb
+
+def stale_read_rate(n, w, r, trials, seed):
+    rng = random.Random(seed)
+    stale = 0
+    for _ in range(trials):
+        written = set(rng.sample(range(n), w))        # a COMPLETED write reached exactly w replicas
+        read = rng.sample(range(n), r)                # a later read asks r random replicas
+        if not any(x in written for x in read):       # none of them has the new value
+            stale += 1
+    return stale / trials
+
+print("n = 3, completed write, later read. exact stale probability = C(n-w, r) / C(n, r)")
+for w, r in [(1, 1), (2, 1), (1, 2), (2, 2), (3, 1), (1, 3)]:
+    exact = comb(3 - w, r) / comb(3, r)
+    emp = stale_read_rate(3, w, r, 200000, 7)
+    print(f"  w={w} r={r}  w+r={w + r} {'> n' if w + r > 3 else '<= n'}  exact {exact:.3f}  simulated {emp:.3f}")
+
+def inversion_rate(n, w, r, k, trials, seed):
+    # a write is IN PROGRESS: it has reached only k replicas so far (k < w). Reader 1 then reader 2 each ask r replicas.
+    rng = random.Random(seed)
+    inv = 0
+    for _ in range(trials):
+        has = set(rng.sample(range(n), k))
+        r1 = rng.sample(range(n), r); r2 = rng.sample(range(n), r)
+        saw_new_first = any(x in has for x in r1)
+        saw_old_second = not any(x in has for x in r2)
+        if saw_new_first and saw_old_second: inv += 1
+    return inv / trials
+
+print()
+print("n = 3, w = 2, r = 2 (w + r > n): a write that has reached only 1 replica so far, two reads one after the other")
+print("  reader 1 returns the NEW value and reader 2 later returns the OLD value in", f"{inversion_rate(3, 2, 2, 1, 200000, 11):.3f}", "of runs")
+print("  exact value: P(r1 hits the one replica) * P(r2 misses it) =", f"{(1 - comb(2, 2) / comb(3, 2)) * (comb(2, 2) / comb(3, 2)):.3f}")
+`} />
+
+A local run printed stale-read probabilities of 0.667 for `(w=1, r=1)`, 0.333 for `(2, 1)` and for `(1, 2)`, and exactly 0.000 for every setting with `w + r > 3`, matching the formula. It then showed that even with `w = 2, r = 2`, a reader returning the new value followed by a reader returning the old one happened in **0.221** of runs (the exact value is 2/9 = 0.222). Quorum overlap protects reads that start after a write completes; it does not order reads against a write in flight.
+
+## Choosing per operation
+
+Most real systems are not uniformly strong or weak. Pick the model **per kind of data**:
+
+| Data or operation | Needs | Typical choice |
+| --- | --- | --- |
+| Account balance, inventory at checkout, unique usernames | Linearizable | Single leader or consensus-backed store; accept the latency |
+| A user's own posted comment | Read-your-writes | Sticky session or version token on an eventually consistent store |
+| Feed, timeline, "likes" count | Eventual (with monotonic reads) | Replicas or cache; tolerate seconds of staleness |
+| Chat messages in one conversation | Causal (replies after the message they answer) | Causally consistent store or per-conversation ordering |
+| Shopping cart across offline devices | Mergeable | CRDT or sibling merge with vector clocks |
+
+## Trade-offs
+
+<TradeOffs caption="Consistency choices" rows={[
+  { option: "Linearizable (leader or consensus)", pros: "Behaves like one machine; simplest correctness reasoning", cons: "Extra round trips; unavailable on the minority side of a partition", chooseWhen: "Money, uniqueness, locks, leader election" },
+  { option: "Causal consistency", pros: "Intuitive ordering for related operations; stays available under partitions", cons: "Dependency metadata; concurrent writes still diverge", chooseWhen: "Collaborative and social features where reply order matters" },
+  { option: "Quorum reads and writes (w + r > n)", pros: "Tunable per request; tolerates slow or failed replicas", cons: "Not linearizable by itself; read repair and conflict handling needed", chooseWhen: "Highly available key-value storage with tunable freshness" },
+  { option: "Eventual consistency", pros: "Lowest latency, highest availability, easy to scale across regions", cons: "Stale or conflicting reads; application must reconcile", chooseWhen: "Counters, feeds, caches, anything where a few seconds of staleness is harmless" },
+  { option: "Session guarantees on top of eventual", pros: "Cheap fix for the most visible anomalies", cons: "Breaks when the session moves to a replica that is behind", chooseWhen: "User-facing apps on replicated or cached data" }
+]} />
+
+## Failure modes
+
+- **Stale read after failover:** the new primary was behind the old one, so acknowledged writes disappear.
+- **Read-your-writes violated** because the read goes to a lagging replica.
+- **Monotonic-read violation:** a user refreshes and sees an older state than before.
+- **Split brain:** two sides of a partition both accept writes; reconcile needed.
+- **Sloppy quorum:** writes succeed on stand-in nodes, so a later read quorum may miss them until handoff finishes.
+
+## Pitfalls
+
+- Believing `w + r > n` means linearizable.
+- Treating "eventual consistency" as "usually fine" without bounding or measuring the staleness.
+- Using CAP to claim a system is "AP" or "CP" as a permanent label.
+- Choosing one consistency level for the whole system instead of per operation.
+- Forgetting that a cache in front of a strongly consistent database makes reads weaker.
+
+## What would you choose and why?
+
+A ticket-booking service sells 1,000 seats across two regions. A seat must never be sold twice, the seat map shown to browsing users may lag by a few seconds, and a customer must immediately see their own booking. Assign a consistency level to each of the three requirements, and say what happens to booking requests in each region if the link between the regions fails.
+
+## Quiz
+
+<Quiz id="sd-m11-consistency-quorums" tags={["consistency", "linearizability", "quorum", "cap"]} questions={[
+  { type: "mcq", q: "What does linearizability guarantee beyond sequential consistency?", options: ["Lower latency", "The single global order also respects real time: if A finishes before B starts, everyone sees A first", "Eventual convergence", "Smaller metadata"], answer: 1, explain: "Linearizability adds the real-time constraint; sequential consistency only requires one agreed order that preserves each client's own order." },
+  { type: "mcq", q: "With n = 3, w = 2 and r = 2, a read that starts after a write completed...", options: ["may be stale", "always overlaps the write quorum in at least one replica", "is always linearizable under concurrent writes too", "needs a leader"], answer: 1, explain: "w + r = 4 is greater than n = 3, so every read quorum shares a replica with every completed write quorum." },
+  { type: "mcq", q: "Why can a quorum store with w + r > n still violate linearizability?", options: ["Replicas have different clocks only", "A write in progress that reached few replicas can be seen by one reader and missed by a later one", "Quorums only work for reads", "w + r > n is impossible"], answer: 1, explain: "Overlap only covers completed writes; during a write in flight, readers can see new then old values (a new-old inversion)." },
+  { type: "multi", q: "Which are true about CAP and PACELC?", options: ["CAP is about the choice between consistency and availability during a partition", "Without a partition a system can be both consistent and available", "PACELC adds a latency versus consistency trade-off when there is no partition", "A system must permanently be labelled CP or AP"], answer: [0, 1, 2], explain: "The CP/AP label describes behaviour during a partition and is not a permanent property of the whole system." },
+  { type: "mcq", q: "Which model is the strongest that can remain available during a network partition?", options: ["Linearizability", "Sequential consistency", "Causal consistency", "None; all need consensus"], answer: 2, explain: "Causal consistency can be implemented without blocking on the other side of a partition, unlike linearizability." }
+]} />
