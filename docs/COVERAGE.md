@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 164 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 167 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -42,10 +42,10 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 8 Hashing | Complete (5) | 5 |
 | 9 Recursion and bitmasks | Complete (5) | 5 |
 | 10 Greedy | Complete (5) | 5 |
-| 11 Graphs: shortest paths and connectivity | Partial (8 lessons: Dijkstra, union-find, minimum spanning tree, topological sort, Bellman-Ford, bipartite graphs, bridges and low-link, strongly connected components; no flows or matching yet) | 8 |
-| 12 Range queries and segment trees | Partial (4 lessons: segment tree, Fenwick tree, sparse table, lazy propagation; no persistent or 2D structures yet) | 4 |
+| 11 Graphs: shortest paths and connectivity | Partial (9 lessons: Dijkstra, union-find, minimum spanning tree, topological sort, Bellman-Ford, bipartite graphs, bridges and low-link, strongly connected components, maximum flow; no min-cost flow, general matching or 2-SAT yet) | 9 |
+| 12 Range queries and segment trees | Partial (5 lessons: segment tree, Fenwick tree, sparse table, lazy propagation, Mo's algorithm; no persistent or 2D structures yet) | 5 |
 | 13 Dynamic programming | Partial (8 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths, bitmask DP, interval DP, digit DP; no DP optimisations (convex hull trick, divide and conquer) yet) | 8 |
-| 14 String matching | Partial (2 lessons: KMP, Z-function; no suffix structures yet) | 2 |
+| 14 String matching | Partial (3 lessons: KMP, Z-function, tries and Aho-Corasick; no suffix arrays or suffix automata yet) | 3 |
 | 15 Trees and ancestors | Partial (4 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter, rerooting; no heavy-light decomposition or centroid decomposition yet) | 4 |
 | 16-26 (Levels 2-3) | Planned | 0 |
 
