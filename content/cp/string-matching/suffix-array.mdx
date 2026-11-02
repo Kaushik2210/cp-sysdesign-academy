@@ -1,0 +1,291 @@
+---
+title: Suffix Arrays and LCP
+track: cp
+module: string-matching
+order: 4
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/string-matching/z-function, cp/range-queries/sparse-table]
+tags: [strings, suffix-array, lcp, kasai, prefix-doubling]
+type: lesson
+problems: [m14-suffix-ranks]
+furtherReading:
+  - title: cp-algorithms, Suffix Array
+    url: https://cp-algorithms.com/string/suffix-array.html
+  - title: CSES Problem Set, Distinct Substrings
+    url: https://cses.fi/problemset/task/2105
+  - title: Library Checker, Suffix Array
+    url: https://judge.yosupo.jp/problem/suffixarray
+---
+
+## Intuition
+
+Sorting the dictionary lets you find a word by binary search. A **suffix array** does the same for a string: list every suffix in dictionary order and store only where each starts. Because *every* substring is a prefix of some suffix, a sorted list of suffixes is a searchable index of **all** substrings.
+
+```text
+s = banana          suffixes, sorted:           suffix array (1-based)
+                    a          (6)
+                    ana        (4)                 6 4 2 1 5 3
+                    anana      (2)
+                    banana     (1)
+                    na         (5)
+                    nana       (3)
+```
+
+The array answers questions that look hard: how many times does a pattern occur (binary search), how many distinct substrings are there, what is the longest substring that appears twice. The two difficulties are building the array fast (sorting suffixes by direct string comparison can cost `O(n²)` per sort) and measuring how similar neighbouring suffixes are.
+
+## Building it: prefix doubling
+
+Sort by the first character, then by the first **2** characters, then **4**, **8**, and so on. The trick is that the first `2k` characters of suffix `i` are just
+
+```text
+(first k characters of suffix i)  followed by  (first k characters of suffix i + k)
+```
+
+and you already know the *rank* of each half from the previous round. So one round is a sort by the **pair** of ranks:
+
+```text
+key(i) = ( rank[i],  rank[i + k]  or -1 if i + k is past the end )
+```
+
+After sorting, walk the order and give equal keys equal new ranks. Double `k`. When all `n` ranks are distinct the suffixes are fully sorted. That takes at most `⌈log₂ n⌉` rounds, each a sort of `n` pairs: `O(n log² n)` with a comparison sort, or `O(n log n)` with radix sort.
+
+## LCP and Kasai's algorithm
+
+The **LCP array** stores, for each rank `r ≥ 1`, the length of the longest common prefix of the suffixes at ranks `r − 1` and `r`. It is what turns the sorted list into answers.
+
+Computing each LCP by direct comparison is slow. **Kasai's algorithm** does it in `O(n)` using one fact: if suffix `i` has LCP `h` with its predecessor in sorted order, then suffix `i + 1` has LCP **at least** `h − 1` with *its* predecessor. So process suffixes in text order, keep a running `h`, extend it with a character loop, and decrease it by one on each step. `h` can fall at most `n` times in total, so it can rise at most `2n` times: linear.
+
+```text
+inv[i] = rank of suffix i
+for i in 0..n-1:
+    if inv[i] > 0:
+        j = sa[inv[i] - 1]                          # the previous suffix in sorted order
+        while s[i + h] == s[j + h]: h += 1
+        lcp[inv[i]] = h
+        h = max(h - 1, 0)
+    else: h = 0
+```
+
+## What you can do with SA + LCP
+
+| question | how |
+| --- | --- |
+| number of **distinct substrings** | `n(n + 1)/2 − Σ lcp` (each suffix adds its length minus what it shares with its predecessor) |
+| **longest repeated substring** | `max(lcp)` |
+| does pattern `p` occur, and how often | binary search the range of suffixes starting with `p`; the size of the range is the count, `O(|p| log n)` |
+| **LCP of two arbitrary suffixes** `i, j` | `min` of `lcp` over the rank interval between them: a range-minimum query, answered in `O(1)` with a [sparse table](/cp/range-queries/sparse-table/) |
+| **longest common substring** of two strings | join them with a separator, take the largest LCP between adjacent suffixes that come from different strings |
+| comparing two substrings quickly | compare via LCP, an alternative to hashing that has no collisions |
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def suffix_array(s):
+    n = len(s)
+    rank = [ord(c) for c in s]
+    sa = list(range(n))
+    k = 1
+    while True:
+        key = lambda i: (rank[i], rank[i + k] if i + k < n else -1)
+        sa.sort(key=key)
+        new = [0] * n
+        for j in range(1, n):
+            new[sa[j]] = new[sa[j - 1]] + (key(sa[j]) != key(sa[j - 1]))
+        rank = new
+        if rank[sa[-1]] == n - 1:
+            return sa
+        k *= 2
+
+def kasai(s, sa):
+    n = len(s)
+    inv = [0] * n
+    for r, p in enumerate(sa): inv[p] = r
+    lcp = [0] * n                       # lcp[r] = common prefix of sa[r - 1] and sa[r]
+    h = 0
+    for i in range(n):
+        if inv[i] > 0:
+            j = sa[inv[i] - 1]
+            while i + h < n and j + h < n and s[i + h] == s[j + h]:
+                h += 1
+            lcp[inv[i]] = h
+            if h > 0: h -= 1
+        else:
+            h = 0
+    return lcp
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> suffixArray(const string& s) {
+    int n = s.size();
+    vector<int> sa(n), rk(n), tmp(n);
+    for (int i = 0; i < n; i++) { sa[i] = i; rk[i] = s[i]; }
+    for (int k = 1;; k *= 2) {
+        auto second = [&](int i) { return i + k < n ? rk[i + k] : -1; };
+        auto cmp = [&](int a, int b) { return rk[a] != rk[b] ? rk[a] < rk[b] : second(a) < second(b); };
+        sort(sa.begin(), sa.end(), cmp);
+        tmp[sa[0]] = 0;
+        for (int j = 1; j < n; j++) tmp[sa[j]] = tmp[sa[j - 1]] + (cmp(sa[j - 1], sa[j]) ? 1 : 0);
+        rk = tmp;
+        if (rk[sa[n - 1]] == n - 1) break;
+    }
+    return sa;
+}
+vector<int> kasai(const string& s, const vector<int>& sa) {
+    int n = s.size(), h = 0;
+    vector<int> inv(n), lcp(n, 0);
+    for (int i = 0; i < n; i++) inv[sa[i]] = i;
+    for (int i = 0; i < n; i++) {
+        if (inv[i] > 0) {
+            int j = sa[inv[i] - 1];
+            while (i + h < n && j + h < n && s[i + h] == s[j + h]) h++;
+            lcp[inv[i]] = h;
+            if (h > 0) h--;
+        } else h = 0;
+    }
+    return lcp;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static int n;
+static int[] rank;
+static int cmp(int a, int b, int k) {
+    if (rank[a] != rank[b]) return Integer.compare(rank[a], rank[b]);
+    int x = a + k < n ? rank[a + k] : -1, y = b + k < n ? rank[b + k] : -1;
+    return Integer.compare(x, y);
+}
+static Integer[] suffixArray(String s) {
+    n = s.length();
+    rank = new int[n];
+    for (int i = 0; i < n; i++) rank[i] = s.charAt(i);
+    Integer[] sa = new Integer[n];
+    for (int i = 0; i < n; i++) sa[i] = i;
+    for (int k = 1; ; k *= 2) {
+        final int kk = k;
+        Arrays.sort(sa, (a, b) -> cmp(a, b, kk));
+        int[] nr = new int[n];
+        for (int j = 1; j < n; j++) nr[sa[j]] = nr[sa[j - 1]] + (cmp(sa[j - 1], sa[j], kk) < 0 ? 1 : 0);
+        rank = nr;
+        if (rank[sa[n - 1]] == n - 1) return sa;
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+Check it against sorting the suffixes directly, then use it to count distinct substrings, find the longest repeat, and count a pattern by binary search:
+
+<CodeRunner language="python" code={`import random
+from bisect import bisect_left, bisect_right
+
+def suffix_array(s):
+    n = len(s)
+    rank = [ord(c) for c in s]
+    sa = list(range(n))
+    k = 1
+    while True:
+        key = lambda i: (rank[i], rank[i + k] if i + k < n else -1)
+        sa.sort(key=key)
+        new = [0] * n
+        for j in range(1, n):
+            new[sa[j]] = new[sa[j - 1]] + (key(sa[j]) != key(sa[j - 1]))
+        rank = new
+        if rank[sa[-1]] == n - 1:
+            return sa
+        k *= 2
+
+def kasai(s, sa):
+    n = len(s)
+    inv = [0] * n
+    for r, p in enumerate(sa): inv[p] = r
+    lcp = [0] * n
+    h = 0
+    for i in range(n):
+        if inv[i] > 0:
+            j = sa[inv[i] - 1]
+            while i + h < n and j + h < n and s[i + h] == s[j + h]:
+                h += 1
+            lcp[inv[i]] = h
+            if h > 0: h -= 1
+        else:
+            h = 0
+    return lcp
+
+def count_occurrences(s, sa, p):
+    # binary search the block of suffixes that start with p (compares only len(p) characters)
+    class Prefixes:
+        def __len__(self): return len(sa)
+        def __getitem__(self, r): return s[sa[r]:sa[r] + len(p)]
+    arr = Prefixes()
+    return bisect_right(arr, p) - bisect_left(arr, p)
+
+s = "banana"
+sa = suffix_array(s)
+lcp = kasai(s, sa)
+print("suffix array (1-based):", [p + 1 for p in sa], "(worked example: 6 4 2 1 5 3)")
+print("lcp array:", lcp)
+print("distinct substrings:", len(s) * (len(s) + 1) // 2 - sum(lcp), " longest repeated substring length:", max(lcp))
+print("occurrences of 'ana':", count_occurrences(s, sa, "ana"), " of 'na':", count_occurrences(s, sa, "na"), " of 'x':", count_occurrences(s, sa, "x"))
+
+random.seed(7)
+for _ in range(400):
+    t = "".join(random.choice("abc") for _ in range(random.randint(1, 30)))
+    sa = suffix_array(t)
+    assert sa == sorted(range(len(t)), key=lambda i: t[i:]), t
+    lcp = kasai(t, sa)
+    assert len(t) * (len(t) + 1) // 2 - sum(lcp) == len({t[i:j] for i in range(len(t)) for j in range(i + 1, len(t) + 1)}), t
+    p = "".join(random.choice("abc") for _ in range(random.randint(1, 3)))
+    assert count_occurrences(t, sa, p) == sum(1 for i in range(len(t) - len(p) + 1) if t.startswith(p, i)), (t, p)
+print("400 random strings: suffix array, distinct substrings and pattern counts all agree with brute force")
+`} />
+
+## Suffix array, suffix automaton, or hashing?
+
+| tool | strengths | weakness |
+| --- | --- | --- |
+| **suffix array + LCP** | simple, memory friendly, no collisions, great for "compare two suffixes" and counting distinct substrings | needs an RMQ for arbitrary LCP queries |
+| suffix automaton | online construction, counts of occurrences per state | harder to learn and to debug |
+| **hashing** + binary search | tiny code, fast to write | probabilistic, and a hash collision can break it |
+| [Z-function](/cp/string-matching/z-function/) / [KMP](/cp/string-matching/kmp/) | linear, one pattern | one pattern, one text |
+| [Aho-Corasick](/cp/string-matching/aho-corasick/) | many patterns, one text | patterns must be known up front |
+
+## Pitfalls
+
+1. **Off-by-one in the pair key.** A suffix shorter than `k` has no second half: use `-1` (smaller than every rank) so it sorts first, as a shorter prefix should.
+2. **Comparing with `<=` when assigning ranks.** Equal keys must get equal ranks; only increment when the pair differs. Otherwise the doubling never terminates correctly.
+3. **Stopping too early.** Stop when all ranks are distinct (`rank[sa[n-1]] == n - 1`), not after a fixed number of rounds, since strings like `aaaa` need all `log n` rounds.
+4. **Mixing 0-based and 1-based positions.** The array stores 0-based starts internally; print `p + 1` if the problem asks for 1-based positions.
+5. **LCP index convention.** Decide once whether `lcp[r]` compares ranks `r − 1` and `r` (used here) or `r` and `r + 1`; the distinct-substring formula uses the sum either way.
+6. **Large inputs.** `O(n log² n)` with a library sort handles `n = 10^5` comfortably, but `10^6` needs radix sort or SA-IS, the linear-time algorithm.
+7. **Forgetting 64 bits.** The number of distinct substrings is up to `n(n + 1)/2`, which exceeds 32 bits for `n` above about 65 000.
+
+## Practice
+
+<Problem id="m14-suffix-ranks" />
+
+## Problem ladder
+
+- [Distinct Substrings](https://cses.fi/problemset/task/2105) (CSES): count distinct substrings, using the formula from this lesson.
+- [Suffix Array](https://judge.yosupo.jp/problem/suffixarray) (Library Checker): the large-input benchmark for the construction.
+- [Longest Duplicate Substring](https://leetcode.com/problems/longest-duplicate-substring/) (LeetCode, hard): max LCP, also solvable by hashing with binary search.
+- [Number of Distinct Substrings in a String](https://www.spoj.com/problems/DISUBSTR/) (SPOJ DISUBSTR): the classic version with many test cases.
+
+## Quiz
+
+<Quiz id="cp-m14-suffix-array" tags={["strings", "suffix-array"]} questions={[
+  { type: "mcq", q: "In prefix doubling, what is the sort key for suffix i when comparing the first 2k characters?", options: ["The suffix as a string", "The pair (rank of the first k characters of i, rank of the first k characters of i + k)", "Its length", "The character at position i + 2k"], answer: 1, explain: "The first 2k characters are the first k of suffix i followed by the first k of suffix i + k, whose ranks are known from the previous round." },
+  { type: "predict", q: "String 'banana' has 6 suffixes. If the sum of the LCP array is 6 (1 + 3 + 0 + 0 + 2 + 0), how many distinct substrings does it have?", code: "n = 6\nprint(n * (n + 1) // 2 - 6)", options: ["15", "21", "27", "6"], answer: 0, explain: "There are n(n+1)/2 = 21 substrings counted with repeats; subtracting the shared prefixes (sum of LCPs = 6) leaves 15 distinct ones." },
+  { type: "mcq", q: "What fact makes Kasai's algorithm linear?", options: ["Suffixes are processed in sorted order", "The LCP with the sorted predecessor drops by at most 1 when moving from suffix i to suffix i + 1", "The string is short", "It uses hashing"], answer: 1, explain: "So the running value h only decreases by one per step and can rise at most 2n times in total." },
+  { type: "multi", q: "Which questions can a suffix array with an LCP array answer?", options: ["How many times does a pattern occur", "How many distinct substrings are there", "What is the longest repeated substring", "What is the shortest path in a graph"], answer: [0, 1, 2], explain: "Graph shortest paths are unrelated to strings." }
+]} />
