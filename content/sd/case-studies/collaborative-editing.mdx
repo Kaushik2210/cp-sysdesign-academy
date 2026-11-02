@@ -1,0 +1,149 @@
+---
+title: "Case Study: Collaborative Document Editing"
+track: sd
+module: case-studies
+order: 11
+difficulty: expert
+estMinutes: 50
+prerequisites: ["sd/case-studies/chat-system", "sd/distributed-theory/time-clocks-and-ordering", "sd/distributed-theory/consistency-models-and-quorums"]
+tags: [case-study, collaboration, operational-transform, crdt, websocket, convergence, presence]
+type: case-study
+furtherReading:
+  - title: Ellis and Gibbs - Concurrency control in groupware systems (the original operational transformation paper)
+    url: https://dl.acm.org/doi/10.1145/66926.66963
+  - title: Shapiro et al. - A comprehensive study of Convergent and Commutative Replicated Data Types
+    url: https://inria.hal.science/inria-00555588
+  - title: Kleppmann et al. - Local-first software
+    url: https://www.inkandswitch.com/local-first/
+  - title: Yjs - a CRDT framework for shared editing
+    url: https://docs.yjs.dev/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Multiple users edit the same document at once and see each other's changes live; cursors and selections of collaborators are visible.
+- Edits made offline merge when the user reconnects; version history with restore.
+- Permissions: owner, editor, commenter, viewer.
+
+**Non-functional**
+- Typing must feel instant: **apply edits locally first** (optimistic), then sync.
+- **Convergence:** after all edits are delivered, every client shows the **same** document, and no user's intent is silently destroyed.
+- Remote edits appear within about 100 to 300 ms.
+- Assume 100M documents, 10M daily active documents, up to ~100 simultaneous editors per document (typically 2 to 5).
+
+## 2. Estimate
+
+- A busy typist produces ~5 operations/s, but most documents are idle at any moment. Assume 1M documents are being edited at once, with 2 editors each at about 2 ops/s: **roughly 4M ops/s overall**. The load is spread across independent documents, so each document sees only tens of ops/s. **Per-document throughput is trivial; the hard parts are correctness and routing millions of small, independent sessions.**
+- Storage: a document is ~50 KB of text; with an operation log and snapshots, ~1 MB per document on average ⇒ 100M docs ≈ **100 TB**.
+
+## 3. The core problem: concurrent edits
+
+Document "abc". Alice inserts `X` at position 1 while Bob concurrently inserts `Y` at position 1. If each applies their own edit then the other's edit **unchanged**, Alice sees `aXYbc` while Bob sees `aYXbc`: divergence. Two families of solutions make all replicas converge.
+
+## 4. Approach A: Operational Transformation (OT)
+
+A central server orders operations. When an operation arrives that was generated against an **older document version**, the server **transforms** it against the operations that happened since, adjusting positions so the original intent holds.
+
+```python
+def apply(doc, op):
+    kind, pos, ch = op
+    return doc[:pos] + ch + doc[pos:] if kind == "ins" else doc[:pos] + doc[pos+1:]
+def transform(a, b, a_wins_ties):
+    """Transform op a so it can be applied after concurrent op b (same base document)."""
+    ka, pa, ca = a; kb, pb, cb = b
+    if kb == "ins":
+        if pb < pa or (pb == pa and not a_wins_ties): return (ka, pa + 1, ca)
+    else:  # b deleted a character
+        if pb < pa: return (ka, pa - 1, ca)
+    return a
+base = "abc"
+a = ("ins", 1, "X"); b = ("ins", 1, "Y")                   # concurrent inserts at the same spot
+s1 = apply(apply(base, a), transform(b, a, False))         # replica 1: A then B'
+s2 = apply(apply(base, b), transform(a, b, True))          # replica 2: B then A'
+print(s1, s2, s1 == s2)                                    # aXYbc aXYbc True
+a = ("ins", 3, "Z"); b = ("del", 0, "")
+print(apply(apply("abc", a), transform(b, a, True)), apply(apply("abc", b), transform(a, b, False)))  # bcZ bcZ
+```
+
+The tie-break rule (who wins when positions are equal) must be consistent everywhere, here by user id. Real OT also handles deletes vs deletes, ranges, formatting and rich text trees, and getting transform functions correct for all pairs is notoriously hard (many published algorithms were later shown to have bugs).
+
+**Architecture (Google Docs style):** clients send operations tagged with the **server revision** they are based on. The server, per document, is a single sequential process: it transforms the op against any newer ops, assigns the next revision, appends to the log and broadcasts the transformed op. Clients keep a queue of unacknowledged local ops and transform incoming server ops against it.
+
+- **Pros:** compact operations, server authority is simple (permissions, ordering, history), well proven.
+- **Cons:** needs a central sequencer per document, complex transform functions, offline/peer-to-peer is harder.
+
+## 5. Approach B: CRDTs
+
+A **CRDT** (conflict-free replicated data type) gives every character a **unique, stable identifier** and defines a merge that is commutative, associative and idempotent, so replicas converge regardless of the order operations arrive.
+
+- **Sequence CRDTs** (RGA, Logoot, Yjs, Automerge) insert a character "after element with id X" instead of "at position 5". Concurrent inserts after the same element are ordered by a deterministic rule (for example by (lamport timestamp, replica id)).
+- **Deletes** mark elements as **tombstones** rather than removing them, so later operations referring to them still resolve.
+- Works peer-to-peer and offline by design; no central transformation step.
+
+- **Pros:** simpler reasoning about convergence, great for offline-first, no central ordering required.
+- **Cons:** metadata overhead (ids and tombstones can make documents several times larger; mitigated with compact encodings and garbage collection when all replicas have seen a delete), and harder to enforce server-side semantics like undo of other users' work.
+
+| | OT | CRDT |
+| --- | --- | --- |
+| Ordering authority | Central server per document | None needed |
+| Offline editing | Possible but complex | Natural |
+| Metadata | Small | Larger (ids, tombstones) |
+| Complexity lives in | Transform functions | Data structure and garbage collection |
+| Used by | Google Docs, Etherpad | Yjs and Automerge-based editors; Figma uses a server-authoritative design inspired by CRDTs |
+
+## 6. System architecture
+
+<Diagram kind="flow" caption="Each document is owned by one collaboration server; clients connect by WebSocket; the log and snapshots are durable" nodes={[
+  { id: "c", label: "Editors (browsers)", x: 0, y: 90, role: "Apply edits optimistically, send ops, render remote cursors.", failureModes: ["Offline periods", "Slow networks cause long unacked queues"], tradeoffs: ["Local-first rendering keeps typing instant"] },
+  { id: "gw", label: "WebSocket gateway", x: 200, y: 90, role: "Authenticates, authorises per document, routes connections to the document owner.", failureModes: ["Reconnect storms"], tradeoffs: ["Route by document id with consistent hashing"] },
+  { id: "doc", label: "Document server (one owner per doc)", x: 400, y: 20, role: "Sequences or merges ops, broadcasts to peers, manages presence.", failureModes: ["Owner crash loses in-memory state", "Two owners during failover"], tradeoffs: ["Persist ops before acking; lease and fencing for ownership"] },
+  { id: "log", label: "Operation log (durable)", x: 600, y: 20, role: "Append-only ops per document.", failureModes: ["Log growth"], tradeoffs: ["Periodic snapshots allow truncating and fast loading"] },
+  { id: "snap", label: "Snapshot store (blob)", x: 600, y: 160, role: "Document state at revision N.", failureModes: ["Corrupt snapshot"], tradeoffs: ["Rebuildable from the log"] },
+  { id: "pres", label: "Presence / cursors", x: 400, y: 160, role: "Ephemeral cursor and selection state, broadcast but not persisted.", failureModes: ["Stale cursors after a client drops"], tradeoffs: ["TTL and heartbeats; loss is harmless"] }
+]} edges={[
+  { from: "c", to: "gw", label: "ops" }, { from: "gw", to: "doc" }, { from: "doc", to: "log", label: "append" }, { from: "log", to: "snap", label: "compact" }, { from: "doc", to: "pres" }, { from: "doc", to: "gw", label: "broadcast" }
+]} />
+
+**Loading a document:** fetch the latest snapshot, replay the ops after it, then open the live connection from that revision. **Reconnecting:** the client says "I have revision N" and the server sends the missing ops, the same sync idea as in the chat lesson.
+
+**Sharding:** assign each document to one document server by consistent hash; documents are independent, so this scales linearly. Hot documents (a 10,000-viewer live doc) separate **editors** (few, full protocol) from **viewers** (many, receive broadcast through read replicas or a pub/sub fan-out).
+
+## 7. Deep dives
+
+- **Presence and cursors:** ephemeral, rate-limited (for example 10 updates/s), stored as positions relative to elements (CRDT ids) or transformed through ops so they track edits.
+- **Undo/redo:** per-user undo must invert only that user's operations, transformed against others' later edits; a classic hard problem.
+- **Version history:** snapshots plus the op log give "restore to any point"; name versions and group ops by time and author.
+- **Permissions and comments:** enforce on the server; comments anchor to ranges that follow text as it moves.
+- **Rich text and structured data:** model as a tree or as attribute spans; tables, images and lists add transform cases.
+- **Offline merge:** on reconnect, replay the local ops; a very long offline branch can produce surprising merges, so show a diff or let the user review.
+- **Garbage collection:** tombstones and old ops are compacted once all active replicas acknowledge a revision.
+
+## 8. Bottlenecks and trade-offs
+
+- **Central sequencing (OT) vs peer merging (CRDT):** choose by whether offline, peer-to-peer and local-first matter more than minimal metadata.
+- **Latency:** the owner server's location sets collaboration latency; place it near the majority of editors, accept cross-region RTT for others.
+- **Failover:** a document owner failing mid-session must recover from the log, and clients resend unacked ops (ops must be idempotent, keyed by client id and sequence number).
+- **Memory:** keep only active documents in memory on the owner, evict idle ones after persisting.
+
+## Pitfalls
+
+- Locking the document (pessimistic) instead of merging.
+- Applying remote ops without transforming or ordering them.
+- Using absolute character positions in a CRDT.
+- Persisting every keystroke as its own database transaction without batching.
+- Persisting presence/cursor data durably.
+- Two document owners at once after failover (split brain), without fencing.
+
+## What would you choose and why?
+
+You are building a Notion-like editor that must work fully offline on phones for days and also support server-side search, permissions and an audit log. Which approach (OT or CRDT, or a hybrid with a server that is the source of truth), and how do you reconcile long offline branches?
+
+## Quiz
+
+<Quiz id="sd-m17-collab-editing" tags={["case-study", "ot", "crdt"]} questions={[
+  { type: "mcq", q: "Alice and Bob concurrently insert at the same position. Why is applying each other's op unchanged a bug?", options: ["It is slower", "Replicas can end up with different text, so they never converge", "It uses more memory", "It deletes the document"], answer: 1, explain: "Order of application changes the result unless operations are transformed or are commutative." },
+  { type: "mcq", q: "How does a sequence CRDT identify an insertion point?", options: ["Absolute index", "After an element with a unique stable id", "Wall-clock time only", "Line number"], answer: 1, explain: "Stable ids make operations independent of how many characters other users inserted before them." },
+  { type: "multi", q: "Which are real costs of CRDT-based editing?", options: ["Metadata overhead for ids", "Tombstones that need garbage collection", "Requires a central server to order operations", "Per-user undo complexity"], answer: [0, 1, 3], explain: "CRDTs avoid central ordering; their costs are size, garbage collection and some semantics like undo." },
+  { type: "mcq", q: "Why is presence (cursors) kept out of the durable operation log?", options: ["It is not needed", "It is ephemeral and high-frequency; losing it is harmless", "Logs cannot store numbers", "It would cause conflicts"], answer: 1, explain: "Cursor state is transient; persisting it wastes writes with no value." }
+]} />

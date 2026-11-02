@@ -1,0 +1,133 @@
+---
+title: "Case Study: Web Crawler"
+track: sd
+module: case-studies
+order: 9
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/case-studies/search-autocomplete", "sd/queues-and-streaming/why-queues", "sd/storage/blob-stores"]
+tags: [case-study, crawler, frontier, politeness, dedup, bloom-filter, robots-txt]
+type: case-study
+furtherReading:
+  - title: RFC 9309 - Robots Exclusion Protocol
+    url: https://www.rfc-editor.org/rfc/rfc9309
+  - title: Heydon and Najork - Mercator, a scalable, extensible web crawler
+    url: https://courses.cs.washington.edu/courses/cse454/15wi/papers/mercator.pdf
+  - title: Manning, Raghavan, Schutze - Introduction to Information Retrieval, chapter 20 (Web crawling and indexes)
+    url: https://nlp.stanford.edu/IR-book/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Starting from seed URLs, discover and download web pages, extract links and follow them.
+- Store page content for a downstream indexer or ML pipeline; refresh pages over time.
+
+**Non-functional**
+- **Polite**: obey `robots.txt`, rate-limit per host, identify the crawler honestly. Hammering one small site is a bug and can get you blocked or sued.
+- **Robust**: the web is full of traps (infinite calendars, session ids in URLs, huge files, malformed HTML, slow servers).
+- **Scalable** and **extensible** (new content types, new processing steps).
+- Assume 1 billion pages per month.
+
+## 2. Estimate
+
+- 1B pages / (30 × 86,400 s) ≈ **400 pages/s**, peak maybe 1,000/s.
+- Average page ~500 KB including resources you keep? Store the HTML only: ~100 KB compressed-average. 1B × 100 KB = **100 TB per month**, ~1.2 PB/year before dedup and compression.
+- Bandwidth: 400 pages/s × 500 KB downloaded ≈ **200 MB/s ≈ 1.6 Gbps**.
+- URL set: tens of billions of URLs ever seen. At 8 bytes per hashed URL, 20B URLs ≈ 160 GB: too big for one machine's memory as an exact set, so partition it (and consider a Bloom filter).
+- DNS: 400 fetches/s across many hosts means DNS lookups are a bottleneck unless cached locally.
+
+## 3. Architecture
+
+<Diagram kind="flow" caption="The URL frontier decides what to fetch next; fetchers are stateless workers; everything flows through queues" nodes={[
+  { id: "seed", label: "Seed URLs", x: 0, y: 90, role: "Initial URLs plus re-crawl schedule.", failureModes: ["Poor seeds limit coverage"], tradeoffs: ["Diverse, high-quality seeds speed up discovery"] },
+  { id: "front", label: "URL frontier", x: 200, y: 90, role: "Prioritised, politeness-aware queues of URLs to fetch.", failureModes: ["Starvation of low-priority hosts", "One huge host dominates"], tradeoffs: ["Per-host queues plus a priority layer balance importance and politeness"] },
+  { id: "fetch", label: "Fetcher fleet", x: 400, y: 20, role: "Resolve DNS, check robots.txt, download with timeouts and size caps.", failureModes: ["Slow or hostile servers tie up workers", "Redirect loops"], tradeoffs: ["Async I/O and hard timeouts; many connections per worker"] },
+  { id: "store", label: "Content store (blob + metadata)", x: 600, y: 20, role: "Raw pages in object storage, metadata (url, fetch time, hash, status) in a database.", failureModes: ["Duplicate content wastes space"], tradeoffs: ["Content-hash dedup before storing"] },
+  { id: "parse", label: "Parser / link extractor", x: 400, y: 160, role: "Extract text and links, normalise URLs.", failureModes: ["Malformed HTML crashes parsers", "Crawler traps generate endless URLs"], tradeoffs: ["Sandboxed parsing, depth and per-site URL caps"] },
+  { id: "seen", label: "URL-seen filter", x: 200, y: 160, role: "Drops URLs already known (sharded set or Bloom filter).", failureModes: ["Bloom false positives skip a few new pages"], tradeoffs: ["Small false-positive rate is acceptable; saves huge memory"] }
+]} edges={[
+  { from: "seed", to: "front" }, { from: "front", to: "fetch", label: "next URL" }, { from: "fetch", to: "store", label: "page" }, { from: "fetch", to: "parse" }, { from: "parse", to: "seen", label: "new links" }, { from: "seen", to: "front", label: "unseen only" }
+]} />
+
+## 4. The URL frontier: the heart of the design
+
+The frontier answers "which URL do I fetch next?" and must satisfy three goals at once.
+
+1. **Politeness:** at most one request at a time per host, with a minimum delay (respect `Crawl-delay` and adaptive delay based on server response time). Implement with **one queue per host** and a min-heap keyed by "next allowed fetch time"; a host's queue is only eligible when its time has come. All URLs of a host go to the same worker (hash host → worker), so politeness needs no distributed coordination.
+2. **Priority:** important pages first (high PageRank-like score, frequent changes, shallow depth). A front layer of priority queues feeds the per-host queues.
+3. **Freshness:** schedule re-crawls by change rate: news home pages hourly, static pages monthly. Estimate change frequency from past fetches and use conditional requests (`If-Modified-Since`, `ETag`) so unchanged pages cost a tiny response.
+
+```python
+from urllib.parse import urlsplit, urlunsplit
+def normalize(u):
+    p = urlsplit(u.strip())
+    host = p.hostname.lower() if p.hostname else ""
+    port = f":{p.port}" if p.port and p.port not in (80, 443) else ""
+    return urlunsplit((p.scheme.lower(), host + port, p.path or "/", p.query, ""))  # drop fragment
+class Frontier:
+    def __init__(self, delay=1.0):
+        self.delay, self.seen, self.q, self.next_ok = delay, set(), {}, {}
+    def add(self, url):
+        url = normalize(url)
+        if url in self.seen: return False
+        self.seen.add(url)
+        self.q.setdefault(urlsplit(url).netloc, []).append(url)
+        return True
+    def pop(self, now):
+        ready = [(self.next_ok.get(h, 0), h) for h, l in self.q.items() if l and self.next_ok.get(h, 0) <= now]
+        if not ready: return None
+        _, h = min(ready)
+        self.next_ok[h] = now + self.delay
+        return self.q[h].pop(0)
+f = Frontier()
+for u in ["http://A.com/x#top", "http://a.com/x", "http://a.com/y", "http://b.com/"]:
+    print(f.add(u), end=" ")      # True False True True  (fragment and case normalised, duplicate dropped)
+print()
+print(f.pop(0), f.pop(0), f.pop(0), f.pop(1.0))
+# http://a.com/x http://b.com/ None http://a.com/y   (a.com must wait its delay; b.com goes meanwhile)
+```
+
+## 5. Dedup and traps
+
+- **URL dedup:** normalise (lowercase host, drop fragments, resolve `.` and `..`, sort or strip tracking parameters, remove default ports), then check a shard of the seen-set keyed by URL hash. A Bloom filter sized for 20B URLs at a 1% false-positive rate needs about 9.6 bits per element ≈ 24 GB: spread across a few machines.
+- **Content dedup:** hash the body (exact) or compute a **SimHash/MinHash** fingerprint (near-duplicates) to skip mirrored or boilerplate pages.
+- **Traps:** cap URL length, path depth and the number of pages per host; detect repeating path patterns; ignore session ids and calendars far into the future; prefer pages reachable by short paths from seeds.
+
+## 6. Fetching details
+
+- **robots.txt:** fetch and cache per host (refresh daily); check every URL before fetching. Respect `Disallow`, `Crawl-delay` and sitemaps. If `robots.txt` is unreachable with a 5xx, back off rather than assume permission.
+- **DNS:** a local caching resolver with prefetching; DNS lookups are slow and blocking in naive code.
+- **Timeouts and limits:** connect/read timeouts, a maximum body size (for example 10 MB), a redirect limit, and content-type filters. Retry transient errors with backoff; give up after a few tries and re-schedule later.
+- **JavaScript-rendered pages** need a headless browser, which is 10 to 100 times more expensive; route only pages that need it.
+- **Distribution:** shard the frontier and fetchers by host hash. If a worker dies, its hosts are reassigned (consistent hashing) and queued URLs recover from a persisted frontier log.
+
+## 7. Bottlenecks and trade-offs
+
+- **Breadth vs freshness vs politeness:** you cannot maximise all three; the scheduler is a priority function over them.
+- **Memory for the seen-set:** exact sets are costly; Bloom filters trade a small number of missed pages for memory.
+- **Throughput:** limited by politeness (per-host delay), not by network, for big sites. Concurrency across millions of hosts is what produces 400 pages/s.
+- **Failure:** fetcher crashes lose in-flight URLs; use at-least-once semantics (duplicates are harmless because of dedup).
+- **Legal/ethical:** honour opt-outs, avoid personal data collection, and publish contact info in the user-agent.
+
+## Pitfalls
+
+- One global queue (a slow host blocks everything; no politeness).
+- Ignoring robots.txt or rate limits.
+- Not normalising URLs, so the same page is crawled many times.
+- No traps protection, so a calendar page consumes millions of fetches.
+- Unbounded body sizes and no timeouts.
+- Storing everything forever without dedup.
+
+## What would you choose and why?
+
+The product team wants fresh news within five minutes of publication, but your general crawl re-visits a page every few weeks. How do you find which pages change quickly (sitemaps, RSS, feeds, learned change rates), and how do you reserve crawl capacity for them without starving the rest?
+
+## Quiz
+
+<Quiz id="sd-m17-web-crawler" tags={["case-study", "crawler", "frontier"]} questions={[
+  { type: "mcq", q: "How does a crawler keep to one polite request at a time per host?", options: ["A global lock", "Per-host queues with a next-allowed-fetch time, all of a host's URLs on one worker", "Random sleeps", "Ignoring robots.txt"], answer: 1, explain: "Routing a host to a single worker makes politeness local; the heap of next-fetch times orders hosts." },
+  { type: "mcq", q: "Why use a Bloom filter for the seen-URL set?", options: ["It never errs", "It saves memory at the cost of a small false-positive rate (a few new pages skipped)", "It stores the URLs", "It orders URLs"], answer: 1, explain: "No false negatives, so duplicates are caught; a false positive means a new URL is wrongly skipped." },
+  { type: "multi", q: "Which defend against crawler traps?", options: ["Per-host page and depth caps", "Maximum URL length", "Following every link infinitely", "Detecting repeating path patterns"], answer: [0, 1, 3], explain: "Without limits, generated URL spaces such as calendars never end." },
+  { type: "predict", q: "In the Frontier code, after pop(0) returns a.com/x, what does the next pop(0) return?", code: "f.pop(0)  # second call at the same time", options: ["a.com/y", "b.com/", "None", "a.com/x again"], answer: 1, explain: "a.com is rate limited until its delay passes, so the ready host b.com is served." }
+]} />

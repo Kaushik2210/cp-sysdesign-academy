@@ -1,0 +1,140 @@
+---
+title: "Case Study: Notification System"
+track: sd
+module: case-studies
+order: 10
+difficulty: medium
+estMinutes: 40
+prerequisites: ["sd/case-studies/chat-system", "sd/queues-and-streaming/backpressure-retries-and-dlq", "sd/scalability/distributed-rate-limiting"]
+tags: [case-study, notifications, push, email, sms, queues, rate-limiting, idempotency, fan-out]
+type: case-study
+furtherReading:
+  - title: Apple - Sending notification requests to APNs
+    url: https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns
+  - title: Firebase Cloud Messaging documentation
+    url: https://firebase.google.com/docs/cloud-messaging
+  - title: Amazon SQS - standard queues and dead-letter queues
+    url: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Internal services (orders, social, security) send notifications through one platform over **mobile push, email, SMS and in-app** channels.
+- Users control preferences: channels per category, quiet hours, opt-out/unsubscribe.
+- Templates and localisation; scheduled and bulk (marketing) sends.
+
+**Non-functional**
+- Transactional messages (password reset, order shipped, one-time codes) are **high priority and low latency**; marketing blasts are bulk and can wait.
+- **No duplicates** and **no silent loss** where possible; at-least-once delivery with dedup.
+- Respect provider limits and cost (SMS costs real money per message).
+- Assume 10M users, 20 notifications per user per day on average = 200M/day, with bursts when a campaign launches.
+
+## 2. Estimate
+
+- 200M/day ≈ **2,300/s average**, peaks of 20,000+/s during campaigns (a 10M-user blast sent over 10 minutes is ~17,000/s).
+- Storage: 200M × 500 B for the log ≈ 100 GB/day; keep 30 to 90 days hot, then archive.
+- The system is **I/O and provider-bound**: most time is spent waiting on APNs, FCM, SMTP and SMS gateways, so the design focuses on queues, concurrency and backpressure, not heavy compute.
+
+## 3. API
+
+```
+POST /v1/notifications
+Idempotency-Key: evt-9f2...
+{ "userId": "u1", "category": "order_shipped", "priority": "high",
+  "data": { "orderId": "123" }, "sendAt": "optional" }
+-> 202 Accepted { notificationId }
+```
+
+Return **202** immediately: the platform accepts the request durably and delivers asynchronously. Callers get status via `GET /v1/notifications/{id}` or events.
+
+## 4. Pipeline
+
+1. **Ingest** validates the request, applies the idempotency key, and writes to a durable queue.
+2. **Preference and policy service** looks up the user's settings: channels allowed, quiet hours, frequency caps, unsubscribed categories, locale.
+3. **Router/renderer** chooses channels, renders the template for the locale, and emits one message per channel into **separate channel queues**.
+4. **Channel workers** (push, email, SMS, in-app) call providers with retries, and record the result.
+5. **Delivery tracking** ingests provider callbacks (delivered, bounced, opened, unsubscribed) and updates status and suppression lists.
+
+<Diagram kind="flow" caption="Separate queues per channel and per priority isolate failures and bulk traffic" nodes={[
+  { id: "svc", label: "Producer services", x: 0, y: 90, role: "Orders, social, security services requesting notifications.", failureModes: ["Retry storms duplicate requests"], tradeoffs: ["Idempotency key per business event"] },
+  { id: "api", label: "Notification API", x: 200, y: 90, role: "Validates, dedupes, persists, returns 202.", failureModes: ["Queue unavailable"], tradeoffs: ["Write-ahead to a durable log before acking"] },
+  { id: "pol", label: "Preferences + rate limits", x: 400, y: 20, role: "Opt-outs, quiet hours, per-user frequency caps, channel choice.", failureModes: ["Stale preferences send unwanted messages"], tradeoffs: ["Check at send time, not just at enqueue time"] },
+  { id: "hq", label: "High-priority queue", x: 400, y: 160, role: "OTPs, security alerts, order events.", failureModes: ["Starved by bulk traffic if shared"], tradeoffs: ["Dedicated queues and workers guarantee latency"] },
+  { id: "bq", label: "Bulk queue", x: 600, y: 160, role: "Marketing and digest sends, throttled.", failureModes: ["Burst overwhelms providers"], tradeoffs: ["Rate-shaped consumers smooth the load"] },
+  { id: "w", label: "Channel workers", x: 600, y: 20, role: "Push (APNs/FCM), email, SMS, in-app. Retry with backoff; failover providers.", failureModes: ["Provider outage", "Invalid or expired device tokens"], tradeoffs: ["Circuit breakers and a second provider for critical channels"] },
+  { id: "dlq", label: "Dead-letter queue + tracking", x: 800, y: 90, role: "Parks messages that exhausted retries; stores delivery status.", failureModes: ["Unmonitored DLQ hides loss"], tradeoffs: ["Alert on DLQ depth; replay tooling"] }
+]} edges={[
+  { from: "svc", to: "api" }, { from: "api", to: "pol" }, { from: "pol", to: "hq", label: "transactional" }, { from: "pol", to: "bq", label: "bulk" }, { from: "hq", to: "w" }, { from: "bq", to: "w" }, { from: "w", to: "dlq", label: "failures" }
+]} />
+
+## 5. Reliability: dedup, retries, ordering
+
+- **Idempotency:** the key is derived from `(business event id, user, channel)`. A dedup store (Redis set with TTL or a unique database constraint) stops a second send even if an upstream retried or the queue redelivered.
+- **Retries:** transient errors retry with exponential backoff and jitter, up to a cap, then go to the dead-letter queue. Permanent errors (invalid token, bounced address) are **not** retried; they update a suppression list.
+- **At-least-once** delivery is the realistic guarantee; combine with dedup for "effectively once". Exactly-once to a user's phone is impossible to guarantee: the provider may deliver after an ambiguous timeout.
+- **Ordering** rarely matters across notifications; where it does (state updates for one order), include a version or sequence number so clients show the latest.
+
+```python
+class Limiter:
+    def __init__(self, per_hour): self.per_hour, self.log = per_hour, {}
+    def allow(self, user, kind, now):
+        k = (user, kind); xs = [t for t in self.log.get(k, []) if now - t < 3600]
+        ok = len(xs) < self.per_hour
+        if ok: xs.append(now)
+        self.log[k] = xs; return ok
+class Dedup:
+    def __init__(self): self.seen = set()
+    def first(self, key):
+        if key in self.seen: return False
+        self.seen.add(key); return True
+L, D = Limiter(2), Dedup()
+print([L.allow("u1", "promo", t) for t in (0, 10, 20, 4000)])        # [True, True, False, True]
+print(D.first("evt-1:u1:push"), D.first("evt-1:u1:push"), D.first("evt-1:u1:email"))  # True False True
+```
+
+The limiter is a sliding-window frequency cap per user and category (production: Redis with the atomic scripts from the rate-limiting lessons). Transactional categories bypass marketing caps.
+
+## 6. Channel specifics
+
+- **Push:** device tokens are registered per device and rotate or expire; remove tokens the provider reports invalid. APNs and FCM apply their own rate limits and may collapse or drop messages for offline devices. Payloads are small (about 4 KB).
+- **Email:** authenticate with SPF, DKIM and DMARC; monitor bounce and complaint rates (high rates damage sender reputation and deliverability). Warm up new sending IPs gradually. Include one-click unsubscribe.
+- **SMS:** costly and regulated (consent, opt-out keywords, regional rules, sender registration). Use for high-value messages like OTPs; fall back between carriers/providers.
+- **In-app:** write to a per-user inbox store and push a lightweight signal over the user's connection (see the chat lesson) when online.
+
+## 7. Scale and bulk sends
+
+- **Campaign fan-out:** a marketing job with 10M recipients is expanded by workers in pages (a cursor over the audience), not materialised at once, and enqueued at a controlled rate.
+- **Priority isolation:** separate queues and worker pools for transactional vs bulk, so a campaign cannot delay a password-reset code.
+- **Backpressure:** workers pull at the rate providers accept; if a provider returns 429, slow down (adaptive concurrency) instead of retrying instantly.
+- **Scheduling:** scheduled sends live in a time-ordered store (a delay queue or sorted set keyed by send time) polled by a scheduler that moves due items to the live queues. Respect users' timezones and quiet hours.
+- **Observability:** per-channel, per-provider success rate, latency from accept to delivery, queue depth and age, DLQ size, cost per channel.
+
+## 8. Trade-offs
+
+- **Delivery guarantees vs duplicates:** accept rare duplicates over rare loss for transactional messages, and dedupe to minimise them.
+- **Centralised platform vs per-team sending:** a shared platform enforces preferences and rate limits uniformly but becomes critical infrastructure needing strong isolation and SLOs.
+- **Provider redundancy:** multi-provider failover improves availability but complicates templates, tracking and cost.
+- **Personalisation and ML timing:** send-time optimisation improves engagement but delays messages; never apply it to transactional ones.
+
+## Pitfalls
+
+- Sending synchronously from the request path of the producer.
+- One shared queue for OTPs and marketing.
+- No dedup key, so a retry sends twice.
+- Retrying permanent failures forever.
+- Ignoring unsubscribe, consent and quiet hours.
+- Unmonitored dead-letter queue.
+
+## What would you choose and why?
+
+A product incident floods your system with 5M "service degraded" alerts in two minutes, and the SMS provider starts returning errors. Which messages do you drop, delay or reroute, and how do you keep OTP delivery unaffected?
+
+## Quiz
+
+<Quiz id="sd-m17-notification-system" tags={["case-study", "notifications", "queues"]} questions={[
+  { type: "mcq", q: "Why separate transactional and bulk notifications into different queues?", options: ["To use more servers", "So a marketing blast cannot delay time-critical messages such as OTPs", "Because bulk messages are encrypted", "To avoid idempotency keys"], answer: 1, explain: "Isolation guarantees latency for critical traffic regardless of bulk load." },
+  { type: "mcq", q: "A provider reports a push token is invalid. What should the worker do?", options: ["Retry with backoff for 24 hours", "Treat it as a permanent failure, remove the token and record it", "Send by SMS always", "Ignore it"], answer: 1, explain: "Retrying permanent failures wastes capacity and harms provider reputation." },
+  { type: "multi", q: "Which reduce duplicate notifications?", options: ["Idempotency key per business event, user and channel", "A dedup store with TTL checked before sending", "At-most-once delivery with no retries", "Unique constraints on the delivery log"], answer: [0, 1, 3], explain: "At-most-once removes duplicates by risking loss; dedup with at-least-once avoids both mostly." },
+  { type: "predict", q: "A limiter allows 2 per hour. Calls at t=0, 10, 20 and 4000 seconds. Which results?", code: "[L.allow('u1','promo',t) for t in (0,10,20,4000)]", options: ["[True, True, True, True]", "[True, True, False, True]", "[True, False, False, True]", "[True, True, False, False]"], answer: 1, explain: "The third call hits the cap; by 4000 s the earlier entries are older than an hour." }
+]} />
