@@ -1,0 +1,145 @@
+{
+  "id": "m13-lucky-badges",
+  "title": "Lucky Badges",
+  "source": {
+    "name": "Original exercise; classic technique (digit DP with tight and leading-zero flags)"
+  },
+  "rating": 2000,
+  "tags": [
+    "dp",
+    "digit-dp",
+    "counting",
+    "modular-arithmetic"
+  ],
+  "statement": "A conference prints badge numbers from `L` to `R` inclusive. A badge number is **lucky** if\n\n- the sum of its decimal digits is divisible by `k`, and\n- no two neighbouring digits are equal (for example `1213` qualifies on this rule, `1223` does not).\n\nNumbers are written without leading zeros. How many lucky badge numbers are there from `L` to `R`?\n\nFor example, with `L = 1`, `R = 30` and `k = 3` the lucky numbers are `3, 6, 9, 12, 15, 18, 21, 24, 27, 30`, so the answer is `10`. If the range went up to `33`, the number `33` would not count because of its repeated digit.\n\n**Input.** One line with `L`, `R` and `k`.\n\n**Output.** The number of lucky badge numbers in `[L, R]`.",
+  "constraints": [
+    "1 ≤ L ≤ R ≤ 10^18",
+    "1 ≤ k ≤ 100",
+    "The numbers do not fit in 32 bits: use 64-bit integers (or BigInt in JavaScript)"
+  ],
+  "timeLimitMs": 3000,
+  "tests": [
+    {
+      "input": "1 30 3\n",
+      "output": "10\n",
+      "hidden": false
+    },
+    {
+      "input": "7 7 7\n",
+      "output": "1\n",
+      "hidden": false
+    },
+    {
+      "input": "1 9 1\n",
+      "output": "9\n",
+      "hidden": true
+    },
+    {
+      "input": "10 11 2\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "1 100 1\n",
+      "output": "90\n",
+      "hidden": true
+    },
+    {
+      "input": "95 105 5\n",
+      "output": "2\n",
+      "hidden": true
+    },
+    {
+      "input": "100 1000 11\n",
+      "output": "66\n",
+      "hidden": true
+    },
+    {
+      "input": "1 100000 17\n",
+      "output": "3654\n",
+      "hidden": true
+    },
+    {
+      "input": "987654 1234567 9\n",
+      "output": "8407\n",
+      "hidden": true
+    },
+    {
+      "input": "1 1000000000000000000 1\n",
+      "output": "168856464709124010\n",
+      "hidden": true
+    },
+    {
+      "input": "1 1000000000000000000 7\n",
+      "output": "24122352101256112\n",
+      "hidden": true
+    },
+    {
+      "input": "1 1000000000000000000 100\n",
+      "output": "1378765611906954\n",
+      "hidden": true
+    },
+    {
+      "input": "123456789012345678 987654321098765432 13\n",
+      "output": "11345294277118846\n",
+      "hidden": true
+    },
+    {
+      "input": "999999999999999999 1000000000000000000 9\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "1000000000000000000 1000000000000000000 1\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "100000000000000000 999999999999999999 36\n",
+      "output": "4062125559742709\n",
+      "hidden": true
+    },
+    {
+      "input": "227600247627320632 283270710275715464 10\n",
+      "output": "994397094323415\n",
+      "hidden": true
+    },
+    {
+      "input": "308914946471561253 730525562469609526 75\n",
+      "output": "2240125399562188\n",
+      "hidden": true
+    },
+    {
+      "input": "123765076861079286 222855491573817294 56\n",
+      "output": "83482145383100\n",
+      "hidden": true
+    },
+    {
+      "input": "40268910788695196 144853895215672256 71\n",
+      "output": "558106348547670\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Checking every number from L to R is hopeless for 10^18. Count instead with a function count(N) = how many valid numbers lie in [1, N], and answer count(R) - count(L - 1).",
+    "Build the number from left to right, one digit at a time. What do you need to remember about the digits already placed? Only the sum modulo k, the last digit, and whether you are still equal to the prefix of N (the tight flag).",
+    "Leading zeros are not digits: until the first non-zero digit is placed, the number has not started, so the equal-neighbours rule and the digit sum must ignore them. Add a started flag. Memoise on (position, sum mod k, last digit, tight, started)."
+  ],
+  "editorial": "Define `count(N)` as the number of valid integers in `[1, N]`; the answer is `count(R) - count(L - 1)`. Write `N` as its decimal digits and place digits from the most significant one. A **digit DP** state is `(pos, mod, last, tight, started)`: `pos` is the number of digits placed, `mod` the digit sum so far modulo `k`, `last` the previous digit (or a sentinel while the number has not started), `tight` says the digits placed so far equal the prefix of `N`, so the next digit may not exceed `N`'s digit, and `started` says a non-zero digit has already been placed. While the number has not started, choosing digit `0` keeps it unstarted and does not touch `mod` or `last`. Once started, a digit equal to `last` is forbidden, otherwise `mod` becomes `(mod + d) mod k`. At the end a number counts if it has started and `mod == 0`. There are at most `19 * k * 11 * 2 * 2` states with 10 transitions each, so the work is a few hundred thousand operations per call to `count`. The tight chain is a single path; every other state is shared through memoisation. Counts reach about `10^18`, so use 64-bit integers.",
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\nfrom functools import lru_cache\nsys.setrecursionlimit(10000)\nL, R, k = (int(x) for x in sys.stdin.read().split())\n# count_upto(n) = how many valid numbers lie in [1, n]; answer = count_upto(R) - count_upto(L - 1)\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length);\nconst L = BigInt(tok[0]), R = BigInt(tok[1]), k = Number(tok[2]);\n// use BigInt for values up to 10^18\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner in = new Scanner(System.in);\n        long L = in.nextLong(), R = in.nextLong();\n        int k = in.nextInt();\n        // answer = countUpto(R) - countUpto(L - 1)\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    long long L, R;\n    int k;\n    scanf(\"%lld %lld %d\", &L, &R, &k);\n    // answer = count_upto(R) - count_upto(L - 1)\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\nfrom functools import lru_cache\nsys.setrecursionlimit(10000)\nL, R, k = (int(x) for x in sys.stdin.read().split())\n\ndef count_upto(n):\n    \"\"\"How many x in [1, n] have digit sum divisible by k and no two equal adjacent digits.\"\"\"\n    if n <= 0:\n        return 0\n    digits = [int(c) for c in str(n)]\n\n    @lru_cache(maxsize=None)\n    def go(pos, mod, last, tight, started):\n        if pos == len(digits):\n            return 1 if started and mod == 0 else 0\n        limit = digits[pos] if tight else 9\n        total = 0\n        for d in range(limit + 1):\n            next_tight = tight and d == limit\n            if not started and d == 0:\n                total += go(pos + 1, 0, 10, next_tight, False)       # still in the leading zeros; 10 = \"no digit yet\"\n            elif started and d == last:\n                continue                                              # equal neighbours are forbidden\n            else:\n                total += go(pos + 1, (mod + d) % k, d, next_tight, True)\n        return total\n\n    return go(0, 0, 10, True, False)\n\nprint(count_upto(R) - count_upto(L - 1))\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length);\nconst L = BigInt(tok[0]), R = BigInt(tok[1]), k = Number(tok[2]);\n\nfunction countUpto(n) {\n  if (n <= 0n) return 0n;\n  const digits = n.toString().split('').map(Number);\n  const memo = new Map();\n  function go(pos, mod, last, tight, started) {\n    if (pos === digits.length) return (started && mod === 0) ? 1n : 0n;\n    const key = (((pos * k + mod) * 11 + last) * 2 + (tight ? 1 : 0)) * 2 + (started ? 1 : 0);\n    if (memo.has(key)) return memo.get(key);\n    const limit = tight ? digits[pos] : 9;\n    let total = 0n;\n    for (let d = 0; d <= limit; d++) {\n      const nextTight = tight && d === limit;\n      if (!started && d === 0) total += go(pos + 1, 0, 10, nextTight, false);\n      else if (started && d === last) continue;\n      else total += go(pos + 1, (mod + d) % k, d, nextTight, true);\n    }\n    memo.set(key, total);\n    return total;\n  }\n  return go(0, 0, 10, true, false);\n}\nconsole.log((countUpto(R) - countUpto(L - 1n)).toString());\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    static int k;\n    static int[] digits;\n    static long[][][][][] memo;\n\n    static long go(int pos, int mod, int last, int tight, int started) {\n        if (pos == digits.length) return (started == 1 && mod == 0) ? 1 : 0;\n        if (memo[pos][mod][last][tight][started] >= 0) return memo[pos][mod][last][tight][started];\n        int limit = tight == 1 ? digits[pos] : 9;\n        long total = 0;\n        for (int d = 0; d <= limit; d++) {\n            int nextTight = (tight == 1 && d == limit) ? 1 : 0;\n            if (started == 0 && d == 0) total += go(pos + 1, 0, 10, nextTight, 0);\n            else if (started == 1 && d == last) continue;\n            else total += go(pos + 1, (mod + d) % k, d, nextTight, 1);\n        }\n        return memo[pos][mod][last][tight][started] = total;\n    }\n\n    static long countUpto(long n) {\n        if (n <= 0) return 0;\n        String s = Long.toString(n);\n        digits = new int[s.length()];\n        for (int i = 0; i < s.length(); i++) digits[i] = s.charAt(i) - '0';\n        memo = new long[s.length() + 1][k][11][2][2];\n        for (long[][][][] a : memo) for (long[][][] b : a) for (long[][] c : b) for (long[] d : c) Arrays.fill(d, -1);\n        return go(0, 0, 10, 1, 0);\n    }\n\n    public static void main(String[] args) {\n        Scanner in = new Scanner(System.in);\n        long L = in.nextLong(), R = in.nextLong();\n        k = in.nextInt();\n        System.out.println(countUpto(R) - countUpto(L - 1));\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\nint k;\nvector<int> digits;\nll memo[20][100][11][2][2];\n\nll go(int pos, int mod, int last, int tight, int started) {\n    if (pos == (int)digits.size()) return (started && mod == 0) ? 1 : 0;\n    ll& res = memo[pos][mod][last][tight][started];\n    if (res >= 0) return res;\n    int limit = tight ? digits[pos] : 9;\n    ll total = 0;\n    for (int d = 0; d <= limit; d++) {\n        int next_tight = tight && d == limit;\n        if (!started && d == 0) total += go(pos + 1, 0, 10, next_tight, 0);\n        else if (started && d == last) continue;\n        else total += go(pos + 1, (mod + d) % k, d, next_tight, 1);\n    }\n    return res = total;\n}\n\nll count_upto(ll n) {\n    if (n <= 0) return 0;\n    string s = to_string(n);\n    digits.clear();\n    for (char c : s) digits.push_back(c - '0');\n    memset(memo, -1, sizeof(memo));\n    return go(0, 0, 10, 1, 0);\n}\n\nint main() {\n    ll L, R;\n    scanf(\"%lld %lld %d\", &L, &R, &k);\n    printf(\"%lld\\n\", count_upto(R) - count_upto(L - 1));\n    return 0;\n}\n"
+  }
+}

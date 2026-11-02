@@ -1,0 +1,288 @@
+---
+title: Digit DP
+track: cp
+module: dynamic-programming
+order: 8
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/dynamic-programming/knapsack, cp/math-basics/modular-arithmetic]
+tags: [dp, digit-dp, counting, memoization, tight-bound]
+type: lesson
+problems: [m13-lucky-badges]
+furtherReading:
+  - title: AtCoder Educational DP Contest, S - Digit Sum
+    url: https://atcoder.jp/contests/dp/tasks/dp_s
+  - title: LeetCode 902, Numbers At Most N Given Digit Set
+    url: https://leetcode.com/problems/numbers-at-most-n-given-digit-set/
+  - title: LeetCode 233, Number of Digit One
+    url: https://leetcode.com/problems/number-of-digit-one/
+---
+
+## Intuition
+
+"How many integers between `L` and `R` have property `P`?" with `R` up to `10^18` cannot be answered by trying them. But a number is just a **string of digits**, and many properties are decided by looking at the digits one at a time with a tiny amount of memory: the digit sum so far, the last digit, whether we have seen a 4. If you can describe the property as "scan the digits left to right with a small state", you can count **all** numbers with that property by running the scan on *every* number at once, merging the numbers that reach the same state. That is **digit DP**.
+
+The second trick is to handle the upper bound. Counting up to `N` means counting digit strings that are **at most** `N`. You walk along `N`'s digits and track one extra bit: "so far, am I still exactly equal to `N`'s prefix?" While equal (**tight**), the next digit may not exceed `N`'s digit; once you place a smaller digit you are **free** and any digit goes.
+
+## Definition
+
+To answer a query over `[L, R]`, compute `count(N)` for "the number of valid integers in `[0, N]` or `[1, N]`" and return
+
+```text
+answer = count(R) - count(L - 1)
+```
+
+Write `N` as digits `d[0..len-1]`, most significant first. Place digits from left to right. The state of the recursion is
+
+```text
+go(pos, <property state>, tight, started)
+```
+
+- `pos`: how many digits are already placed.
+- `<property state>`: whatever the property needs, for example `digit sum mod k`, `last digit`, `count of 4s`, `a bitmask of used digits`.
+- `tight`: `true` if the digits placed so far equal `d[0..pos-1]`. Then the next digit ranges over `0..d[pos]`; otherwise `0..9`.
+- `started`: `true` once a non-zero digit has been placed. Leading zeros are not real digits: they must not count toward the digit sum, the "last digit" or "no equal neighbours".
+
+```text
+go(pos, state, tight, started):
+    if pos == len:  return 1 if the number is valid else 0
+    limit = d[pos] if tight else 9
+    total = 0
+    for digit in 0..limit:
+        next_tight   = tight and digit == limit
+        if not started and digit == 0:  total += go(pos+1, same state, next_tight, False)
+        else:                           total += go(pos+1, update(state, digit), next_tight, True)
+    return total
+```
+
+**Memoise on the whole tuple.** The number of states is `len × |property states| × 2 × 2`, with `len <= 19`. The tight chain is one single path; every state off that path is shared by many numbers, which is where the saving comes from.
+
+## Example, step by step
+
+Count `x` in `[0, 25]` with digit sum equal to `5` (just to see the shape). `N = 25`, digits `[2, 5]`.
+
+- Position 0, tight: digit may be `0, 1, 2`.
+  - Digit `0` or `1`: no longer tight. The second digit is free `0..9`; we need the remaining digit to bring the sum to 5: for first digit 0 the second must be 5 (number 5), for first digit 1 it must be 4 (number 14). Two numbers.
+  - Digit `2`: still tight. The second digit ranges over `0..5`; it must be 3 (number 23). One number.
+- Total: `5, 14, 23`: three numbers.
+
+The same logic, with a table memoising the non-tight cases, is what the code below does for any property.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import sys
+from functools import lru_cache
+sys.setrecursionlimit(10000)
+
+def count_upto(n, k):
+    """Valid integers in [1, n]: digit sum divisible by k, no two equal neighbours."""
+    if n <= 0:
+        return 0
+    digits = [int(c) for c in str(n)]
+
+    @lru_cache(maxsize=None)
+    def go(pos, mod, last, tight, started):
+        if pos == len(digits):
+            return 1 if started and mod == 0 else 0
+        limit = digits[pos] if tight else 9
+        total = 0
+        for d in range(limit + 1):
+            nt = tight and d == limit
+            if not started and d == 0:
+                total += go(pos + 1, 0, 10, nt, False)
+            elif started and d == last:
+                continue
+            else:
+                total += go(pos + 1, (mod + d) % k, d, nt, True)
+        return total
+
+    return go(0, 0, 10, True, False)
+
+print(count_upto(R, k) - count_upto(L - 1, k))
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int k;
+vector<int> digits;
+long long memo[20][100][11][2][2];
+
+long long go(int pos, int mod, int last, int tight, int started) {
+    if (pos == (int)digits.size()) return (started && mod == 0) ? 1 : 0;
+    long long& res = memo[pos][mod][last][tight][started];
+    if (res >= 0) return res;
+    int limit = tight ? digits[pos] : 9;
+    long long total = 0;
+    for (int d = 0; d <= limit; d++) {
+        int nt = tight && d == limit;
+        if (!started && d == 0) total += go(pos + 1, 0, 10, nt, 0);
+        else if (started && d == last) continue;
+        else total += go(pos + 1, (mod + d) % k, d, nt, 1);
+    }
+    return res = total;
+}
+
+long long count_upto(long long n) {
+    if (n <= 0) return 0;
+    string s = to_string(n);
+    digits.clear();
+    for (char c : s) digits.push_back(c - '0');
+    memset(memo, -1, sizeof(memo));           // reset for each bound
+    return go(0, 0, 10, 1, 0);
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static int k;
+static int[] digits;
+static long[][][][][] memo;
+
+static long go(int pos, int mod, int last, int tight, int started) {
+    if (pos == digits.length) return (started == 1 && mod == 0) ? 1 : 0;
+    if (memo[pos][mod][last][tight][started] >= 0) return memo[pos][mod][last][tight][started];
+    int limit = tight == 1 ? digits[pos] : 9;
+    long total = 0;
+    for (int d = 0; d <= limit; d++) {
+        int nt = (tight == 1 && d == limit) ? 1 : 0;
+        if (started == 0 && d == 0) total += go(pos + 1, 0, 10, nt, 0);
+        else if (started == 1 && d == last) continue;
+        else total += go(pos + 1, (mod + d) % k, d, nt, 1);
+    }
+    return memo[pos][mod][last][tight][started] = total;
+}
+// countUpto(n): fill digits from Long.toString(n), allocate and fill memo with -1, return go(0, 0, 10, 1, 0)
+```
+
+</Tab>
+</Tabs>
+
+Run the plain "digit sum divisible by `k`" version, the version with the neighbour rule, and a "contains the digit 4" variant, and compare each with brute force:
+
+<CodeRunner language="python" code={`from functools import lru_cache
+
+def count_upto(n, k):
+    """Numbers x in [0, n] whose digit sum is divisible by k (0 included, then removed)."""
+    digits = [int(c) for c in str(n)]
+
+    @lru_cache(maxsize=None)
+    def go(pos, mod, tight):
+        if pos == len(digits):
+            return 1 if mod == 0 else 0
+        limit = digits[pos] if tight else 9
+        return sum(go(pos + 1, (mod + d) % k, tight and d == limit) for d in range(limit + 1))
+
+    return go(0, 0, True) - 1            # remove x = 0
+
+def brute(n, k):
+    return sum(1 for x in range(1, n + 1) if sum(map(int, str(x))) % k == 0)
+
+print("numbers up to 100 with digit sum divisible by 5:", count_upto(100, 5), "(brute:", brute(100, 5), ")")
+for n in (1, 9, 10, 99, 100, 1234, 99999):
+    for k in (1, 2, 7, 13):
+        assert count_upto(n, k) == brute(n, k), (n, k)
+print("matches brute force on 28 checks")
+
+def lucky(n, k):
+    """Digit sum divisible by k and no two equal neighbours; leading zeros are not digits."""
+    if n <= 0:
+        return 0
+    digits = [int(c) for c in str(n)]
+
+    @lru_cache(maxsize=None)
+    def go(pos, mod, last, tight, started):
+        if pos == len(digits):
+            return 1 if started and mod == 0 else 0
+        limit = digits[pos] if tight else 9
+        total = 0
+        for d in range(limit + 1):
+            nt = tight and d == limit
+            if not started and d == 0:
+                total += go(pos + 1, 0, 10, nt, False)
+            elif started and d == last:
+                continue
+            else:
+                total += go(pos + 1, (mod + d) % k, d, nt, True)
+        return total
+
+    return go(0, 0, 10, True, False)
+
+def lucky_brute(n, k):
+    return sum(1 for x in range(1, n + 1)
+               if sum(map(int, str(x))) % k == 0 and all(a != b for a, b in zip(str(x), str(x)[1:])))
+
+for n in (9, 30, 99, 1000, 54321):
+    assert lucky(n, 3) == lucky_brute(n, 3)
+print("lucky numbers in [1, 30] for k = 3:", lucky(30, 3) - lucky(0, 3))
+print("count in [1, 10**18] with k = 7:", lucky(10**18, 7))
+
+# A different property with the same skeleton: how many numbers in [1, n] contain the digit 4?
+def with_four(n):
+    digits = [int(c) for c in str(n)]
+
+    @lru_cache(maxsize=None)
+    def go(pos, tight, seen):
+        if pos == len(digits):
+            return 1 if seen else 0
+        limit = digits[pos] if tight else 9
+        return sum(go(pos + 1, tight and d == limit, seen or d == 4) for d in range(limit + 1))
+
+    return go(0, True, False)
+
+print("numbers up to 100 containing a 4:", with_four(100), "(brute:", sum('4' in str(x) for x in range(1, 101)), ")")
+`} />
+
+## Common variants
+
+| question | extra state beyond `(pos, tight, started)` |
+| --- | --- |
+| digit sum equals or is divisible by something | `sum` or `sum mod k` |
+| no two equal (or consecutive) adjacent digits | `last` digit |
+| contains / avoids a digit | a boolean `seen` |
+| count how many times digit `d` appears across all numbers | carry the count and the total of numbers; or add a `count` state and sum `count × ways` |
+| every digit allowed from a set | no extra state, restrict the loop |
+| divisible by the number itself's digits (Beautiful numbers) | `value mod lcm(1..9)` and `lcm` of used digits |
+| property of the binary representation (popcount, XOR) | same idea with base 2 and `tight` over bits |
+| count numbers in `[L, R]` with property in base `b` | change `10` to `b` and `9` to `b - 1` |
+| k-th number with the property | count with a prefix fixed, then choose digits greedily or binary search on `N` |
+
+## Pitfalls
+
+1. **Treating leading zeros as digits.** Without `started`, `0042` has "two equal neighbours" and `last` is wrong. Always ask: do leading zeros change the state?
+2. **Forgetting to subtract `count(L - 1)`** or evaluating `count(0)` incorrectly. Handle `N <= 0` explicitly, and decide whether `0` itself belongs to the answer.
+3. **Sharing a memo table across different bounds** when the memo includes the `tight` flag. Either reset it for each `N`, or memoise only non-tight states (they do not depend on `N`) and keep it across calls.
+4. **Wrong limit in the loop**: `limit = d[pos]` only when tight. A free position goes up to `9`.
+5. **`next_tight`**: it is `tight and digit == limit`, not `digit == d[pos]` when you are already free.
+6. **Overflow.** Counts reach `10^18`. Use 64-bit integers; JavaScript needs `BigInt` for both the input and the counts.
+7. **State blow-up.** Adding a mask of used digits (1024 states) or a large modulus is fine; adding anything that grows with the value of `N` is not.
+8. **Using plain recursion without memoisation** over `10^18` digits' worth of states is exponential in the length, `10^19`.
+
+## Practice
+
+<Problem id="m13-lucky-badges" />
+
+## Problem ladder
+
+- [Digit Sum](https://atcoder.jp/contests/dp/tasks/dp_s) (AtCoder Educational DP S): the cleanest introduction, count numbers up to `K` with digit sum divisible by `D`.
+- [Number of Digit One](https://leetcode.com/problems/number-of-digit-one/) (LeetCode 233, hard): total occurrences of digit 1 in `[1, n]`.
+- [Numbers With Repeated Digits](https://leetcode.com/problems/numbers-with-repeated-digits/) (LeetCode 1012, hard): count with a bitmask of used digits.
+- [Numbers At Most N Given Digit Set](https://leetcode.com/problems/numbers-at-most-n-given-digit-set/) (LeetCode 902, hard): the tight flag with a restricted alphabet.
+- [Beautiful numbers](https://codeforces.com/problemset/problem/55/D) (Codeforces 55D, rating about 2800): divisible by every non-zero digit, a stretch problem.
+
+## Quiz
+
+<Quiz id="cp-m13-digit-dp" tags={["dp", "digit-dp"]} questions={[
+  { type: "mcq", q: "How do you count valid numbers in the interval [L, R] with digit DP?", options: ["Run the DP over every number from L to R", "Compute count(R) minus count(L - 1)", "Run the DP only on L", "Sum count(L) and count(R)"], answer: 1, explain: "Counting prefixes up to a bound is natural for digit DP; the difference gives the interval." },
+  { type: "mcq", q: "What does the `tight` flag mean?", options: ["The digits placed so far equal the prefix of N, so the next digit cannot exceed N's digit", "The number is a palindrome", "The digit sum is minimal", "The number has no leading zeros"], answer: 0, explain: "Once a smaller digit is placed, every later digit is free (0 to 9)." },
+  { type: "mcq", q: "Why is a `started` flag needed in problems about adjacent equal digits?", options: ["To speed up the DP", "Leading zeros are not real digits and must not count as neighbours or toward the digit sum", "To handle negative numbers", "To avoid overflow"], answer: 1, explain: "Otherwise 7 would be treated as 007 and could be wrongly rejected or have a wrong state." },
+  { type: "predict", q: "How many integers in [1, 100] contain the digit 4, according to the demo (checked against brute force)?", code: "print(with_four(100))", options: ["10", "19", "20", "29"], answer: 1, explain: "Ten numbers 40-49 plus the nine others ending in 4 (4, 14, ..., 94 excluding 44) gives 19." },
+  { type: "multi", q: "Which statements about the number of states are true?", options: ["It is about len x (property states) x 2 x 2 for the lucky-number DP", "It grows with the numeric value of N", "len is at most 19 for N up to 10^18", "The tight chain is a single path, so most states are shared"], answer: [0, 2, 3], explain: "State count depends on the number of digits and the property state, not on the size of N." }
+]} />
