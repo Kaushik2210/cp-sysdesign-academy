@@ -1,0 +1,281 @@
+---
+title: Bipartite Matching
+track: cp
+module: graphs
+order: 11
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/graphs/bipartite-graphs, cp/graphs/maximum-flow]
+tags: [graph, bipartite-matching, augmenting-path, kuhn, konig, hall]
+type: lesson
+problems: [m11-dance-pairs]
+furtherReading:
+  - title: cp-algorithms, Kuhn's algorithm for maximum bipartite matching
+    url: https://cp-algorithms.com/graph/kuhn_maximum_bipartite_matching.html
+  - title: CSES Problem Set, School Dance
+    url: https://cses.fi/problemset/task/1696
+  - title: CSES Problem Set, Download Speed
+    url: https://cses.fi/problemset/task/1694
+---
+
+## Intuition
+
+Leaders on one side, followers on the other. Some pairs would like to dance together. Everyone dances with at most one partner. How many couples can dance at once? This is **maximum bipartite matching**, and the same shape appears everywhere: jobs to workers, students to projects, tasks to machines, rooks on a board with forbidden squares.
+
+You already know a tool that solves it: [maximum flow](/cp/graphs/maximum-flow/). Put a source in front of the leaders, a sink behind the followers, give every edge capacity 1, and the max flow is the matching size. Matching deserves its own lesson because a much simpler algorithm works directly on the graph, and because three classical theorems (Berge, König, Hall) turn matching into a source of other answers.
+
+## Definitions
+
+A **matching** is a set of edges, no two sharing a vertex. A vertex in the matching is *matched*, otherwise *free*. A **maximum** matching has the most edges possible.
+
+An **alternating path** alternates between edges *not* in the matching and edges *in* it. An **augmenting path** is an alternating path that starts at a free vertex on the left and ends at a free vertex on the right. Flipping it (swap which edges are in the matching) adds exactly **one** edge to the matching:
+
+```text
+before:  L1   L2 = R1   R2              (= is a matched edge)
+path:    L1 - R1 = L2 - R2
+after:   L1 = R1   L2 = R2              matching grew from 1 edge to 2
+```
+
+**Berge's theorem.** A matching is maximum **if and only if** it has no augmenting path. So the algorithm is: keep finding augmenting paths and flipping them until none exists.
+
+## Kuhn's algorithm
+
+For each leader `u`, in turn, try to find an augmenting path starting at `u` using a DFS:
+
+```text
+try_augment(u):
+    for each follower v adjacent to u:
+        if v was already visited in this search: skip
+        mark v visited
+        if v is free  OR  try_augment(partner[v]):     # v's partner can be re-matched elsewhere
+            partner[v] = u
+            return true
+    return false
+```
+
+The recursion `try_augment(partner[v])` asks: "if I take `v`, can its current partner find a different follower?" A chain of such re-matchings *is* the augmenting path. The `visited` array is reset **per leader**, which bounds one search by `O(e)` edges. With `n` leaders the total is `O(n · e)`, fast enough for graphs with a few thousand vertices. For `10^5` vertices use **Hopcroft-Karp** (below).
+
+## Example: why greedy fails
+
+```text
+leaders:    A     B
+followers:  1     2
+edges:      A-1, A-2, B-1
+```
+
+Greedy gives `A` the first follower `1`. Now `B` has only `1`, which is taken: matching of size 1. Kuhn processes `B` as follows: `B` tries `1`, whose partner is `A`; `A` tries `1` (visited) then `2` (free), so `A` moves to `2` and `B` takes `1`. Matching of size 2.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import sys
+sys.setrecursionlimit(10000)
+
+def max_matching(n, m, edges):                    # leaders 1..n, followers 1..m, edges (u, v)
+    adj = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        adj[u].append(v)
+    match = [0] * (m + 1)                         # match[v] = leader paired with follower v (0 = free)
+
+    def try_augment(u, seen):
+        for v in adj[u]:
+            if not seen[v]:
+                seen[v] = True
+                if match[v] == 0 or try_augment(match[v], seen):
+                    match[v] = u
+                    return True
+        return False
+
+    return sum(1 for u in range(1, n + 1) if try_augment(u, [False] * (m + 1))), match
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<int>> adj;
+vector<int> match_;
+vector<bool> seen;
+
+bool tryAugment(int u) {
+    for (int v : adj[u]) {
+        if (!seen[v]) {
+            seen[v] = true;
+            if (match_[v] == 0 || tryAugment(match_[v])) { match_[v] = u; return true; }
+        }
+    }
+    return false;
+}
+int maxMatching(int n, int m) {
+    match_.assign(m + 1, 0);
+    int result = 0;
+    for (int u = 1; u <= n; u++) {
+        seen.assign(m + 1, false);
+        if (tryAugment(u)) result++;
+    }
+    return result;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static List<Integer>[] adj;
+static int[] match;
+static boolean[] seen;
+
+static boolean tryAugment(int u) {
+    for (int v : adj[u]) {
+        if (!seen[v]) {
+            seen[v] = true;
+            if (match[v] == 0 || tryAugment(match[v])) { match[v] = u; return true; }
+        }
+    }
+    return false;
+}
+static int maxMatching(int n, int m) {
+    match = new int[m + 1];
+    int result = 0;
+    for (int u = 1; u <= n; u++) {
+        seen = new boolean[m + 1];
+        if (tryAugment(u)) result++;
+    }
+    return result;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, compare it with maximum flow and with a brute force, and check that König's theorem holds:
+
+<CodeRunner language="python" code={`import sys, random
+from collections import deque
+sys.setrecursionlimit(10000)
+
+def max_matching(n, m, edges):
+    adj = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        adj[u].append(v)
+    match = [0] * (m + 1)
+    def try_augment(u, seen):
+        for v in adj[u]:
+            if not seen[v]:
+                seen[v] = True
+                if match[v] == 0 or try_augment(match[v], seen):
+                    match[v] = u
+                    return True
+        return False
+    size = sum(1 for u in range(1, n + 1) if try_augment(u, [False] * (m + 1)))
+    return size, match, adj
+
+def brute(n, m, edges):
+    # try every subset of right vertices as the set that is matched, via bitmask DP over leaders
+    from functools import lru_cache
+    nb = [0] * n
+    for u, v in edges: nb[u - 1] |= 1 << (v - 1)
+    @lru_cache(None)
+    def go(i, used):
+        if i == n: return 0
+        best = go(i + 1, used)
+        a = nb[i] & ~used
+        while a:
+            b = a & -a; a ^= b
+            best = max(best, 1 + go(i + 1, used | b))
+        return best
+    return go(0, 0)
+
+def min_vertex_cover_size(n, m, edges, match, adj):
+    # Konig's construction: Z = vertices reachable from free leaders by alternating paths
+    matched_left = {match[v]: v for v in range(1, m + 1) if match[v]}
+    zl, zr = set(), set()
+    q = deque(u for u in range(1, n + 1) if u not in matched_left)
+    zl.update(q)
+    while q:
+        u = q.popleft()
+        for v in adj[u]:
+            if v not in zr:
+                zr.add(v)
+                w = match[v]
+                if w and w not in zl:
+                    zl.add(w); q.append(w)
+    cover_left = {u for u in range(1, n + 1) if u not in zl}
+    cover_right = zr
+    for u, v in edges:
+        assert u in cover_left or v in cover_right        # it really covers every edge
+    return len(cover_left) + len(cover_right)
+
+# the greedy trap from the lesson: A-1, A-2, B-1
+print("greedy trap graph matching size:", max_matching(2, 2, [(1, 1), (1, 2), (2, 1)])[0], "(greedy alone would give 1)")
+
+random.seed(11)
+for _ in range(500):
+    n = random.randint(1, 7); m = random.randint(1, 7)
+    es = [(random.randint(1, n), random.randint(1, m)) for _ in range(random.randint(0, 18))]
+    size, match, adj = max_matching(n, m, es)
+    assert size == brute(n, m, es), (n, m, es)
+    assert min_vertex_cover_size(n, m, es, match, adj) == size      # Konig: max matching = min vertex cover
+print("500 random graphs: Kuhn matches brute force, and a minimum vertex cover of the same size exists (Konig)")
+`} />
+
+## Three theorems worth knowing
+
+| theorem | statement | what it gives you |
+| --- | --- | --- |
+| **Berge** | a matching is maximum iff it has no augmenting path | the correctness of Kuhn's algorithm |
+| **König** | in a bipartite graph, maximum matching = minimum **vertex cover** (fewest vertices touching every edge) | the minimum cover and the maximum **independent set** (`n + m −` matching) for free |
+| **Hall** | the left side can be fully matched iff every set `S` of leaders has at least `|S|` neighbouring followers | a fast yes/no test, and a proof tool |
+
+From **König's construction** (shown in the demo): after a maximum matching, take every vertex reachable from a free leader by alternating paths. The leaders **not** reached plus the followers reached form a minimum vertex cover.
+
+## Faster: Hopcroft-Karp
+
+Kuhn's algorithm finds one augmenting path per leader. **Hopcroft-Karp** finds a *maximal set* of shortest augmenting paths per phase: a BFS builds layers from the free leaders, then a DFS (like Dinic's blocking flow) collects vertex-disjoint augmenting paths along the layers. There are `O(√V)` phases, so it runs in `O(E √V)`. It is exactly Dinic's algorithm specialised to unit-capacity bipartite networks. A few extra tricks make plain Kuhn faster in practice:
+
+- **Greedy initialisation:** pair each leader with any free neighbour first, then run Kuhn only for the rest.
+- **Don't reset `seen`** between leaders when the previous search failed (a failed search proves those followers are dead ends).
+- **Random shuffle** of adjacency lists to dodge adversarial orders.
+
+## What matching can model
+
+| problem | modelling |
+| --- | --- |
+| assign jobs to workers (each can do some) | leaders = workers, followers = jobs, edge = "can do" |
+| **minimum path cover** of a DAG | split every vertex into out/in copies; `paths = vertices − matching` |
+| place the most **non-attacking rooks** on a board with holes | rows vs columns, edge for every allowed square |
+| maximum **independent set** in a bipartite graph | `n + m −` maximum matching (König) |
+| **domino tiling** of a board with removed cells | colour the board like a chessboard; cells of one colour vs the other; a perfect matching is a tiling |
+| minimum number of **lines** covering all marked cells of a grid | minimum vertex cover of the rows-versus-columns graph, equal to the maximum matching |
+
+## Pitfalls
+
+1. **Not resetting `seen` per leader.** The visited array must be fresh for each new search (except for the optimisation above, which is only valid for failed searches).
+2. **Mixing the sides.** `match[v]` is indexed by *followers* and stores a *leader*; keep the two index ranges separate, or offset the followers.
+3. **Counting duplicates.** Repeated pairs are harmless in Kuhn's algorithm, but make sure input duplicates do not inflate degrees in a degree-based check.
+4. **Recursion depth.** The DFS depth can reach the matching size; raise Python's recursion limit or use an explicit stack for graphs beyond a few thousand vertices.
+5. **Confusing matching with vertex cover.** They are equal in size only for **bipartite** graphs; for general graphs a different algorithm (Edmonds' blossom) is needed.
+6. **Too slow on huge graphs.** `O(n · e)` is fine for thousands of vertices; for `10^5` use Hopcroft-Karp or Dinic.
+7. **Assuming a perfect matching.** Check the size against `n` (and `m`); unmatched vertices are normal.
+
+## Practice
+
+<Problem id="m11-dance-pairs" />
+
+## Problem ladder
+
+- [School Dance](https://cses.fi/problemset/task/1696) (CSES): the maximum matching, and printing the pairs.
+- [Distinct Routes](https://cses.fi/problemset/task/1711) (CSES): a flow problem built on the same ideas, to compare with matching.
+- [Maximum Matching in a Bipartite Graph](https://judge.yosupo.jp/problem/bipartitematching) (Library Checker): large input, wants Hopcroft-Karp.
+
+## Quiz
+
+<Quiz id="cp-m11-bipartite-matching" tags={["graph", "bipartite-matching"]} questions={[
+  { type: "mcq", q: "What does Berge's theorem say?", options: ["Every graph has a perfect matching", "A matching is maximum exactly when it has no augmenting path", "Matchings are always unique", "The matching size equals the number of vertices"], answer: 1, explain: "If an augmenting path exists you can flip it to enlarge the matching; if none exists the matching cannot be improved." },
+  { type: "mcq", q: "In a bipartite graph, the size of a maximum matching equals the size of what?", options: ["The maximum clique", "The minimum vertex cover", "The number of edges", "The longest path"], answer: 1, explain: "That is König's theorem; it fails for non-bipartite graphs." },
+  { type: "predict", q: "A bipartite graph has 5 leaders and 4 followers, and its maximum matching has size 3. How large is a maximum independent set (König)?", code: "n, m, matching = 5, 4, 3\nprint(n + m - matching)", options: ["3", "5", "6", "9"], answer: 2, explain: "Maximum independent set = vertices minus minimum vertex cover = 9 - 3 = 6." },
+  { type: "multi", q: "Which statements about Kuhn's algorithm are true?", options: ["It tries to find an augmenting path from each leader in turn", "The visited array is reset for every new leader", "It runs in O(n * e) time", "It works unchanged for any non-bipartite graph"], answer: [0, 1, 2], explain: "General graphs need Edmonds' blossom algorithm because odd cycles break the alternating-path search." }
+]} />
