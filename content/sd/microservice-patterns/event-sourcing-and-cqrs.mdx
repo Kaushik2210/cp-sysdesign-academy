@@ -1,0 +1,240 @@
+---
+title: Event Sourcing and CQRS
+track: sd
+module: microservice-patterns
+order: 3
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/microservice-patterns/sagas-and-the-transactional-outbox", "sd/queues-and-streaming/stream-processing-basics"]
+tags: [event-sourcing, cqrs, event-store, projections, read-models, snapshots, eventual-consistency, upcasting]
+type: lesson
+furtherReading:
+  - title: Fowler, Event Sourcing
+    url: https://martinfowler.com/eaaDev/EventSourcing.html
+  - title: Fowler, CQRS
+    url: https://martinfowler.com/bliki/CQRS.html
+  - title: Microsoft Azure Architecture Center, CQRS pattern
+    url: https://learn.microsoft.com/en-us/azure/architecture/patterns/cqrs
+  - title: Kleppmann, Designing Data-Intensive Applications, chapter 11 (events and derived data)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Most applications store **current state**: a bank account row holds a balance, and a withdrawal overwrites it. The old balance, and the reason it changed, are gone unless you add an audit table. **Event sourcing** inverts this: store the **sequence of things that happened** (`AccountOpened`, `Deposited 100`, `Withdrew 30`) as the source of truth, and treat the current state as something you **derive** by replaying those events. Like a bank statement, the ledger is the truth and the balance is a view of it.
+
+**CQRS** (Command Query Responsibility Segregation) is a separate but complementary idea: use **different models** for changing data (commands) and for reading it (queries), so each can be shaped and scaled for its job. Event sourcing makes CQRS natural, because the event stream can feed any number of purpose-built read models.
+
+## Event sourcing
+
+**Events are immutable facts in the past tense:** `OrderPlaced`, `ItemAdded`, `PaymentRefunded`. They are only ever **appended**, never updated or deleted. An **aggregate** (an order, an account) is rebuilt by loading its events and applying them in order; behaviour decides, in code, which new events a command produces.
+
+```text
+command: Withdraw 30 from account 7
+  1. load events of account 7 -> rebuild balance = 120
+  2. check the rule: 120 >= 30, so allowed
+  3. append event Withdrew(30) with expected version 14  -> new version 15
+```
+
+**Optimistic concurrency.** Two commands might race on the same aggregate. Each append states the **version it expects** (the number of events it saw); the store rejects the append if the stream has moved on, and the caller reloads and retries. This keeps each aggregate's history strictly ordered without locks.
+
+**What you gain**
+
+- A complete **audit trail** by construction: every change and its cause is recorded.
+- **Temporal queries:** the state as of any past moment, by replaying up to that time.
+- **Replay and repair:** fix a bug in a projection or add a new report by replaying history into new code.
+- **Events as integration:** other services subscribe to the same facts.
+- Natural fit for domains that already think in terms of ledgers (finance, orders, inventory movements).
+
+**What it costs**
+
+- A different programming model; many teams find it harder to learn and to debug.
+- Querying current state needs a **projection**; you cannot simply `SELECT` across aggregates in the event store.
+- **Schema evolution:** events live forever, so old event formats must keep being understood.
+- **Eventual consistency** between the event store and its read models.
+- Deleting data (privacy laws) conflicts with an append-only log.
+
+## Projections and CQRS
+
+A **projection** (read model) is a view built by consuming events and updating a table, search index, cache or graph shaped for specific queries: "orders per customer", "balance per account", "full-text search over products". Each projection is independent: you can add a new one by replaying the whole history into it.
+
+CQRS splits the application along that seam:
+
+- The **write side** validates commands against the aggregate and appends events. It is optimised for consistency and invariants.
+- The **read side** serves queries from denormalised projections. It is optimised for speed and scale, and can use a different storage technology per view.
+
+<Diagram kind="mermaid" caption="Event sourcing with CQRS: commands append events; projections consume them asynchronously to build read models" code={`sequenceDiagram
+  participant C as Client
+  participant W as Command handler
+  participant E as Event store
+  participant P as Projector
+  participant R as Read model
+  C->>W: Withdraw 30 (command)
+  W->>E: load events, append Withdrew(30) at expected version
+  E-->>W: ok
+  W-->>C: accepted
+  E->>P: new event (asynchronous)
+  P->>R: update balance view
+  C->>R: query balance
+  R-->>C: balance (may be slightly behind)`} />
+
+CQRS does **not** require event sourcing: you can keep a normal write database and feed a separate read store from change events (often through the outbox from the previous lesson). Event sourcing does not require CQRS either, but replaying events to answer every query would be impractical, so they are almost always used together.
+
+### Eventual consistency and the user experience
+
+The read model trails the write side. A user who submits a change and immediately reloads may see the old value. Options: **return the new state in the command response** and update the UI optimistically; **read your own writes** by routing that user's next reads to the write side or waiting until the projection reaches the event's version; or simply design the interface for a short delay ("your change is being applied").
+
+## Snapshots
+
+Replaying a long stream on every command is wasteful. A **snapshot** stores the aggregate's state at some version; loading becomes "latest snapshot plus the events after it". Snapshots are an **optimisation**, never the source of truth: they can be deleted and rebuilt.
+
+## Schema evolution
+
+Because events are immutable and kept forever, their format will outlive your code. Strategies:
+
+- **Add optional fields; never change meaning.** Old events stay valid.
+- **Upcasting:** when loading an old event version, a small transformer converts it to the current shape in memory.
+- **New event types** for new meanings, instead of reusing an old type with different semantics.
+- A **schema registry** or explicit version numbers on every event.
+
+## Privacy and deletion
+
+An immutable log conflicts with "delete my data". Common approaches: keep personal data **outside** the events (events hold an id; a separate store holds the personal details and can be erased), or **crypto-shredding** (encrypt personal fields with a per-person key and delete the key to make them unreadable).
+
+## What it costs in practice, simulated
+
+The simulation first rebuilds an account balance from its event stream by replaying from the start and from the latest snapshot (taken every 100 or every 1,000 events), and checks all methods give the identical balance. It then simulates a read model fed by a projector that polls the event log: writes arrive at about 1,000 per second, the projector wakes every X milliseconds and applies each event in 0.05 ms, and we measure how far the read model lags behind.
+
+<CodeRunner language="python" code={`import random
+
+rng = random.Random(3)
+
+# --- 1. an account as a stream of events; state is derived by replaying them ---
+def apply(state, event):
+    kind, amount = event
+    if kind == "deposit":
+        return state + amount
+    if kind == "withdraw":
+        return state - amount
+    return state
+
+def make_events(n):
+    return [(rng.choice(["deposit", "withdraw"]), rng.randint(1, 100)) for _ in range(n)]
+
+def rebuild(events):
+    state = 0
+    for e in events:
+        state = apply(state, e)
+    return state
+
+def rebuild_with_snapshots(events, every):
+    # a snapshot is taken after every 'every' events; a rebuild starts from the latest snapshot
+    snap_state, snap_pos = 0, 0
+    state = 0
+    for i, e in enumerate(events, 1):
+        state = apply(state, e)
+        if i % every == 0:
+            snap_state, snap_pos = state, i
+    replayed = 0
+    state = snap_state
+    for e in events[snap_pos:]:
+        state = apply(state, e)
+        replayed += 1
+    return state, replayed
+
+print("rebuild the current balance of one account: events replayed from the start versus from the latest snapshot")
+print("  events in stream   from the start   snapshot every 100   snapshot every 1000")
+for n in (537, 5321, 50777, 500999):
+    ev = make_events(n)
+    full = rebuild(ev)
+    s100, r100 = rebuild_with_snapshots(ev, 100)
+    s1000, r1000 = rebuild_with_snapshots(ev, 1000)
+    assert full == s100 == s1000
+    print(f"  {n:>16}   {n:>14}   {r100:>18}   {r1000:>19}")
+print("(all three methods produced the identical balance in every row)")
+
+# --- 2. CQRS read model lag: a projector polls the event log and applies new events ---
+def lag_stats(poll_ms, rate_per_s=1000, seconds=10, apply_ms=0.05, seed=7):
+    r = random.Random(seed)
+    t = 0.0
+    arrivals = []
+    while t < seconds * 1000:
+        t += r.expovariate(rate_per_s / 1000.0)           # Poisson arrivals, in ms
+        arrivals.append(t)
+    lags = []
+    i = 0
+    now = poll_ms
+    while i < len(arrivals):
+        batch = []
+        while i < len(arrivals) and arrivals[i] <= now:
+            batch.append(arrivals[i]); i += 1
+        busy = now
+        for a in batch:
+            busy += apply_ms
+            lags.append(busy - a)                          # time from the write to its appearance in the read model
+        now = max(now + poll_ms, busy)
+    lags.sort()
+    return lags[len(lags) // 2], lags[int(0.99 * len(lags))], lags[-1]
+
+print()
+print("read model behind the event log: 1000 writes per second, the projector polls every X ms and applies 0.05 ms per event")
+print("  poll interval   median lag   99th percentile lag   worst lag")
+for poll in (5, 50, 500, 2000):
+    p50, p99, worst = lag_stats(poll)
+    print(f"  {poll:>10} ms   {p50:>7.1f} ms   {p99:>16.1f} ms   {worst:>7.1f} ms")
+`} />
+
+A local run printed: for a stream of 500,999 events, replaying from the start touches all **500,999** events, while a snapshot every 100 events cuts that to **99** and a snapshot every 1,000 events to **999**, with the **identical** balance every time. For a stream of 5,321 events the counts were 5,321, 21 and 321. For the read model at 1,000 writes per second, a poll interval of **5 ms** gave a median lag of 2.7 ms and a worst lag of 5.1 ms; **50 ms** gave a median of 26.5 ms and a 99th percentile of 49.6 ms; **500 ms** gave a median of 265.8 ms and a worst lag of 500.0 ms; and **2,000 ms** gave a median of 1,046.3 ms and a worst lag of 2,000.0 ms. The lag is essentially half the poll interval on average and the whole interval at worst, so a push-based or low-interval projector is the lever for freshness.
+
+<Diagram kind="flow" caption="From a command to a query in an event-sourced system" nodes={[
+  { id: "cmd", label: "Command", x: 0, y: 80, role: "A request to change state, validated against the aggregate's rules.", failureModes: ["Rejected by an invariant", "Version conflict with a concurrent command"], tradeoffs: ["Retry after reload; cheap and lock free"] },
+  { id: "store", label: "Event store (append only)", x: 190, y: 80, role: "The source of truth: an ordered, immutable log per aggregate.", failureModes: ["Stream grows unbounded without snapshots", "Schema drift over years"], tradeoffs: ["Full history and audit; no in-place updates"] },
+  { id: "proj", label: "Projectors", x: 400, y: 80, role: "Consume events and update read models; can be rebuilt by replay.", failureModes: ["Lag behind the write side", "A bug corrupts a view until it is rebuilt"], tradeoffs: ["Many shapes of the same data; eventual consistency"] },
+  { id: "read", label: "Read models", x: 600, y: 80, role: "Denormalised tables, search indexes or caches serving queries fast.", failureModes: ["Stale reads right after a write"], tradeoffs: ["Independent scaling and technology per view"] }
+]} edges={[
+  { from: "cmd", to: "store", label: "append" }, { from: "store", to: "proj", label: "stream" }, { from: "proj", to: "read", label: "update" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="State storage and read models" rows={[
+  { option: "Plain CRUD state", pros: "Simple, familiar, easy queries", cons: "History lost unless audited separately; one model for reads and writes", chooseWhen: "Most applications; the default" },
+  { option: "CRUD plus an audit log", pros: "Simple, with a record of changes", cons: "The log is secondary and can drift from the state", chooseWhen: "You need an audit trail but not replay" },
+  { option: "Event sourcing", pros: "Full history, temporal queries, replay, natural integration events", cons: "Learning curve, projections, schema evolution, eventual consistency", chooseWhen: "Ledger-like domains, strong audit needs, rich history" },
+  { option: "CQRS without event sourcing", pros: "Separate read model per query shape; independent scaling", cons: "Two models to keep in sync; eventual consistency", chooseWhen: "Read and write needs differ sharply" },
+  { option: "Snapshots", pros: "Bounded load time for long streams", cons: "Extra storage and logic; must be rebuildable", chooseWhen: "Aggregates with thousands of events" }
+]} />
+
+## Failure modes
+
+- **Projection lag** makes users see stale data; monitor the gap between the log head and each projection.
+- **Projection bug:** a wrong view; fix the code and **rebuild** from the log.
+- **Poison event:** an event the projector cannot process blocks its stream; use a dead-letter path and alerting.
+- **Concurrency conflicts** under hot aggregates: many retries; model hot spots as smaller aggregates.
+- **Event schema drift:** old events can no longer be read after an incompatible change.
+- **Unbounded streams:** loading an aggregate becomes slow without snapshots.
+- **Reordering across partitions:** consumers must key and order by aggregate id.
+
+## Pitfalls
+
+- Using event sourcing for a simple CRUD application because it sounds modern.
+- Putting commands, rather than facts, in the event log ("PleaseWithdraw" instead of "Withdrew").
+- Letting other services read the event store's internals instead of subscribing to published events.
+- Changing the meaning of an existing event type.
+- Treating a projection as a source of truth and writing into it.
+- Forgetting how personal data will be erased.
+- Doing a reporting query across all aggregates directly on the event store.
+
+## What would you choose and why?
+
+A payments team wants a complete, tamper-evident history of every balance change, the ability to answer "what was this account's balance last Tuesday at noon?", and a fast mobile screen showing the current balance and the last 20 transactions. Would you use event sourcing, CQRS or both, and how would you make the mobile screen feel instant right after a transfer even though the read model is asynchronous?
+
+## Quiz
+
+<Quiz id="sd-m13-event-sourcing" tags={["event-sourcing", "cqrs", "projections", "snapshots"]} questions={[
+  { type: "mcq", q: "In event sourcing, what is the source of truth?", options: ["The current state table", "The append-only sequence of immutable events", "The cache", "The read model"], answer: 1, explain: "State is derived by replaying events; everything else can be rebuilt from the log." },
+  { type: "mcq", q: "What is the purpose of a snapshot?", options: ["To replace the event log", "To bound the time to load an aggregate: latest snapshot plus the events after it", "To encrypt events", "To delete old events"], answer: 1, explain: "Snapshots are only an optimisation; the simulation cut a 500,999-event replay to 99 events with a snapshot every 100." },
+  { type: "mcq", q: "How does optimistic concurrency work when appending events?", options: ["Locks the whole store", "Each append states the version it expects; the store rejects it if the stream has changed since, and the caller reloads and retries", "Events are reordered automatically", "The last writer always wins"], answer: 1, explain: "That keeps each aggregate's history strictly ordered without holding locks." },
+  { type: "multi", q: "Which are true about CQRS?", options: ["Reads and writes use different models", "It requires event sourcing", "Read models are often eventually consistent with the write side", "Each read model can use storage suited to its queries"], answer: [0, 2, 3], explain: "CQRS can be used with an ordinary write database feeding separate read stores." },
+  { type: "mcq", q: "With a projector that polls every 500 ms and 1,000 writes per second, roughly how stale is the read model on average?", options: ["About 1 ms", "About 250 ms (half the poll interval)", "About 5 seconds", "Zero"], answer: 1, explain: "Events wait on average half the poll interval before being applied; the simulation measured a median of about 266 ms." }
+]} />
