@@ -1,0 +1,300 @@
+---
+title: Extended Euclid and the Chinese Remainder Theorem
+track: cp
+module: number-theory
+order: 1
+difficulty: hard
+estMinutes: 50
+prerequisites: [cp/math-basics/gcd-and-lcm, cp/math-basics/modular-arithmetic]
+tags: [number-theory, extended-euclid, modular-inverse, crt, diophantine, congruences]
+type: lesson
+problems: [m17-meeting-day]
+furtherReading:
+  - title: cp-algorithms, Extended Euclidean Algorithm
+    url: https://cp-algorithms.com/algebra/extended-euclid-algorithm.html
+  - title: cp-algorithms, Chinese Remainder Theorem
+    url: https://cp-algorithms.com/algebra/chinese-remainder-theorem.html
+  - title: cp-algorithms, Linear Congruence Equation
+    url: https://cp-algorithms.com/algebra/linear-congruence-equation.html
+---
+
+## Intuition
+
+Euclid's algorithm tells you **how big** the gcd of two numbers is. The **extended** version also tells you **how to build it** from the two numbers: it finds integers `x` and `y` with
+
+```text
+a * x + b * y = gcd(a, b)
+```
+
+That single identity (Bezout's identity) is the key to most of number theory in contests:
+
+- It gives **modular inverses for any modulus**, not only primes (Fermat's little theorem needs a prime).
+- It solves **linear congruences** `a x = b (mod m)` and **linear Diophantine equations** `a x + b y = c`.
+- It powers the **Chinese remainder theorem (CRT)**: combining congruences with different moduli into one, even when the moduli share factors.
+
+Think of the stories: a robot visiting every 4 days and another every 6; when do they coincide? "What number leaves remainder 2 when divided by 3, 3 when divided by 5 and 2 when divided by 7?" (Sunzi, around the 3rd century, answer 23.) CRT is the general tool.
+
+## Definition
+
+**Bezout's identity.** For integers `a, b` (not both zero) there exist integers `x, y` with `a x + b y = gcd(a, b)`. All integers of the form `a x + b y` are exactly the multiples of the gcd.
+
+**Extended Euclid.** Run Euclid's recursion and carry the coefficients back up. If `b = 0` then `gcd = a` with `(x, y) = (1, 0)`. Otherwise recurse on `(b, a mod b)` to get `(g, x1, y1)` with `b x1 + (a mod b) y1 = g`. Since `a mod b = a - floor(a / b) * b`:
+
+```text
+b*x1 + (a - floor(a/b)*b) * y1 = g
+a*y1 + b*(x1 - floor(a/b)*y1)  = g          so   x = y1,   y = x1 - floor(a/b) * y1
+```
+
+It runs in `O(log min(a, b))` and the coefficients are bounded by `max(|a|, |b|)` in absolute value.
+
+**Modular inverse.** If `gcd(a, m) = 1`, then `a x + m y = 1` gives `a x = 1 (mod m)`, so `x mod m` is the inverse of `a`. If `gcd(a, m) > 1` there is **no** inverse.
+
+**Linear congruence** `a x = b (mod m)`. Let `g = gcd(a, m)`.
+
+- If `g` does not divide `b`: no solution.
+- Otherwise divide everything by `g`: `(a/g) x = (b/g) (mod m/g)`. Now `a/g` is invertible modulo `m/g`, so `x = (b/g) * inv(a/g) (mod m/g)`, and the full set of solutions modulo `m` is `x0, x0 + m/g, x0 + 2m/g, ...`: exactly `g` solutions.
+
+**Linear Diophantine equation** `a x + b y = c`. Solvable iff `gcd(a, b)` divides `c`. If `(x0, y0) = (x, y) * (c / g)` from the extended Euclid, all solutions are `(x0 + k b/g, y0 - k a/g)` for integer `k`.
+
+## The Chinese remainder theorem
+
+**Coprime moduli.** If `m1, m2, ..., mk` are pairwise coprime, the system `x = r_i (mod m_i)` has a **unique** solution modulo `M = m1 m2 ... mk`. One way to build it: `x = sum of r_i * M_i * inv(M_i mod m_i)` where `M_i = M / m_i`.
+
+**General moduli (merging).** Maintain `x` and `M` so that the solutions so far are exactly `x + M Z`. To add `x = r (mod m)`:
+
+1. We need `t` with `x + M t = r (mod m)`, i.e. `M t = (r - x) (mod m)`: a linear congruence.
+2. Let `g = gcd(M, m)`. No solution unless `g` divides `r - x`.
+3. `t = ((r - x)/g) * inv(M/g, m/g) (mod m/g)`.
+4. New state: `x = x + M t`, `M = lcm(M, m) = M/g * m`.
+
+If any step fails, the whole system has no solution. When it succeeds, the result is the **smallest non-negative** solution and its period `lcm(m1..mk)`.
+
+## Example, step by step
+
+Sunzi's problem: `x = 2 (mod 3)`, `x = 3 (mod 5)`, `x = 2 (mod 7)`.
+
+- Start `x = 0, M = 1`. Merge `(2, 3)`: `g = 1`, `t = 2 * inv(1, 3) = 2`, so `x = 2`, `M = 3`.
+- Merge `(3, 5)`: need `3 t = 3 - 2 = 1 (mod 5)`. `inv(3) mod 5 = 2`, so `t = 2`, `x = 2 + 3*2 = 8`, `M = 15`. Check: `8 mod 3 = 2`, `8 mod 5 = 3`.
+- Merge `(2, 7)`: need `15 t = 2 - 8 = -6 = 1 (mod 7)`. `15 mod 7 = 1`, `inv = 1`, so `t = 1`, `x = 8 + 15 = 23`, `M = 105`. The answer is **23**, repeating every 105.
+
+A non-coprime example: `x = 2 (mod 6)` and `x = 4 (mod 10)`. `g = gcd(6, 10) = 2` divides `4 - 2 = 2`, so a solution exists: `t = (2/2) * inv(3, 5) = 2`, `x = 2 + 6*2 = 14`, `M = 30`. And `x = 0 (mod 2)`, `x = 1 (mod 4)` has no solution: `g = 2` does not divide `1`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def ext_gcd(a, b):
+    if b == 0:
+        return a, 1, 0
+    g, x1, y1 = ext_gcd(b, a % b)
+    return g, y1, x1 - (a // b) * y1
+
+def inverse(a, m):
+    if m == 1:
+        return 0
+    g, x, _ = ext_gcd(a % m, m)
+    return x % m                         # valid only when g == 1
+
+x, M = 0, 1
+for r, m in congruences:
+    g = ext_gcd(M, m)[0]
+    diff = (r - x) % m
+    if diff % g:
+        print(-1); break                 # no solution
+    mg = m // g
+    t = (diff // g) % mg * inverse((M // g) % mg, mg) % mg
+    x += M * t
+    M = M // g * m
+    x %= M
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+ll ext_gcd(ll a, ll b, ll& x, ll& y) {
+    if (b == 0) { x = 1; y = 0; return a; }
+    ll x1, y1;
+    ll g = ext_gcd(b, a % b, x1, y1);
+    x = y1;
+    y = x1 - (a / b) * y1;
+    return g;
+}
+ll inverse(ll a, ll m) {                    // gcd(a, m) must be 1
+    if (m == 1) return 0;
+    ll x, y;
+    ext_gcd(a % m, m, x, y);
+    return ((x % m) + m) % m;
+}
+// merge (r, m) into the running (x, M)
+ll a, b, g = ext_gcd(M, m, a, b);
+ll diff = ((r - x) % m + m) % m;
+if (diff % g) return -1;                    // no solution
+ll mg = m / g;
+ll t = ((diff / g) % mg) * inverse((M / g) % mg, mg) % mg;
+x += M * t;
+M = M / g * m;
+x %= M;
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] extGcd(long a, long b) {
+    if (b == 0) return new long[]{a, 1, 0};
+    long[] r = extGcd(b, a % b);
+    return new long[]{r[0], r[2], r[1] - (a / b) * r[2]};
+}
+static long inverse(long a, long m) {
+    if (m == 1) return 0;
+    long x = extGcd(a % m, m)[1];
+    return ((x % m) + m) % m;
+}
+// merge (r, m) into the running (x, M)
+long g = extGcd(M, m)[0];
+long diff = ((r - x) % m + m) % m;
+if (diff % g != 0) { /* no solution */ }
+long mg = m / g;
+long t = ((diff / g) % mg) * inverse((M / g) % mg, mg) % mg;
+x += M * t;
+M = M / g * m;
+x %= M;
+```
+
+</Tab>
+</Tabs>
+
+The demo checks the identity, inverses modulo composite numbers, linear congruences, the merge step against brute force, and a Diophantine equation:
+
+<CodeRunner language="python" code={`import math, random
+
+def ext_gcd(a, b):
+    """Return (g, x, y) with a*x + b*y = g = gcd(a, b)."""
+    if b == 0:
+        return a, 1, 0
+    g, x1, y1 = ext_gcd(b, a % b)
+    return g, y1, x1 - (a // b) * y1
+
+random.seed(11)
+for _ in range(1000):
+    a, b = random.randint(0, 10**6), random.randint(0, 10**6)
+    g, x, y = ext_gcd(a, b)
+    assert g == math.gcd(a, b) and a * x + b * y == g
+print("a*x + b*y = gcd(a, b) holds on 1000 random pairs; example:", ext_gcd(240, 46))
+
+def inverse(a, m):
+    """Inverse of a modulo m, for any m (not only primes) as long as gcd(a, m) = 1."""
+    g, x, _ = ext_gcd(a % m, m)
+    if g != 1:
+        raise ValueError("no inverse")
+    return x % m
+
+print("inverse of 3 modulo 10 (not a prime):", inverse(3, 10), "| 3 * 7 % 10 =", 3 * 7 % 10)
+for _ in range(500):
+    m = random.randint(2, 1000)
+    a = random.randint(1, m - 1)
+    if math.gcd(a, m) == 1:
+        assert a * inverse(a, m) % m == 1
+print("inverses checked modulo composite and prime moduli")
+
+def solve_congruence(a, b, m):
+    """All x in [0, m) with a*x = b (mod m): returns (first solution, step) or None."""
+    g = math.gcd(a, m)
+    if b % g:
+        return None
+    a2, b2, m2 = a // g, b // g, m // g
+    x0 = b2 * inverse(a2 % m2, m2) % m2 if m2 > 1 else 0
+    return x0, m2                         # solutions are x0, x0 + m2, x0 + 2*m2, ... (g of them below m)
+
+print("6x = 4 (mod 10):", solve_congruence(6, 4, 10), "-> x in {4, 9}")
+print("4x = 3 (mod 10):", solve_congruence(4, 3, 10), "-> no solution because gcd(4, 10) = 2 does not divide 3")
+for _ in range(500):
+    m = random.randint(1, 60); a = random.randint(0, 80); b = random.randint(0, 80)
+    brute = [x for x in range(m) if (a * x - b) % m == 0]
+    res = solve_congruence(a, b, m)
+    got = [] if res is None else [x for x in range(res[0], m, res[1])]
+    assert got == brute, (a, b, m)
+print("linear congruences match brute force on 500 random cases")
+
+def crt(r1, m1, r2, m2):
+    """Merge x = r1 (mod m1) and x = r2 (mod m2); the moduli need not be coprime. Returns (r, lcm) or None."""
+    g = math.gcd(m1, m2)
+    if (r2 - r1) % g:
+        return None
+    m2g = m2 // g
+    t = ((r2 - r1) // g) * inverse((m1 // g) % m2g, m2g) % m2g if m2g > 1 else 0
+    lcm = m1 // g * m2
+    return (r1 + m1 * t) % lcm, lcm
+
+print("x = 2 (mod 3) and x = 3 (mod 5):", crt(2, 3, 3, 5))
+print("then x = 2 (mod 7):", crt(8, 15, 2, 7), "-> 23 is the Sunzi answer")
+print("x = 2 (mod 6) and x = 4 (mod 10) (not coprime):", crt(2, 6, 4, 10))
+print("x = 0 (mod 2) and x = 1 (mod 4):", crt(0, 2, 1, 4))
+for _ in range(1000):
+    m1, m2 = random.randint(1, 40), random.randint(1, 40)
+    r1, r2 = random.randint(0, m1 - 1), random.randint(0, m2 - 1)
+    L = m1 * m2 // math.gcd(m1, m2)
+    brute = [x for x in range(L) if x % m1 == r1 and x % m2 == r2]
+    res = crt(r1, m1, r2, m2)
+    assert (res is None and not brute) or (res is not None and brute == [res[0]] and res[1] == L)
+print("CRT merge matches brute force on 1000 random pairs of congruences")
+
+def diophantine(a, b, c):
+    """One solution of a*x + b*y = c, and the step: x -> x + b/g, y -> y - a/g gives all of them."""
+    g, x, y = ext_gcd(a, b)
+    if c % g:
+        return None
+    return x * (c // g), y * (c // g), b // g, a // g
+
+x0, y0, dx, dy = diophantine(12, 18, 30)
+print("12x + 18y = 30: one solution", (x0, y0), "all solutions (x0 + k*%d, y0 - k*%d)" % (dx, dy))
+assert all(12 * (x0 + k * dx) + 18 * (y0 - k * dy) == 30 for k in range(-5, 6))
+`} />
+
+## Which tool for which problem
+
+| question | tool |
+| --- | --- |
+| `a^{-1} mod p`, `p` prime | Fermat: `pow(a, p - 2, p)` |
+| `a^{-1} mod m`, `m` any, `gcd(a, m) = 1` | extended Euclid |
+| inverses of `1..n` modulo a prime | the linear recurrence `inv[i] = -(p / i) * inv[p mod i] mod p` |
+| `a x = b (mod m)` | `g = gcd(a, m)`, check `g` divides `b`, reduce, invert |
+| `a x + b y = c` in integers | extended Euclid, then shift by `(b/g, -a/g)` |
+| combine `x = r_i (mod m_i)` | iterative merging (above) |
+| huge answer beyond 64 bits | big integers, or 128-bit multiplication in the merge |
+| nonnegative `x` smallest | reduce `x` modulo the current `lcm` after each step |
+
+## Pitfalls
+
+1. **Negative values after `%`.** In C++ and Java `(r - x) % m` can be negative. Normalise: `((v % m) + m) % m`.
+2. **Using Fermat for a composite modulus.** `pow(a, m - 2, m)` is wrong when `m` is not prime. Use extended Euclid.
+3. **Forgetting the divisibility test** `g | (r - x)`. Without it you return garbage for inconsistent systems.
+4. **Overflow in `M * t` or `(r - x) * inv`.** Both factors can approach `10^9` or more. Reduce `t` modulo `m/g` first, and use `__int128`, `Math.multiplyHigh` or BigInteger when the lcm is large.
+5. **Inverse modulo 1.** When `m/g = 1`, every integer is congruent to 0: return `t = 0` instead of dividing.
+6. **Reducing before dividing by `g`.** Divide `(r - x)` by `g` while it is the exact multiple, then reduce modulo `m/g`.
+7. **Assuming coprime moduli.** The textbook CRT formula breaks when moduli share factors; the merge method handles both cases.
+8. **Recursion depth for huge Fibonacci-like inputs.** Extended Euclid depth is `O(log)`, so it is safe, but write it iteratively for hot loops.
+
+## Practice
+
+<Problem id="m17-meeting-day" />
+
+## Problem ladder
+
+- [Throne](https://atcoder.jp/contests/abc186/tasks/abc186_e) (AtCoder ABC 186 E): a linear congruence with a twist.
+- [Chinese Remainder Theorem](https://judge.yosupo.jp/problem/crt) (Library Checker): merging congruences with non-coprime moduli, large values.
+- [GCD Table](https://codeforces.com/problemset/problem/338/D) (Codeforces 338D, rating about 2600): CRT applied to a table of gcds.
+- [Exponentiation II](https://cses.fi/problemset/task/1712) (CSES): modular reduction with the exponent taken modulo `p - 1`, the Fermat/Euler companion to this lesson.
+
+## Quiz
+
+<Quiz id="cp-m17-ext-euclid-crt" tags={["number-theory", "crt", "extended-euclid"]} questions={[
+  { type: "mcq", q: "When does `a x = 1 (mod m)` have a solution?", options: ["Always", "When gcd(a, m) = 1", "When m is prime only", "When a < m"], answer: 1, explain: "A modular inverse exists exactly when a and m are coprime; the extended Euclid finds it." },
+  { type: "predict", q: "Using the Sunzi example, what is the smallest non-negative x with x = 2 (mod 3), x = 3 (mod 5), x = 2 (mod 7)?", code: "# x = 23 satisfies all three: 23 % 3, 23 % 5, 23 % 7", options: ["8", "23", "105", "53"], answer: 1, explain: "23 mod 3 = 2, 23 mod 5 = 3, 23 mod 7 = 2, and it is the smallest solution below 105." },
+  { type: "mcq", q: "For `x = 0 (mod 2)` and `x = 1 (mod 4)`, what is the result of merging?", options: ["x = 1 (mod 4)", "x = 2 (mod 4)", "No solution, because gcd(2, 4) = 2 does not divide 1", "x = 0 (mod 4)"], answer: 2, explain: "x even and x = 1 mod 4 means x odd: a contradiction." },
+  { type: "mcq", q: "How many solutions modulo m does `a x = b (mod m)` have when g = gcd(a, m) divides b?", options: ["0", "1", "g", "m"], answer: 2, explain: "Dividing by g leaves one solution modulo m/g, which lifts to g solutions modulo m." },
+  { type: "multi", q: "Which are true about merging congruences with general moduli?", options: ["The new modulus is the lcm of the old moduli", "A solution exists only if gcd(M, m) divides r - x", "The moduli must be pairwise coprime", "Fermat's little theorem is enough to find the inverses"], answer: [0, 1], explain: "Moduli can share factors, and the inverses are modulo m/g, which need not be prime, so extended Euclid is used." }
+]} />

@@ -1,0 +1,131 @@
+{
+  "id": "m17-meeting-day",
+  "title": "Meeting Day",
+  "source": {
+    "name": "Original exercise; classic technique (Chinese remainder theorem with non-coprime moduli, extended Euclid)"
+  },
+  "rating": 2000,
+  "tags": [
+    "number-theory",
+    "crt",
+    "extended-euclid",
+    "modular-inverse"
+  ],
+  "statement": "`k` maintenance robots visit a depot. Robot `i` arrives for the first time on day `r[i]` and then every `m[i]` days: on days `r[i]`, `r[i] + m[i]`, `r[i] + 2 m[i]`, and so on (days are numbered from `0`, and `0 ≤ r[i] < m[i]`). The manager wants to know the **first day on which all `k` robots are at the depot together**, or whether such a day never comes.\n\nFor example, robots with `(r, m) = (2, 3), (3, 5), (2, 7)` all arrive on day `23`, and on no earlier day.\n\n**Input.** First line: `k`. Then `k` lines `r m`.\n\n**Output.** The smallest day `x ≥ 0` with `x mod m[i] = r[i]` for every `i`, or `-1` if there is none.",
+  "constraints": [
+    "1 ≤ k ≤ 20",
+    "1 ≤ m[i] ≤ 10^6, 0 ≤ r[i] < m[i]",
+    "The least common multiple of all the moduli is at most 10^13, so the answer (if it exists) is below 10^13; use 64-bit integers where the language needs it",
+    "Moduli are **not** necessarily pairwise coprime"
+  ],
+  "timeLimitMs": 3000,
+  "tests": [
+    {
+      "input": "3\n2 3\n3 5\n2 7\n",
+      "output": "23\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n4 9\n",
+      "output": "4\n",
+      "hidden": false
+    },
+    {
+      "input": "2\n0 2\n1 4\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n2 6\n4 10\n",
+      "output": "14\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n0 1\n0 1\n0 1\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n5 1000000\n7 999999\n",
+      "output": "2000005\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n123456 999983\n4 1000\n0 999\n",
+      "output": "167553275004\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n1 4\n1 6\n1 10\n1 15\n",
+      "output": "1\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n0 4\n2 6\n4 10\n1 15\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n4 5\n18 19\n17 28\n1 3\n",
+      "output": "2089\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n10 28\n25 28\n0 2\n1 3\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n6 8\n9 19\n6 18\n0 5\n",
+      "output": "3030\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n2 8\n0 10\n2 4\n2 24\n",
+      "output": "50\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n15861 172963\n107758 438299\n",
+      "output": "6896742523\n",
+      "hidden": true
+    },
+    {
+      "input": "4\n861653 951440\n36649 147188\n250309 360848\n79 133\n",
+      "output": "442462325013\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n145563 969792\n373293 817242\n25 43\n",
+      "output": "5203872984219\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n186098 746946\n369175 401459\n609398 617916\n",
+      "output": "1334644792790\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "For two robots you need x = r1 + m1 * a and x = r2 + m2 * b. Rearranged, m1 * a - m2 * b = r2 - r1, a linear Diophantine equation. It has a solution exactly when gcd(m1, m2) divides r2 - r1.",
+    "Solve m1 * t = (r2 - r1) (mod m2) by dividing everything by g = gcd(m1, m2): t = ((r2 - r1) / g) * inverse(m1 / g, m2 / g) (mod m2 / g). The inverse comes from the extended Euclidean algorithm, which finds u, v with a*u + b*v = gcd(a, b).",
+    "Merge the congruences one by one. After merging, the solutions form a single congruence x = X (mod M) where M is the least common multiple so far, and you continue with the next robot. If at any step g does not divide the difference, print -1."
+  ],
+  "editorial": "Keep the invariant that the days on which the first `i` robots are together are exactly `x + M * Z` with `0 ≤ x < M`, starting from `x = 0`, `M = 1`. To add robot `(r, m)`, we need `t` with `x + M t ≡ r (mod m)`, that is `M t ≡ (r - x) (mod m)`. Let `g = gcd(M, m)`. This linear congruence has a solution **iff** `g` divides `(r - x)`; otherwise the answer is `-1`. When it does, divide by `g`: `(M/g) t ≡ (r - x)/g (mod m/g)`, and since `gcd(M/g, m/g) = 1` the factor `M/g` has an inverse modulo `m/g`, obtained from the **extended Euclidean algorithm** (`a u + b v = gcd(a, b)`, so `u` is the inverse of `a` modulo `b` when the gcd is 1). Then `t = ((r - x)/g) * inv(M/g) mod (m/g)`, the new `x` is `x + M t`, and the new modulus is `lcm(M, m) = M/g * m`. Because every merge produces the smallest solution below the new `lcm`, the final `x` is the answer. All intermediate products stay below `10^13` thanks to the constraint on the lcm; with larger bounds you need 128-bit multiplication or BigInt.",
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(1)"
+  },
+  "starter": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nk = int(data[0])\n# robots are data[1:]: r m, two numbers each\n# merge them one at a time, keeping x and the lcm M so far\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst k = tok[0];\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        // read k and the pairs (r, m); use long\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read k and the pairs (r, m); use long long\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nk = int(data[0])\n\ndef ext_gcd(a, b):\n    \"\"\"Return (g, x, y) with a*x + b*y = g = gcd(a, b).\"\"\"\n    if b == 0:\n        return a, 1, 0\n    g, x1, y1 = ext_gcd(b, a % b)\n    return g, y1, x1 - (a // b) * y1\n\ndef inverse(a, m):\n    \"\"\"Inverse of a modulo m when gcd(a, m) = 1 (and 0 when m = 1).\"\"\"\n    if m == 1:\n        return 0\n    g, x, _ = ext_gcd(a % m, m)\n    return x % m\n\nx, M = 0, 1                                   # invariant: the solutions so far are x + M*Z, with 0 <= x < M\nanswer = None\nfor i in range(k):\n    r, m = int(data[1 + 2 * i]), int(data[2 + 2 * i])\n    g = ext_gcd(M, m)[0]\n    diff = (r - x) % m\n    if diff % g != 0:                         # M*t = r - x (mod m) has a solution only if g divides r - x\n        answer = -1\n        break\n    mg = m // g\n    t = (diff // g) % mg * inverse((M // g) % mg, mg) % mg\n    x += M * t\n    M = M // g * m\n    x %= M\nprint(answer if answer is not None else x)\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst k = tok[0];\nfunction extGcd(a, b) {\n  if (b === 0) return [a, 1, 0];\n  const [g, x1, y1] = extGcd(b, a % b);\n  return [g, y1, x1 - Math.floor(a / b) * y1];\n}\nfunction inverse(a, m) {\n  if (m === 1) return 0;\n  const [, x] = extGcd(a % m, m);\n  return ((x % m) + m) % m;\n}\nlet x = 0, M = 1, answer = null;\nfor (let i = 0; i < k; i++) {\n  const r = tok[1 + 2 * i], m = tok[2 + 2 * i];\n  const g = extGcd(M, m)[0];\n  const diff = (((r - x) % m) + m) % m;\n  if (diff % g !== 0) { answer = -1; break; }\n  const mg = m / g;\n  const t = ((diff / g) % mg) * inverse((M / g) % mg, mg) % mg;\n  x += M * t;\n  M = (M / g) * m;\n  x %= M;\n}\nconsole.log(String(answer !== null ? answer : x));\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    static long[] extGcd(long a, long b) {\n        if (b == 0) return new long[]{a, 1, 0};\n        long[] r = extGcd(b, a % b);\n        return new long[]{r[0], r[2], r[1] - (a / b) * r[2]};\n    }\n\n    static long inverse(long a, long m) {\n        if (m == 1) return 0;\n        long x = extGcd(a % m, m)[1];\n        return ((x % m) + m) % m;\n    }\n\n    public static void main(String[] args) throws IOException {\n        StreamTokenizer in = new StreamTokenizer(new BufferedInputStream(System.in));\n        in.nextToken();\n        int k = (int) in.nval;\n        long x = 0, M = 1;\n        boolean ok = true;\n        for (int i = 0; i < k; i++) {\n            in.nextToken();\n            long r = (long) in.nval;\n            in.nextToken();\n            long m = (long) in.nval;\n            if (!ok) continue;\n            long g = extGcd(M, m)[0];\n            long diff = ((r - x) % m + m) % m;\n            if (diff % g != 0) { ok = false; continue; }\n            long mg = m / g;\n            long t = ((diff / g) % mg) * inverse((M / g) % mg, mg) % mg;\n            x += M * t;\n            M = M / g * m;\n            x %= M;\n        }\n        System.out.println(ok ? x : -1);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\n\nll ext_gcd(ll a, ll b, ll& x, ll& y) {\n    if (b == 0) { x = 1; y = 0; return a; }\n    ll x1, y1;\n    ll g = ext_gcd(b, a % b, x1, y1);\n    x = y1;\n    y = x1 - (a / b) * y1;\n    return g;\n}\nll inverse(ll a, ll m) {\n    if (m == 1) return 0;\n    ll x, y;\n    ext_gcd(a % m, m, x, y);\n    return ((x % m) + m) % m;\n}\nint main() {\n    int k;\n    scanf(\"%d\", &k);\n    ll x = 0, M = 1;\n    bool ok = true;\n    for (int i = 0; i < k; i++) {\n        ll r, m;\n        scanf(\"%lld %lld\", &r, &m);\n        if (!ok) continue;\n        ll a, b;\n        ll g = ext_gcd(M, m, a, b);\n        ll diff = ((r - x) % m + m) % m;\n        if (diff % g != 0) { ok = false; continue; }\n        ll mg = m / g;\n        ll t = ((diff / g) % mg) * inverse((M / g) % mg, mg) % mg;\n        x += M * t;\n        M = M / g * m;\n        x %= M;\n    }\n    printf(\"%lld\\n\", ok ? x : -1LL);\n    return 0;\n}\n"
+  }
+}
