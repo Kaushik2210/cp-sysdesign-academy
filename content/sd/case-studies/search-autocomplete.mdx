@@ -1,0 +1,134 @@
+---
+title: "Case Study: Search Autocomplete (Typeahead)"
+track: sd
+module: case-studies
+order: 8
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/case-studies/url-shortener", "sd/caching/caching-strategies", "sd/queues-and-streaming/stream-processing-basics"]
+tags: [case-study, autocomplete, typeahead, trie, top-k, caching, ranking]
+type: case-study
+furtherReading:
+  - title: The System Design Primer - Design a type-ahead / search suggestions (Trie sections)
+    url: https://github.com/donnemartin/system-design-primer
+  - title: Manning, Raghavan, Schutze - Introduction to Information Retrieval, chapter 3 (Dictionaries and tolerant retrieval)
+    url: https://nlp.stanford.edu/IR-book/
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 11 (Stream processing)
+    url: https://dataintensive.net/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- As the user types a prefix, show the top 5 to 10 suggested completions.
+- Suggestions are ranked by popularity (and optionally recency and personalisation).
+- New trending queries should appear within minutes to hours; offensive or blocked terms must never appear.
+
+**Non-functional**
+- Very low latency: suggestions must arrive in under about 100 ms end to end, or the user has typed past them.
+- High availability; slightly stale suggestions are acceptable (eventual consistency).
+- Assume 10B searches/day and an average query length of 20 characters.
+
+## 2. Estimate
+
+- Each search types ~20 characters; with debouncing the client sends maybe 5 suggestion requests per search. 10B × 5 = 50B/day ≈ **580,000 requests/s**, peak well over 1M/s. This is a **read-heavy, latency-critical** workload.
+- Distinct queries: assume 1B distinct strings ever seen, but a few tens of millions account for nearly all traffic (a long-tail distribution).
+- Storage for the suggestion data: 100M distinct popular queries × ~30 bytes plus a score ≈ **3 to 5 GB**. It fits in memory on a single machine; the problem is request rate and freshness, not size.
+
+## 3. API
+
+```
+GET /v1/suggest?q=app&limit=5&lang=en
+-> { "q": "app", "suggestions": ["apple", "app store", "apple watch", ...] }
+```
+
+Cacheable: the response depends only on the prefix (plus coarse locale), so responses carry short `Cache-Control` headers and are served by the CDN or browser cache whenever possible.
+
+## 4. Data structure: a trie with precomputed top-k
+
+A trie stores strings by prefix: each node is a prefix. A naive approach walks the whole subtree under a prefix to find the best completions, which for the prefix `a` is huge. Instead, **store the top k suggestions at every node**, so a lookup is one walk of `len(prefix)` steps and returns the list directly.
+
+```python
+import heapq
+class Node:
+    __slots__ = ("kids", "top")
+    def __init__(self): self.kids, self.top = {}, []   # top: list of (score, word)
+class Trie:
+    def __init__(self, k=3): self.root, self.k = Node(), k
+    def add(self, word, score):
+        n = self.root
+        for ch in word:
+            n = n.kids.setdefault(ch, Node())
+            cand = [t for t in n.top if t[1] != word] + [(score, word)]
+            n.top = heapq.nlargest(self.k, cand)       # keep only the best k
+    def suggest(self, prefix):
+        n = self.root
+        for ch in prefix:
+            if ch not in n.kids: return []
+            n = n.kids[ch]
+        return [w for s, w in sorted(n.top, reverse=True)]
+t = Trie()
+for w, s in [("apple", 50), ("app", 90), ("apply", 20), ("apt", 70), ("banana", 10)]:
+    t.add(w, s)
+print(t.suggest("ap"), t.suggest("app"), t.suggest("b"), t.suggest("z"))
+# ['app', 'apt', 'apple'] ['app', 'apple', 'apply'] ['banana'] []
+```
+
+<Complexity time="O(L) per lookup, O(L·k) per insert" space="O(total characters × k) with top-k lists" note="L = prefix length; trading memory for lookup speed" />
+
+Optimisations: compress single-child chains (radix tree), store word ids instead of strings in the top-k lists, cap depth (do not index beyond about 30 characters), and keep the whole structure in memory, built offline and loaded read-only.
+
+## 5. Architecture: offline build, online serve
+
+<Diagram kind="flow" caption="Query logs are aggregated offline into a trie snapshot that is served from memory behind a cache" nodes={[
+  { id: "client", label: "Search box", x: 0, y: 90, role: "Debounces keystrokes (about 100 ms) and cancels stale requests.", failureModes: ["Request storms from fast typists"], tradeoffs: ["Client-side cache of recent prefixes avoids repeated calls"] },
+  { id: "cdn", label: "CDN / browser cache", x: 200, y: 90, role: "Caches popular prefix responses for short TTLs.", failureModes: ["Stale suggestions after a block-list change"], tradeoffs: ["Short TTL or purge on block-list updates"] },
+  { id: "svc", label: "Suggestion servers", x: 400, y: 90, role: "Hold the trie in memory and answer lookups.", failureModes: ["Snapshot load failure", "Memory growth"], tradeoffs: ["Replicated and stateless: any replica can answer"] },
+  { id: "logs", label: "Query log stream", x: 400, y: 20, role: "Search events from the search service, via a message queue.", failureModes: ["Spam and bot queries skew counts"], tradeoffs: ["Filter bots and low-quality traffic before counting"] },
+  { id: "agg", label: "Aggregation (batch + stream)", x: 600, y: 20, role: "Counts query frequency in windows, applies decay and the block list.", failureModes: ["Lag delays trends"], tradeoffs: ["Hourly batch for the stable base plus a small streaming layer for trending terms"] },
+  { id: "build", label: "Trie builder + store", x: 600, y: 160, role: "Builds a new trie snapshot, validates it and publishes it to object storage.", failureModes: ["Bad snapshot pushed to every server"], tradeoffs: ["Canary rollout and quick rollback of snapshots"] }
+]} edges={[
+  { from: "client", to: "cdn" }, { from: "cdn", to: "svc", label: "miss" }, { from: "svc", to: "logs", label: "search events" }, { from: "logs", to: "agg" }, { from: "agg", to: "build" }, { from: "build", to: "svc", label: "snapshot load" }
+]} />
+
+**Serving.** Suggestion servers load an immutable snapshot at startup and swap atomically to a newer one (double-buffer). No locks on the read path. Replicate for throughput; shard only if the data outgrows memory.
+
+**Sharding when needed.** Partition by the first one or two characters of the prefix, or by hash of a short prefix. Hot prefixes (`a`, `s`) are uneven, so balance by measured traffic, not by alphabet, and cache the shortest prefixes aggressively since they are the most requested and the least personalised.
+
+## 6. Ranking, freshness, and safety
+
+- **Score** = frequency over a time window with **exponential decay**, so last week's fad fades: `score = sum(count_in_bucket × decay^(age))`.
+- **Trending**: a streaming job (windowed counts over minutes) flags queries whose recent rate far exceeds their baseline and merges them into the served list ahead of the next full rebuild.
+- **Personalisation**: blend a user's recent searches or locale with the global list at request time; keep the global path cached and add a small personal layer.
+- **Safety**: a block list and policy filters are applied at build time **and** at serve time (a fast set lookup) so emergency removals do not wait for a rebuild. Do not suggest queries containing private data (emails, ids): minimum-frequency thresholds from many distinct users guard against leaking one person's query.
+- **Typos**: fuzzy matching via edit-distance bounded search or n-gram indexes; run it as a fallback only when exact prefixes return nothing, because it is far more expensive.
+
+## 7. Bottlenecks and trade-offs
+
+- **Freshness vs cost:** continuous trie updates complicate concurrency; periodic immutable snapshots plus a small trending overlay are simpler and fast.
+- **Memory vs latency:** top-k at each node uses memory (k copies per path) but makes lookups constant-time per character.
+- **Consistency:** different replicas may serve different snapshot versions for a few minutes; acceptable.
+- **Availability:** if the service is down, the search box still works; suggestions degrade silently. Autocomplete must never block search.
+- **Load:** debounce, cache, and cancel in-flight requests on the client, so the typical keystroke costs nothing.
+
+## Pitfalls
+
+- Walking a subtree per request instead of storing top-k.
+- Updating the live trie in place under heavy read traffic.
+- Ranking by all-time counts only (no recency).
+- Not filtering abusive, private or blocked terms at serve time.
+- Sending a request for every keystroke with no debounce or cancellation.
+- Making search depend on autocomplete availability.
+
+## What would you choose and why?
+
+Your product launches in a language without spaces between words (such as Chinese or Japanese). Characters, not words, form prefixes, and users type through an input method that composes text. What changes about tokenisation, prefix definition and when you issue requests?
+
+## Quiz
+
+<Quiz id="sd-m17-search-autocomplete" tags={["case-study", "autocomplete", "trie"]} questions={[
+  { type: "mcq", q: "Why store the top-k completions at each trie node?", options: ["To reduce disk use", "So a lookup is one walk of the prefix with no subtree search", "To make inserts faster", "To remove the need for ranking"], answer: 1, explain: "Precomputing results trades memory for constant-time-per-character lookups." },
+  { type: "mcq", q: "How should a read-heavy suggestion service apply new data?", options: ["Lock the trie and update in place on every query", "Build a new immutable snapshot offline and swap it in atomically", "Rebuild per request", "Write each query to the trie synchronously"], answer: 1, explain: "Immutable snapshots avoid locks on the read path and are easy to roll back." },
+  { type: "multi", q: "Which reduce load on the suggestion backend?", options: ["Debouncing keystrokes on the client", "Caching responses for popular prefixes at the CDN", "Cancelling stale in-flight requests", "Querying on every keystroke with no cache"], answer: [0, 1, 2], explain: "Most keystrokes should never reach the servers." },
+  { type: "mcq", q: "A term must be removed from suggestions immediately. What is the right mechanism?", options: ["Wait for the next daily rebuild", "A serve-time block list checked on every response, plus removal at the next build", "Restart all servers", "Lower its score"], answer: 1, explain: "Serve-time filtering makes emergency removals independent of build cadence." }
+]} />

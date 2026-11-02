@@ -1,0 +1,142 @@
+---
+title: "Case Study: Video Streaming"
+track: sd
+module: case-studies
+order: 7
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/news-feed", "sd/networking-and-apis/cdn-and-api-design", "sd/storage/blob-stores", "sd/queues-and-streaming/why-queues"]
+tags: [case-study, video, streaming, cdn, transcoding, adaptive-bitrate, hls, dash, object-storage]
+type: case-study
+furtherReading:
+  - title: RFC 8216 - HTTP Live Streaming (HLS)
+    url: https://www.rfc-editor.org/rfc/rfc8216
+  - title: Netflix Technology Blog - Open Connect, Netflix's content delivery network
+    url: https://openconnect.netflix.com/en/
+  - title: MPEG-DASH overview (DASH Industry Forum)
+    url: https://dashif.org/
+  - title: Huang et al. - A buffer-based approach to rate adaptation (SIGCOMM 2014)
+    url: https://dl.acm.org/doi/10.1145/2619239.2626296
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Creators upload videos; viewers search, browse and watch them.
+- Playback starts quickly and adapts to the viewer's network and device.
+- View counts, resume position and basic recommendations (recommendation algorithms out of scope).
+
+**Non-functional**
+- Fast start (first frame in about 2 seconds) and few stalls (rebuffering). These are the quality metrics that matter.
+- High availability of playback; uploads may be slower and retried.
+- Cost-aware: **egress bandwidth is the bill**, so cache hit rate is a business metric.
+- Assume 200M daily viewers watching 1 hour each, and 500 hours of video uploaded per minute.
+
+## 2. Estimate
+
+- Egress: 3 Mbps average stream = 0.375 MB/s, so 1 hour is about 1.35 GB. 200M viewers × 1.35 GB ≈ **270 PB/day**, which is about 3.1 TB/s, or **25 Tbps on average**, higher at peak. No origin can serve this: the **CDN** must.
+- Uploads: 500 hours/min × 60 × 24 = **720,000 hours/day**. At a 5 Mbps source (2.25 GB/hour) that is about **1.6 PB/day** of originals, plus roughly 3 PB/day for the transcoded renditions.
+- Metadata (titles, counts, owners) is tiny by comparison and lives in ordinary databases.
+- Conclusion: the system is dominated by **blob storage and bandwidth**, not by request QPS.
+
+## 3. How video is delivered: adaptive bitrate streaming
+
+A video is cut into segments of 2 to 10 seconds, each encoded at several bitrates (a **ladder**). A **manifest** (HLS `.m3u8` or DASH `.mpd`) lists the segments per rendition. The player downloads segments over plain **HTTP**, which is why ordinary CDNs and caches work, and picks a rendition per segment based on measured throughput and buffer level.
+
+| Rung | Resolution | Typical bitrate |
+| --- | --- | --- |
+| 1 | 240p | 400 kbps |
+| 2 | 480p | 1,000 kbps |
+| 3 | 720p | 2,500 kbps |
+| 4 | 1080p | 5,000 kbps |
+
+A simple player rule: if the buffer is nearly empty, drop to the lowest rung; otherwise choose the highest rendition whose bitrate fits under a safety fraction of measured throughput, and step up only one rung at a time to avoid oscillation.
+
+```python
+LADDER = [(240, 400), (480, 1000), (720, 2500), (1080, 5000)]   # (height, kbps)
+def pick(throughput_kbps, buffer_s, current=0, safety=0.8, low_buf=5):
+    if buffer_s < low_buf: return 0                       # protect against stalling
+    usable = throughput_kbps * safety
+    best = max((i for i, (_, r) in enumerate(LADDER) if r <= usable), default=0)
+    return min(best, current + 1)                         # climb gradually
+print(pick(6000, 20, current=1))  # 2  (720p; steps up one rung from 480p)
+print(pick(6000, 20, current=3))  # 2  (usable 4800 kbps, so 1080p at 5000 does not fit)
+print(pick(900, 20, current=3))   # 0  (usable 720 kbps: only 240p)
+print(pick(6000, 2, current=3))   # 0  (buffer low: panic to the lowest rung)
+```
+
+Production players use buffer-based algorithms (see the SIGCOMM paper) that are more stable, but the trade-off is the same: quality vs. stall risk.
+
+## 4. Upload and processing pipeline
+
+1. The client uploads **directly to object storage** with a signed URL, in resumable chunks (multipart). The app servers never proxy bytes.
+2. A completion event goes onto a queue; a workflow engine runs the pipeline as a **DAG**:
+   - validate and virus/format check, extract metadata and thumbnails,
+   - **split into chunks at keyframes** and transcode chunks **in parallel** across a worker fleet, one job per (chunk, rendition),
+   - package into HLS/DASH segments and write the manifest,
+   - run content moderation and copyright fingerprinting,
+   - publish: flip the video to `ready` and index it for search.
+3. Failed tasks retry independently (idempotent, keyed by video id, chunk, rendition). Transcoding is CPU/GPU-heavy and bursty, so workers autoscale on queue depth, and popular creators get a priority lane.
+
+Parallel chunk transcoding turns a one-hour encode into minutes: the job's latency is the slowest chunk plus overhead, not the video length.
+
+<Diagram kind="flow" caption="Upload straight to object storage, transcode in parallel, serve segments from the CDN edge" nodes={[
+  { id: "creator", label: "Creator client", x: 0, y: 20, role: "Uploads in resumable chunks via signed URLs.", failureModes: ["Connection drops mid-upload"], tradeoffs: ["Resumable multipart avoids restarting multi-GB uploads"] },
+  { id: "raw", label: "Object storage (originals)", x: 200, y: 20, role: "Durable store for source files.", failureModes: ["Accidental deletion"], tradeoffs: ["Versioning and replication; cheap cold tier for old originals"] },
+  { id: "q", label: "Queue / workflow", x: 400, y: 20, role: "Orchestrates the processing DAG with retries.", failureModes: ["Poison jobs stall the pipeline"], tradeoffs: ["Dead-letter queue and per-task idempotency"] },
+  { id: "tc", label: "Transcode workers", x: 600, y: 20, role: "Encode chunks into the bitrate ladder in parallel.", failureModes: ["Spot instance preemption", "Queue spikes after a big event"], tradeoffs: ["Cheap preemptible capacity plus retries beats reserved capacity"] },
+  { id: "seg", label: "Object storage (segments + manifests)", x: 600, y: 160, role: "Origin for the CDN.", failureModes: ["Origin overload on a CDN miss storm"], tradeoffs: ["An origin shield (mid-tier cache) collapses misses"] },
+  { id: "cdn", label: "CDN edge caches", x: 400, y: 160, role: "Serve segments close to viewers; the bulk of all traffic.", failureModes: ["Cold cache for a brand-new viral video", "Regional PoP outage"], tradeoffs: ["Pre-warm for expected hits; fail over to the next-nearest PoP"] },
+  { id: "viewer", label: "Player", x: 200, y: 160, role: "Fetches manifest then segments, adapting bitrate.", failureModes: ["Stalls on poor networks"], tradeoffs: ["Smaller segments adapt faster but add request overhead"] }
+]} edges={[
+  { from: "creator", to: "raw", label: "signed upload" }, { from: "raw", to: "q", label: "event" }, { from: "q", to: "tc" }, { from: "tc", to: "seg", label: "segments" }, { from: "seg", to: "cdn", label: "miss" }, { from: "cdn", to: "viewer", label: "HTTP segments" }
+]} />
+
+## 5. Playback path and the CDN
+
+- The player asks the API for metadata and a manifest URL, then fetches segments from a CDN hostname. DNS or anycast routes to a nearby edge.
+- Edge cache → regional/shield cache → origin object store. A good hit rate (95%+ for popular content) is what makes 25 Tbps affordable.
+- **Long-tail vs hot:** the top few percent of videos produce most views and stay in edge caches; the long tail is served from regional caches or origin with higher latency. Large providers place **appliance caches inside ISP networks** (the Open Connect model) so traffic never crosses the open internet.
+- Segments are immutable and cacheable for a long time with versioned URLs; **manifests** for live streams are short-lived.
+- Protect content with **signed URLs/tokens** and, for premium content, DRM (encrypted segments, licence server).
+
+## 6. Deep dives
+
+**Fast start.** Begin at a low-to-medium rung to get the first frame quickly, then climb. Preload the first segment on hover. Keep the first segments small.
+
+**Resume and view counts.** Store the playback position per (user, video) with periodic heartbeats from the player into a key-value store; do not write on every second. View counts are accumulated through a stream (Kafka → aggregation) and applied to the counter with eventual consistency; de-duplicate repeated views and bots.
+
+**Live streaming.** The same ideas with a tighter loop: the ingest server transcodes in real time, segments are 1 to 4 seconds, the manifest is updated continuously, and latency is 5 to 30 seconds for HLS/DASH (low-latency variants and WebRTC for sub-second). Thundering herds at the live edge make CDN request collapsing essential.
+
+**Storage cost.** Keep fewer renditions for unpopular videos (encode the top rungs lazily on demand), use newer codecs (HEVC, AV1) when the saving in bandwidth outweighs extra encoding cost and decoding support, and tier old originals to cold storage.
+
+**Thumbnails and search.** Thumbnails are generated in the pipeline and served from the CDN; titles and tags go to a search index updated asynchronously.
+
+## 7. Bottlenecks and trade-offs
+
+- **Cost vs quality:** more rungs and higher bitrates cost storage and egress; per-title encoding picks bitrates per video complexity.
+- **Latency vs efficiency in segment size:** longer segments compress better and need fewer requests; shorter ones start faster and adapt quicker.
+- **Consistency:** a video published in one region may take seconds to be visible everywhere; acceptable.
+- **Failure modes:** CDN PoP loss (reroute), origin failure (multi-region replicated object storage), transcode backlog (autoscale, shed low priority), thundering herd on a new viral upload (origin shield, request collapsing).
+
+## Pitfalls
+
+- Proxying uploads or downloads through application servers.
+- Serving video from the origin instead of a CDN.
+- One giant file per rendition (no seeking, no adaptivity) instead of segments.
+- Transcoding a whole video on one machine.
+- Counting views synchronously on the playback path.
+- Ignoring egress cost in the design.
+
+## What would you choose and why?
+
+The business wants to offer 4K and HDR. Storage and egress per hour roughly triple for those renditions. Which videos get them, when are they encoded (at upload or on first demand), and how do you decide with data rather than guesses?
+
+## Quiz
+
+<Quiz id="sd-m17-video-streaming" tags={["case-study", "video", "cdn"]} questions={[
+  { type: "mcq", q: "Why does adaptive bitrate streaming use short HTTP segments?", options: ["It avoids needing a CDN", "The player can switch quality per segment and ordinary HTTP caches can serve them", "It removes the need for encoding", "It encrypts the video"], answer: 1, explain: "Segmenting enables per-segment rendition choice and makes content cacheable by standard CDNs." },
+  { type: "mcq", q: "What dominates the infrastructure cost of a video platform?", options: ["Database queries", "Egress bandwidth and storage of video blobs", "TLS handshakes", "Search indexing"], answer: 1, explain: "Hundreds of petabytes per day of delivery dwarfs request-rate costs; cache hit rate is a cost lever." },
+  { type: "multi", q: "Which speed up processing of a long uploaded video?", options: ["Split at keyframes and transcode chunks in parallel", "Retry only failed tasks independently", "Transcode the whole file on one very large machine", "Upload directly to object storage with resumable chunks"], answer: [0, 1, 3], explain: "Parallel chunk jobs bound latency by the slowest chunk; direct uploads keep app servers off the data path." },
+  { type: "predict", q: "With the pick() rule above, throughput 6000 kbps, buffer 20 s, current rung 3 (1080p). Which rung is chosen?", code: "pick(6000, 20, current=3)", options: ["0", "1", "2", "3"], answer: 2, explain: "Usable bandwidth is 4800 kbps; 1080p needs 5000, so 720p (rung 2) is the best fit." }
+]} />
