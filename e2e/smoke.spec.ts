@@ -726,7 +726,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("167");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("170");
   });
 });
 
@@ -739,7 +739,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 74 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 77 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -844,6 +844,9 @@ test.describe("visualizer lessons", () => {
     ["/cp/graphs/strongly-connected-components/", "Strongly Connected Components", "Connect the Towns"],
     ["/cp/graphs/bridges-and-articulation-points/", "Bridges and Articulation Points", "Critical Cables"],
     ["/cp/dynamic-programming/digit-dp/", "Digit DP", "Lucky Badges"],
+    ["/cp/string-matching/suffix-arrays/", "Suffix Arrays", "Distinct Fragments"],
+    ["/cp/trees/heavy-light-decomposition/", "Heavy-Light Decomposition", "Courier Routes"],
+    ["/cp/dynamic-programming/dp-optimizations/", "DP Optimizations", "Parcel Batches"],
   ];
   for (const [path, title, problem] of LESSONS) {
     test(`${title} has a practice problem and its visualizer where one exists`, async ({ page }) => {
@@ -851,7 +854,7 @@ test.describe("visualizer lessons", () => {
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
       await expect(page.getByRole("region", { name: `Problem: ${problem}` })).toBeVisible();
       // Only the first five lessons embed a visualizer; the rest have none yet.
-      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Maximum Flow and Dinic", "Strongly Connected Components", "Bridges and Articulation Points", "Digit DP"].includes(title)) {
+      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Maximum Flow and Dinic", "Strongly Connected Components", "Bridges and Articulation Points", "Digit DP", "Suffix Arrays", "Heavy-Light Decomposition", "DP Optimizations"].includes(title)) {
         await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
       }
     });
