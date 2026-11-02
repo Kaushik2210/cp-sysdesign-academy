@@ -1,0 +1,120 @@
+{
+  "id": "m13-merge-crates",
+  "title": "Merge the Crates",
+  "source": {
+    "name": "Original exercise; classic technique (interval DP, optimal merge order of adjacent items)"
+  },
+  "rating": 1800,
+  "tags": [
+    "dp",
+    "interval-dp",
+    "prefix-sums",
+    "optimal-merge"
+  ],
+  "statement": "A warehouse has `n` crates standing in a row; crate `i` weighs `w[i]`. A robot can **weld two neighbouring crates** into one crate whose weight is the sum of the two. Welding costs as much energy as the weight of the **new** crate. It keeps welding neighbours until only one crate is left. Find the smallest total energy needed.\n\nFor example, for weights `4 1 1 4` welding the two middle crates first costs `2`, then welding the result with the left crate costs `6`, then welding with the right crate costs `10`: total `18`. That is the best possible: welding the two left crates and the two right crates first would cost `5 + 5 + 10 = 20`.\n\n**Input.** First line: `n`. Second line: `w[1] ... w[n]`.\n\n**Output.** The minimum total energy, as one integer.",
+  "constraints": [
+    "1 ≤ n ≤ 200 in this browser version (the O(n^3) idea reaches about 400 comfortably, and an O(n^2) refinement goes much further)",
+    "1 ≤ w[i] ≤ 10^7",
+    "The answer can exceed the 32-bit range; use 64-bit integers where the language needs it"
+  ],
+  "timeLimitMs": 3000,
+  "tests": [
+    {
+      "input": "4\n4 1 1 4\n",
+      "output": "18\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n7\n",
+      "output": "0\n",
+      "hidden": false
+    },
+    {
+      "input": "2\n5 9\n",
+      "output": "14\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n3 3 3 3 3\n",
+      "output": "36\n",
+      "hidden": true
+    },
+    {
+      "input": "6\n1 2 3 4 5 6\n",
+      "output": "51\n",
+      "hidden": true
+    },
+    {
+      "input": "6\n6 5 4 3 2 1\n",
+      "output": "51\n",
+      "hidden": true
+    },
+    {
+      "input": "7\n10000000 1 10000000 1 10000000 1 10000000\n",
+      "output": "110000009\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n5 19 28 26 25 3 9 4\n",
+      "output": "331\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n28 28 2 3 3 12 27 6\n",
+      "output": "284\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n8 19 18 5 12 30 20 16\n",
+      "output": "371\n",
+      "hidden": true
+    },
+    {
+      "input": "8\n8 10 4 24 13 16 5 3\n",
+      "output": "234\n",
+      "hidden": true
+    },
+    {
+      "input": "60\n391 341 237 171 924 936 395 592 918 707 291 567 284 393 873 750 782 591 10 800 256 678 860 19 450 972 159 154 741 327 172 264 671 708 636 598 61 123 804 602 34 443 888 289 862 753 222 75 744 369 750 487 129 569 687 19 127 102 936 148\n",
+      "output": "165250\n",
+      "hidden": true
+    },
+    {
+      "input": "200\n4085551 8425669 9265880 2716861 4128530 3882240 9266537 4292244 6666910 9198776 7778270 9195846 8782991 5744756 9832529 6043508 6488921 4658969 6776216 127558 1910806 475544 9041793 4331914 546805 8015552 2980163 5826291 5027929 6160752 7533716 3242880 494486 7351144 2818253 7887340 214972 1016748 1782487 9934247 1805917 2933664 9214955 7787586 271761 7289010 6962152 3370026 6204484 1879461 8134083 9223458 2996610 9888823 6010787 7555100 8309276 1973239 8705332 7380744 173347 7282662 9053727 685622 7958950 8598258 9047360 1671576 8786806 5150537 8916263 7718983 459308 5495632 7056991 8866899 1463394 9818464 9732298 6856299 9407526 4668915 3773392 7870141 9838554 8123904 3575152 9065960 898612 5413193 7799543 5162493 8985401 9991665 7438085 3404332 9252276 5911942 4940402 4240641 8076976 2464330 9226989 7084843 2995066 1886441 5001331 7789764 188906 2630474 7068312 1297601 9351342 8504532 8401124 4752307 9711290 9950838 7340523 7490207 8017596 6399386 281976 4685291 2344490 6721163 6759311 6474320 5323278 5368607 6736272 9581154 5529719 9271539 7678472 6857388 8577886 9934545 5443122 8025321 2090139 91613 2196529 6573367 3615718 6924131 4376572 894438 6558661 9414588 5510346 820623 8879855 4595635 555577 5438960 51313 4856425 7582378 1213254 8123112 8965689 9266314 2372993 5845577 4599630 1334158 8142882 8453124 9900238 30990 4049508 7302589 3118875 1801501 9526440 176741 8893789 2681883 9748985 8010329 2258842 2594505 8780677 9034465 6868038 7011469 3450553 8198838 908008 7693756 7699924 6803184 1260808 9248623 771282 1974424 4957872 8504263 1300536\n",
+      "output": "8587714002\n",
+      "hidden": true
+    },
+    {
+      "input": "200\n10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000 10000000\n",
+      "output": "15440000000\n",
+      "hidden": true
+    },
+    {
+      "input": "200\n1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 131072 262144 524288 1048576 2097152 4194304 8388608 1 2 4 8 16 32 64 128\n",
+      "output": "679478784\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Think about the very last weld. It joins a prefix of the row and the rest into one crate. What does it cost, and what must have been true about each side?",
+    "Let dp[i][j] be the cheapest way to weld crates i..j into one crate. The last weld splits the segment at some k, so dp[i][j] = min over k of dp[i][k] + dp[k+1][j] plus the weight of the whole segment i..j. Segment weights come from prefix sums.",
+    "Fill the table by increasing segment length, so both halves are already known. That is O(n^3) time and O(n^2) memory, fine for n up to a few hundred. A single crate costs 0."
+  ],
+  "editorial": "This is an **interval DP**: the answer for a segment is built from answers for smaller segments inside it. Let `dp[i][j]` be the minimum energy to weld crates `i..j` into one. A single crate costs 0. For `i < j`, consider the **last weld**: it joins the crate made from `i..k` with the crate made from `k+1..j` for some `k`. Those two sub-segments are welded independently, at cost `dp[i][k] + dp[k+1][j]`, and the final weld costs the weight of the entire segment, `pre[j+1] - pre[i]`, whatever `k` is. So `dp[i][j] = min over k in [i, j-1] of dp[i][k] + dp[k+1][j] + (pre[j+1] - pre[i])`. Compute segments in increasing order of length so that the shorter segments are ready. The answer is `dp[0][n-1]`. There are O(n^2) segments with O(n) split points each, so O(n^3) time and O(n^2) memory. The cost function satisfies the quadrangle inequality, so Knuth's optimisation (the best split point is monotone) brings the time down to O(n^2). Weights up to 10^7 and 200 crates give totals near 10^10, so use 64-bit integers.",
+  "complexity": {
+    "time": "O(n^3)",
+    "space": "O(n^2)"
+  },
+  "starter": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn = int(data[0])\nw = [int(x) for x in data[1:1 + n]]\n# prefix sums of w make 'weight of crates i..j' an O(1) lookup\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0];\nconst w = tok.slice(1, 1 + n);\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        // read n and the weights; use long for the DP table\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read n and the weights; use long long for the DP table\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nn = int(data[0])\nw = [int(x) for x in data[1:1 + n]]\npre = [0] * (n + 1)\nfor i in range(n):\n    pre[i + 1] = pre[i] + w[i]\nINF = float(\"inf\")\n# dp[i][j] = cheapest way to weld crates i..j into one crate\ndp = [[0] * n for _ in range(n)]\nfor length in range(2, n + 1):\n    for i in range(0, n - length + 1):\n        j = i + length - 1\n        best = INF\n        for k in range(i, j):                       # the last weld joins [i..k] and [k+1..j]\n            c = dp[i][k] + dp[k + 1][j]\n            if c < best:\n                best = c\n        dp[i][j] = best + pre[j + 1] - pre[i]       # that last weld costs the whole segment's weight\nprint(dp[0][n - 1])\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0];\nconst w = tok.slice(1, 1 + n);\nconst pre = new Array(n + 1).fill(0);\nfor (let i = 0; i < n; i++) pre[i + 1] = pre[i] + w[i];\nconst dp = [];\nfor (let i = 0; i < n; i++) dp.push(new Array(n).fill(0));\nfor (let len = 2; len <= n; len++) {\n  for (let i = 0; i + len <= n; i++) {\n    const j = i + len - 1;\n    let best = Infinity;\n    for (let k = i; k < j; k++) {\n      const c = dp[i][k] + dp[k + 1][j];\n      if (c < best) best = c;\n    }\n    dp[i][j] = best + pre[j + 1] - pre[i];\n  }\n}\nconsole.log(String(dp[0][n - 1]));\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        StreamTokenizer in = new StreamTokenizer(new BufferedInputStream(System.in));\n        in.nextToken();\n        int n = (int) in.nval;\n        long[] pre = new long[n + 1];\n        for (int i = 0; i < n; i++) {\n            in.nextToken();\n            pre[i + 1] = pre[i] + (long) in.nval;\n        }\n        long[][] dp = new long[n][n];\n        for (int len = 2; len <= n; len++) {\n            for (int i = 0; i + len <= n; i++) {\n                int j = i + len - 1;\n                long best = Long.MAX_VALUE;\n                for (int k = i; k < j; k++) {\n                    long c = dp[i][k] + dp[k + 1][j];\n                    if (c < best) best = c;\n                }\n                dp[i][j] = best + pre[j + 1] - pre[i];\n            }\n        }\n        System.out.println(dp[0][n - 1]);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\nint main() {\n    int n;\n    scanf(\"%d\", &n);\n    vector<ll> pre(n + 1, 0);\n    for (int i = 0; i < n; i++) {\n        ll x;\n        scanf(\"%lld\", &x);\n        pre[i + 1] = pre[i] + x;\n    }\n    vector<vector<ll>> dp(n, vector<ll>(n, 0));\n    for (int len = 2; len <= n; len++) {\n        for (int i = 0; i + len <= n; i++) {\n            int j = i + len - 1;\n            ll best = LLONG_MAX;\n            for (int k = i; k < j; k++) best = min(best, dp[i][k] + dp[k + 1][j]);\n            dp[i][j] = best + pre[j + 1] - pre[i];\n        }\n    }\n    printf(\"%lld\\n\", dp[0][n - 1]);\n    return 0;\n}\n"
+  }
+}

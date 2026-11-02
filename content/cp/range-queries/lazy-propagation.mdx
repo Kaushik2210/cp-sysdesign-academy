@@ -1,0 +1,292 @@
+---
+title: Lazy Propagation
+track: cp
+module: range-queries
+order: 4
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/range-queries/segment-trees]
+tags: [segment-tree, lazy-propagation, range-update, range-query, data-structure]
+type: lesson
+problems: [m12-garden-growth]
+furtherReading:
+  - title: cp-algorithms, Segment Tree (lazy propagation section)
+    url: https://cp-algorithms.com/data_structures/segment_tree.html#lazy-propagation
+  - title: CSES Problem Set, Range Updates and Sums
+    url: https://cses.fi/problemset/task/1735
+  - title: Codeforces EDU, Segment Tree (part 2, lazy propagation)
+    url: https://codeforces.com/edu/courses
+---
+
+## Intuition
+
+A plain [segment tree](/cp/range-queries/segment-trees/) handles "change one element" and "answer a range". Now the events are different: **"add `d` to every element in `a[l..r]`"** mixed with range queries. Doing it element by element costs `O(n)` per update, and `n = q = 2·10^5` means `4·10^10` steps.
+
+The observation behind **lazy propagation**: you rarely need the *individual* values. When an update covers a node's whole range, the node's answer changes in a way you can compute **without looking at its children**: adding `d` to every element adds `d` to the maximum, and adds `d · length` to the sum. So record the change on that one node and *postpone* telling the children. The postponed change is a **lazy tag**. It is paid for only if a later operation actually needs to look inside that node.
+
+## Definition
+
+Each node stores two things for its range:
+
+- `val`: the answer for the range (max, sum, ...) **including** every update applied to this node or above it that has already been pushed here.
+- `lz`: a tag, "add this amount to every element of the range, the children have not been told yet". Empty means `0`.
+
+Three operations:
+
+```text
+apply(node, d):   val += effect(d, node)     # max: d      sum: d * length
+                  lz  += d
+
+push(node):       if lz != 0:
+                      apply(left child,  lz)
+                      apply(right child, lz)
+                      lz = 0
+
+update(node, [l, r], ql, qr, d):
+    if [l, r] inside [ql, qr]:  apply(node, d); return      # stop: lazy
+    push(node)                                              # children must be correct before we change them
+    recurse into the children that overlap [ql, qr]
+    val = combine(left.val, right.val)
+
+query(node, ...): same shape; push(node) before descending; combine the answers
+```
+
+The rule that makes it correct: **always push before you descend**. Then any node you read has had every update above it delivered.
+
+Both operations visit `O(log n)` nodes (at most two partially covered nodes per level), so the whole structure is `O((n + q) log n)`.
+
+## Example, step by step
+
+Array `[3, 1, 4, 1, 5]`, operation "add 10 to positions 2 to 4" (1-based).
+
+1. Root covers `1..5`, only partly inside the update. Push (nothing to push), recurse.
+2. Left child covers `1..3`: partly inside; recurse. Its child `1..2` is partly inside; its leaf `2` is fully inside, so `val` becomes `11` and the leaf gets a tag (harmless on a leaf).
+3. Node `3..3` (leaf) is inside: `val = 14`.
+4. Right child `4..5`: partly inside; leaf `4` becomes `11`.
+5. Going back up, every touched node recomputes its maximum from its children.
+
+Now the update "add 5 to the whole array": the root is fully covered, so only `root.val += 5; root.lz += 5` happens and the recursion stops immediately. The next query that goes below the root pushes the `5` down one level at a time, **only along the path it follows**. The rest of the tree never hears about it until it is needed.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import sys
+sys.setrecursionlimit(10000)
+
+mx = [0] * (4 * n)
+lz = [0] * (4 * n)
+
+def build(o, l, r):
+    if l == r:
+        mx[o] = a[l]; return
+    m = (l + r) // 2
+    build(2*o, l, m); build(2*o+1, m+1, r)
+    mx[o] = max(mx[2*o], mx[2*o+1])
+
+def apply(o, d):
+    mx[o] += d; lz[o] += d
+
+def push(o):
+    if lz[o]:
+        apply(2*o, lz[o]); apply(2*o+1, lz[o]); lz[o] = 0
+
+def update(o, l, r, ql, qr, d):
+    if ql <= l and r <= qr:
+        apply(o, d); return
+    push(o)
+    m = (l + r) // 2
+    if ql <= m: update(2*o, l, m, ql, qr, d)
+    if qr > m:  update(2*o+1, m+1, r, ql, qr, d)
+    mx[o] = max(mx[2*o], mx[2*o+1])
+
+def query(o, l, r, ql, qr):
+    if ql <= l and r <= qr:
+        return mx[o]
+    push(o)
+    m = (l + r) // 2
+    best = None
+    if ql <= m: best = query(2*o, l, m, ql, qr)
+    if qr > m:
+        v = query(2*o+1, m+1, r, ql, qr)
+        best = v if best is None else max(best, v)
+    return best
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> mx(4 * n), lz(4 * n);
+
+void apply(int o, long long d) { mx[o] += d; lz[o] += d; }
+void push(int o) {
+    if (lz[o]) { apply(2*o, lz[o]); apply(2*o+1, lz[o]); lz[o] = 0; }
+}
+void update(int o, int l, int r, int ql, int qr, long long d) {
+    if (ql <= l && r <= qr) { apply(o, d); return; }
+    push(o);
+    int m = (l + r) / 2;
+    if (ql <= m) update(2*o, l, m, ql, qr, d);
+    if (qr > m)  update(2*o+1, m+1, r, ql, qr, d);
+    mx[o] = max(mx[2*o], mx[2*o+1]);
+}
+long long query(int o, int l, int r, int ql, int qr) {
+    if (ql <= l && r <= qr) return mx[o];
+    push(o);
+    int m = (l + r) / 2;
+    long long best = LLONG_MIN;
+    if (ql <= m) best = max(best, query(2*o, l, m, ql, qr));
+    if (qr > m)  best = max(best, query(2*o+1, m+1, r, ql, qr));
+    return best;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] mx, lz;
+
+static void apply(int o, long d) { mx[o] += d; lz[o] += d; }
+static void push(int o) {
+    if (lz[o] != 0) { apply(2*o, lz[o]); apply(2*o+1, lz[o]); lz[o] = 0; }
+}
+static void update(int o, int l, int r, int ql, int qr, long d) {
+    if (ql <= l && r <= qr) { apply(o, d); return; }
+    push(o);
+    int m = (l + r) / 2;
+    if (ql <= m) update(2*o, l, m, ql, qr, d);
+    if (qr > m)  update(2*o+1, m+1, r, ql, qr, d);
+    mx[o] = Math.max(mx[2*o], mx[2*o+1]);
+}
+static long query(int o, int l, int r, int ql, int qr) {
+    if (ql <= l && r <= qr) return mx[o];
+    push(o);
+    int m = (l + r) / 2;
+    long best = Long.MIN_VALUE;
+    if (ql <= m) best = Math.max(best, query(2*o, l, m, ql, qr));
+    if (qr > m)  best = Math.max(best, query(2*o+1, m+1, r, ql, qr));
+    return best;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it against a brute force and watch the lazy tree answer correctly after thousands of random operations:
+
+<CodeRunner language="python" code={`import random
+random.seed(5)
+
+class Lazy:
+    def __init__(self, a):
+        self.n = len(a)
+        self.mx = [0] * (4 * self.n)
+        self.lz = [0] * (4 * self.n)
+        self._build(1, 0, self.n - 1, a)
+    def _build(self, o, l, r, a):
+        if l == r:
+            self.mx[o] = a[l]; return
+        m = (l + r) // 2
+        self._build(2*o, l, m, a); self._build(2*o+1, m+1, r, a)
+        self.mx[o] = max(self.mx[2*o], self.mx[2*o+1])
+    def _apply(self, o, d):
+        self.mx[o] += d; self.lz[o] += d
+    def _push(self, o):
+        if self.lz[o]:
+            self._apply(2*o, self.lz[o]); self._apply(2*o+1, self.lz[o]); self.lz[o] = 0
+    def add(self, ql, qr, d, o=1, l=0, r=None):
+        if r is None: r = self.n - 1
+        if ql <= l and r <= qr:
+            self._apply(o, d); return
+        self._push(o)
+        m = (l + r) // 2
+        if ql <= m: self.add(ql, qr, d, 2*o, l, m)
+        if qr > m: self.add(ql, qr, d, 2*o+1, m+1, r)
+        self.mx[o] = max(self.mx[2*o], self.mx[2*o+1])
+    def best(self, ql, qr, o=1, l=0, r=None):
+        if r is None: r = self.n - 1
+        if ql <= l and r <= qr:
+            return self.mx[o]
+        self._push(o)
+        m = (l + r) // 2
+        res = -10**30
+        if ql <= m: res = max(res, self.best(ql, qr, 2*o, l, m))
+        if qr > m: res = max(res, self.best(ql, qr, 2*o+1, m+1, r))
+        return res
+
+a = [random.randint(-50, 50) for _ in range(60)]
+t = Lazy(a)
+for step in range(5000):
+    l = random.randint(0, 59); r = random.randint(l, 59)
+    if random.random() < 0.5:
+        d = random.randint(-9, 9)
+        t.add(l, r, d)
+        for i in range(l, r + 1):
+            a[i] += d
+    else:
+        assert t.best(l, r) == max(a[l:r + 1]), (l, r)
+print("5000 random operations: lazy tree matches the brute force")
+t2 = Lazy([3, 1, 4, 1, 5])
+t2.add(1, 3, 10)
+print("max after adding 10 to positions 2..4:", t2.best(0, 4))
+t2.add(0, 4, 5)
+print("root tag pending after a whole-array add:", t2.lz[1])
+print("max of the first two positions:", t2.best(0, 1))
+print("root tag after that query had to look inside:", t2.lz[1])
+`} />
+
+## Combining different tags
+
+What you must define for a given problem:
+
+| problem | node value | `apply(node, d)` | tag composition |
+| --- | --- | --- | --- |
+| range add, range max/min | max | `val += d` | `lz += d` |
+| range add, range sum | sum | `val += d * len` | `lz += d` |
+| range assign, range sum | sum | `val = d * len` | `lz = d` (a new assignment *replaces* any earlier tag) |
+| range assign **and** range add, range sum | sum | needs two fields | order matters, see below |
+
+A tag is a **function** applied to the elements. For correctness you need: composing two tags gives another tag of the same kind (so a node holds one pending tag, not a growing list), and the node's value can be updated from the tag in `O(1)`.
+
+**Assign plus add together.** Store the pending tag as a pair `(mul, add)` meaning "x becomes `mul · x + add`". Composing a new `(m2, a2)` after `(m1, a1)` gives `(m2·m1, m2·a1 + a2)`. Assignment is `mul = 0`, `add = value`; addition is `mul = 1`, `add = d`. The order of composition is the classic place where this goes wrong.
+
+## Two common alternatives
+
+- **No-push (permanent tags).** For add + max you can leave a tag on the node forever and never push: define `mx[o] = max(mx[2o], mx[2o+1]) + add[o]`. A query adds the tags it passes on the way down. It is shorter, but it only works when the tag composes commutatively and the combine step can absorb it, so it does not extend to assignment.
+- **Fenwick tree for add + sum.** Range add with *point* query needs just a Fenwick tree over the difference array. Range add with *range sum* needs two Fenwick trees. Use them when the operation set is that simple; reach for lazy propagation when you also need max, min, or assignment.
+
+## Pitfalls
+
+1. **Forgetting to push before descending**, in `update` *or* `query`. The children then hold stale values, and the bug appears only for particular operation orders.
+2. **Pushing but not recomputing on the way back** (`mx[o] = max(children)`), so the parent keeps an old value.
+3. **`apply` that ignores the length** for sums: `val += d`, instead of `val += d * len`.
+4. **Overflow.** `10^9` plus `2·10^5` additions of `10^6` is `2·10^11`. Use 64-bit integers.
+5. **Wrong tag composition** when mixing assign and add (assignment must clear the earlier add).
+6. **Tag array too small.** Use `4n` entries for the recursive layout.
+7. **Using it when you do not need it.** If every update is a single point, the plain segment tree is simpler and faster.
+
+## Practice
+
+<Problem id="m12-garden-growth" />
+
+## Problem ladder
+
+- [Range Update Queries](https://cses.fi/problemset/task/1651) (CSES): range add, point query, so a Fenwick tree also works.
+- [Range Updates and Sums](https://cses.fi/problemset/task/1735) (CSES): add and assign together, the `(mul, add)` tag.
+- [Circular RMQ](https://codeforces.com/problemset/problem/52/C) (Codeforces 52C, rating about 2200): range add and range minimum on a circular array.
+- [Falling Squares](https://leetcode.com/problems/falling-squares/) (LeetCode, hard): range assign to a maximum, then range max.
+- [Range Sum Query - Mutable](https://leetcode.com/problems/range-sum-query-mutable/) (LeetCode, medium): the plain segment tree contrast.
+
+## Quiz
+
+<Quiz id="cp-m12-lazy-propagation" tags={["segment-tree", "lazy-propagation"]} questions={[
+  { type: "mcq", q: "When an update fully covers a node's range, what does lazy propagation do?", options: ["Visits all leaves below it", "Updates the node's value, stores a tag, and stops", "Rebuilds the node's children", "Ignores the update"], answer: 1, explain: "The node's answer can be updated in O(1) and the children are told later, only if needed." },
+  { type: "mcq", q: "Why must `push(node)` run before descending into the children?", options: ["To save memory", "So the children hold the updates that were postponed on this node, and are correct to read or change", "To clear the array", "To sort the children"], answer: 1, explain: "Otherwise a child would answer without the pending tag above it." },
+  { type: "predict", q: "For a range-add / range-sum tree, a node covers 4 elements and receives `apply(node, 3)`. By how much does its sum increase?", code: "length = 4\nd = 3\nprint(d * length)", options: ["3", "4", "7", "12"], answer: 3, explain: "Each of the 4 elements grows by 3, so the sum grows by d times the length." },
+  { type: "mcq", q: "What is the complexity of n elements and q mixed range updates and range queries with lazy propagation?", options: ["O(n q)", "O((n + q) log n)", "O(q)", "O(n log^2 n)"], answer: 1, explain: "Each operation visits O(log n) nodes; building costs O(n)." },
+  { type: "multi", q: "Which of these cause wrong answers in a lazy segment tree?", options: ["Not pushing the tag before recursing into a child", "Not recomputing the parent from its children after the recursion", "Using 64-bit integers for sums that can pass 2^31", "Composing an assignment tag without clearing the earlier add tag"], answer: [0, 1, 3], explain: "Using 64-bit integers is the correct choice, not a bug." }
+]} />
