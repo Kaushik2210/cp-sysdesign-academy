@@ -711,11 +711,14 @@ test.describe("interactive, maximalist UI", () => {
   });
 });
 
-test.describe("distributed systems theory lessons", () => {
+test.describe("distributed systems theory and consensus lessons", () => {
   const SD_LESSONS: [string, string][] = [
     ["/sd/distributed-theory/time-clocks-and-ordering/", "Time, Clocks and Ordering"],
     ["/sd/distributed-theory/consistency-models-and-quorums/", "Consistency Models and Quorums"],
     ["/sd/distributed-theory/failure-detection-leases-and-fencing/", "Failure Detection, Leases and Fencing"],
+    ["/sd/consensus-and-coordination/consensus-and-raft/", "Consensus and Raft"],
+    ["/sd/consensus-and-coordination/paxos-and-multi-paxos/", "Paxos and Multi-Paxos"],
+    ["/sd/consensus-and-coordination/two-phase-commit-and-coordination/", "Two-Phase Commit and Coordination Services"],
   ];
   for (const [path, title] of SD_LESSONS) {
     test(`${title} shows its simulation, trade-offs table and quiz`, async ({ page }) => {
@@ -743,7 +746,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("142");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("145");
   });
 });
 
