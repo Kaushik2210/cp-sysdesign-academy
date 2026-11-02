@@ -1,0 +1,1 @@
+{ "title": "Security Fundamentals", "level": "Level 2: Intermediate Systems", "order": 15, "summary": "The security knowledge a system designer needs: storing passwords safely, tokens and sessions, authorization (roles, attributes and object-level checks), and threat modelling with the common web attacks." }

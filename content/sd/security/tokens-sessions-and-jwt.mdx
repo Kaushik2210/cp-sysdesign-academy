@@ -1,0 +1,187 @@
+---
+title: Tokens, Sessions and JWTs
+track: sd
+module: security
+order: 2
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/security/passwords-and-credential-storage", "sd/networking-and-apis/client-server-and-http"]
+tags: [security, sessions, cookies, jwt, oauth, oidc, tokens, revocation, hmac]
+type: lesson
+furtherReading:
+  - title: "RFC 8725, JSON Web Token Best Current Practices"
+    url: https://www.rfc-editor.org/rfc/rfc8725
+  - title: "OAuth 2.0 for Browser-Based Apps and the Authorization Code flow with PKCE (RFC 7636)"
+    url: https://www.rfc-editor.org/rfc/rfc7636
+  - title: "OWASP Session Management Cheat Sheet"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+  - title: "OpenID Connect Core 1.0"
+    url: https://openid.net/specs/openid-connect-core-1_0.html
+---
+
+## Intuition
+
+HTTP forgets you between requests. After you sign in, the server needs a way to recognise your next request without asking for the password again. The answer is always some **credential that the client presents on every request**: a **session identifier** in a cookie, or a **token** in an `Authorization` header. Whoever holds it **is** you, as far as the server can tell. So the design questions are about this thing:
+
+- What is it, and what does the server have to remember to check it?
+- How long does it live, and how do we **take it back** if it is stolen?
+- Where does the client keep it, and what protects it there?
+
+## Two designs
+
+**Server-side sessions (opaque identifiers).** On login the server creates a random, unguessable id, stores `session_id -> user, expiry, attributes` in a store (memory, Redis, a database) and sends the id in a cookie. Each request is a lookup. Revocation is trivial: delete the record. The cost is a lookup per request and a shared store when you run many servers (the stateless-services lesson covers this).
+
+**Self-contained tokens (such as JWT).** The server issues a signed statement: *"user alice, role user, expires at 12:05"*. Any service that knows the verification key can check the signature and trust the contents **without a lookup**. That is convenient for microservices and third parties. The cost: you cannot easily **revoke** a token before it expires, and everything in it is visible to the client (signed, not encrypted, unless you use JWE).
+
+A **JWT** has three base64url parts, `header.payload.signature`. The header names the algorithm (`HS256` for a shared-secret HMAC, `RS256` or `ES256` for a public-key signature), the payload carries *claims* (`sub`, `exp`, `aud`, `iss`, roles), and the signature covers the first two parts.
+
+## OAuth 2.0 and OpenID Connect in one paragraph
+
+**OAuth 2.0** lets an application act on a user's behalf without holding their password: the user signs in at the *authorization server*, which issues an **access token** (short-lived, sent to APIs) and optionally a **refresh token** (long-lived, used only against the authorization server to get new access tokens). For browser and mobile apps use the **authorization code flow with PKCE**. **OpenID Connect (OIDC)** adds an **ID token** (a JWT that says who the user is) on top, and is what "Sign in with Google" uses. The pattern **short-lived access token + revocable refresh token** is the standard compromise between the two designs above.
+
+## Cookies versus headers
+
+| where the credential lives | protects against | exposed to |
+| --- | --- | --- |
+| Cookie with `HttpOnly; Secure; SameSite=Lax` | script access (XSS cannot read it), network sniffing, most cross-site requests | **CSRF** if not for SameSite or anti-CSRF tokens |
+| `Authorization: Bearer` header, token in memory | CSRF (the browser does not add it automatically) | XSS can use or steal it; harder to keep across reloads |
+| Token in `localStorage` | nothing in particular | any script on the page (XSS) can read it |
+
+A common safe default for a web app: an opaque session id (or a short-lived token) in an `HttpOnly`, `Secure`, `SameSite` cookie, plus CSRF defences. For mobile and service-to-service calls, bearer tokens with short lifetimes.
+
+## Code: forging, flawed verifiers and revocation
+
+The program signs a token with HMAC-SHA256 and then attacks it five ways against two verifiers. The **flawed** verifier believes the algorithm named in the *untrusted* token header (a real class of bugs: the `alg: none` attack). The **strict** verifier fixes the algorithm on the server, always checks the signature and enforces expiry. The second part simulates a stolen token that is revoked 10 minutes after the theft, for three token lifetimes.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import base64, hashlib, hmac, json, random
+
+random.seed(5)
+SECRET = b"server-side-secret-key"
+
+def b64(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+def unb64(s):
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+def sign(payload, alg="HS256"):
+    header = b64(json.dumps({"alg": alg}).encode())
+    body = b64(json.dumps(payload).encode())
+    sig = b64(hmac.new(SECRET, f"{header}.{body}".encode(), hashlib.sha256).digest()) if alg == "HS256" else ""
+    return f"{header}.{body}.{sig}"
+
+def verify_naive(token, now):
+    header, body, sig = token.split(".")
+    alg = json.loads(unb64(header))["alg"]
+    if alg != "none":
+        good = b64(hmac.new(SECRET, f"{header}.{body}".encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(sig, good):
+            return None
+    payload = json.loads(unb64(body))
+    return payload if payload["exp"] > now else None
+
+def verify_strict(token, now):
+    try:
+        header, body, sig = token.split(".")
+        if json.loads(unb64(header)).get("alg") != "HS256":
+            return None
+        good = b64(hmac.new(SECRET, f"{header}.{body}".encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(sig, good):
+            return None
+        payload = json.loads(unb64(body))
+        return payload if payload["exp"] > now else None
+    except Exception:
+        return None
+
+now = 1_000_000
+good = sign({"sub": "alice", "role": "user", "exp": now + 300})
+header, body, sig = good.split(".")
+forged_body = b64(json.dumps({"sub": "alice", "role": "admin", "exp": now + 300}).encode())
+attacks = {
+    "valid token": good,
+    "role changed to admin, old signature": f"{header}.{forged_body}.{sig}",
+    "alg set to none, no signature": sign({"sub": "alice", "role": "admin", "exp": now + 300}, alg="none"),
+    "expired token": sign({"sub": "alice", "role": "user", "exp": now - 1}),
+    "signature stripped": f"{header}.{body}.",
+}
+print(" attack                                    flawed verifier     strict verifier")
+for name, tok in attacks.items():
+    a = verify_naive(tok, now)
+    b = verify_strict(tok, now)
+    print(f" {name:40s}  {'ACCEPTED ' + a['role'] if a else 'rejected':18s}  {'accepted ' + b['role'] if b else 'rejected'}")
+
+print()
+print("Stolen token, revoked 10 minutes after the theft. How long can the thief still use it?")
+print(" token lifetime   average minutes of use after revocation (no blocklist)   with a blocklist check")
+for ttl in (5, 60, 24 * 60):
+    total = 0.0
+    for _ in range(100000):
+        age_at_theft = random.uniform(0, ttl)
+        remaining = ttl - age_at_theft
+        total += max(0.0, remaining - 10)
+    print(f" {ttl:8d} min     {total / 100000:10.1f} minutes                                          0.0 minutes")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| attack | flawed verifier | strict verifier |
+| --- | --- | --- |
+| valid token | accepted (user) | accepted (user) |
+| role changed to admin, old signature | rejected | rejected |
+| `alg: none`, no signature | **ACCEPTED as admin** | rejected |
+| expired token | rejected | rejected |
+| signature stripped | rejected | rejected |
+
+| token lifetime | average minutes the thief can still use it after revocation (no blocklist) | with a blocklist check |
+| --- | --- | --- |
+| 5 minutes | 0.0 | 0.0 |
+| 60 minutes | 20.8 | 0.0 |
+| 24 hours (1,440 minutes) | 712.2 | 0.0 |
+
+The signature protects the contents: changing the role invalidates it in both verifiers. But the flawed verifier let an attacker **skip the signature altogether** simply by declaring `alg: none`, a complete authentication bypass in one field, because the verifier trusted the attacker-controlled header. The fix is a rule, not a trick: **the server decides the algorithm and the key**, never the token. The second table shows the cost of self-contained tokens: with a 24-hour lifetime a stolen token stays usable for about 12 hours *after* you revoke it (the closed form is `(T - 10)^2 / (2T)` minutes for lifetime `T`), whereas a 5-minute lifetime leaves no window at all for a 10-minute response time. Hence **short-lived access tokens**, refresh tokens that the server *can* revoke, and a blocklist (or token version per user) checked on sensitive operations. The model assumes the theft happens at a uniformly random time in the token's life.
+
+## Rules for JWTs in practice
+
+- Fix the allowed algorithms on the server; reject `none` and unexpected algorithms (and never let a public key be treated as an HMAC secret, the other classic confusion).
+- Validate `exp`, `nbf`, `iss` and **`aud`** (the token must be meant for *this* service), allowing small clock skew.
+- Keep access tokens short (minutes), and keep secrets out of the payload: it is readable by anyone holding the token.
+- Prefer asymmetric signatures (`RS256`, `ES256`) when many services verify tokens: they hold only the public key; publish it at a JWKS endpoint and rotate keys with `kid`.
+- Do not use JWTs as a general-purpose session store; if you need instant revocation or lots of mutable state, use server-side sessions.
+- Store refresh tokens securely, rotate them on use, and detect reuse (a reused refresh token means theft).
+
+## Trade-offs
+
+<TradeOffs caption="Session and token designs" rows={[
+  { option: "Server-side session id in a cookie", pros: "Instant revocation; small credential; contents never leave the server", cons: "Lookup per request; shared store needed", chooseWhen: "First-party web applications" },
+  { option: "Self-contained JWT access token", pros: "No lookup; verifiable by any service with the key", cons: "Hard to revoke; payload visible; easy to misuse", chooseWhen: "Short-lived tokens between services and for third-party API access" },
+  { option: "Short access token + refresh token (OAuth2)", pros: "Small theft window; server controls refresh and revocation", cons: "More moving parts: rotation, storage, reuse detection", chooseWhen: "Mobile apps, SPAs, public APIs" },
+  { option: "Opaque access token with introspection", pros: "Instant revocation; no data in the token", cons: "Every call needs a lookup or cached introspection", chooseWhen: "High-risk APIs that need immediate revocation" },
+  { option: "Mutual TLS or signed requests for service-to-service", pros: "Strong machine identity; no bearer secrets to steal", cons: "Certificate management", chooseWhen: "Internal microservice traffic" }
+]} />
+
+## Pitfalls
+
+- Trusting any field of the token header, especially `alg`.
+- Long-lived JWTs with no revocation story.
+- Putting personal data or secrets in the payload.
+- Not checking `aud` and `iss`, so a token issued for one service works on another.
+- Putting tokens in URLs (they end up in logs and referrer headers).
+- Storing tokens in `localStorage` in an application that may suffer XSS.
+- Comparing signatures with `==` instead of a constant-time comparison.
+- Using the same signing key for years; no rotation plan.
+
+## What would you choose and why?
+
+You are designing sign-in for a web app with a React front end, a mobile app, and twelve internal services behind a gateway. Where do tokens live in each client? Which token type goes between the gateway and the services? How quickly must you be able to cut off a compromised account, and what does that imply for token lifetimes and revocation?
+
+## Quiz
+
+<Quiz id="sd-m15-tokens-sessions-jwt" tags={["security", "jwt", "sessions"]} questions={[
+  { type: "mcq", q: "What was the flaw in the lesson's naive JWT verifier?", options: ["It used HMAC", "It trusted the algorithm named in the untrusted token header, so alg none skipped the signature", "It checked expiry", "It used base64"], answer: 1, explain: "The verifier must choose the algorithm and key itself, never read them from the token." },
+  { type: "predict", q: "A token lives 60 minutes and is revoked 10 minutes after theft at a random point in its life. About how long can the thief use it after revocation (no blocklist)?", code: "T = 60\nprint(round((T - 10) ** 2 / (2 * T), 1))", options: ["0 minutes", "About 21 minutes", "About 50 minutes", "60 minutes"], answer: 1, explain: "(60 - 10)^2 / (2 x 60) = 20.8 minutes, matching the measured 20.8." },
+  { type: "mcq", q: "Why are short-lived access tokens combined with refresh tokens?", options: ["To make tokens larger", "To limit the theft window while letting the server revoke the long-lived refresh token", "To avoid TLS", "To skip signature checks"], answer: 1, explain: "Access tokens expire quickly on their own; the refresh token is what the server can revoke." },
+  { type: "multi", q: "Which cookie attributes help protect a session cookie?", options: ["HttpOnly", "Secure", "SameSite", "Path=/admin-only-by-name"], answer: [0, 1, 2], explain: "HttpOnly blocks script access, Secure forces HTTPS, SameSite reduces cross-site sending." },
+  { type: "mcq", q: "Which is true about a signed (not encrypted) JWT payload?", options: ["Clients cannot read it", "Anyone holding the token can read it, so no secrets belong there", "It is always encrypted", "It cannot be modified by the server"], answer: 1, explain: "Signing prevents tampering, not reading; use JWE or keep data server-side if it must be hidden." }
+]} />

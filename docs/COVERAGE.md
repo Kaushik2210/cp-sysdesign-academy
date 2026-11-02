@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 189 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 193 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -67,7 +67,8 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 12 Consensus and coordination | Complete (4: consensus and majorities, Raft leader election, Raft log replication and safety, leases and fencing tokens; Paxos is described, not walked through; no Raft implementation exercise yet) | 4 |
 | 13 Microservice patterns | Complete (4: service boundaries and availability, retry amplification and circuit breakers, CQRS and event sourcing, evolving APIs and events; no service mesh or API gateway lesson beyond module 5) | 4 |
 | 14 Search systems | Complete (4: inverted indexes and text analysis, TF-IDF and BM25 ranking, scatter-gather and tail latency, vector search and ANN; no typeahead or learning-to-rank lesson) | 4 |
-| 15-28 (Levels 2-4, case studies, LLD) | Planned | 0 |
+| 15 Security fundamentals | Complete (4: passwords and credential storage, tokens sessions and JWTs, authorization with RBAC ABAC and object-level checks, threat modelling and common web attacks; no dedicated TLS, cryptography or secrets-management lesson) | 4 |
+| 16-28 (Levels 2-4, case studies, LLD) | Planned | 0 |
 
 ## Known gaps and caveats
 

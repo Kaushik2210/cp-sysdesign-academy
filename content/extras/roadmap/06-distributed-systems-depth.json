@@ -30,7 +30,7 @@
     { "kind": "lesson", "ref": "sd/scalability/load-shedding-and-bulkheads" },
     { "kind": "page", "title": "Glossary: consensus, quorum, split brain, fencing token", "href": "/glossary/", "note": "Search these terms and follow the related links." },
     { "kind": "project", "title": "A replicated key-value store that survives failures", "brief": "Implement a leader-based replicated store (the MIT labs are a good scaffold). Add a test harness that kills nodes, delays and drops messages, and checks that acknowledged writes are never lost and reads are linearizable where you promise it.", "deliverable": "A repository with the store, a fault-injection test suite and a short document explaining which guarantees you provide and which you do not." },
-    { "kind": "planned", "title": "Security and observability modules", "note": "SD modules 15 and 16 (security and observability) are not written on this site yet. The papers and course above cover the same ground in the meantime." }
+    { "kind": "planned", "title": "Observability module", "note": "SD module 16 (observability and reliability) is not written on this site yet. The papers and course above cover the same ground in the meantime." }
   ],
   "exit": [
     "You can explain how Raft elects a leader and why a committed entry cannot be lost.",

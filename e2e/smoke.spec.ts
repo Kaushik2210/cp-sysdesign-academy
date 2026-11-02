@@ -81,6 +81,10 @@ test("distributed systems lessons render with a runnable program and a quiz", as
     ["/sd/search-systems/ranking-tf-idf-and-bm25/", "Ranking with TF-IDF and BM25"],
     ["/sd/search-systems/scatter-gather-search-and-tail-latency/", "Scatter-Gather Search and Tail Latency"],
     ["/sd/search-systems/vector-search-and-ann/", "Vector Search and Approximate Nearest Neighbours"],
+    ["/sd/security/passwords-and-credential-storage/", "Passwords and Credential Storage"],
+    ["/sd/security/tokens-sessions-and-jwt/", "Tokens, Sessions and JWTs"],
+    ["/sd/security/authorization-rbac-abac-and-idor/", "Authorization with RBAC, ABAC and Object-Level Checks"],
+    ["/sd/security/threat-modeling-and-web-attacks/", "Threat Modeling and Common Web Attacks"],
   ]) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
@@ -753,7 +757,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("149");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("153");
   });
 });
 
