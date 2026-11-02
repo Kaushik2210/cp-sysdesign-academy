@@ -1,0 +1,266 @@
+---
+title: Strongly Connected Components
+track: cp
+module: graphs
+order: 8
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/graphs/topological-sort, cp/graphs/bridges]
+tags: [graph, directed-graph, scc, kosaraju, condensation, dfs]
+type: lesson
+problems: [m11-mutual-reach]
+furtherReading:
+  - title: cp-algorithms, Strongly Connected Components and the Condensation Graph
+    url: https://cp-algorithms.com/graph/strongly-connected-components.html
+  - title: CSES Problem Set, Planets and Kingdoms
+    url: https://cses.fi/problemset/task/1683
+  - title: cp-algorithms, 2-SAT
+    url: https://cp-algorithms.com/graph/2SAT.html
+---
+
+## Intuition
+
+In an undirected graph, "connected" is easy: if you can walk from `a` to `b`, you can walk back. With **one-way streets** that breaks. You may be able to drive from `a` to `b` and never return.
+
+Group the squares into **districts**: two squares are in the same district when you can drive from each to the other. Inside a district you can wander anywhere and always get back. Between districts traffic only flows one way, otherwise they would merge into one. So if you shrink every district to a single dot, **no cycle can remain**: the picture becomes a directed acyclic graph, and the tools from [topological sort](/cp/graphs/topological-sort/) apply again.
+
+## Definition
+
+In a directed graph, vertices `u` and `v` are **strongly connected** if there is a path `u -> v` **and** a path `v -> u`. This is an equivalence relation, and its classes are the **strongly connected components** (SCCs). Contracting each SCC to one vertex gives the **condensation graph**, which is always a DAG.
+
+**Kosaraju's algorithm** finds all SCCs with two DFS passes in `O(n + m)`:
+
+```text
+pass 1:  DFS the whole graph; append each vertex to `order` when it FINISHES.
+pass 2:  build the reversed graph (flip every edge).
+         for v in reversed(order):        # latest finisher first
+             if v is unvisited: DFS from v in the reversed graph; everything reached is one SCC.
+```
+
+**Why it works.** The vertex that finishes last in pass 1 lies in a *source* component of the condensation DAG (nothing points into it). In the reversed graph that component has no outgoing edges to the others, so the DFS from it reaches exactly its own vertices. Remove it and repeat: the next latest finisher is in a source of what remains.
+
+## Example, step by step
+
+Graph with 7 vertices:
+
+```text
+1->2  2->3  3->1     (a triangle)
+3->4                 (a one-way bridge out)
+4->5  5->6  6->4     (another triangle)
+6->7                 (a one-way tail)
+```
+
+**Pass 1** from vertex 1 (neighbours in input order): `1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7`. Vertex 7 has no outgoing edge, so it finishes first. Then 6, 5, 4, 3, 2, 1 finish in that order:
+
+```text
+order = [7, 6, 5, 4, 3, 2, 1]
+```
+
+**Pass 2** on the reversed graph, scanning `order` from the end:
+
+| start | reaches in reversed graph | component |
+| --- | --- | --- |
+| 1 | reversed edges lead 1 to 3, then 3 to 2; the reversed `4->3` points away from 4 only, so nothing outside the triangle is reached | `{1, 2, 3}` |
+| 2, 3 | already visited | skipped |
+| 4 | reversed edges lead 4 to 6, then 6 to 5; the reversed `3->4` is `4->3`, but 3 is already visited | `{4, 5, 6}` |
+| 5, 6 | already visited | skipped |
+| 7 | the reversed `6->7` is `7->6`, and 6 is already visited | `{7}` |
+
+Three components of sizes `3, 3, 1`. The condensation is the chain `{1,2,3} -> {4,5,6} -> {7}`.
+
+## Code
+
+The recursive form is short. The sweep order is the important part.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import sys
+sys.setrecursionlimit(10000)           # fine for a few thousand vertices; use an explicit stack beyond that
+
+adj = [[] for _ in range(n + 1)]
+radj = [[] for _ in range(n + 1)]
+for u, v in edges:
+    adj[u].append(v)
+    radj[v].append(u)
+
+seen = [False] * (n + 1)
+order = []
+def dfs1(v):
+    seen[v] = True
+    for to in adj[v]:
+        if not seen[to]:
+            dfs1(to)
+    order.append(v)                    # appended when v FINISHES
+
+comp = [0] * (n + 1)
+def dfs2(v, c):
+    comp[v] = c
+    for to in radj[v]:
+        if not comp[to]:
+            dfs2(to, c)
+
+for s in range(1, n + 1):
+    if not seen[s]:
+        dfs1(s)
+c = 0
+for s in reversed(order):
+    if not comp[s]:
+        c += 1
+        dfs2(s, c)                     # comp[v] in 1..c, numbered in topological order of the condensation
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<int>> adj(n + 1), radj(n + 1);
+vector<bool> seen(n + 1, false);
+vector<int> order, comp(n + 1, 0);
+
+void dfs1(int v) {
+    seen[v] = true;
+    for (int to : adj[v]) if (!seen[to]) dfs1(to);
+    order.push_back(v);                // appended when v FINISHES
+}
+void dfs2(int v, int c) {
+    comp[v] = c;
+    for (int to : radj[v]) if (!comp[to]) dfs2(to, c);
+}
+// for (int s = 1; s <= n; s++) if (!seen[s]) dfs1(s);
+// int c = 0;
+// for (int i = n - 1; i >= 0; i--) if (!comp[order[i]]) dfs2(order[i], ++c);
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static List<Integer>[] adj, radj;
+static boolean[] seen;
+static int[] order, comp;
+static int cnt = 0;
+
+static void dfs1(int v) {
+    seen[v] = true;
+    for (int to : adj[v]) if (!seen[to]) dfs1(to);
+    order[cnt++] = v;                  // stored when v FINISHES
+}
+static void dfs2(int v, int c) {
+    comp[v] = c;
+    for (int to : radj[v]) if (comp[to] == 0) dfs2(to, c);
+}
+// for (int s = 1; s <= n; s++) if (!seen[s]) dfs1(s);
+// int c = 0;
+// for (int i = n - 1; i >= 0; i--) if (comp[order[i]] == 0) dfs2(order[i], ++c);
+```
+
+</Tab>
+</Tabs>
+
+Run it, check it against a pairwise reachability table, and see the components:
+
+<CodeRunner language="python" code={`import random
+
+def scc(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    radj = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        adj[u].append(v)
+        radj[v].append(u)
+    seen = [False] * (n + 1)
+    order = []
+
+    def dfs1(v):
+        seen[v] = True
+        for to in adj[v]:
+            if not seen[to]:
+                dfs1(to)
+        order.append(v)
+
+    for s in range(1, n + 1):
+        if not seen[s]:
+            dfs1(s)
+    comp = [0] * (n + 1)
+    c = 0
+
+    def dfs2(v):
+        comp[v] = c
+        for to in radj[v]:
+            if not comp[to]:
+                dfs2(to)
+
+    for s in reversed(order):
+        if not comp[s]:
+            c += 1
+            dfs2(s)
+    return c, comp[1:]
+
+def brute(n, edges):
+    reach = [[i == j for j in range(n + 1)] for i in range(n + 1)]
+    for u, v in edges:
+        reach[u][v] = True
+    for k in range(1, n + 1):
+        for i in range(1, n + 1):
+            for j in range(1, n + 1):
+                if reach[i][k] and reach[k][j]:
+                    reach[i][j] = True
+    return [[reach[i][j] and reach[j][i] for j in range(1, n + 1)] for i in range(1, n + 1)]
+
+edges = [(1, 2), (2, 3), (3, 1), (3, 4), (4, 5), (5, 6), (6, 4), (6, 7)]
+count, comp = scc(7, edges)
+print("components:", count, "labels:", comp)
+
+random.seed(4)
+for _ in range(400):
+    n = random.randint(1, 9)
+    es = [(random.randint(1, n), random.randint(1, n)) for _ in range(random.randint(0, 14))]
+    es = [(u, v) for u, v in es if u != v]
+    k, comp = scc(n, es)
+    same = brute(n, es)
+    for i in range(n):
+        for j in range(n):
+            assert (comp[i] == comp[j]) == same[i][j]
+print("400 random digraphs agree with the pairwise reachability table")
+`} />
+
+Labels come out in **topological order of the condensation**: an edge between two components always goes from a smaller label to a larger one. That is exactly what you need to run a DP over the DAG afterwards.
+
+## What SCCs give you
+
+- **Condensation DP.** Contract each component, then count paths, longest paths or reachable sets on the DAG in topological order. Typical statements: "maximum coins collected on a route that may revisit squares", "minimum number of edges to add so everything is reachable".
+- **Source and sink components.** The condensation's source components (in-degree 0) are the places you must start from to reach everything.
+- **2-SAT.** Each variable and its negation become vertices, each clause adds two implication edges, and the formula is satisfiable exactly when no variable shares an SCC with its negation.
+- **Tarjan's algorithm** finds the same components in one DFS using `tin` and `low`, like the [bridges lesson](/cp/graphs/bridges/). Kosaraju is easier to remember; Tarjan needs no reversed graph.
+
+## Pitfalls
+
+1. **Using the wrong order in pass 2.** You must sweep from the **latest** finisher. Scanning `order` from the front merges components.
+2. **Forgetting to reverse the graph** (or reversing it in pass 1). One pass is on the original edges, the other on the reversed ones.
+3. **Appending on discovery instead of finish.** The list must be post-order, appended after the neighbour loop.
+4. **Treating it like undirected connectivity.** Union-find does not work on directed edges.
+5. **Recursion depth.** A chain of `2·10^5` vertices overflows the stack in Python and Java; use an explicit stack or run in a thread with a big stack. The practice problem's reference solution does the first pass iteratively.
+6. **Vertex numbering.** Mixing 0-based and 1-based indexes when you size `comp` and `seen` is the classic off-by-one here.
+
+## Practice
+
+<Problem id="m11-mutual-reach" />
+
+## Problem ladder
+
+- [Planets and Kingdoms](https://cses.fi/problemset/task/1683) (CSES): label every vertex with its component, exactly this lesson.
+- [Giant Pizza](https://cses.fi/problemset/task/1684) (CSES): 2-SAT built on top of SCCs.
+- [Coin Collector](https://cses.fi/problemset/task/1686) (CSES): condensation, then a DP on the DAG.
+- [Strongly Connected Components](https://judge.yosupo.jp/problem/scc) (Library Checker): the large-input benchmark, with components output in topological order.
+- [Flight Routes Check](https://cses.fi/problemset/task/1682) (CSES): reachability both ways from one vertex, a gentler warm-up.
+
+## Quiz
+
+<Quiz id="cp-m11-scc" tags={["graph", "scc", "directed-graph"]} questions={[
+  { type: "mcq", q: "What do you get if you contract every strongly connected component of a directed graph into one vertex?", options: ["A tree", "A directed acyclic graph", "A complete graph", "An undirected graph"], answer: 1, explain: "A cycle between two components would put them in the same component, so what remains has no cycles." },
+  { type: "mcq", q: "In Kosaraju's second pass, in which order are start vertices taken?", options: ["Increasing finish time of pass 1", "Decreasing finish time of pass 1", "Increasing vertex number", "Random order"], answer: 1, explain: "The vertex that finished last is in a source component, and the reversed-graph DFS from it cannot leave that component." },
+  { type: "predict", q: "How many SCCs does a directed path 1 -> 2 -> 3 -> 4 have?", code: "edges = [(1, 2), (2, 3), (3, 4)]\n# no vertex can get back to an earlier one\nprint(4)", options: ["1", "2", "3", "4"], answer: 3, explain: "Nothing can return, so every vertex is its own component." },
+  { type: "multi", q: "Which statements about SCCs are true?", options: ["Every vertex belongs to exactly one SCC", "A single vertex with no cycle through it is an SCC of size 1", "The condensation graph can contain a cycle", "Kosaraju runs in O(n + m)"], answer: [0, 1, 3], explain: "The condensation is always acyclic." },
+  { type: "mcq", q: "In 2-SAT, when is the formula unsatisfiable?", options: ["When some variable and its negation are in the same SCC", "When the graph has more than n edges", "When there are two SCCs", "Never"], answer: 0, explain: "Then x implies not x and not x implies x, a contradiction." }
+]} />
