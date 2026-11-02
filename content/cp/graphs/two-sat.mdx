@@ -1,0 +1,297 @@
+---
+title: 2-SAT
+track: cp
+module: graphs
+order: 10
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/graphs/strongly-connected-components]
+tags: [graph, 2-sat, scc, implication-graph, boolean-logic]
+type: lesson
+problems: [m11-party-clashes]
+furtherReading:
+  - title: cp-algorithms, 2-SAT
+    url: https://cp-algorithms.com/graph/2SAT.html
+  - title: CSES Problem Set, Giant Pizza
+    url: https://cses.fi/problemset/task/1684
+  - title: AtCoder Library Practice Contest, H - Two SAT
+    url: https://atcoder.jp/contests/practice2/tasks/practice2_h
+---
+
+## Intuition
+
+You must decide, for each of `n` yes/no questions ("does guest 3 come?"), a value, subject to rules of the form **"at least one of these two statements is true"**. Trying all `2^n` answers is hopeless, yet this problem, called **2-SAT**, is solvable in linear time. (Allow three statements per rule, 3-SAT, and it becomes NP-complete. Two is the lucky size.)
+
+The key is to read each rule as a pair of **implications**. "Guest 1 comes **or** guest 2 stays home" means:
+
+```text
+if guest 1 stays home, then guest 2 must stay home       (¬a → b)
+if guest 2 comes,      then guest 1 must come            (¬b → a)
+```
+
+Both say the same thing, and both are one-way arrows between statements. Draw those arrows and the problem turns into a question about a directed graph, which is exactly what [strongly connected components](/cp/graphs/strongly-connected-components/) answers.
+
+## The implication graph
+
+Make **two nodes per variable**: the literal `x` and its negation `¬x`. A clause `(a ∨ b)` adds two edges:
+
+```text
+¬a → b          ¬b → a
+```
+
+A path `u → ... → v` means *if `u` is true, `v` must be true*. Two things follow:
+
+- If `x` and `¬x` are in the **same SCC**, each forces the other: `x ⇒ ¬x` and `¬x ⇒ x`. Then `x` cannot be either value. **Unsatisfiable.**
+- If **no** variable has `x` and `¬x` in the same SCC, a valid assignment exists. **Satisfiable.**
+
+So deciding satisfiability is one SCC computation on `2n` nodes with `2m` edges: `O(n + m)`.
+
+## Finding an assignment
+
+The graph has a symmetry (each edge `u → v` has a twin `¬v → ¬u`), so you can pick values by looking at where the SCCs sit in the condensation DAG:
+
+```text
+x is TRUE   if its component comes LATER in topological order than the component of ¬x
+x is FALSE  otherwise
+```
+
+Intuition: if there is a path `x → ... → ¬x`, then `x` is earlier and must be false (otherwise it would force `¬x`). The rule picks the literal that has no path to its negation.
+
+With Kosaraju's algorithm the components come out **already numbered in topological order** (as the SCC lesson showed), so the assignment is simply `value[x] = comp[x] > comp[¬x]`. With Tarjan's algorithm the numbering is reversed, so flip the comparison.
+
+## Index layout
+
+Store literal `x_i` at node `2i` and `¬x_i` at node `2i + 1`. Then negation is `v ^ 1`, which keeps the code short:
+
+```text
+clause (a or b):   add edge  (a ^ 1) -> b     and     (b ^ 1) -> a
+```
+
+A signed input such as `-3` means "variable 3 is false": map `+i` to `2(i-1)` and `-i` to `2(i-1)+1`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def two_sat(n, clauses):                      # clauses: pairs of signed ints, +i = x_i, -i = not x_i
+    N = 2 * n
+    node = lambda x: 2 * (x - 1) if x > 0 else 2 * (-x - 1) + 1
+    g = [[] for _ in range(N)]; rg = [[] for _ in range(N)]
+    for a, b in clauses:
+        a, b = node(a), node(b)
+        g[a ^ 1].append(b); rg[b].append(a ^ 1)
+        g[b ^ 1].append(a); rg[a].append(b ^ 1)
+    seen = [False] * N; nxt = [0] * N; order = []
+    for s in range(N):                         # Kosaraju pass 1 (explicit stack)
+        if seen[s]: continue
+        seen[s] = True
+        stack = [s]
+        while stack:
+            v = stack[-1]
+            if nxt[v] < len(g[v]):
+                to = g[v][nxt[v]]; nxt[v] += 1
+                if not seen[to]:
+                    seen[to] = True; stack.append(to)
+            else:
+                stack.pop(); order.append(v)
+    comp = [-1] * N; c = 0
+    for s in reversed(order):                  # pass 2 on the reversed graph
+        if comp[s] >= 0: continue
+        comp[s] = c; stack = [s]
+        while stack:
+            v = stack.pop()
+            for to in rg[v]:
+                if comp[to] < 0:
+                    comp[to] = c; stack.append(to)
+        c += 1
+    if any(comp[2 * i] == comp[2 * i + 1] for i in range(n)):
+        return None                            # unsatisfiable
+    return [comp[2 * i] > comp[2 * i + 1] for i in range(n)]   # True = variable is true
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int node(int x) { return x > 0 ? 2 * (x - 1) : 2 * (-x - 1) + 1; }
+vector<vector<int>> g, rg;
+vector<bool> seen;
+vector<int> comp_, order_;
+void dfs1(int v) { seen[v] = true; for (int to : g[v]) if (!seen[to]) dfs1(to); order_.push_back(v); }
+void dfs2(int v, int c) { comp_[v] = c; for (int to : rg[v]) if (comp_[to] < 0) dfs2(to, c); }
+
+// returns an assignment, or an empty vector if unsatisfiable
+vector<bool> twoSat(int n, const vector<pair<int,int>>& clauses) {
+    int N = 2 * n;
+    g.assign(N, {}); rg.assign(N, {});
+    for (auto [x, y] : clauses) {
+        int a = node(x), b = node(y);
+        g[a ^ 1].push_back(b); rg[b].push_back(a ^ 1);
+        g[b ^ 1].push_back(a); rg[a].push_back(b ^ 1);
+    }
+    seen.assign(N, false); comp_.assign(N, -1); order_.clear();
+    for (int s = 0; s < N; s++) if (!seen[s]) dfs1(s);
+    int c = 0;
+    for (int i = N - 1; i >= 0; i--) if (comp_[order_[i]] < 0) dfs2(order_[i], c++);
+    vector<bool> val(n);
+    for (int i = 0; i < n; i++) {
+        if (comp_[2 * i] == comp_[2 * i + 1]) return {};
+        val[i] = comp_[2 * i] > comp_[2 * i + 1];
+    }
+    return val;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static int node(int x) { return x > 0 ? 2 * (x - 1) : 2 * (-x - 1) + 1; }
+static List<Integer>[] g, rg;
+static boolean[] seen;
+static int[] comp;
+static List<Integer> order = new ArrayList<>();
+static void dfs1(int v) { seen[v] = true; for (int to : g[v]) if (!seen[to]) dfs1(to); order.add(v); }
+static void dfs2(int v, int c) { comp[v] = c; for (int to : rg[v]) if (comp[to] < 0) dfs2(to, c); }
+
+// returns an assignment, or null if unsatisfiable
+static boolean[] twoSat(int n, int[][] clauses) {
+    int N = 2 * n;
+    g = new List[N]; rg = new List[N];
+    for (int i = 0; i < N; i++) { g[i] = new ArrayList<>(); rg[i] = new ArrayList<>(); }
+    for (int[] cl : clauses) {
+        int a = node(cl[0]), b = node(cl[1]);
+        g[a ^ 1].add(b); rg[b].add(a ^ 1);
+        g[b ^ 1].add(a); rg[a].add(b ^ 1);
+    }
+    seen = new boolean[N]; comp = new int[N]; Arrays.fill(comp, -1); order.clear();
+    for (int s = 0; s < N; s++) if (!seen[s]) dfs1(s);
+    int c = 0;
+    for (int i = N - 1; i >= 0; i--) if (comp[order.get(i)] < 0) dfs2(order.get(i), c++);
+    boolean[] val = new boolean[n];
+    for (int i = 0; i < n; i++) {
+        if (comp[2 * i] == comp[2 * i + 1]) return null;
+        val[i] = comp[2 * i] > comp[2 * i + 1];
+    }
+    return val;
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, check the answer against all `2^n` assignments, and verify every assignment it returns:
+
+<CodeRunner language="python" code={`import random
+
+def two_sat(n, clauses):
+    N = 2 * n
+    node = lambda x: 2 * (x - 1) if x > 0 else 2 * (-x - 1) + 1
+    g = [[] for _ in range(N)]; rg = [[] for _ in range(N)]
+    for a, b in clauses:
+        a, b = node(a), node(b)
+        g[a ^ 1].append(b); rg[b].append(a ^ 1)
+        g[b ^ 1].append(a); rg[a].append(b ^ 1)
+    seen = [False] * N; nxt = [0] * N; order = []
+    for s in range(N):
+        if seen[s]: continue
+        seen[s] = True
+        stack = [s]
+        while stack:
+            v = stack[-1]
+            if nxt[v] < len(g[v]):
+                to = g[v][nxt[v]]; nxt[v] += 1
+                if not seen[to]:
+                    seen[to] = True; stack.append(to)
+            else:
+                stack.pop(); order.append(v)
+    comp = [-1] * N; c = 0
+    for s in reversed(order):
+        if comp[s] >= 0: continue
+        comp[s] = c; stack = [s]
+        while stack:
+            v = stack.pop()
+            for to in rg[v]:
+                if comp[to] < 0:
+                    comp[to] = c; stack.append(to)
+        c += 1
+    if any(comp[2 * i] == comp[2 * i + 1] for i in range(n)):
+        return None
+    return [comp[2 * i] > comp[2 * i + 1] for i in range(n)]
+
+def holds(assign, clauses):
+    lit = lambda x: assign[abs(x) - 1] == (x > 0)
+    return all(lit(a) or lit(b) for a, b in clauses)
+
+def brute(n, clauses):
+    for bits in range(1 << n):
+        assign = [bool(bits >> i & 1) for i in range(n)]
+        if holds(assign, clauses):
+            return True
+    return False
+
+clauses = [(1, 2), (-1, 3), (-2, -3)]
+print("guests 1..3, rules (1 or 2), (not 1 or 3), (not 2 or not 3):", two_sat(3, clauses))
+print("x and not x:", two_sat(1, [(1, 1), (-1, -1)]))
+
+random.seed(21)
+sat = unsat = 0
+for _ in range(1000):
+    n = random.randint(1, 9)
+    cl = [(random.randint(1, n) * random.choice([1, -1]), random.randint(1, n) * random.choice([1, -1])) for _ in range(random.randint(0, 3 * n))]
+    res = two_sat(n, cl)
+    assert (res is not None) == brute(n, cl), (n, cl)
+    if res is not None:
+        assert holds(res, cl), (n, cl, res)       # the assignment really satisfies every rule
+        sat += 1
+    else:
+        unsat += 1
+print("1000 random formulas agree with brute force:", sat, "satisfiable (assignment verified),", unsat, "unsatisfiable")
+`} />
+
+## Modelling with 2-SAT
+
+The skill is recognising 2-SAT problems. Any "choose one of two options for each item" problem whose conflicts involve **pairs** of items qualifies:
+
+| situation | clause(s) |
+| --- | --- |
+| `a` and `b` cannot both be true | `(¬a ∨ ¬b)` |
+| `a` forces `b` | `(¬a ∨ b)` |
+| `a` and `b` must be equal | `(¬a ∨ b)` and `(a ∨ ¬b)` |
+| `a` and `b` must differ | `(a ∨ b)` and `(¬a ∨ ¬b)` |
+| `a` must be true | `(a ∨ a)` |
+| at most one of `a, b, c, ...` is true | a clause `(¬x ∨ ¬y)` for every pair (`O(k²)` clauses; prefix variables reduce it to `O(k)`) |
+
+Typical problem shapes: **seating or scheduling with pairwise conflicts** ("each person picks morning or evening; some pairs cannot share a slot"), **choosing one of two toppings per person**, **orienting edges**, **two choices per meeting room**, and **making a geometric layout without overlaps** where each object has two placements.
+
+If a rule involves three or more statements that must all interact, it is 3-SAT and no polynomial algorithm is known. Check that every constraint really is a pair before modelling.
+
+## Pitfalls
+
+1. **Adding only one implication per clause.** Both `¬a → b` and `¬b → a` are required; the graph must be symmetric.
+2. **Forgetting duplicates.** A rule using the same variable twice is fine: `(x ∨ x)` adds the edge `¬x → x`, which forces `x` true.
+3. **Wrong index mapping.** Keep `x` at `2i` and `¬x` at `2i + 1`; mixing 0-based and 1-based variables is the usual bug.
+4. **Using the wrong comparison for the assignment.** With Kosaraju numbering (topological order) use `comp[x] > comp[¬x]`; with Tarjan numbering (reverse topological) use `<`.
+5. **Recursion depth.** The graph has `2n` nodes; a long implication chain overflows Python's stack. Use an explicit stack.
+6. **Expecting a unique answer.** There can be many satisfying assignments. Only the yes/no result is canonical, which is why the practice problem asks for it.
+
+## Practice
+
+<Problem id="m11-party-clashes" />
+
+## Problem ladder
+
+- [Giant Pizza](https://cses.fi/problemset/task/1684) (CSES): a plain 2-SAT with an assignment to print, this lesson exactly.
+- [Two SAT](https://atcoder.jp/contests/practice2/tasks/practice2_h) (AtCoder Library Practice Contest H): a 2-SAT where you print an assignment, built on the SCC library.
+- [Strongly Connected Components](https://judge.yosupo.jp/problem/scc) (Library Checker): practise the engine under 2-SAT at large sizes.
+
+## Quiz
+
+<Quiz id="cp-m11-two-sat" tags={["graph", "2-sat"]} questions={[
+  { type: "mcq", q: "How is the clause (a OR b) represented in the implication graph?", options: ["One edge a -> b", "Two edges: not a -> b and not b -> a", "One edge not a -> not b", "No edges, only a node"], answer: 1, explain: "The clause says that if a is false then b is true, and if b is false then a is true; both directions are needed." },
+  { type: "mcq", q: "When is a 2-SAT formula unsatisfiable?", options: ["When there are more clauses than variables", "When some variable and its negation are in the same strongly connected component", "When the graph has a cycle", "When a variable appears twice"], answer: 1, explain: "Same component means x implies not x and not x implies x, so neither value works." },
+  { type: "predict", q: "With literal x_i stored at node 2i and its negation at 2i + 1, what is the negation of node 6?", code: "v = 6\nprint(v ^ 1)", options: ["5", "7", "3", "12"], answer: 1, explain: "6 is x_3 (index 2*3); its negation is 7, because XOR with 1 flips the lowest bit." },
+  { type: "multi", q: "Which constraints can be expressed directly as 2-SAT clauses?", options: ["a and b cannot both be true", "a forces b", "at most one of a, b, c is true (one clause per pair)", "at least one of a, b, c is true"], answer: [0, 1, 2], explain: "At-least-one of three needs a clause with three literals, which is 3-SAT territory; the first three are pairwise." }
+]} />
