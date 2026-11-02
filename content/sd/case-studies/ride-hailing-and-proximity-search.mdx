@@ -1,0 +1,131 @@
+---
+title: "Case Study: Ride Hailing and Proximity Search"
+track: sd
+module: case-studies
+order: 5
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/chat-system", "sd/databases-2/sharding-and-partitioning", "sd/databases-2/hot-keys-and-hot-partitions"]
+tags: [case-study, geospatial, geohash, proximity, matching, location, websocket]
+type: case-study
+furtherReading:
+  - title: Uber Engineering - H3, Uber's hexagonal hierarchical spatial index
+    url: https://www.uber.com/blog/h3/
+  - title: Geohash (Wikipedia) - encoding and precision table
+    url: https://en.wikipedia.org/wiki/Geohash
+  - title: Google S2 Geometry library
+    url: http://s2geometry.io/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Riders request a ride from a pickup point; the system finds nearby available drivers and matches one.
+- Drivers continuously report their location and availability.
+- Riders see nearby drivers and the driver's live position during the trip.
+- ETA and price estimate (treated as black-box services here).
+
+**Non-functional**
+- Match in a few seconds; location freshness of about 5 seconds.
+- A driver is never assigned two rides at once; a rider is never matched to a ghost driver.
+- Highly available in dense cities; graceful behaviour at regional failure.
+- Assume 5M drivers online at peak, each sending a location every 4 seconds; 1M ride requests per hour at peak.
+
+## 2. Estimate
+
+- Location writes: 5M / 4 s = **1.25M updates/s**. This is the dominant load, and it is *ephemeral* data: only the latest position matters.
+- Each record ~50 bytes: 5M × 50 B = **250 MB** of current state. It fits in memory on one machine; throughput, not size, is the problem.
+- Ride requests: 1M/hour ≈ 280/s. Tiny by comparison.
+- Persistent history: 1.25M × 50 B × 86,400 ≈ 5 TB/day if you keep every ping; sample or compress for the trip record and archive it.
+
+## 3. Spatial indexing: the core idea
+
+"Find drivers within 2 km" must not scan 5M drivers. Divide the world into cells and index drivers by cell.
+
+| Technique | Idea | Pros | Cons |
+| --- | --- | --- | --- |
+| **Geohash** | Interleave lat/lon bits into a base32 string; shared prefix means nearby | Simple, string keys, prefix queries | Cells are rectangles with edge distortion; neighbours across a boundary have different prefixes |
+| **Quadtree** | Recursively split dense regions into four | Adapts to density | Dynamic structure; harder to shard and update at 1M writes/s |
+| **S2 / H3** | Hierarchical cells on a sphere (squares or hexagons) | Uniform neighbours, good for ride pricing zones | Library dependency |
+
+Geohash precision: 6 characters is about a 1.2 km × 0.6 km cell; 5 characters about 4.9 km × 4.9 km. Choose the cell size near the search radius.
+
+```python
+B = "0123456789bcdefghjkmnpqrstuvwxyz"
+def geohash(lat, lon, prec=6):
+    la, lo = [-90.0, 90.0], [-180.0, 180.0]
+    bits, bit, ch, even, out = [16, 8, 4, 2, 1], 0, 0, True, []
+    while len(out) < prec:
+        rng, v = (lo, lon) if even else (la, lat)
+        mid = (rng[0] + rng[1]) / 2
+        if v >= mid: ch |= bits[bit]; rng[0] = mid
+        else: rng[1] = mid
+        even = not even
+        if bit < 4: bit += 1
+        else: out.append(B[ch]); bit, ch = 0, 0
+    return "".join(out)
+print(geohash(57.64911, 10.40744, 11))                       # u4pruydqqvj (reference value)
+print(geohash(37.7749, -122.4194), geohash(37.7752, -122.4189))  # same cell: 9q8yyk 9q8yyk
+```
+
+**Boundary problem:** two points metres apart can sit in different cells. So a proximity query always searches the rider's cell **plus its 8 neighbours**, then filters by exact distance (haversine) and sorts.
+
+## 4. Data and architecture
+
+- **Driver location store:** an in-memory key-value store (Redis, or a purpose-built service) with `cell → set of driverIds` and `driverId → (lat, lon, ts, status)`. An update moves the driver between cell sets if the cell changed, and expires if no heartbeat arrives within about 15 seconds.
+- **Sharding:** partition by cell (hash of the geohash prefix) so a nearby search touches a handful of shards. A hot city can overload one shard: use finer cells for dense areas or split a city across several shards.
+- **Trips and payments:** a normal transactional database keyed by trip id, because this data is small and correctness matters.
+- **Location ingestion:** drivers send over a persistent connection (WebSocket/MQTT) to gateways, which write to the location store and publish to a stream (Kafka) for ETA models, surge pricing and archiving. The ingest path is write-optimised and loses nothing important if a ping is dropped.
+
+<Diagram kind="flow" caption="Ephemeral location data in memory; durable trip state in a database; matching in between" nodes={[
+  { id: "driver", label: "Driver apps", x: 0, y: 20, role: "Send location every ~4 s and accept or reject offers.", failureModes: ["Spotty mobile networks lose pings", "Battery drain from frequent updates"], tradeoffs: ["Adaptive frequency: slower when idle or stationary, faster during trips"] },
+  { id: "rider", label: "Rider apps", x: 0, y: 160, role: "Request rides and watch the trip.", failureModes: ["Duplicate requests on retry"], tradeoffs: ["Idempotency key per ride request"] },
+  { id: "gw", label: "Gateways", x: 200, y: 90, role: "Persistent connections, auth, fan-in of location updates.", failureModes: ["Connection storms after outage"], tradeoffs: ["Stateless; shard users across gateways"] },
+  { id: "loc", label: "Location index (in memory)", x: 400, y: 20, role: "Geohash cell to drivers, plus the latest position of each driver, with TTL.", failureModes: ["Shard loss drops current positions (rebuilds within seconds from fresh pings)"], tradeoffs: ["No durability needed: data is regenerated by incoming updates"] },
+  { id: "match", label: "Matching service", x: 400, y: 160, role: "Queries nearby cells, ranks candidates by ETA, offers to the best driver, handles timeouts and next candidate.", failureModes: ["Two requests grab the same driver"], tradeoffs: ["Atomic claim (compare-and-set driver status) prevents double assignment"] },
+  { id: "trip", label: "Trip database", x: 600, y: 160, role: "Durable trip state machine: requested, matched, picked up, completed.", failureModes: ["Primary failover mid-trip"], tradeoffs: ["Replicated store; trip survives gateway or matcher failure"] }
+]} edges={[
+  { from: "driver", to: "gw", label: "location" }, { from: "gw", to: "loc", label: "upsert" }, { from: "rider", to: "gw", label: "request" }, { from: "gw", to: "match" }, { from: "match", to: "loc", label: "nearby(cell+neighbours)" }, { from: "match", to: "trip", label: "persist" }
+]} />
+
+## 5. Matching and the double-assignment problem
+
+1. Rider requests; the matching service reads candidate drivers from the 9 cells, filters to `available`, computes road ETA for the closest ~10 (straight-line distance first as a cheap prefilter).
+2. It offers the ride to the best driver with a 10-15 second timeout.
+3. To avoid two requests offering the same driver, the service performs an **atomic claim**: set the driver's status from `available` to `offered` only if it is currently `available` (compare-and-set, a Lua script, or a conditional update). If the driver declines or times out, release the claim and offer to the next candidate.
+4. Accepted offers write the trip row transactionally and flip the driver to `on_trip`.
+
+The same lease-and-fence thinking from the locks lesson applies: a claim carries an expiry so a crashed matcher cannot lock a driver forever.
+
+## 6. Deep dives
+
+**Live tracking.** During a trip, the driver's updates are pushed to the rider over their connection by subscribing to the trip's channel; throttle to what the UI can render.
+
+**Surge pricing.** A stream job counts requests and available drivers per cell over sliding windows and publishes a multiplier per cell; smooth it over time and across neighbours to avoid price cliffs at boundaries.
+
+**ETA.** Straight-line is a filter only. Real ETA uses a road graph and live traffic (separate service, heavily cached by cell pair and time bucket).
+
+**Failure handling.** If the location index loses a shard, drivers reappear within one update interval, so degraded matching lasts seconds. If matching is unavailable, queue requests briefly rather than losing them.
+
+**Privacy.** Location is sensitive: encrypt in transit, restrict access, and delete raw trails after a retention period. Share the exact position with a rider only for their own trip.
+
+## Pitfalls
+
+- Scanning all drivers or using a SQL `WHERE distance < r` without a spatial index.
+- Searching only the rider's own cell and missing neighbours.
+- Persisting every ping synchronously in a relational database.
+- Offering a driver to multiple riders at once.
+- One giant shard for a megacity.
+
+## What would you choose and why?
+
+Add "carpool": a driver already on a trip can pick up a second rider if the detour is under 3 minutes. How does your index need to change (drivers on trip are no longer excluded), and what new consistency risks appear when two riders compete for one seat?
+
+## Quiz
+
+<Quiz id="sd-m17-ride-hailing" tags={["case-study", "geospatial", "geohash"]} questions={[
+  { type: "mcq", q: "Why must a proximity search also check neighbouring geohash cells?", options: ["To use more memory", "Points close together can fall in different cells across a boundary", "Geohash is random", "Neighbours hold backups"], answer: 1, explain: "Cell boundaries are arbitrary; a driver 10 m away may lie in an adjacent cell." },
+  { type: "mcq", q: "What dominates the load of this system?", options: ["Ride requests", "Driver location updates", "Payment writes", "Trip history reads"], answer: 1, explain: "Millions of drivers pinging every few seconds give over a million writes per second." },
+  { type: "mcq", q: "How do you prevent the same driver being offered to two riders?", options: ["Hope it is rare", "An atomic compare-and-set claim on the driver's status, with an expiry", "Offer to both and cancel one later", "Use a bigger cache"], answer: 1, explain: "A conditional update makes the claim atomic; the expiry prevents a crashed matcher from holding the driver." },
+  { type: "multi", q: "Why can the live location index be kept in memory without durability?", options: ["Only the latest position matters", "Fresh pings rebuild lost state within seconds", "Locations never change", "Trip records are stored separately and durably"], answer: [0, 1, 3], explain: "Locations change constantly; the durable data is the trip, not the position." }
+]} />

@@ -1,0 +1,152 @@
+---
+title: "Case Study: Distributed Key-Value Store"
+track: sd
+module: case-studies
+order: 6
+difficulty: expert
+estMinutes: 50
+prerequisites: ["sd/distributed-theory/consistency-models-and-quorums", "sd/databases-2/consistent-hashing", "sd/databases-2/replication", "sd/distributed-theory/time-clocks-and-ordering"]
+tags: [case-study, key-value, dynamo, consistent-hashing, quorum, lsm-tree, gossip, hinted-handoff]
+type: case-study
+furtherReading:
+  - title: DeCandia et al. - Dynamo, Amazon's Highly Available Key-value Store
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: Chang et al. - Bigtable, a Distributed Storage System for Structured Data
+    url: https://research.google/pubs/bigtable-a-distributed-storage-system-for-structured-data/
+  - title: Apache Cassandra documentation - Architecture overview
+    url: https://cassandra.apache.org/doc/latest/cassandra/architecture/overview.html
+  - title: O'Neil et al. - The Log-Structured Merge-Tree (LSM-Tree)
+    url: https://www.cs.umb.edu/~poneil/lsmtree.pdf
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- `put(key, value)`, `get(key)`, `delete(key)`. Values up to ~1 MB; typical 1 KB.
+- Horizontally scalable to petabytes and millions of operations per second.
+
+**Non-functional**
+- Always writable and low latency (single-digit ms p99 for the common path): an **AP, tunable-consistency** design in the Dynamo/Cassandra tradition.
+- Survive node, rack and zone failures with no manual intervention.
+- Easy to add and remove nodes with minimal data movement.
+- Configurable per-request consistency.
+
+(If the requirement were strict linearizability, the answer changes: use a consensus group per shard, as in the Raft lesson. Name this fork explicitly in an interview.)
+
+## 2. Building blocks
+
+A single-node store is an LSM tree or B-tree on disk. The distributed design adds: **partitioning**, **replication**, **coordination**, **conflict handling**, **failure detection** and **repair**.
+
+## 3. Partitioning with consistent hashing
+
+Hash each key onto a ring; each node owns arcs. Use **virtual nodes** (for example 64 to 256 tokens per machine) so load spreads evenly and a new machine takes small slices from many neighbours instead of half of one.
+
+```python
+import bisect, hashlib
+def h(s): return int(hashlib.md5(s.encode()).hexdigest(), 16)
+class Ring:
+    def __init__(self, nodes, vnodes=64):
+        self.ring = sorted((h(f"{n}#{i}"), n) for n in nodes for i in range(vnodes))
+        self.keys = [k for k, _ in self.ring]
+    def replicas(self, key, n=3):
+        i, out = bisect.bisect(self.keys, h(key)), []
+        while len(out) < n:
+            node = self.ring[i % len(self.ring)][1]
+            if node not in out: out.append(node)   # distinct physical nodes
+            i += 1
+        return out
+r = Ring(["a", "b", "c", "d", "e"])
+print(r.replicas("user:42"), r.replicas("user:43"))
+r2 = Ring(["a", "b", "c", "d", "e", "f"])
+keys = [f"k{i}" for i in range(10000)]
+moved = sum(r.replicas(k, 1)[0] != r2.replicas(k, 1)[0] for k in keys)
+print(round(moved / len(keys), 2))   # about 1/6 of keys move when a 6th node joins
+```
+
+Adding the sixth node moves only about 1/6 of the keys, versus nearly all keys with `hash(key) mod N`.
+
+## 4. Replication and quorums
+
+Each key is stored on the next **N = 3** distinct nodes clockwise (the **preference list**), ideally in different racks or zones. Writes go to a **coordinator** (any node; clients or a smart driver can route directly). It sends the write to all N replicas and waits for **W** acks; reads query **R** replicas.
+
+| Setting | Behaviour |
+| --- | --- |
+| W=1, R=1 | Fastest, may read stale |
+| W=2, R=2 (N=3) | Quorum: read sees the latest acknowledged write (absent the caveats in the consistency lesson) |
+| W=3, R=1 | Fast reads, writes fail if any replica is down |
+| W=N (ALL) | Strongest, least available |
+
+## 5. Handling failures
+
+- **Failure detection:** nodes gossip membership and heartbeat state every second to a few random peers; a phi-accrual detector turns delayed heartbeats into a suspicion level instead of a hard timeout. No central master to fail.
+- **Sloppy quorum and hinted handoff:** if a replica is down, the coordinator writes to the next healthy node on the ring with a *hint* naming the intended owner; when the owner returns, the hint is replayed. This keeps writes available at the cost of weaker guarantees.
+- **Read repair:** on a read, if replicas return different versions, the coordinator returns the newest and writes it back to stale replicas.
+- **Anti-entropy:** background repair compares replicas using **Merkle trees** (hash trees over key ranges) so only differing ranges are exchanged, instead of scanning everything.
+- **Permanent loss:** re-replicate the lost node's ranges from survivors onto others to restore N copies.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant Co as Coordinator
+  participant A as Replica A
+  participant B as Replica B
+  participant D as Replica C (down)
+  participant H as Node D (hint holder)
+  C->>Co: put(k, v), W=2
+  Co->>A: write
+  Co->>B: write
+  Co->>D: write (no response)
+  Co->>H: write + hint for C
+  A-->>Co: ack
+  B-->>Co: ack
+  Co-->>C: success (W=2 met)
+  Note over H,D: when C returns, H replays the hinted write`} caption="A write with W=2 survives one replica being down" />
+
+## 6. Conflicts and versions
+
+Concurrent writes to the same key on different replicas need reconciliation:
+
+- **Last-write-wins** by timestamp: simple, can drop writes under clock skew.
+- **Vector clocks / version vectors:** detect concurrency and return **siblings** for the application to merge.
+- **CRDT values** (counters, sets) merge automatically.
+
+Choose per table: LWW for caches and idempotent overwrites; siblings or CRDTs where losing a write matters.
+
+## 7. The write path on one node (LSM tree)
+
+1. Append to a **commit log** (sequential disk write) for durability.
+2. Insert into an in-memory sorted **memtable**.
+3. When full, flush the memtable to an immutable sorted file (**SSTable**).
+4. Reads check the memtable then SSTables, using a **Bloom filter** per file to skip files that cannot contain the key.
+5. A background **compaction** merges SSTables, dropping overwritten values and expired **tombstones** (deletes are writes of a marker so they propagate to replicas).
+
+Writes become sequential I/O, which is why this design absorbs high write rates. The costs are read amplification (several files) and write amplification (compaction).
+
+## 8. Deep dives and trade-offs
+
+- **Hot keys:** one celebrity key overloads its 3 replicas; mitigate with client-side caching, key salting for counters, or read replicas for that range.
+- **Tombstones and resurrection:** if a replica is down longer than the tombstone retention, it can return deleted data. Keep retention longer than the max repair interval.
+- **Multi-datacentre:** place N replicas per datacentre; use `LOCAL_QUORUM` to keep latency local, and replicate asynchronously across regions.
+- **Secondary indexes and range scans:** a hash ring spreads sequential keys, so range queries are poor; use a clustering key within a partition for ordered scans inside one partition.
+- **Capacity:** 100 TB with a 3x replication factor needs 300 TB raw. With 10 TB per node and 50% headroom for compaction and growth, about 60 nodes.
+
+## Pitfalls
+
+- Using `hash mod N` partitioning (reshuffles almost everything).
+- One token per node (uneven load, painful rebalancing).
+- Putting all replicas in one rack.
+- Treating W+R>N as linearizable.
+- Forgetting tombstone retention versus repair frequency.
+- Using LWW for data where losing an update is unacceptable.
+
+## What would you choose and why?
+
+A product team wants a counter of page views that is always writable across three regions and eventually accurate, and also a unique-username table that must never allow duplicates. Which consistency settings or data types, and possibly which different store, do you use for each?
+
+## Quiz
+
+<Quiz id="sd-m17-kv-store" tags={["case-study", "key-value", "dynamo"]} questions={[
+  { type: "mcq", q: "Why use virtual nodes in the hash ring?", options: ["To encrypt keys", "To spread load evenly and make joining or leaving nodes move small slices from many peers", "To avoid replication", "To make hashing faster"], answer: 1, explain: "Many tokens per machine smooth variance and share rebalancing work." },
+  { type: "mcq", q: "A replica is down during a write with W=2, N=3. What does hinted handoff do?", options: ["Fails the write", "Stores the write on another node with a hint to deliver it to the owner on recovery", "Deletes the key", "Switches to strong consistency"], answer: 1, explain: "It keeps the write available and repairs the intended replica later." },
+  { type: "multi", q: "Which mechanisms repair replica divergence?", options: ["Read repair", "Merkle-tree anti-entropy", "Hinted handoff", "Increasing the key length"], answer: [0, 1, 2], explain: "Each handles a different window: during reads, in the background, and after short outages." },
+  { type: "mcq", q: "Why are deletes written as tombstones?", options: ["Disks cannot erase", "So the deletion replicates to all replicas and is not undone by stale copies", "To save space immediately", "To avoid compaction"], answer: 1, explain: "Without a marker, a stale replica would re-introduce the deleted value during repair." }
+]} />

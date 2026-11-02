@@ -1,0 +1,141 @@
+---
+title: "Case Study: Payment System"
+track: sd
+module: case-studies
+order: 4
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/chat-system", "sd/distributed-theory/distributed-transactions-2pc-and-sagas", "sd/queues-and-streaming/delivery-semantics-and-idempotency"]
+tags: [case-study, payments, idempotency, ledger, double-entry, reconciliation, saga]
+type: case-study
+furtherReading:
+  - title: Stripe - Designing robust and predictable APIs with idempotency
+    url: https://stripe.com/blog/idempotency
+  - title: Square Engineering - Books, an immutable double-entry accounting database service
+    url: https://developer.squareup.com/blog/books-an-immutable-double-entry-accounting-database-service/
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 11 (Stream processing)
+    url: https://dataintensive.net/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- A merchant's checkout asks us to charge a customer's card or wallet for an amount.
+- Support authorise then capture, refunds, and payouts to merchants.
+- Report payment status; send webhooks to merchants.
+
+**Non-functional**
+- **Correctness above all**: never charge twice, never lose a charge, balances must always add up. Availability and latency matter, but a slow correct answer beats a fast wrong one.
+- Fully auditable; money records are never updated in place.
+- External PSPs (card networks, banks) are slow (hundreds of ms to seconds) and unreliable, with their own timeouts and duplicate semantics.
+- Assume 1M payments per day, peak 10x average.
+
+We integrate with a payment service provider (PSP) rather than talking to card networks ourselves, and we never store raw card numbers (tokens only, PCI DSS scope kept small).
+
+## 2. Estimate
+
+- 1M/day ≈ **12 payments/s**, peak about 120/s. This is a **low-throughput, high-correctness** system: you scale for safety, not QPS.
+- Each payment creates about 5 ledger rows and a few events: ~5M rows/day, ~2 B rows over a year at 1 KB ≈ 2 TB/year. Easily a sharded relational database.
+
+## 3. API and idempotency
+
+```
+POST /v1/payments
+Idempotency-Key: 6f1c...      (required)
+{ "amount": 4999, "currency": "USD", "paymentMethodToken": "...", "orderId": "..." }
+-> 201 { id, status: "pending" | "succeeded" | "failed" }
+```
+
+Amounts are **integers in minor units** (cents), never floats. The `Idempotency-Key` makes retries safe: the first request stores `(key, request hash, response)` atomically with its effects; a retry with the same key returns the stored response; the same key with a different body is rejected with an error.
+
+## 4. The ledger
+
+Record every movement as **double-entry** rows: each transaction has debit and credit entries that sum to zero. Balances are derived from entries (and cached), entries are **append-only**, and corrections are new compensating entries, never edits.
+
+```python
+class Ledger:
+    def __init__(self): self.entries, self.keys, self.bal = [], {}, {}
+    def transfer(self, key, src, dst, amt):
+        if key in self.keys: return self.keys[key]          # idempotent replay
+        if self.bal.get(src, 0) < amt: return "insufficient"
+        self.entries += [(src, -amt), (dst, amt)]            # double entry
+        self.bal[src] = self.bal.get(src, 0) - amt
+        self.bal[dst] = self.bal.get(dst, 0) + amt
+        self.keys[key] = "ok"; return "ok"
+
+L = Ledger(); L.bal["alice"] = 100
+print(L.transfer("k1", "alice", "bob", 30), L.transfer("k1", "alice", "bob", 30), L.bal)
+print(sum(a for _, a in L.entries))   # entries always sum to 0
+```
+
+In production, the key check, balance check and entry inserts happen in **one database transaction** (serializable, or a unique constraint on the idempotency key plus row locks on the accounts). That is what the toy shows in miniature.
+
+## 5. Payment flow and state machine
+
+States: `created → authorised → captured → (refunded)` with failure branches `declined`, `expired`, `failed`. Transitions are validated (no refund before capture) and every change is recorded as an event.
+
+<Diagram kind="flow" caption="Our service coordinates; the PSP does the money movement; the ledger records the truth" nodes={[
+  { id: "merchant", label: "Merchant checkout", x: 0, y: 90, role: "Creates a payment with an idempotency key; receives webhooks.", failureModes: ["Retries on timeout", "Webhook endpoint down"], tradeoffs: ["Merchants must be idempotent on their side too"] },
+  { id: "api", label: "Payment service", x: 200, y: 90, role: "Validates, dedupes by key, persists the payment row in state created, orchestrates the PSP call.", failureModes: ["Crash after calling PSP but before saving the result"], tradeoffs: ["Persist intent first, then call; recover by querying the PSP"] },
+  { id: "db", label: "Payments DB + ledger", x: 400, y: 20, role: "ACID store: payments, idempotency keys, double-entry ledger, outbox.", failureModes: ["Primary failure", "Hot merchant account rows"], tradeoffs: ["Synchronous replication to a standby: slower writes, no lost payments"] },
+  { id: "psp", label: "PSP / bank", x: 400, y: 160, role: "Authorises and captures funds externally.", failureModes: ["Timeout with unknown outcome", "Duplicate processing without a key", "Rate limits"], tradeoffs: ["Pass our own idempotency key to the PSP so retries are safe"] },
+  { id: "outbox", label: "Outbox + queue", x: 600, y: 20, role: "Reliably publishes payment events (webhooks, receipts, analytics).", failureModes: ["Consumer lag", "Duplicate events"], tradeoffs: ["At-least-once delivery; consumers dedupe by event id"] },
+  { id: "recon", label: "Reconciliation job", x: 600, y: 160, role: "Compares our ledger with PSP settlement files daily and flags mismatches.", failureModes: ["Late settlement data"], tradeoffs: ["Catches what real-time paths miss; human review for exceptions"] }
+]} edges={[
+  { from: "merchant", to: "api", label: "POST + key" }, { from: "api", to: "db", label: "txn" }, { from: "api", to: "psp", label: "authorise (with key)" }, { from: "db", to: "outbox" }, { from: "psp", to: "recon", label: "settlement files" }, { from: "db", to: "recon" }
+]} />
+
+## 6. The hard problem: unknown outcomes
+
+The call to the PSP times out. Did the charge happen? You cannot know. Rules:
+
+1. **Never assume failure on a timeout** and never blindly retry with a new key.
+2. Record the payment as `pending` / `unknown` and persist the PSP idempotency key before the call.
+3. Retry with the **same** key (safe), or query the PSP by our reference.
+4. A background job resolves stuck pending payments; the reconciliation job is the safety net.
+5. Only mark `failed` when the PSP definitively says so.
+
+This is the saga/outbox/idempotency toolkit of the previous modules applied where mistakes cost real money.
+
+## 7. Deep dives
+
+**Exactly-once effect.** Impossible to guarantee delivery exactly once; achieve it with at-least-once delivery plus idempotent consumers everywhere (API, PSP call, webhook, ledger posting).
+
+**Concurrency on accounts.** Two payouts from the same balance must not overdraw: use row locks or optimistic versioning, and keep balance checks in the same transaction as the posting. Hot accounts (a big merchant) serialise; mitigate with sub-accounts or batching.
+
+**Sharding.** Shard by merchant or account id so each transaction touches one shard; cross-shard transfers use a saga with a holding account.
+
+**Refunds and chargebacks.** New ledger entries referencing the original; limits so total refunds never exceed the capture.
+
+**Security and compliance.** Tokenise card data at the edge, encrypt at rest, restrict access, audit all reads of sensitive data, and keep a minimal PCI scope. Never log PANs or CVVs.
+
+**Webhooks.** Sign payloads (HMAC), retry with exponential backoff for days, and let merchants fetch the current status because webhooks may be late or duplicated.
+
+## 8. Bottlenecks and trade-offs
+
+- Consistency vs availability: choose consistency for the ledger (CP), accept that during a database failover some requests fail and clients retry safely.
+- Latency: the PSP dominates. Show "processing" states and push results by webhook; don't hold HTTP connections for slow flows.
+- Multi-region: single-writer ledger region with synchronous standby; read replicas elsewhere for dashboards.
+- Observability: payment success rate by PSP, unknown-outcome count and age, reconciliation mismatches, and ledger balance invariants checked continuously.
+
+## Pitfalls
+
+- Using floats for money.
+- Updating balances in place without an append-only ledger.
+- Retrying payments with a fresh idempotency key.
+- Treating a timeout as a failure.
+- Publishing events outside the transaction.
+- No reconciliation.
+
+## What would you choose and why?
+
+You must support split payments (one customer payment paid out to three sellers, with a platform fee). Sketch the ledger accounts and entries, decide what happens if one payout fails, and say when funds become available to each seller.
+
+## Quiz
+
+<Quiz id="sd-m17-payment-system" tags={["case-study", "payments", "idempotency"]} questions={[
+  { type: "mcq", q: "A PSP call times out. What should the payment service do?", options: ["Mark the payment failed and let the user retry with a new key", "Keep the payment pending, retry with the same idempotency key or query the PSP, and reconcile later", "Charge again immediately", "Delete the payment"], answer: 1, explain: "A timeout means the outcome is unknown; assuming failure risks double charging." },
+  { type: "mcq", q: "Why store money as integer minor units?", options: ["It is faster to render", "Floating point cannot represent decimal amounts exactly", "Databases forbid decimals", "Banks require it in every API"], answer: 1, explain: "Binary floats cause rounding errors; integers are exact." },
+  { type: "multi", q: "Which belong in a single database transaction when posting a transfer?", options: ["Idempotency key check", "Balance check on the source account", "Debit and credit ledger entries", "The HTTP call to the card network"], answer: [0, 1, 2], explain: "External calls cannot be rolled back by a database transaction and should be orchestrated separately." },
+  { type: "mcq", q: "What is the purpose of daily reconciliation?", options: ["To speed up payments", "To detect mismatches between our ledger and the PSP or bank that real-time paths missed", "To compress logs", "To rotate keys"], answer: 1, explain: "It is the safety net for lost, duplicated or delayed events." }
+]} />
