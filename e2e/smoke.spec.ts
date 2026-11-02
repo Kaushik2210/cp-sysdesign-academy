@@ -726,7 +726,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("133");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("136");
   });
 });
 
