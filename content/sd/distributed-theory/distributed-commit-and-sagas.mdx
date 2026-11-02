@@ -1,0 +1,185 @@
+---
+title: Two-Phase Commit and Sagas
+track: sd
+module: distributed-theory
+order: 4
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/databases-1/acid-and-transactions", "sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/distributed-theory/failure-detection-and-gossip"]
+tags: [two-phase-commit, saga, distributed-transactions, compensation, outbox, atomic-commit]
+type: lesson
+furtherReading:
+  - title: "Garcia-Molina and Salem, Sagas (1987)"
+    url: https://www.cs.cornell.edu/andru/cs711/2002fa/reading/sagas.pdf
+  - title: "Gray and Lamport, Consensus on Transaction Commit"
+    url: https://www.microsoft.com/en-us/research/publication/consensus-on-transaction-commit/
+  - title: "microservices.io, Saga pattern"
+    url: https://microservices.io/patterns/data/saga.html
+  - title: Designing Data-Intensive Applications (Kleppmann), chapters 7 and 9 (atomic commit)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Placing an order touches three systems: the order service records it, the payment service charges the card, the inventory service reserves stock. In a single database one transaction makes this **all or nothing**. Once the three live in different services, with different databases, there is no shared transaction. A crash after the card is charged but before stock is reserved leaves the customer paying for nothing.
+
+There are two broad answers. **Atomic commit** (two-phase commit) makes the participants agree on a single outcome, at the price of blocking when the coordinator fails. **Sagas** give up atomicity and isolation: each step commits locally, and if a later step fails, earlier steps are **undone by compensating actions**. Distributed systems engineers choose between them by asking what is worse: waiting, or temporarily showing intermediate states.
+
+## Two-phase commit (2PC)
+
+A **coordinator** drives the participants.
+
+1. **Prepare (voting).** The coordinator asks every participant "can you commit?". A participant that says *yes* writes the transaction durably, **acquires its locks and promises it will commit if told to**. It can no longer decide on its own.
+2. **Commit or abort (decision).** If every vote is yes the coordinator logs *commit* and tells everyone to commit; if any vote is no (or times out) it logs *abort* and tells everyone to abort.
+
+The key property is **atomicity across participants**: either all commit or all abort. The key weakness is **blocking**: a participant that has voted yes and then loses the coordinator cannot unilaterally commit (maybe another participant voted no) or abort (maybe the others already committed). It must wait, **holding its locks**, until the coordinator recovers or another party learns the decision.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Coordinator
+  participant O as Orders
+  participant P as Payments
+  participant S as Stock
+  C->>O: prepare
+  C->>P: prepare
+  C->>S: prepare
+  O-->>C: yes
+  P-->>C: yes
+  S-->>C: yes
+  Note over C: log decision: COMMIT
+  C->>O: commit
+  C->>P: commit
+  C->>S: commit`} caption="Two-phase commit: if the coordinator dies between the votes and the decision, the three participants are stuck in the prepared state" />
+
+Blocking can be reduced by making the coordinator **fault tolerant** (replicate its log with a consensus protocol, as Spanner does with Paxos groups), but the protocol stays expensive: several round trips and locks held across them. 2PC is what database engines and XA transaction managers use inside a trusted, low-latency environment.
+
+## Sagas
+
+A **saga** is a sequence of local transactions `T1, T2, ..., Tn`, each with a **compensating transaction** `C1, ..., Cn` that semantically undoes it (refund the charge, release the reservation). If `Tk` fails, run `C(k-1), ..., C1` in reverse order.
+
+Two coordination styles:
+
+- **Choreography:** each service reacts to events from the previous one (order created, then payment service charges and publishes "charged", then stock reserves). No central brain, but the flow is spread across services and hard to follow.
+- **Orchestration:** a saga orchestrator service tells each participant what to do next and records progress. Easier to reason about, monitor and test; the orchestrator must itself be durable.
+
+Sagas have no isolation: other transactions can see the **intermediate state** (an order that is charged but not yet stocked). Countermeasures: mark records *pending* until the saga completes, use semantic locks, and design compensations to be safe when other updates have happened in between.
+
+Practical requirements:
+
+- Every step and compensation must be **idempotent**, because messages are retried (see the delivery-semantics lesson).
+- Use the **transactional outbox** pattern: write the business change and the event to publish in one local transaction, and let a relay publish the event, so you never commit state without announcing it or the reverse.
+- Compensations can fail too; they are retried until they succeed, and some actions (sending an email) cannot be undone, only followed by an apology message.
+
+## Code: what happens when things go wrong
+
+The program runs 2PC with participants for orders, payments and stock under four scenarios, then runs a four-step saga that fails at different steps.
+
+<CodeRunner language="python" code={`class Participant:
+    def __init__(self, name, will_vote_yes=True):
+        self.name, self.will_vote_yes, self.state = name, will_vote_yes, "idle"
+
+    def prepare(self):
+        self.state = "prepared" if self.will_vote_yes else "aborted"
+        return self.will_vote_yes
+
+    def commit(self):
+        self.state = "committed"
+
+    def abort(self):
+        self.state = "aborted"
+
+def two_phase_commit(parts, crash_after=None):
+    votes = [p.prepare() for p in parts]
+    if crash_after == "prepare":
+        return "coordinator crashed with decision unknown"
+    decision = all(votes)
+    for i, p in enumerate(parts):
+        if crash_after == "decide-one" and i == 1:
+            return "coordinator crashed after informing one participant"
+        p.commit() if decision else p.abort()
+    return "commit" if decision else "abort"
+
+def show(title, parts, outcome):
+    print(f"{title}: {outcome}")
+    print("   " + ", ".join(f"{p.name}={p.state}" for p in parts))
+    blocked = [p.name for p in parts if p.state == "prepared"]
+    print("   blocked (holding locks, cannot decide alone):", blocked or "none")
+
+def fresh(no_vote=None):
+    return [Participant("orders"), Participant("payments", no_vote != "payments"), Participant("stock")]
+
+ps = fresh();               show("all vote yes", ps, two_phase_commit(ps))
+ps = fresh("payments");     show("one votes no", ps, two_phase_commit(ps))
+ps = fresh();               show("crash before decision", ps, two_phase_commit(ps, "prepare"))
+ps = fresh();               show("crash after informing one", ps, two_phase_commit(ps, "decide-one"))
+
+print()
+def saga(steps, fail_at=None):
+    done, log = [], []
+    for i, (name, do, undo) in enumerate(steps):
+        if fail_at == i:
+            log.append(f"{name} FAILED")
+            for pname, pundo in reversed(done):
+                log.append(f"compensate {pname}: {pundo}")
+            return "rolled back", log
+        log.append(f"{name}: {do}")
+        done.append((name, undo))
+    return "completed", log
+
+steps = [("create order", "order #1 pending", "mark order cancelled"),
+         ("charge card", "charged 40", "refund 40"),
+         ("reserve stock", "2 units reserved", "release 2 units"),
+         ("schedule shipping", "pickup booked", "cancel pickup")]
+for fail in (None, 3, 2):
+    outcome, log = saga(steps, fail)
+    print(f"saga, failure at step {fail}: {outcome}")
+    for line in log:
+        print("   ", line)
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| 2PC scenario | final states (orders, payments, stock) | blocked participants |
+| --- | --- | --- |
+| all vote yes | committed, committed, committed | none |
+| payments votes no | aborted, aborted, aborted | none |
+| coordinator crashes before deciding | prepared, prepared, prepared | **all three** (holding locks) |
+| coordinator crashes after informing one | committed, prepared, prepared | **payments and stock** |
+
+The last row shows why participants cannot just time out and abort: `orders` already committed, so aborting `payments` and `stock` would break atomicity. They must wait for the coordinator (or a recovery protocol) to tell them the outcome.
+
+The saga runs behaved as designed. With a failure at shipping (step 3) the log shows `release 2 units`, `refund 40`, `mark order cancelled`, in **reverse order**; with a failure at stock (step 2) only the first two steps are compensated. Between the charge and the refund, other readers could see the order as charged and pending: that visible window is the price of not blocking.
+
+## Trade-offs
+
+<TradeOffs caption="Keeping several services consistent" rows={[
+  { option: "Single database transaction", pros: "ACID, no coordination protocol, easiest to get right", cons: "Requires the data to live in one database", chooseWhen: "Whenever the boundary can be drawn so that a transaction stays local (often the best answer)" },
+  { option: "Two-phase commit", pros: "Atomic outcome and isolation across participants", cons: "Blocking on coordinator failure, locks held across round trips, poor availability", chooseWhen: "A few trusted databases in one low-latency environment, for example inside a distributed SQL engine" },
+  { option: "Saga (orchestrated)", pros: "No cross-service locks; each service stays autonomous; visible progress", cons: "No isolation; compensations to design, test and keep idempotent", chooseWhen: "Business workflows across microservices (orders, bookings, onboarding)" },
+  { option: "Saga (choreographed)", pros: "No central component, loose coupling", cons: "Flow is implicit and hard to debug; cyclic dependencies creep in", chooseWhen: "Short flows with two or three services and stable events" },
+  { option: "Avoid the problem (merge services, or accept eventual reconciliation)", pros: "Removes distributed commit entirely", cons: "Coupling or periodic repair jobs", chooseWhen: "When two services always change together or a nightly reconciliation is acceptable" }
+]} />
+
+## Pitfalls
+
+- Using 2PC across services owned by different teams over a wide-area network: one slow participant stalls everyone and holds locks.
+- Compensations that are not idempotent, so a retried refund pays twice.
+- Forgetting the outbox: committing the local change and crashing before publishing the event leaves the saga stuck forever.
+- Assuming a compensation always restores the exact previous state; a refund does not remove the customer's email about the charge.
+- Showing users intermediate states without a *pending* marker, so they act on a half-finished order.
+- Treating timeouts as failures without checking: the step may have succeeded and the reply was lost, so the compensation must handle both cases.
+
+## What would you choose and why?
+
+A travel site books a flight, a hotel and a car as one trip. The airline and the hotel are external companies with their own APIs, and the car rental sometimes takes minutes to confirm. Would you use 2PC, a saga, or something else? Which steps are compensable (cancel booking) and which are not (non-refundable fare), and in what order would you run them to minimise the cost of failure?
+
+## Quiz
+
+<Quiz id="sd-m11-distributed-commit-and-sagas" tags={["two-phase-commit", "saga", "distributed-transactions"]} questions={[
+  { type: "mcq", q: "In two-phase commit, why can a participant that voted yes not simply abort when the coordinator disappears?", options: ["It does not know how", "Other participants may already have committed, so aborting would break atomicity", "Aborting is not allowed by the database", "Votes are final only after 24 hours"], answer: 1, explain: "After voting yes it has promised to follow the decision; it must learn the decision rather than guess." },
+  { type: "mcq", q: "What does a saga give up compared with a single ACID transaction?", options: ["Durability", "Atomicity of visibility and isolation: intermediate states can be seen", "Local transactions", "Retries"], answer: 1, explain: "Each step commits on its own, so other readers can observe a half-finished workflow before compensation or completion." },
+  { type: "predict", q: "A saga has steps create order, charge, reserve stock, ship. The ship step fails. In which order do the compensations run?", code: "done = ['create order', 'charge', 'reserve stock']\nprint(list(reversed(done)))", options: ["create order, charge, reserve stock", "reserve stock, charge, create order", "charge only", "ship, reserve stock, charge"], answer: 1, explain: "Compensations undo completed steps in reverse order: release stock, refund the charge, cancel the order." },
+  { type: "multi", q: "Which are practical requirements of a saga implementation?", options: ["Idempotent steps and compensations", "A transactional outbox so state changes and events are not separated by a crash", "A global lock across all services", "Retries of compensations until they succeed"], answer: [0, 1, 3], explain: "A global lock would recreate the blocking that sagas are meant to avoid." },
+  { type: "mcq", q: "Which is usually the best first choice when you can arrange it?", options: ["Two-phase commit across all services", "Keeping the data that must change together inside one database transaction", "A choreographed saga with ten services", "Manual reconciliation only"], answer: 1, explain: "Drawing service boundaries so that transactions stay local avoids distributed commit altogether." }
+]} />
