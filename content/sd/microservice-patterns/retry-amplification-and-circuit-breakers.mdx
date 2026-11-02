@@ -1,0 +1,178 @@
+---
+title: Retry Amplification and Circuit Breakers
+track: sd
+module: microservice-patterns
+order: 2
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/microservice-patterns/service-boundaries-and-availability", "sd/queues-and-streaming/backpressure-retries-and-dlq", "sd/scalability/load-shedding-and-bulkheads"]
+tags: [retries, circuit-breaker, retry-budget, timeouts, resilience, cascading-failure, amplification]
+type: lesson
+furtherReading:
+  - title: "Amazon Builders' Library, Timeouts, retries and backoff with jitter"
+    url: https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/
+  - title: "Google SRE Book, Addressing Cascading Failures"
+    url: https://sre.google/sre-book/addressing-cascading-failures/
+  - title: "Fowler, CircuitBreaker"
+    url: https://martinfowler.com/bliki/CircuitBreaker.html
+  - title: "Release It! (Nygard), stability patterns"
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+---
+
+## Intuition
+
+A retry is a bet that a failure was transient. When it is, the retry hides the glitch and everyone is happy. When it is not (the dependency is overloaded or down), the retry sends **more** load to the service that is already struggling.
+
+In a call chain the problem compounds. If the edge service retries 3 times, and the middle service it calls also retries 3 times, then one user request can become up to **9** requests to the bottom service, and with a third layer, 27. Each layer's retry policy looks reasonable in isolation; together they form an amplifier that turns a small degradation into a full outage. This is a classic **cascading failure**: the extra load makes the dependency slower, which causes more timeouts, which causes more retries.
+
+## The defences
+
+- **Timeouts everywhere.** Every remote call has a deadline shorter than its caller's deadline, so work is abandoned instead of piling up. Propagate the remaining deadline down the chain.
+- **Retry only when it is safe and useful:** idempotent operations, transient error classes (connection reset, 503), never for a request that already timed out in an overloaded system without backoff.
+- **Exponential backoff with jitter** spreads retries over time instead of synchronising them (see the backpressure lesson).
+- **Retry budgets.** Allow retries only as a fraction of recent first attempts (for example 10%). Under a full outage the budget is exhausted quickly and retries stop adding load.
+- **Retry at one layer only** (usually the edge or the layer closest to the user) so retries cannot multiply.
+- **Circuit breakers.** After several failures, stop calling the dependency and **fail fast** for a cooldown period, then let a probe request through to test recovery. States: *closed* (normal), *open* (fail fast), *half-open* (testing).
+- **Bulkheads and load shedding** (earlier lesson) limit how much of the caller's capacity one dependency can consume.
+- **Fallbacks:** a cached value or a default answer when the call fails.
+
+<Diagram kind="mermaid" code={`stateDiagram-v2
+  [*] --> Closed
+  Closed --> Open: failures reach the threshold
+  Open --> HalfOpen: cooldown elapsed
+  HalfOpen --> Closed: probe succeeds
+  HalfOpen --> Open: probe fails`} caption="Circuit breaker states: open means calls fail immediately without touching the dependency" />
+
+## Code: how many calls reach the dependency?
+
+A three-tier chain: **edge**, **middle**, **dependency**. The dependency fails a fixed fraction of calls. We compare five setups: no retries, retries at the edge only, retries (3 attempts) at both layers, both layers with a retry budget (each first attempt earns 0.1 of a retry), and the budget plus a circuit breaker in front of the dependency (opens after 5 consecutive failures, fails fast for 50 calls, then probes).
+
+<CodeRunner language="python" code={`import random
+
+random.seed(21)
+
+class Layer:
+    def __init__(self, below, attempts, budget=False):
+        self.below, self.attempts, self.budget, self.tokens = below, attempts, budget, 10.0
+
+    def call(self):
+        if self.budget:
+            self.tokens = min(10.0, self.tokens + 0.1)
+        for attempt in range(self.attempts):
+            if attempt > 0:
+                if self.budget:
+                    if self.tokens < 1:
+                        return False
+                    self.tokens -= 1
+            if self.below.call():
+                return True
+        return False
+
+class Dependency:
+    def __init__(self, f):
+        self.f, self.calls = f, 0
+
+    def call(self):
+        self.calls += 1
+        return random.random() > self.f
+
+class Breaker:
+    def __init__(self, below, threshold=5, cooldown=50):
+        self.below, self.threshold, self.cooldown = below, threshold, cooldown
+        self.fails, self.open_for = 0, 0
+
+    def call(self):
+        if self.open_for > 0:
+            self.open_for -= 1
+            return False
+        ok = self.below.call()
+        self.fails = 0 if ok else self.fails + 1
+        if self.fails >= self.threshold:
+            self.open_for, self.fails = self.cooldown, 0
+        return ok
+
+def run(label, f, edge_attempts, mid_attempts, budget, breaker, n=100000):
+    dep = Dependency(f)
+    bottom = Breaker(dep) if breaker else dep
+    mid = Layer(bottom, mid_attempts, budget)
+    edge = Layer(mid, edge_attempts, budget)
+    ok = sum(edge.call() for _ in range(n))
+    print(f" {label:34s} {100 * ok / n:6.1f}%      {dep.calls / n:6.2f}")
+
+for f in (0.1, 0.5, 0.9):
+    print(f"dependency fails {int(f * 100)}% of calls; 100000 user requests; chain edge -> middle -> dependency")
+    print(" setup                              user success   calls to dependency per request")
+    run("no retries", f, 1, 1, False, False)
+    run("3 attempts at the edge only", f, 3, 1, False, False)
+    run("3 attempts at both layers", f, 3, 3, False, False)
+    run("both layers + retry budget", f, 3, 3, True, False)
+    run("both layers + budget + breaker", f, 3, 3, True, True)
+    print()
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced (user success rate, then calls to the dependency per user request):
+
+| setup | fails 10%: success / calls | fails 50%: success / calls | fails 90%: success / calls |
+| --- | --- | --- | --- |
+| no retries | 90.0% / 1.00 | 50.2% / 1.00 | 10.1% / 1.00 |
+| 3 attempts at the edge only | 99.9% / 1.11 | 87.5% / 1.75 | 27.2% / 2.71 |
+| 3 attempts at both layers | 100.0% / 1.11 | 99.8% / 1.99 | 61.1% / **6.13** |
+| both layers + retry budget | 100.0% / 1.11 | 60.4% / 1.21 | 12.2% / 1.21 |
+| budget + circuit breaker | 100.0% / 1.11 | 33.8% / 0.68 | 1.5% / **0.15** |
+
+Read the table in three steps.
+
+1. **When failures are rare and independent, retries are great**: at 10% failures, retries lift success from 90% to 99.9% at a cost of only 11% extra load.
+2. **When the dependency is struggling, retries multiply load**: at 90% failures, retrying at two layers sends 6.13 calls per user request (the worst case is 9), about six times the normal load on a service that is already failing. That extra load is what turns a degradation into an outage in a real system, where failure *rate* depends on load; this simulation uses a fixed failure rate, so it shows the amplification but not the feedback that follows it.
+3. **Budgets and breakers cap the damage at a price in success**: the budget holds the load at 1.21 calls per request regardless of how bad things are; the breaker drops it to 0.15 by not calling at all. Success falls with them (12.2% and 1.5% at 90% failures), but a dependency that is sent 0.15 calls per request has a chance to recover, which is what actually restores service. The trade is deliberate: lose some requests now to keep the whole system alive.
+
+<Callout type="warning" title="Retries and idempotency">
+A retried request may have succeeded the first time with the reply lost. Only retry operations that are idempotent, or attach an idempotency key so the server can recognise and de-duplicate the second attempt (see the delivery-semantics lesson).
+</Callout>
+
+## Choosing parameters
+
+| knob | too small | too large |
+| --- | --- | --- |
+| timeout | healthy but slow calls fail, causing needless retries | threads and memory held by slow calls; failures detected late |
+| retries per call | transient errors reach the user | load multiplies under failure |
+| retry budget | few retries even when helpful | little protection |
+| breaker threshold | opens on noise, rejecting good traffic | opens too late to protect the dependency |
+| breaker cooldown | hammers a recovering service | slow recovery after the fault is fixed |
+
+Set timeouts from measured latency (a bit above the 99th or 99.9th percentile), give each layer a **smaller** deadline than the layer above, and monitor breaker state changes: an open breaker is an alert, not just a code path.
+
+## Trade-offs
+
+<TradeOffs caption="Resilience techniques for a service call" rows={[
+  { option: "Timeout only", pros: "Prevents unbounded waiting; trivial", cons: "Does not reduce load on a failing service", chooseWhen: "Always, as the base layer" },
+  { option: "Retries with backoff and jitter", pros: "Hides transient failures", cons: "Multiplies load during real failures", chooseWhen: "Idempotent calls, at a single layer, with a budget" },
+  { option: "Retry budget", pros: "Bounds amplification to a fixed fraction", cons: "Some transient errors surface to users", chooseWhen: "Any service that retries and has many clients" },
+  { option: "Circuit breaker", pros: "Fails fast; protects the dependency and the caller's threads", cons: "Needs tuning; rejects some good requests while open", chooseWhen: "Calls to remote dependencies that can fail slowly or completely" },
+  { option: "Fallback / graceful degradation", pros: "Users get a reduced but working experience", cons: "Fallback paths are rarely exercised and can hide bugs", chooseWhen: "Non-critical features (recommendations, personalisation)" }
+]} />
+
+## Pitfalls
+
+- Retrying at every layer of a chain, so one failure fans out multiplicatively.
+- Retrying without a timeout, or with a timeout longer than the caller's own deadline.
+- Retrying non-idempotent writes.
+- Retrying immediately and in lock step (no backoff, no jitter).
+- A breaker that is shared across unrelated dependencies, so one bad service blocks calls to healthy ones; use one breaker per dependency (or per host).
+- Never testing the open-breaker and fallback paths; they fail in production because they never ran before.
+
+## What would you choose and why?
+
+Your checkout service calls payments (critical), fraud scoring (important), and recommendations (nice to have). During an incident, fraud scoring starts timing out. Which calls get retries, which get breakers, which get fallbacks, and what do you show the customer? What do the dashboards need to show so that on-call sees the breaker opening instead of discovering it from complaints?
+
+## Quiz
+
+<Quiz id="sd-m13-retry-amplification" tags={["retries", "circuit-breaker", "resilience"]} questions={[
+  { type: "predict", q: "The edge retries a call up to 3 times and the middle service also retries up to 3 times. What is the worst-case number of calls to the bottom service per user request?", code: "edge_attempts, middle_attempts = 3, 3\nprint(edge_attempts * middle_attempts)", options: ["3", "6", "9", "27"], answer: 2, explain: "Each of the edge's 3 attempts can trigger 3 attempts at the middle: 3 x 3 = 9." },
+  { type: "mcq", q: "What does an open circuit breaker do?", options: ["Sends all traffic to the dependency faster", "Fails calls immediately without calling the dependency, for a cooldown", "Retries forever", "Closes the database connection pool"], answer: 1, explain: "Failing fast protects both the caller's resources and the struggling dependency." },
+  { type: "mcq", q: "In the lesson's measurements, what did the retry budget do at 90% dependency failures?", options: ["Raised load to 9 calls per request", "Held the load at about 1.2 calls per request", "Raised success to 99%", "Had no effect"], answer: 1, explain: "The budget (1.21 calls per request) stops retries from multiplying load; success stays low because the dependency itself is failing." },
+  { type: "multi", q: "Which are good practices?", options: ["Propagate a shrinking deadline down the call chain", "Retry at every layer for maximum success", "Add jitter to backoff", "Use one circuit breaker per dependency"], answer: [0, 2, 3], explain: "Retrying at every layer multiplies load." },
+  { type: "mcq", q: "Why must retried writes be idempotent or carry an idempotency key?", options: ["Retries are always slower", "The first attempt may have succeeded and only the reply was lost", "Databases forbid retries", "To save bandwidth"], answer: 1, explain: "Without a way to recognise a duplicate, a retry can apply the operation twice." }
+]} />

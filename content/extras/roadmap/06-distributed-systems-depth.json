@@ -18,6 +18,10 @@
     { "kind": "lesson", "ref": "sd/consensus-and-coordination/raft-leader-election" },
     { "kind": "lesson", "ref": "sd/consensus-and-coordination/raft-log-replication-and-safety" },
     { "kind": "lesson", "ref": "sd/consensus-and-coordination/leases-locks-and-fencing" },
+    { "kind": "lesson", "ref": "sd/microservice-patterns/service-boundaries-and-availability" },
+    { "kind": "lesson", "ref": "sd/microservice-patterns/retry-amplification-and-circuit-breakers" },
+    { "kind": "lesson", "ref": "sd/microservice-patterns/cqrs-and-event-sourcing" },
+    { "kind": "lesson", "ref": "sd/microservice-patterns/evolving-apis-and-events" },
     { "kind": "lesson", "ref": "sd/databases-2/read-replicas-and-failover" },
     { "kind": "lesson", "ref": "sd/databases-2/hot-keys-and-hot-partitions" },
     { "kind": "lesson", "ref": "sd/queues-and-streaming/kafka-rabbitmq-sqs" },
@@ -26,7 +30,7 @@
     { "kind": "lesson", "ref": "sd/scalability/load-shedding-and-bulkheads" },
     { "kind": "page", "title": "Glossary: consensus, quorum, split brain, fencing token", "href": "/glossary/", "note": "Search these terms and follow the related links." },
     { "kind": "project", "title": "A replicated key-value store that survives failures", "brief": "Implement a leader-based replicated store (the MIT labs are a good scaffold). Add a test harness that kills nodes, delays and drops messages, and checks that acknowledged writes are never lost and reads are linearizable where you promise it.", "deliverable": "A repository with the store, a fault-injection test suite and a short document explaining which guarantees you provide and which you do not." },
-    { "kind": "planned", "title": "Microservice patterns, search, security and observability modules", "note": "SD modules 13 to 16 (microservice patterns, search, security and observability) are not written on this site yet. The papers and course above cover the same ground in the meantime." }
+    { "kind": "planned", "title": "Search, security and observability modules", "note": "SD modules 14 to 16 (search, security and observability) are not written on this site yet. The papers and course above cover the same ground in the meantime." }
   ],
   "exit": [
     "You can explain how Raft elects a leader and why a committed entry cannot be lost.",

@@ -1,0 +1,187 @@
+---
+title: CQRS and Event Sourcing
+track: sd
+module: microservice-patterns
+order: 3
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/microservice-patterns/service-boundaries-and-availability", "sd/queues-and-streaming/stream-processing-basics", "sd/distributed-theory/distributed-commit-and-sagas"]
+tags: [cqrs, event-sourcing, projections, snapshots, read-models, audit-log, eventual-consistency]
+type: lesson
+furtherReading:
+  - title: "Fowler, Event Sourcing"
+    url: https://martinfowler.com/eaaDev/EventSourcing.html
+  - title: "Fowler, CQRS"
+    url: https://martinfowler.com/bliki/CQRS.html
+  - title: "Microsoft Azure Architecture Center, CQRS pattern"
+    url: https://learn.microsoft.com/en-us/azure/architecture/patterns/cqrs
+  - title: "Kleppmann, Designing Data-Intensive Applications, chapter 11 (event sourcing and CQRS)"
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Most applications store the **current state**: a row with the balance of an account. When a transfer happens the row is updated and the old value is gone. That is compact and fast to read, but it throws away *how* you got there: who changed it, when, why, and what the balance was last Tuesday.
+
+**Event sourcing** stores the **sequence of facts** instead: `Deposited 100`, `Withdrew 30`, `Deposited 5`. The current state is whatever you get by replaying them. The log is append-only, so it is a complete audit trail, and you can rebuild state at any point in time, or build *new* views of the same history that you did not think of when you wrote the first event.
+
+**CQRS** (Command Query Responsibility Segregation) separates the **write model** (commands that validate and change state) from one or more **read models** (query-optimised views). They often go together: the write side appends events, projections consume them and maintain read-optimised tables.
+
+## Definition
+
+- **Command:** a request to do something (`Withdraw 50`). It can be rejected. It is validated against current state and, if accepted, produces **events**.
+- **Event:** an immutable fact in the past tense (`Withdrew 50`). Events are never edited or deleted; mistakes are corrected by later compensating events.
+- **Event store:** an append-only log per entity (an *aggregate*, such as one account) with optimistic concurrency: an append says "I expect the stream to have N events", and fails if another writer got there first.
+- **Aggregate state:** a fold over the events: `state = events.reduce(apply, initial)`.
+- **Projection / read model:** a consumer that folds events into a table, search index or cache optimised for particular queries. It is **eventually consistent** with the write side: it lags by however many events it has not processed.
+- **Snapshot:** a stored state at event N so that loading an aggregate replays only the events after N.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  C[Command: withdraw 50] --> H[Command handler: validate against state]
+  H -->|append event| S[(Event store: Deposited 100, Withdrew 30, ...)]
+  S -->|events| P1[Projector]
+  S -->|events| P2[Projector]
+  P1 --> R1[(Read model: balances by customer)]
+  P2 --> R2[(Search index: transactions)]
+  Q[Query: show my balance] --> R1`} caption="CQRS with event sourcing: commands change the event store, queries hit read models that are updated asynchronously" />
+
+## Code: replay cost, snapshots and read-model lag
+
+The program builds an account with 100,457 events and compares loading it by full replay with loading from a snapshot taken every 10,000, 1,000 and 100 events. It also shows a command being validated against state, time travel, and a read model that lags and catches up.
+
+<CodeRunner language="python" code={`import random
+
+random.seed(8)
+
+class EventStore:
+    def __init__(self):
+        self.streams = {}
+        self.snapshots = {}
+
+    def append(self, account, event):
+        self.streams.setdefault(account, []).append(event)
+
+def apply(balance, event):
+    kind, amount = event
+    return balance + amount if kind == "Deposited" else balance - amount
+
+def load(store, account, use_snapshot):
+    events = store.streams.get(account, [])
+    start, balance = 0, 0
+    if use_snapshot and account in store.snapshots:
+        start, balance = store.snapshots[account]
+    for e in events[start:]:
+        balance = apply(balance, e)
+    return balance, len(events) - start
+
+def handle_withdraw(store, account, amount, use_snapshot=True):
+    balance, _ = load(store, account, use_snapshot)
+    if amount > balance:
+        return "rejected: insufficient funds"
+    store.append(account, ("Withdrew", amount))
+    return "accepted"
+
+store = EventStore()
+for _ in range(100457):
+    if random.random() < 0.6:
+        store.append("acc-1", ("Deposited", random.randint(1, 100)))
+    else:
+        store.append("acc-1", ("Withdrew", random.randint(1, 20)))
+
+stream = store.streams["acc-1"]
+print("events in the stream:", len(stream))
+
+bal_full, applied_full = load(store, "acc-1", use_snapshot=False)
+print("replay from the start      : balance", bal_full, "events applied", applied_full)
+
+for every in (10000, 1000, 100):
+    snap_at = (len(stream) // every) * every
+    b = 0
+    for e in stream[:snap_at]:
+        b = apply(b, e)
+    store.snapshots["acc-1"] = (snap_at, b)
+    bal, applied = load(store, "acc-1", use_snapshot=True)
+    assert bal == bal_full
+    print(f"snapshot every {every:5d} events: balance {bal} events applied {applied}")
+
+b = 0
+for e in stream[:500]:
+    b = apply(b, e)
+print("balance after the first 500 events:", b)
+
+read_model = {"balance": 0, "applied": 0}
+def project(upto):
+    for e in stream[read_model["applied"]:upto]:
+        read_model["balance"] = apply(read_model["balance"], e)
+    read_model["applied"] = upto
+project(100447)
+print("read model lag after the projector handled 100447 events:", len(stream) - read_model["applied"], "events behind")
+project(len(stream))
+print("read model equals replayed state after catching up:", read_model["balance"] == bal_full)
+
+print("withdraw 10 from an empty account:", handle_withdraw(store, "acc-2", 10))
+store.append("acc-2", ("Deposited", 50))
+print("withdraw 10 after a deposit of 50 :", handle_withdraw(store, "acc-2", 10))
+print("withdraw 100 from a balance of 40  :", handle_withdraw(store, "acc-2", 100))
+print("events stored for acc-2:", store.streams["acc-2"])
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| way of loading the account | events applied | balance |
+| --- | --- | --- |
+| full replay from the start | 100,457 | 2,618,850 |
+| snapshot every 10,000 events | 457 | 2,618,850 |
+| snapshot every 1,000 events | 457 | 2,618,850 |
+| snapshot every 100 events | 57 | 2,618,850 |
+
+All four methods return the same balance; the snapshot only changes the work. Loading by full replay applied 100,457 events, a snapshot every 1,000 cut that to 457 (a factor of about 220), and a snapshot every 100 events to 57. The 500-event time-travel query returned the balance of 13,977 as it was then, something a plain "current state" table cannot answer. The read model, after handling 100,447 of the 100,457 events, was **10 events behind** and, once it caught up, matched the replayed state exactly. The command side rejected the over-withdrawals using the current state and stored only the accepted events (`Deposited 50`, `Withdrew 10`). The point is the shape of the costs, not the absolute numbers: replay cost grows with stream length, so long-lived aggregates need snapshots, and any read model has a visible lag.
+
+## When it fits, and when it does not
+
+**Good fits:** domains where history matters (finance, orders, inventory, audit and compliance), systems that need several different read views of the same data, debugging by replay ("what exactly happened to this order?"), and integrations that publish business events.
+
+**Poor fits:** simple CRUD, data without meaningful history, teams new to eventual consistency, and cases where every query needs read-your-writes behaviour with no lag. Event sourcing is a heavy commitment; CQRS alone (separate read model, plain tables for writes) is often enough.
+
+## Hard parts
+
+- **Eventual consistency of read models.** After a command succeeds, the user's next query may not show it yet. Mitigations: return the new state in the command response, route the user's reads to the write side briefly, or wait for the projector to reach the event's position.
+- **Event schema evolution.** Events live for ever, so their format must evolve compatibly: add optional fields, version event types, and write *upcasters* that translate old events when reading (see the next lesson).
+- **Rebuilding projections.** Fixing a projector bug means replaying the whole log into a new table, so plan the capacity and run old and new versions side by side.
+- **Privacy and deletion.** Immutable logs conflict with the right to be forgotten; use encryption with per-user keys (crypto-shredding) or keep personal data outside the events.
+- **Concurrency.** Use optimistic concurrency on the stream version, and design commands to be idempotent.
+- **Cross-aggregate invariants.** An aggregate is the consistency boundary; rules spanning aggregates need sagas or eventual processes.
+
+## Trade-offs
+
+<TradeOffs caption="Storing state versus storing events" rows={[
+  { option: "Current state only (CRUD)", pros: "Simple; fast reads; familiar tools", cons: "History lost unless audited separately; one shape of read", chooseWhen: "Most applications" },
+  { option: "CQRS without event sourcing", pros: "Query-optimised read models; independent scaling of reads and writes", cons: "Synchronisation and lag to manage", chooseWhen: "Read patterns differ greatly from the write model" },
+  { option: "Event sourcing with CQRS", pros: "Full history and audit; replayable; many views; natural event publishing", cons: "Eventual consistency, schema evolution, replay and privacy challenges", chooseWhen: "History is a core requirement and the team can operate it" },
+  { option: "Audit table beside CRUD", pros: "Gives most of the audit value with little change", cons: "History is a by-product and may drift from the truth", chooseWhen: "You need an audit trail but not replay" }
+]} />
+
+## Pitfalls
+
+- Treating events as notifications with a vague meaning; events should be precise business facts.
+- Putting too much into one aggregate, creating contention; or too little, losing invariants.
+- Forgetting snapshots until loading an aggregate takes seconds.
+- Changing past events in place instead of appending corrections.
+- Reading from a projection and then using it to validate a command: validate against the write-side state.
+- Building event sourcing in a domain with no use for the history.
+
+## What would you choose and why?
+
+An airline stores bookings. Staff need the full change history of each booking (for disputes), the website shows "my trips" instantly after booking, and finance wants a daily revenue report. Would you use event sourcing, CQRS with plain tables, or CRUD plus an audit table? What does the customer see in the first second after paying?
+
+## Quiz
+
+<Quiz id="sd-m13-cqrs-event-sourcing" tags={["cqrs", "event-sourcing", "projections"]} questions={[
+  { type: "mcq", q: "In event sourcing, how is the current state of an aggregate obtained?", options: ["Read the latest row", "Fold (replay) its events from the start or from a snapshot", "Ask the read model", "Call the projector"], answer: 1, explain: "State is derived from the events, which are the source of truth." },
+  { type: "mcq", q: "Why are snapshots used?", options: ["To delete old events", "To avoid replaying a long history every time an aggregate is loaded", "To encrypt events", "To make events mutable"], answer: 1, explain: "Replay cost grows with the stream length; a snapshot lets you replay only the events after it." },
+  { type: "predict", q: "A stream has 100,457 events and a snapshot every 1,000 events. How many events must be replayed after the latest snapshot?", code: "print(100457 % 1000)", options: ["57", "457", "1000", "100457"], answer: 1, explain: "The last snapshot is at 100,000, so 457 events remain." },
+  { type: "multi", q: "Which are challenges of CQRS with event sourcing?", options: ["Read models lag behind the write side", "Event schemas must evolve compatibly", "Events can be edited freely", "Rebuilding a projection means replaying the log"], answer: [0, 1, 3], explain: "Events are immutable; corrections are new events." },
+  { type: "mcq", q: "Which domain is the best fit for event sourcing?", options: ["A static marketing page", "A payments ledger needing full audit history", "A simple settings table", "A cache"], answer: 1, explain: "Event sourcing pays off when the history itself is valuable." }
+]} />

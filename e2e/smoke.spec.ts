@@ -73,6 +73,10 @@ test("distributed systems lessons render with a runnable program and a quiz", as
     ["/sd/consensus-and-coordination/raft-leader-election/", "Raft Leader Election"],
     ["/sd/consensus-and-coordination/raft-log-replication-and-safety/", "Raft Log Replication and Safety"],
     ["/sd/consensus-and-coordination/leases-locks-and-fencing/", "Leases, Locks and Fencing Tokens"],
+    ["/sd/microservice-patterns/service-boundaries-and-availability/", "Service Boundaries and Availability"],
+    ["/sd/microservice-patterns/retry-amplification-and-circuit-breakers/", "Retry Amplification and Circuit Breakers"],
+    ["/sd/microservice-patterns/cqrs-and-event-sourcing/", "CQRS and Event Sourcing"],
+    ["/sd/microservice-patterns/evolving-apis-and-events/", "Evolving APIs and Events Safely"],
   ]) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
@@ -745,7 +749,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("141");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("145");
   });
 });
 
