@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 188 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 195 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -66,7 +66,8 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 11 Distributed theory | Complete (4: CAP and PACELC, consistency and quorums, time and clocks, 2PC and sagas) | 4 |
 | 12 Consensus and coordination | Partial (3: why consensus and Paxos, Raft, locks and fencing) | 3 |
 | 13 Microservice patterns | Partial (3: monolith vs microservices, resilience patterns, event-driven/CQRS/event sourcing; no service mesh or API versioning lesson) | 3 |
-| 14-15 (search, security) | Planned | 0 |
+| 14 Search | Partial (3: inverted index and text analysis, BM25 relevance, distributed search architecture; no vector search or query-understanding lesson) | 3 |
+| 15 Security | Partial (4: authentication and OAuth, authorization, secrets/encryption/TLS, web attacks and threat modelling; no privacy-compliance lesson) | 4 |
 | 16 Observability and reliability | Partial (3: logs/metrics/traces, SLOs and error budgets, safe deployments and incident response; no capacity-testing lesson) | 3 |
 | 17 Case studies | Partial (11: URL shortener, news feed, chat, payments, ride hailing and proximity search, distributed key-value store, video streaming, search autocomplete, web crawler, notifications, collaborative editing; no e-commerce, ticketing, metrics or file sync designs yet) | 11 |
 | 18-26 (more case studies) | Planned | 0 |
