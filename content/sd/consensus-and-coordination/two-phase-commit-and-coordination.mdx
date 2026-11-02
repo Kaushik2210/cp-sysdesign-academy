@@ -1,0 +1,206 @@
+---
+title: Two-Phase Commit and Coordination Services
+track: sd
+module: consensus-and-coordination
+order: 3
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/consensus-and-coordination/paxos-and-multi-paxos", "sd/databases-1/acid-and-transactions"]
+tags: [two-phase-commit, atomic-commit, 3pc, sagas, zookeeper, etcd, coordination, leader-election, distributed-transactions]
+type: lesson
+furtherReading:
+  - title: Gray and Lamport, Consensus on Transaction Commit
+    url: https://www.microsoft.com/en-us/research/publication/consensus-on-transaction-commit/
+  - title: Hunt et al., ZooKeeper, Wait-free Coordination for Internet-scale Systems (USENIX ATC 2010)
+    url: https://www.usenix.org/legacy/event/atc10/tech/full_papers/Hunt.pdf
+  - title: etcd documentation, API guarantees and leases
+    url: https://etcd.io/docs/
+  - title: Corbett et al., Spanner (OSDI 2012), two-phase commit across Paxos groups
+    url: https://research.google/pubs/spanner-googles-globally-distributed-database/
+---
+
+## Intuition
+
+Consensus answers "which single value do we all agree on?" A related but different problem appears the moment one logical operation touches **several** databases or services. Moving 100 coins from account A (on server 1) to account B (on server 2) must either happen on both or on neither; a state where A is debited and B is not is a bug that destroys money. This is **atomic commit**: all participants commit, or all abort, even when some crash or messages are lost.
+
+The classic protocol is **two-phase commit (2PC)**. It is simple, widely used inside databases, and teaches an important lesson: it is *not* fault tolerant in the way consensus is. Understanding exactly where it blocks explains why modern systems layer it on top of consensus, avoid it with sagas, or use dedicated coordination services.
+
+## Two-phase commit
+
+One node, the **coordinator**, drives the transaction. The others are **participants** (resource managers).
+
+**Phase 1: prepare (voting).** The coordinator asks every participant "can you commit?" Each participant checks that it can (constraints hold, locks acquired), **durably logs that it is prepared**, and votes **yes**; or it votes **no** and aborts locally. A prepared participant has made a promise: it can no longer decide on its own and must keep its locks until it hears the verdict.
+
+**Phase 2: commit or abort.** If **all** voted yes, the coordinator **durably logs the decision `commit`** and tells everyone to commit. If any voted no (or timed out), it logs `abort` and tells everyone to abort. Participants apply the decision, release locks and acknowledge.
+
+<Diagram kind="mermaid" caption="Two-phase commit with two participants. The marked point is where a coordinator crash leaves participants stuck" code={`sequenceDiagram
+  participant C as Coordinator
+  participant P1 as Participant 1
+  participant P2 as Participant 2
+  C->>P1: PREPARE
+  C->>P2: PREPARE
+  P1-->>C: vote YES (prepared, locks held)
+  P2-->>C: vote YES (prepared, locks held)
+  Note over C: all yes: log COMMIT durably
+  Note over C,P2: crash here and both participants are in doubt
+  C->>P1: COMMIT
+  C->>P2: COMMIT
+  P1-->>C: ack
+  P2-->>C: ack`} />
+
+The two **durable logs** matter. Because the participant logs "prepared" before voting and the coordinator logs the decision before announcing it, a crash and restart can always be recovered: a recovering participant asks the coordinator for the outcome, and a recovering coordinator re-sends the logged decision.
+
+## The blocking problem
+
+The weakness is the window between a participant voting yes and learning the decision. A prepared participant **cannot unilaterally commit** (another participant may have voted no) and **cannot unilaterally abort** (the coordinator may already have decided commit). It is **in doubt**. If the coordinator crashes at that moment, the participant must **wait**, holding its locks, until the coordinator comes back, which can take minutes or hours. Locked rows block other transactions, so one crashed coordinator can stall a large part of the system.
+
+The simulation enumerates where a coordinator can crash in a 3-participant transaction and counts how many participants are left in doubt, then runs a Monte Carlo experiment.
+
+<CodeRunner language="python" code={`import random
+
+PARTS = 3
+# The coordinator can crash at one of these points of a two-phase commit with 3 participants.
+CRASH_POINTS = [
+    "before sending any PREPARE",
+    "after PREPARE reached 1 of 3 participants",
+    "after all votes arrived, before logging the decision",
+    "after logging COMMIT, before sending any decision",
+    "after COMMIT reached 1 of 3 participants",
+    "after the decision reached everyone",
+]
+
+def outcome(point, votes):
+    """Return what each participant knows when the coordinator crashes at 'point' and never comes back (until recovery)."""
+    states = ["init"] * PARTS
+    if point == 0:
+        return ["init"] * PARTS                                 # nobody was asked: free to abort
+    prepared = {0: 1, 1: 1, 2: PARTS, 3: PARTS, 4: PARTS, 5: PARTS}[point]
+    for i in range(prepared):
+        states[i] = "prepared" if votes[i] else "aborted"       # a participant that votes NO aborts on its own
+    if point >= 4:
+        decision = "committed" if all(votes) else "aborted"
+        informed = {4: 1, 5: PARTS}[point]
+        for i in range(informed):
+            states[i] = decision
+    return states
+
+def classify(states):
+    blocked = [i for i, s in enumerate(states) if s == "prepared"]
+    return len(blocked)
+
+print("coordinator crashes at each point of a 2PC with 3 participants, all voting YES")
+print("  crash point                                                  participants stuck IN DOUBT (prepared, holding locks)")
+for p, name in enumerate(CRASH_POINTS):
+    st = outcome(p, [True, True, True])
+    print(f"  {name:<58} {classify(st)}   states: {st}")
+
+# Monte Carlo: 100000 transactions, each crashes the coordinator with probability 0.5% at a uniformly random point
+rng = random.Random(9)
+txs = 100000
+crash_p = 0.005
+blocked_tx = blocked_parts = 0
+for _ in range(txs):
+    if rng.random() < crash_p:
+        point = rng.randrange(len(CRASH_POINTS))
+        votes = [rng.random() > 0.02 for _ in range(PARTS)]
+        b = classify(outcome(point, votes))
+        if b:
+            blocked_tx += 1
+            blocked_parts += b
+print()
+print(f"{txs} transactions, coordinator crash probability {crash_p:.1%} per transaction at a random point")
+print(f"  transactions that left at least one participant blocked in doubt: {blocked_tx} ({100 * blocked_tx / txs:.3f}% of all transactions)")
+print(f"  participant-locks stuck until the coordinator recovers: {blocked_parts}")
+`} />
+
+A local run showed that a crash **before any PREPARE** leaves 0 participants in doubt, a crash after the PREPARE reached only one participant leaves 1 stuck, a crash after all votes arrived (whether before or after logging the decision) leaves **all 3** stuck, a crash after the decision reached one participant leaves 2 stuck, and a crash after the decision reached everyone leaves 0. In a Monte Carlo run of 100,000 transactions with a 0.5% coordinator crash chance per transaction at a random point, **348 transactions (0.348%)** left at least one participant blocked, holding **764 participant locks** in total until the coordinator recovered. Rare per transaction, but each blocked participant holds real locks for as long as recovery takes.
+
+## Three-phase commit and its limits
+
+**Three-phase commit (3PC)** adds a "pre-commit" phase so that participants can often decide among themselves after a coordinator crash, removing blocking **if** the network never partitions and failures are detected reliably. In real networks, where partitions and slow nodes look like failures, 3PC can violate atomicity (two sides decide differently), so it is almost never used. The robust fix is different: make the **coordinator itself fault tolerant** by replicating its decision with consensus. **Paxos Commit** (Gray and Lamport) and **Spanner** run 2PC where each participant group, and the coordinator state, are **replicated with Paxos**; a crashed leader of a group is replaced, and the transaction continues. Blocking is replaced by a brief leader election.
+
+## Avoiding distributed transactions: sagas
+
+Locking several services for the duration of a slow business process is often unacceptable. A **saga** splits a long transaction into a sequence of **local transactions**, each committed immediately, with a **compensating action** for each one to undo it if a later step fails. Booking a trip: reserve flight, reserve hotel, charge card; if the card fails, release the hotel, then release the flight.
+
+| | Two-phase commit | Saga |
+| --- | --- | --- |
+| Atomicity | Real atomic commit; nothing visible until all commit | Eventual: intermediate states are visible, compensation repairs failures |
+| Isolation | Locks hold other transactions out | None by default; need semantic locks or versioning |
+| Availability | Blocks on coordinator failure | Each step is local; no cross-service locks |
+| Complexity | In the database or transaction manager | In the application: compensations, retries, idempotency |
+| Typical use | Within a database cluster, across shards | Microservices and long-running business flows |
+
+Every saga step and compensation must be **idempotent**, because messages repeat and steps are retried. The next module on microservice patterns returns to sagas in depth.
+
+## Coordination services: ZooKeeper and etcd
+
+Rather than every application implementing consensus, most systems use a **coordination service**: a small, consensus-replicated store (3 or 5 nodes) that offers primitives for coordination. **ZooKeeper** (using its Zab protocol) and **etcd** (using Raft) are the common ones, and Chubby was Google's original. They offer a small file-system-like or key-value API with strong guarantees:
+
+- **Linearizable writes**, with ordered, consistent reads of the same key space.
+- **Ephemeral nodes / leases:** a key that disappears automatically when the client's session ends or its lease expires. This is how you detect that a worker died.
+- **Watches:** a client can subscribe to a key and be notified when it changes, so it does not need to poll.
+- **Sequential nodes / revisions:** every update gets a **monotonically increasing number** (ZooKeeper's `zxid`, etcd's revision), which doubles as a **fencing token** (see the previous module).
+
+### Recipes
+
+- **Leader election:** each candidate creates an ephemeral sequential node; the lowest sequence number is the leader, and each other candidate watches only the node just before it (avoiding a stampede when the leader dies).
+- **Distributed lock:** the same pattern; release by deleting the node or letting the session expire. Pair it with the node's revision as a fencing token on writes to the protected resource.
+- **Configuration and feature flags:** store small values; clients watch for changes.
+- **Service discovery and membership:** each instance registers an ephemeral node; a watch on the parent gives the live set.
+- **Barrier and queue** primitives for coordinating batches of workers.
+
+### What to keep in a coordination service
+
+Consensus makes every write expensive (a majority round trip and a disk sync), and the data is replicated in memory on every node. So: store **small, critical, slowly changing control-plane state** (leaders, locks, configuration, membership), not user data, high-rate counters or large blobs. Run it as its own small cluster, spread across failure domains, and treat its availability as a dependency of everything that uses it.
+
+<Diagram kind="flow" caption="Choosing how to coordinate an operation across components" nodes={[
+  { id: "q", label: "Operation spans several components", x: 0, y: 80, role: "Decide how strict the atomicity must be.", failureModes: ["Assuming a single database transaction when two systems are involved"], tradeoffs: ["Stronger atomicity costs availability and latency"] },
+  { id: "db", label: "Same database or shard group", x: 220, y: 10, role: "Use a normal ACID transaction, or the database's built-in distributed commit.", failureModes: ["Cross-shard 2PC blocks on coordinator failure unless replicated"], tradeoffs: ["Simplest and strongest"] },
+  { id: "saga", label: "Several services, long-running", x: 220, y: 80, role: "Use a saga with idempotent steps and compensations.", failureModes: ["Visible intermediate states", "Compensation can itself fail"], tradeoffs: ["Available and decoupled; application complexity"] },
+  { id: "coord", label: "Agree on a leader, a lock or a config", x: 220, y: 150, role: "Use ZooKeeper or etcd instead of writing consensus yourself.", failureModes: ["The coordination cluster becoming a bottleneck or single point of failure"], tradeoffs: ["Small, strongly consistent control-plane data"] }
+]} edges={[
+  { from: "q", to: "db" }, { from: "q", to: "saga" }, { from: "q", to: "coord" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Coordinating work across nodes" rows={[
+  { option: "Two-phase commit", pros: "True atomic commit across participants; well understood", cons: "Blocks while the coordinator is down; holds locks; extra round trips", chooseWhen: "Short transactions inside one database system or tightly coupled shards" },
+  { option: "2PC over replicated (Paxos or Raft) participants", pros: "Atomic commit without coordinator blocking; used by Spanner and distributed SQL databases", cons: "Highest latency and complexity", chooseWhen: "Globally consistent transactions across partitions" },
+  { option: "Sagas with compensations", pros: "No cross-service locks; each step is local and available", cons: "Intermediate states visible; compensation design is hard", chooseWhen: "Business workflows across independent services" },
+  { option: "Coordination service (ZooKeeper/etcd)", pros: "Battle-tested consensus, leases, watches, fencing numbers", cons: "Another critical cluster; only for small control-plane data", chooseWhen: "Leader election, locks, configuration, service membership" },
+  { option: "Idempotent operations with retries", pros: "Simple; tolerates duplicates and timeouts", cons: "Does not give atomicity across multiple objects", chooseWhen: "Single-object updates and message processing" }
+]} />
+
+## Failure modes
+
+- **Coordinator crash after votes:** participants block in doubt, holding locks.
+- **Participant crash after voting yes:** on recovery it must ask for the decision and can only learn it from the coordinator (or the log of a replica).
+- **Lost final message:** a participant never learns the decision; recovery needs a periodic "what was the outcome?" query.
+- **Heuristic decisions:** an operator forces a blocked participant to commit or abort, and may create inconsistency with the others.
+- **Coordination service outage:** every service that needs leader election or config stalls or loses its leader; test this failure.
+- **Thundering herd on a watch:** all clients wake on one key change; watch the predecessor, not the whole directory.
+
+## Pitfalls
+
+- Assuming two separate databases can be updated atomically without a protocol.
+- Using 2PC across services with long-running steps, so locks are held for seconds or minutes.
+- Writing a saga whose compensating step is not idempotent.
+- Storing bulk or high-churn data in ZooKeeper or etcd.
+- Implementing a lock on a coordination service without fencing tokens for the protected resource.
+- Running the coordination cluster in one availability zone.
+
+## What would you choose and why?
+
+An order service must (1) reserve inventory in one database, (2) charge a payment provider's API, and (3) create a shipment in another team's service. Each step can fail, the payment API cannot join a distributed transaction, and the whole flow may take seconds. Decide between 2PC and a saga, list the compensating action for each step, and say how you would make each step idempotent. Where, if anywhere, would you use a coordination service in this design?
+
+## Quiz
+
+<Quiz id="sd-m12-2pc-coordination" tags={["two-phase-commit", "sagas", "zookeeper", "etcd"]} questions={[
+  { type: "mcq", q: "When is a participant 'in doubt' in two-phase commit?", options: ["Before it receives PREPARE", "After it voted yes but before it learns the coordinator's decision", "After it commits", "When it votes no"], answer: 1, explain: "It has promised to commit if told to, so it can neither commit nor abort on its own until the verdict arrives." },
+  { type: "mcq", q: "Why is 2PC called a blocking protocol?", options: ["It uses blocking sockets", "If the coordinator fails after the votes, prepared participants must wait, holding locks, until it recovers", "It blocks reads only", "Participants block on disk writes"], answer: 1, explain: "No participant can safely decide alone, so progress stops until the coordinator is back." },
+  { type: "mcq", q: "How do Spanner and distributed SQL databases avoid 2PC blocking?", options: ["By skipping the prepare phase", "By replicating the coordinator and participants with Paxos or Raft, so a failed leader is replaced and the protocol continues", "By using wall clocks only", "By avoiding transactions"], answer: 1, explain: "Atomic commit on top of replicated groups turns coordinator failure into a brief leader election." },
+  { type: "multi", q: "Which are properties of a saga?", options: ["Each step is a local transaction that commits immediately", "Failures are repaired with compensating actions", "No intermediate state is ever visible to others", "Steps and compensations should be idempotent"], answer: [0, 1, 3], explain: "Sagas trade isolation for availability: other transactions can observe intermediate states." },
+  { type: "mcq", q: "What is the best use of an etcd or ZooKeeper cluster?", options: ["Storing user uploads", "Small, critical control-plane state: leader election, locks, configuration and membership", "A high-rate counter store", "Caching web pages"], answer: 1, explain: "Every write is a majority round trip with a disk sync, so keep it for small, slowly changing, critical data." }
+]} />
