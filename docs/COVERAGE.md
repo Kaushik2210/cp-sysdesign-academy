@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 168 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 171 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -66,7 +66,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 11 Distributed theory | Complete (4: CAP and PACELC, consistency and quorums, time and clocks, 2PC and sagas) | 4 |
 | 12 Consensus and coordination | Complete (3: why consensus and Paxos, Raft, locks and fencing) | 3 |
 | 13-16 (microservices, search, security, observability) | Planned | 0 |
-| 17 Case studies | Partial (3: URL shortener, news feed, chat; no video, maps, payments or search designs yet) | 3 |
+| 17 Case studies | Partial (6: URL shortener, news feed, chat, payments, ride hailing and proximity search, distributed key-value store; no video streaming or search designs yet) | 6 |
 | 18-28 (more case studies, LLD) | Planned | 0 |
 
 ## Known gaps and caveats
