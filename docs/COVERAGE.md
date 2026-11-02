@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 198 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 201 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -69,7 +69,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 14 Search | Partial (3: inverted index and text analysis, BM25 relevance, distributed search architecture; no vector search or query-understanding lesson) | 3 |
 | 15 Security | Partial (4: authentication and OAuth, authorization, secrets/encryption/TLS, web attacks and threat modelling; no privacy-compliance lesson) | 4 |
 | 16 Observability and reliability | Partial (3: logs/metrics/traces, SLOs and error budgets, safe deployments and incident response; no capacity-testing lesson) | 3 |
-| 17 Case studies | Partial (14: URL shortener, news feed, chat, payments, ride hailing and proximity search, distributed key-value store, video streaming, search autocomplete, web crawler, notifications, collaborative editing, ticket booking, metrics monitoring, file sync; no e-commerce checkout, food delivery, stock exchange or social graph designs yet) | 14 |
+| 17 Case studies | Partial (17: URL shortener, news feed, chat, payments, ride hailing and proximity search, distributed key-value store, video streaming, search autocomplete, web crawler, notifications, collaborative editing, ticket booking, metrics monitoring, file sync, stock exchange, social graph, e-commerce checkout; no food delivery, hotel booking, ad server or leaderboard designs yet) | 17 |
 | 18-26 (more case studies) | Planned | 0 |
 | 27 LLD: OOP, SOLID and patterns | Partial (3: SOLID, creational and structural patterns, behavioural patterns; no concurrency patterns or UML lesson) | 3 |
 | 28 LLD case studies | Partial (3: parking lot, LRU cache with TTL, elevator; no vending machine, library system, chess or splitwise-style designs yet) | 3 |
