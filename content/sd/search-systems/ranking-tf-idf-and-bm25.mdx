@@ -1,0 +1,206 @@
+---
+title: Ranking with TF-IDF and BM25
+track: sd
+module: search-systems
+order: 2
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/search-systems/inverted-indexes-and-text-analysis"]
+tags: [search, ranking, tf-idf, bm25, relevance, ndcg, learning-to-rank, hybrid-search, vector-search]
+type: lesson
+furtherReading:
+  - title: Robertson and Zaragoza, The Probabilistic Relevance Framework, BM25 and Beyond
+    url: https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf
+  - title: Introduction to Information Retrieval, tf-idf weighting
+    url: https://nlp.stanford.edu/IR-book/html/htmledition/tf-idf-weighting-1.html
+  - title: Wikipedia, Okapi BM25
+    url: https://en.wikipedia.org/wiki/Okapi_BM25
+  - title: Cormack, Clarke and Buettcher, Reciprocal Rank Fusion outperforms Condorcet and individual rank learning methods
+    url: https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf
+---
+
+## Intuition
+
+An inverted index tells you **which documents match** a query. A good search system also has to decide **in what order to show them**, because a query such as `python` can match millions of documents and the user will look at ten. Ranking turns the set of matches into a list ordered by how relevant each document is.
+
+Relevance has no single definition, but a few intuitions drive almost every ranking function:
+
+1. A document that mentions the query word **more often** is probably more about it (term frequency).
+2. A word that appears in **almost every** document tells you little; a **rare** word is a stronger signal (inverse document frequency).
+3. A word repeated 150 times does not make a page 150 times more relevant: returns **diminish**.
+4. In a **very long** document a mention is less meaningful than in a short, focused one (length normalisation).
+
+**TF-IDF** captures the first two and **BM25** captures all four. BM25 is the default scoring function in Lucene, Elasticsearch, OpenSearch and Solr.
+
+## TF-IDF
+
+For a query term `t` and a document `d`:
+
+```text
+tf(t, d)   = how many times t occurs in d
+df(t)      = how many documents contain t
+idf(t)     = log( N / df(t) )                    N is the number of documents
+tf-idf     = tf(t, d)  *  idf(t)
+```
+
+For a multi-term query add up the score of each term. The `idf` factor makes a rare word worth much more than a common one: with `N = 1,000,000` documents, a word in 1,000 documents has `idf = log(1000) = 6.9`, while a word in 500,000 documents has `idf = log(2) = 0.69`, ten times less.
+
+Raw term frequency over-rewards repetition, so many variants use a sub-linear function such as `1 + log(tf)`. That helps, but a document is still rewarded without limit for repeating a word, and long documents, which naturally contain more of every word, are favoured.
+
+## BM25
+
+BM25 fixes both problems with two tunable parameters:
+
+```text
+score(t, d) = idf(t) * ( tf * (k1 + 1) ) / ( tf + k1 * (1 - b + b * len(d) / avglen) )
+
+k1  controls term-frequency saturation (typical 1.2): bigger means tf matters for longer
+b   controls length normalisation (typical 0.75): 0 ignores length, 1 fully normalises
+```
+
+Two behaviours to notice:
+
+- **Saturation:** as `tf` grows the fraction approaches `k1 + 1` and stops growing. The tenth mention adds far less than the second.
+- **Length normalisation:** a document longer than average has a larger denominator, so the same `tf` earns less; a shorter one earns more.
+
+BM25 uses a smoothed idf, `log(1 + (N - df + 0.5) / (df + 0.5))`, which never goes negative for words in more than half the documents. Because `k1` and `b` are knobs, they are tuned per corpus: short product titles want `b` near 0 (length carries no meaning), long articles want a higher `b`.
+
+## Seeing the difference
+
+The simulation scores a tiny corpus built to expose naive weaknesses for the query `python`: a focused tutorial, a very long guide that mentions the word more often in absolute terms, a tiny note, a keyword-stuffed page, and some unrelated pages. It then shows how each score grows when one word is repeated more and more in a 300-word document.
+
+<CodeRunner language="python" code={`import math
+
+# A small corpus built to expose the weaknesses of naive scoring. Query: "python"
+# Each document is (name, total words, how many of those words are "python"). The other words are filler.
+docs = [
+    ("tutorial   ", 120, 6),     # a focused page: python is a real topic
+    ("long guide ", 2400, 12),   # a long document that mentions python more often, but in a sea of other text
+    ("short note ", 20, 2),      # a tiny page about python
+    ("keyword spam", 300, 150),  # stuffed with the query word
+    ("unrelated  ", 200, 0),
+    ("unrelated 2", 150, 0),
+    ("unrelated 3", 400, 1),
+]
+N = len(docs)
+df = sum(1 for _, _, tf in docs if tf > 0)             # documents containing the term
+avg_len = sum(length for _, length, _ in docs) / N
+
+idf_plain = math.log(N / df)                            # classic inverse document frequency
+idf_bm25 = math.log(1 + (N - df + 0.5) / (df + 0.5))   # the smoothed variant used by BM25
+
+def raw_count(tf, length):
+    return tf
+
+def tf_idf(tf, length):
+    return (1 + math.log(tf)) * idf_plain if tf > 0 else 0.0     # sub-linear tf, then times idf
+
+def bm25(tf, length, k1=1.2, b=0.75):
+    if tf == 0: return 0.0
+    norm = k1 * (1 - b + b * length / avg_len)          # longer than average documents are penalised
+    return idf_bm25 * tf * (k1 + 1) / (tf + norm)
+
+print("query: python | corpus of", N, "documents,", df, "contain the term, average length", round(avg_len), "words")
+print("idf of the term: classic", round(idf_plain, 3), "| BM25", round(idf_bm25, 3))
+print()
+rankings = {}
+print("  document        words   python   raw count   tf-idf   BM25")
+for name, length, tf in docs:
+    r, t, b = raw_count(tf, length), tf_idf(tf, length), bm25(tf, length)
+    rankings[name] = (r, t, b)
+    print(f"  {name}   {length:>5}   {tf:>6}   {r:>9}   {t:>6.2f}   {b:>4.2f}")
+
+def order(col):
+    return [n.strip() for n, v in sorted(rankings.items(), key=lambda kv: -kv[1][col]) if v[col] > 0]
+print()
+print("ranking by raw count :", order(0))
+print("ranking by tf-idf    :", order(1))
+print("ranking by BM25      :", order(2))
+
+# how fast does each score grow when the same word is repeated more and more in a 300-word document?
+print()
+print("a 300-word document: score as the query word is repeated more times")
+print("  repeats   raw count   tf-idf   BM25")
+for tf in (1, 2, 5, 10, 25, 50, 100, 200):
+    print(f"  {tf:>7}   {tf:>9}   {tf_idf(tf, 300):>6.2f}   {bm25(tf, 300):>4.2f}")
+`} />
+
+A local run printed: by **raw count and by TF-IDF** the order was keyword spam, the long guide, the tutorial, the short note; by **BM25** it became keyword spam, **tutorial, short note, long guide**, because the 2,400-word guide's 12 mentions are diluted by its length while the 120-word tutorial's 6 mentions are concentrated (BM25 0.76 and 0.71 for the tutorial and the short note, against 0.60 for the long guide). The repetition table shows saturation clearly: raw count went from 1 to 200, TF-IDF from 0.34 to 2.12, but **BM25 only rose from 0.45 to 0.82**, and was already 0.76 at 10 repeats and 0.82 at 100. Notice also what BM25 does **not** do: the keyword-stuffed page still ranked first (0.82 against the tutorial's 0.76). Saturation limits the damage of repetition (a 25-times advantage in raw count shrank to about 8% in score), but spam resistance needs other signals.
+
+<Diagram kind="flow" caption="A ranking pipeline: cheap retrieval first, expensive scoring on a small candidate set" nodes={[
+  { id: "retr", label: "Retrieve candidates", x: 0, y: 80, role: "Inverted-index match with BM25 (and optionally vector search) to find a few hundred or thousand candidates.", failureModes: ["A relevant document is not retrieved and no later stage can recover it"], tradeoffs: ["Fast and broad, modest precision"] },
+  { id: "rank", label: "Rescore with features", x: 220, y: 80, role: "A learning-to-rank model combines BM25, freshness, popularity, click history, quality signals and personalisation.", failureModes: ["Feature leakage or stale training data", "Feedback loops that entrench popular results"], tradeoffs: ["Better ordering; more machinery and evaluation needed"] },
+  { id: "rerank", label: "Rerank the top results", x: 440, y: 80, role: "An expensive model (a cross-encoder or business rules) reorders the top 20 to 100.", failureModes: ["Latency budget", "Unexplainable ordering"], tradeoffs: ["Highest quality on a tiny set, paid for in milliseconds"] },
+  { id: "serve", label: "Page of results", x: 650, y: 80, role: "Diversity, deduplication and snippets are applied, and the page is returned.", failureModes: ["Too many near-duplicates"], tradeoffs: ["User experience over pure score order"] }
+]} edges={[
+  { from: "retr", to: "rank", label: "top N" }, { from: "rank", to: "rerank", label: "top 100" }, { from: "rerank", to: "serve" }
+]} />
+
+## Beyond text statistics
+
+Text relevance is one signal among many. Real systems combine:
+
+- **Field boosts:** a match in the title counts more than one in the body (BM25F scores fields with separate weights).
+- **Freshness and popularity:** news wants recent items, shops want best sellers, with a decay so old items do not dominate or vanish.
+- **Personalisation and context:** location, language, past behaviour.
+- **Quality and authority signals:** link structure, ratings, spam scores.
+- **Learning to rank:** a model trained on labelled examples or click data takes many features (including the BM25 score) and learns the best combination, typically applied to the top few hundred candidates.
+
+### Semantic and hybrid search
+
+Keyword matching misses synonyms and paraphrases (`cheap flights` and `low-cost airfare`). **Vector search** represents queries and documents as embeddings (dense vectors from a neural model) and retrieves the nearest ones by approximate nearest-neighbour indexes such as HNSW. It finds meaning but can miss exact tokens (product codes, names). **Hybrid search** runs both and merges the lists, commonly with **reciprocal rank fusion**: each document scores `sum of 1 / (k + rank)` over the lists it appears in, which needs no score calibration between the very different BM25 and vector score scales.
+
+## Measuring relevance
+
+You cannot improve what you do not measure. With human judgments or click data per query:
+
+- **Precision at k:** the fraction of the top `k` that are relevant.
+- **Recall:** the fraction of all relevant documents that were retrieved.
+- **MRR (mean reciprocal rank):** the average of `1 / rank of the first relevant result`; good for "find the one right answer" queries.
+- **NDCG (normalised discounted cumulative gain):** rewards putting highly relevant documents near the top, using graded relevance and a logarithmic position discount.
+
+Run offline evaluation on a fixed query set before every ranking change, then confirm online with an A/B test, since offline gains do not always translate to user behaviour.
+
+## Trade-offs
+
+<TradeOffs caption="Scoring and ranking choices" rows={[
+  { option: "TF-IDF", pros: "Simple, intuitive, fast", cons: "Unbounded reward for repetition; favours long documents", chooseWhen: "Teaching, small tools, a baseline" },
+  { option: "BM25", pros: "Saturation and length normalisation; strong default with two knobs", cons: "Ignores meaning and non-text signals; spam still works partly", chooseWhen: "The default first-stage keyword ranker" },
+  { option: "Learning to rank", pros: "Combines many signals; optimises for what users do", cons: "Needs training data, features and monitoring; feedback loops", chooseWhen: "Mature search with enough traffic and labels" },
+  { option: "Vector (semantic) search", pros: "Finds paraphrases and meaning", cons: "Misses exact identifiers; heavier indexing and memory; harder to explain", chooseWhen: "Natural-language questions and recommendations" },
+  { option: "Hybrid with rank fusion", pros: "Covers exact and semantic matches; needs no score calibration", cons: "Two retrieval systems to run and tune", chooseWhen: "General-purpose search where both kinds of queries occur" },
+  { option: "Field boosts", pros: "Cheap, large relevance gains", cons: "Weights need tuning and drift as content changes", chooseWhen: "Documents with a clear title or key field" }
+]} />
+
+## Failure modes
+
+- **Keyword stuffing and spam** rise to the top because text statistics are easy to game.
+- **Popularity feedback loop:** popular results get more clicks, which makes them more popular; newer or niche results never surface.
+- **Score incomparability:** adding BM25 to a vector similarity or a boost gives nonsense because the scales differ; use rank fusion or normalise.
+- **Per-shard statistics skew:** document frequencies computed on small shards differ, so the same document scores differently depending on where it lives.
+- **Overfitting to a test set:** tuning to a few queries that fail on real traffic.
+- **Position bias in click data:** top results get clicked because they are on top, not because they are best.
+- **Stale ranking features:** popularity or freshness computed daily make fast-moving items look old.
+
+## Pitfalls
+
+- Tuning `k1` and `b` once and never revisiting them as the corpus changes.
+- Summing scores from different scales without normalisation.
+- Measuring only clicks, not whether users found what they needed.
+- Letting boosts overwhelm text relevance so unrelated promoted items win.
+- Running expensive models on all matches instead of a small candidate set.
+- Ignoring zero-result and abandoned queries, which show where recall fails.
+
+## What would you choose and why?
+
+A recipe site has 2 million recipes with titles, ingredient lists and long method text. Users search `quick vegetarian pasta`. Describe your first-stage retrieval, which fields you would boost and why, how you would blend in ratings and freshness, what you would put in an evaluation set, and when you would add semantic search.
+
+## Quiz
+
+<Quiz id="sd-m14-ranking" tags={["search", "ranking", "bm25", "tf-idf"]} questions={[
+  { type: "mcq", q: "Why does a rare query term get a higher idf than a common one?", options: ["Rare words are longer", "A word found in few documents distinguishes them more, while a word in nearly every document tells you little", "It is a legal requirement", "Common words are not indexed"], answer: 1, explain: "idf is the log of N over the document frequency, so rarer words weigh more." },
+  { type: "mcq", q: "What does term-frequency saturation in BM25 mean?", options: ["The index is full", "Each extra repetition of a word adds less to the score, approaching a ceiling", "Stop words are removed", "Documents are truncated"], answer: 1, explain: "In the simulation the BM25 score rose only from 0.45 to 0.82 while the word was repeated from 1 to 200 times." },
+  { type: "mcq", q: "Why did BM25 rank the short tutorial above the 2,400-word guide with twice the mentions?", options: ["It ignores term frequency", "Length normalisation discounts matches in longer-than-average documents", "The guide had no idf", "Random tie-breaking"], answer: 1, explain: "The guide's 12 mentions are spread across a very long document, so each counts for less." },
+  { type: "multi", q: "Which statements about hybrid search are true?", options: ["It combines keyword and vector retrieval", "Reciprocal rank fusion merges ranked lists without calibrating score scales", "BM25 and vector scores can be added directly with no normalisation", "It can find both exact identifiers and paraphrases"], answer: [0, 1, 3], explain: "The scores have different scales, so rank-based fusion or normalisation is used." },
+  { type: "mcq", q: "Which metric rewards putting highly relevant results near the top using graded relevance?", options: ["Precision at 100", "NDCG", "Document count", "Index size"], answer: 1, explain: "NDCG discounts gains by position, so a relevant result at rank 1 is worth much more than at rank 10." }
+]} />
