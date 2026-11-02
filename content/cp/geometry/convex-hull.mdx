@@ -1,0 +1,299 @@
+---
+title: The Convex Hull
+track: cp
+module: geometry
+order: 2
+difficulty: hard
+estMinutes: 50
+prerequisites: [cp/geometry/cross-product-and-segments, cp/sorting-and-searching/sorting-for-problem-solving]
+tags: [geometry, convex-hull, monotone-chain, graham-scan, rotating-calipers, cross-product]
+type: lesson
+problems: [m25-fence-the-sheep]
+furtherReading:
+  - title: cp-algorithms, Convex Hull construction
+    url: https://cp-algorithms.com/geometry/convex-hull.html
+  - title: cp-algorithms, Convex hull trick and Li Chao tree (the same geometry, applied to DP)
+    url: https://cp-algorithms.com/geometry/convex_hull_trick.html
+  - title: CSES Problem Set, Convex Hull
+    url: https://cses.fi/problemset/task/2195
+---
+
+## Intuition
+
+Hammer a nail at every point, stretch a rubber band around all the nails and let go. The band snaps tight around the outermost nails: that closed shape is the **convex hull**. Every other nail is inside, or sits on a straight stretch of the band.
+
+The hull is the most useful single object in computational geometry. Many questions about a cloud of points reduce to the same question about only its hull, which is usually much smaller:
+
+- the **farthest pair** of points (the diameter) lies on the hull,
+- the **smallest enclosing rectangle** or the **minimum width** can be found by walking around the hull,
+- "is this point inside the cloud's region?" is "is it inside the hull?",
+- the **upper envelope of lines** (the convex hull trick in DP) is a hull in the dual plane.
+
+## Definition
+
+A set is **convex** if the segment between any two of its points stays inside the set. The **convex hull** of a point set is the smallest convex set containing it. For finite point sets it is a convex polygon whose corners are **some of the input points**.
+
+Describing the hull exactly needs one decision about points that lie **on an edge** (collinear with two corners): either include them as vertices or drop them. This lesson uses the **strict** hull: only true corners, where the boundary turns. The practice problem counts them, so the policy matters. Two degenerate cases must also be defined: all points equal (the hull is one point) and all points collinear (the hull is a segment with two endpoints).
+
+**Orientation facts.** Listing the corners in **counter-clockwise** order, every consecutive triple `a, b, c` makes a strict left turn: `cross(b - a, c - a) > 0`. That is the invariant the algorithm maintains.
+
+## Andrew's monotone chain
+
+1. Remove duplicates and **sort** the points by `(x, y)`.
+2. **Lower hull:** sweep left to right with a stack. For each new point `p`, while the stack has at least two points `a` (second last) and `b` (last), and `cross(a, b, p) <= 0` (the turn `a -> b -> p` is clockwise or straight), **pop** `b`. Then push `p`.
+3. **Upper hull:** do the same sweep right to left.
+4. Join the two chains. The first and the last points are shared, so drop the last point of each chain before concatenating.
+
+The result is the strict hull in counter-clockwise order. Using `<= 0` removes points lying on an edge; use `< 0` to keep them.
+
+**Why it works.** After processing a prefix of the sorted points, the stack holds the lower hull of that prefix: the points where the boundary has so far kept turning left. A new point that makes the last stack point a right turn (or straight) proves that point is not on the lower hull, so it is discarded.
+
+**Cost.** Sorting is `O(n log n)`. Each point is pushed once and popped at most once per chain, so the sweeps are `O(n)`.
+
+## Other algorithms, briefly
+
+| algorithm | time | idea |
+| --- | --- | --- |
+| Andrew's monotone chain | `O(n log n)` | sort by x, two stack sweeps |
+| Graham scan | `O(n log n)` | sort by angle around the lowest point, one stack sweep; needs care with ties and collinear points |
+| Jarvis march (gift wrapping) | `O(n h)` | from the leftmost point, repeatedly pick the most clockwise next point; fast when the hull `h` is small |
+| Chan's algorithm | `O(n log h)` | combine the two: small hulls of groups, then wrap |
+| QuickHull | `O(n log n)` average | divide by the farthest point from a line |
+
+## Using the hull
+
+**Area and perimeter.** Shoelace formula on the corners for twice the area (exact in integers); sum the Euclidean distances for the perimeter (the only place a square root is needed).
+
+**Point inside a convex polygon.** With counter-clockwise corners, `p` is inside or on the boundary if `cross(a_i, a_(i+1), p) >= 0` for every edge. For many queries, binary search on the angle around one vertex gives `O(log h)`.
+
+**Farthest pair: rotating calipers.** The two farthest points are both corners of the hull. Take each edge `a b` and move a second pointer `j` forward as long as the vertex after `j` is farther from the line `a b` than `j`; the vertex `j` is the one antipodal to the edge. Both pointers only move forward around the polygon, so the total work is `O(h)`. The same two-pointer sweep computes the minimum-area enclosing rectangle and the width of the set.
+
+**Minkowski sum** of two convex polygons: merge their edge vectors sorted by angle, in `O(h1 + h2)`.
+
+## Example, step by step
+
+Points `(0,0), (4,0), (4,4), (0,4), (2,2), (2,0), (4,2)`.
+
+- Sorted: `(0,0), (0,4), (2,0), (2,2), (4,0), (4,2), (4,4)`.
+- **Lower hull** (stack trace):
+  - push `(0,0)`, push `(0,4)`.
+  - `(2,0)`: `cross((0,0), (0,4), (2,0)) = -8 <= 0`, so pop `(0,4)`; push `(2,0)`.
+  - `(2,2)`: `cross((0,0), (2,0), (2,2)) = 4 > 0`, keep; push `(2,2)`.
+  - `(4,0)`: `cross((2,0), (2,2), (4,0)) = -4 <= 0`, pop `(2,2)`; then `cross((0,0), (2,0), (4,0)) = 0 <= 0`, pop `(2,0)` (it lies on the edge); push `(4,0)`.
+  - `(4,2)`: `cross((0,0), (4,0), (4,2)) = 8 > 0`, push.
+  - `(4,4)`: `cross((4,0), (4,2), (4,4)) = 0 <= 0`, pop `(4,2)` (on the edge); `cross((0,0), (4,0), (4,4)) = 16 > 0`, push.
+  - Lower hull: `(0,0), (4,0), (4,4)`.
+- **Upper hull** (the same sweep, right to left) gives `(4,4), (0,4), (0,0)`.
+- Joined: `(0,0), (4,0), (4,4), (0,4)`: **4 posts**, twice the area `32`. The interior point `(2,2)` and the edge points `(2,0)`, `(4,2)` were all discarded.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def cross(o, a, b):
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+def convex_hull(points):
+    pts = sorted(set(points))
+    if len(pts) <= 2:
+        return pts
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]          # counter-clockwise corners
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+typedef pair<ll,ll> P;
+ll cross(const P& o, const P& a, const P& b) {
+    return (a.first - o.first) * (b.second - o.second) - (a.second - o.second) * (b.first - o.first);
+}
+vector<P> convex_hull(vector<P> pts) {
+    sort(pts.begin(), pts.end());
+    pts.erase(unique(pts.begin(), pts.end()), pts.end());
+    if (pts.size() <= 2) return pts;
+    vector<P> lower, upper;
+    for (const P& p : pts) {
+        while (lower.size() >= 2 && cross(lower[lower.size()-2], lower.back(), p) <= 0) lower.pop_back();
+        lower.push_back(p);
+    }
+    for (int i = (int)pts.size() - 1; i >= 0; i--) {
+        while (upper.size() >= 2 && cross(upper[upper.size()-2], upper.back(), pts[i]) <= 0) upper.pop_back();
+        upper.push_back(pts[i]);
+    }
+    lower.pop_back(); upper.pop_back();
+    lower.insert(lower.end(), upper.begin(), upper.end());
+    return lower;                            // counter-clockwise corners
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long cross(long[] o, long[] a, long[] b) {
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+}
+// pts: distinct points sorted by (x, y)
+static ArrayList<long[]> convexHull(ArrayList<long[]> pts) {
+    if (pts.size() <= 2) return pts;
+    ArrayList<long[]> lower = new ArrayList<>(), upper = new ArrayList<>();
+    for (long[] p : pts) {
+        while (lower.size() >= 2 && cross(lower.get(lower.size() - 2), lower.get(lower.size() - 1), p) <= 0)
+            lower.remove(lower.size() - 1);
+        lower.add(p);
+    }
+    for (int i = pts.size() - 1; i >= 0; i--) {
+        long[] p = pts.get(i);
+        while (upper.size() >= 2 && cross(upper.get(upper.size() - 2), upper.get(upper.size() - 1), p) <= 0)
+            upper.remove(upper.size() - 1);
+        upper.add(p);
+    }
+    ArrayList<long[]> hull = new ArrayList<>(lower.subList(0, lower.size() - 1));
+    hull.addAll(upper.subList(0, upper.size() - 1));
+    return hull;
+}
+```
+
+</Tab>
+</Tabs>
+
+The demo compares the monotone chain with gift wrapping on random sets, shows the degenerate cases, finds the farthest pair with rotating calipers (checked against the `O(n^2)` search) and tests whether a point is inside:
+
+<CodeRunner language="python" code={`import itertools, math, random
+
+def cross(o, a, b):
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+def hull_monotone(points):
+    """Andrew's monotone chain: strict convex hull, counter-clockwise, in O(n log n)."""
+    pts = sorted(set(points))
+    if len(pts) <= 2:
+        return pts
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:      # <= 0 also drops points lying on an edge
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+def hull_jarvis(points):
+    """Gift wrapping, O(n*h): from the leftmost point keep choosing the most clockwise next point."""
+    pts = sorted(set(points))
+    if len(pts) <= 2:
+        return pts
+    start = cur = pts[0]
+    hull = []
+    while True:
+        hull.append(cur)
+        nxt = pts[0] if pts[0] != cur else pts[1]
+        for p in pts:
+            if p == cur:
+                continue
+            c = cross(cur, nxt, p)
+            if c < 0 or (c == 0 and (p[0] - cur[0]) ** 2 + (p[1] - cur[1]) ** 2 > (nxt[0] - cur[0]) ** 2 + (nxt[1] - cur[1]) ** 2):
+                nxt = p
+        cur = nxt
+        if cur == start:
+            return hull
+
+def area2(poly):
+    return abs(sum(poly[i][0] * poly[(i + 1) % len(poly)][1] - poly[(i + 1) % len(poly)][0] * poly[i][1] for i in range(len(poly))))
+
+random.seed(21)
+for _ in range(500):
+    n = random.randint(1, 25)
+    pts = [(random.randint(-5, 5), random.randint(-5, 5)) for _ in range(n)]
+    a, b = hull_monotone(pts), hull_jarvis(pts)
+    assert sorted(a) == sorted(b) and area2(a) == area2(b), pts
+print("monotone chain and gift wrapping agree on 500 random point sets (with duplicates and collinear points)")
+
+sq = [(0, 0), (4, 0), (4, 4), (0, 4), (2, 2), (2, 0), (4, 2)]
+h = hull_monotone(sq)
+print("hull of a square with interior and edge points:", h, "| posts:", len(h), "| twice the area:", area2(h))
+print("collinear points:", hull_monotone([(0, 0), (1, 1), (2, 2), (3, 3)]), "| one point:", hull_monotone([(5, 5), (5, 5)]))
+
+# Perimeter of the hull, using squared distances only until the very end
+def perimeter(poly):
+    return sum(math.dist(poly[i], poly[(i + 1) % len(poly)]) for i in range(len(poly)))
+print("perimeter of the 4 x 4 square hull:", perimeter(h))
+
+# The farthest pair of points (the diameter) always lies on the hull. Rotating calipers finds it in O(h).
+def diameter2_calipers(hull):
+    """Squared diameter of a convex polygon in counter-clockwise order, with two pointers that only move forward."""
+    m = len(hull)
+    if m == 1:
+        return 0
+    if m == 2:
+        return (hull[0][0] - hull[1][0]) ** 2 + (hull[0][1] - hull[1][1]) ** 2
+    best, j = 0, 1
+    for i in range(m):
+        a, b = hull[i], hull[(i + 1) % m]
+        while abs(cross(a, b, hull[(j + 1) % m])) > abs(cross(a, b, hull[j])):     # farther from edge a-b: advance
+            j = (j + 1) % m
+        for q in (hull[j], hull[(j + 1) % m]):
+            for p in (a, b):
+                best = max(best, (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2)
+    return best
+
+def diameter2_brute(points):
+    return max((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 for p, q in itertools.combinations(points, 2)) if len(set(points)) > 1 else 0
+
+for _ in range(500):
+    pts = [(random.randint(-30, 30), random.randint(-30, 30)) for _ in range(random.randint(1, 40))]
+    assert diameter2_calipers(hull_monotone(pts)) == diameter2_brute(pts)
+print("rotating calipers finds the farthest pair, matching the O(n^2) search, on 500 random point sets")
+
+# Is a point inside the convex hull? Every edge must have it on the left (or on the line).
+def inside_convex(hull, p):
+    return all(cross(hull[i], hull[(i + 1) % len(hull)], p) >= 0 for i in range(len(hull)))
+print("inside tests:", inside_convex(h, (2, 1)), inside_convex(h, (5, 2)), inside_convex(h, (4, 4)))
+`} />
+
+## Pitfalls
+
+1. **Not removing duplicates.** Repeated points make `cross = 0` in the wrong places and can leave a duplicate corner. Sort and unique first.
+2. **`<` instead of `<=` in the pop test** when you want strict corners (or the reverse when the problem wants collinear boundary points kept, as in LeetCode's "Erect the Fence"). Decide the policy first.
+3. **Degenerate inputs.** One distinct point, two points, and all-collinear points break the generic code unless handled: with `lower[:-1] + upper[:-1]` one point gives an empty list.
+4. **Returning clockwise order** by sweeping in the wrong direction; downstream tests (inside-polygon, calipers) assume counter-clockwise.
+5. **Overflow.** Cross products of coordinates near `10^9` reach `10^18`; use 128-bit or reduce.
+6. **Float comparisons.** Keep the whole construction in integers; convert to `double` only for the perimeter.
+7. **Calipers with the wrong comparison.** The pointer advances while the *absolute* cross product (distance to the edge) increases; with a non-strictly-convex polygon (collinear corners left in), it can stall.
+8. **Using the hull when you need the full set.** The hull loses interior points; problems about *all* pairs or *all* points inside need other tools.
+
+## Practice
+
+<Problem id="m25-fence-the-sheep" />
+
+## Problem ladder
+
+- [Convex Hull](https://cses.fi/problemset/task/2195) (CSES): print the hull, including points on the boundary.
+- [Erect the Fence](https://leetcode.com/problems/erect-the-fence/) (LeetCode 587, hard): the hull *with* boundary points kept, a test of the collinear policy.
+- [Polygon Area](https://cses.fi/problemset/task/2191) (CSES): the shoelace formula you need to finish.
+- [Minimum Euclidean Distance](https://cses.fi/problemset/task/2194) (CSES): the next lesson's closest pair, a related but different structure.
+
+## Quiz
+
+<Quiz id="cp-m25-convex-hull" tags={["geometry", "convex-hull"]} questions={[
+  { type: "mcq", q: "In Andrew's monotone chain, when do you pop the last point of the stack?", options: ["When the new point has a larger x", "When cross(a, b, p) <= 0, so a -> b -> p is not a strict left turn", "When the stack has three points", "When the new point is a duplicate"], answer: 1, explain: "A clockwise or straight turn means b is not a corner of the hull on that side." },
+  { type: "mcq", q: "What is the time complexity of the monotone chain on n points?", options: ["O(n)", "O(n log n)", "O(n^2)", "O(n h) where h is the hull size"], answer: 1, explain: "Sorting dominates; the two stack sweeps are linear." },
+  { type: "predict", q: "For the points (0,0), (1,1), (2,2), (3,3), how many strict hull corners are there?", code: "hull = convex_hull([(0,0),(1,1),(2,2),(3,3)])", options: ["1", "2", "3", "4"], answer: 1, explain: "All points are collinear: the hull is the segment between (0,0) and (3,3), with two endpoints." },
+  { type: "mcq", q: "Where does the farthest pair of points in a set always lie?", options: ["Both on the hull", "One on the hull and one inside", "Both inside", "On the lower chain only"], answer: 0, explain: "Moving an interior point outward could only increase a distance, so the extreme pair is on the hull; rotating calipers finds it in O(h)." },
+  { type: "multi", q: "Which are correct?", options: ["Remove duplicate points before building the hull", "Using `< 0` instead of `<= 0` keeps points that lie on an edge", "Gift wrapping runs in O(n h)", "The hull corners are always the points with the largest coordinates"], answer: [0, 1, 2], explain: "Corners can be anywhere on the boundary of the cloud, not only extreme in a coordinate." }
+]} />
