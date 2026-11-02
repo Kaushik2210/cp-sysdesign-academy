@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 176 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 182 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -67,7 +67,9 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 12 Consensus and coordination | Complete (3: why consensus and Paxos, Raft, locks and fencing) | 3 |
 | 13-16 (microservices, search, security, observability) | Planned | 0 |
 | 17 Case studies | Partial (11: URL shortener, news feed, chat, payments, ride hailing and proximity search, distributed key-value store, video streaming, search autocomplete, web crawler, notifications, collaborative editing; no e-commerce, ticketing, metrics or file sync designs yet) | 11 |
-| 18-28 (more case studies, LLD) | Planned | 0 |
+| 18-26 (more case studies) | Planned | 0 |
+| 27 LLD: OOP, SOLID and patterns | Partial (3: SOLID, creational and structural patterns, behavioural patterns; no concurrency patterns or UML lesson) | 3 |
+| 28 LLD case studies | Partial (3: parking lot, LRU cache with TTL, elevator; no vending machine, library system, chess or splitwise-style designs yet) | 3 |
 
 ## Known gaps and caveats
 
