@@ -23,9 +23,15 @@
     { "kind": "lesson", "ref": "sd/consensus/why-consensus-and-paxos" },
     { "kind": "lesson", "ref": "sd/consensus/raft-leader-election-and-log-replication" },
     { "kind": "lesson", "ref": "sd/consensus/distributed-locks-leases-and-fencing" },
+    { "kind": "lesson", "ref": "sd/microservice-patterns/monolith-vs-microservices" },
+    { "kind": "lesson", "ref": "sd/microservice-patterns/resilience-patterns" },
+    { "kind": "lesson", "ref": "sd/microservice-patterns/event-driven-cqrs-event-sourcing" },
+    { "kind": "lesson", "ref": "sd/observability-and-reliability/logs-metrics-and-traces" },
+    { "kind": "lesson", "ref": "sd/observability-and-reliability/slos-error-budgets-and-alerting" },
+    { "kind": "lesson", "ref": "sd/observability-and-reliability/safe-deployments-and-incident-response" },
     { "kind": "page", "title": "Glossary: consensus, quorum, split brain, fencing token", "href": "/glossary/", "note": "Search these terms and follow the related links." },
     { "kind": "project", "title": "A replicated key-value store that survives failures", "brief": "Implement a leader-based replicated store (the MIT labs are a good scaffold). Add a test harness that kills nodes, delays and drops messages, and checks that acknowledged writes are never lost and reads are linearizable where you promise it.", "deliverable": "A repository with the store, a fault-injection test suite and a short document explaining which guarantees you provide and which you do not." },
-    { "kind": "planned", "title": "Microservice patterns, search and security modules", "note": "SD modules 13 to 16 are not written on this site yet. The papers and course above cover the same ground in the meantime." }
+    { "kind": "planned", "title": "Search and security modules", "note": "SD modules 14 and 15 are not written on this site yet. The papers and course above cover the same ground in the meantime." }
   ],
   "exit": [
     "You can explain how Raft elects a leader and why a committed entry cannot be lost.",
