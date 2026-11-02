@@ -1,0 +1,348 @@
+---
+title: Heavy-Light Decomposition
+track: cp
+module: trees
+order: 5
+difficulty: hard
+estMinutes: 50
+prerequisites: [cp/trees/euler-tour-subtree-queries, cp/trees/lowest-common-ancestor, cp/range-queries/segment-trees]
+tags: [trees, hld, heavy-light, segment-tree, path-queries]
+type: lesson
+problems: [m15-path-boss]
+furtherReading:
+  - title: cp-algorithms, Heavy-light decomposition
+    url: https://cp-algorithms.com/graph/hld.html
+  - title: CSES Problem Set, Path Queries II
+    url: https://cses.fi/problemset/task/2134
+  - title: USACO Guide, Heavy-Light Decomposition
+    url: https://usaco.guide/plat/hld
+---
+
+## Intuition
+
+[Euler tours](/cp/trees/euler-tour-subtree-queries/) turn **subtree** questions into array ranges. A **path** between two vertices is different: it goes up from `u` to a common ancestor and down to `v`, and the vertices of that path are scattered all over any Euler order.
+
+The remedy: cut the tree into **vertical chains** and lay each chain out as a contiguous block of an array. A path then becomes a handful of pieces, each a contiguous range of one chain, and a segment tree answers each piece. The cutting rule that guarantees few pieces: from every vertex, keep the edge to its **heaviest child** (the one with the biggest subtree) and cut the rest. Light edges are rare on any path, because each light edge at least **halves** the subtree size you are in, so a path can cross at most `log2(n)` of them.
+
+## Definition
+
+Root the tree. For every vertex `v`:
+
+- `size[v]`: number of vertices in its subtree.
+- `heavy[v]`: the child with the largest `size` (or none for a leaf). The edge `v -> heavy[v]` is a **heavy edge**, all other child edges are **light**.
+- Heavy edges form vertical **chains**. Every vertex is on exactly one chain (a leaf alone is a chain of one).
+- `head[v]`: the top vertex of the chain containing `v`.
+- `pos[v]`: the index of `v` in a global array, assigned so that **every chain occupies consecutive positions, top first**.
+
+**Light edge bound.** Going from a vertex up to the root, every time you leave a chain through a light edge, the parent's subtree is more than twice as large as the child's (otherwise the child would have been heavy). So at most `log2(n)` chains are visited.
+
+**Path query `u..v`** (here: maximum):
+
+```text
+res = -infinity
+while head[u] != head[v]:
+    if depth[head[u]] < depth[head[v]]:  swap(u, v)          # move the one whose chain top is deeper
+    res = max(res, range_query(pos[head[u]], pos[u]))        # the whole chain piece from its top down to u
+    u = parent[head[u]]                                      # jump over the light edge
+if depth[u] > depth[v]:  swap(u, v)
+res = max(res, range_query(pos[u], pos[v]))                  # same chain: one last contiguous range
+```
+
+Each loop iteration is one chain piece and costs one segment-tree query `O(log n)`, so a query costs `O(log^2 n)`. A **point update** is just a segment-tree point update, `O(log n)`.
+
+For **edge weights**, store each edge's weight on its **deeper endpoint** and exclude the top vertex (the LCA) in the final range.
+
+## Example, step by step
+
+Tree with 9 vertices (root 1):
+
+```text
+1: children 2, 3
+2: children 4, 5
+5: children 6, 7
+3: child 8
+8: child 9
+```
+
+Subtree sizes: `size = [9, 5, 3, 1, 3, 1, 1, 2, 1]` for vertices `1..9`. Heavy children: `1 -> 2` (size 5 beats 3), `2 -> 5` (3 beats 1), `5 -> 6` (tie with 7, the first wins), `3 -> 8`, `8 -> 9`.
+
+Chains (head, top first) and their positions:
+
+| chain | vertices | head | positions |
+| --- | --- | --- | --- |
+| A | `1, 2, 5, 6` | 1 | 0, 1, 2, 3 |
+| B | `3, 8, 9` | 3 | 4, 5, 6 |
+| C | `4` | 4 | 7 |
+| D | `7` | 7 | 8 |
+
+Query the path **4 to 9** (it is `4, 2, 1, 3, 8, 9`):
+
+1. `head[4] = 4`, `head[9] = 3`, different. The deeper head is 4 (depth 2 versus 1): query positions `[7, 7]`, then `u = parent[4] = 2`.
+2. `head[2] = 1`, `head[9] = 3`, different. Now `v = 9`'s head is deeper (depth 1 vs 0): query positions `[pos[3], pos[9]] = [4, 6]`, then `v = parent[3] = 1`.
+3. `head[2] = head[1] = 1`: same chain. `1` is shallower, so one last query `[pos[1], pos[2]] = [0, 1]`.
+
+Three range queries for a path of six vertices. On a million-vertex tree the same loop needs at most about 20 pieces.
+
+## Code
+
+Compute everything iteratively (BFS order) so a path-shaped tree cannot overflow the call stack.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+parent = [0] * (n + 1); depth = [0] * (n + 1)
+order = [1]; seen = [False] * (n + 1); seen[1] = True
+for v in order:                                   # BFS: parents come before children
+    for to in adj[v]:
+        if not seen[to]:
+            seen[to] = True; parent[to] = v; depth[to] = depth[v] + 1; order.append(to)
+
+size = [1] * (n + 1); heavy = [0] * (n + 1)
+for v in reversed(order[1:]):
+    size[parent[v]] += size[v]
+for v in order[1:]:
+    p = parent[v]
+    if heavy[p] == 0 or size[v] > size[heavy[p]]:
+        heavy[p] = v
+
+head = [0] * (n + 1); pos = [0] * (n + 1); cur = 0
+for v in order:                                   # each chain top lays out its whole chain
+    if v == 1 or heavy[parent[v]] != v:
+        u = v
+        while u:
+            head[u] = v; pos[u] = cur; cur += 1
+            u = heavy[u]
+
+def path_max(u, v):                               # seg_query(l, r) = max over positions l..r
+    res = NEG
+    while head[u] != head[v]:
+        if depth[head[u]] < depth[head[v]]:
+            u, v = v, u
+        res = max(res, seg_query(pos[head[u]], pos[u]))
+        u = parent[head[u]]
+    if depth[u] > depth[v]:
+        u, v = v, u
+    return max(res, seg_query(pos[u], pos[v]))
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> parent(n + 1), depth(n + 1), order = {1}, sz(n + 1, 1), heavy(n + 1), head(n + 1), pos(n + 1);
+vector<bool> seen(n + 1); seen[1] = true;
+for (size_t i = 0; i < order.size(); i++)
+    for (int to : adj[order[i]])
+        if (!seen[to]) { seen[to] = true; parent[to] = order[i]; depth[to] = depth[order[i]] + 1; order.push_back(to); }
+for (int i = n - 1; i >= 1; i--) sz[parent[order[i]]] += sz[order[i]];
+for (int i = 1; i < n; i++) {
+    int v = order[i], p = parent[v];
+    if (!heavy[p] || sz[v] > sz[heavy[p]]) heavy[p] = v;
+}
+int cur = 0;
+for (int v : order)
+    if (v == 1 || heavy[parent[v]] != v)
+        for (int u = v; u; u = heavy[u]) { head[u] = v; pos[u] = cur++; }
+
+long long pathMax(int u, int v) {
+    long long res = NEG;
+    while (head[u] != head[v]) {
+        if (depth[head[u]] < depth[head[v]]) swap(u, v);
+        res = max(res, segQuery(pos[head[u]], pos[u]));
+        u = parent[head[u]];
+    }
+    if (depth[u] > depth[v]) swap(u, v);
+    return max(res, segQuery(pos[u], pos[v]));
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] parent = new int[n + 1], depth = new int[n + 1], order = new int[n], sz = new int[n + 1], heavy = new int[n + 1];
+boolean[] seen = new boolean[n + 1];
+int hd = 0, tl = 0;
+order[tl++] = 1; seen[1] = true;
+while (hd < tl) {
+    int v = order[hd++];
+    for (int to : adj[v]) if (!seen[to]) { seen[to] = true; parent[to] = v; depth[to] = depth[v] + 1; order[tl++] = to; }
+}
+Arrays.fill(sz, 1);
+for (int i = n - 1; i >= 1; i--) sz[parent[order[i]]] += sz[order[i]];
+for (int i = 1; i < n; i++) {
+    int v = order[i], p = parent[v];
+    if (heavy[p] == 0 || sz[v] > sz[heavy[p]]) heavy[p] = v;
+}
+int[] head = new int[n + 1], pos = new int[n + 1];
+int cur = 0;
+for (int v : order)
+    if (v == 1 || heavy[parent[v]] != v)
+        for (int u = v; u != 0; u = heavy[u]) { head[u] = v; pos[u] = cur++; }
+```
+
+</Tab>
+</Tabs>
+
+Run the full structure with a segment tree, and compare with the slow "walk up from both ends" method:
+
+<CodeRunner language="python" code={`import random
+
+NEG = -10 ** 18
+
+class HLD:
+    def __init__(self, n, edges, val):
+        adj = [[] for _ in range(n + 1)]
+        for u, v in edges:
+            adj[u].append(v)
+            adj[v].append(u)
+        self.n = n
+        self.parent = [0] * (n + 1)
+        self.depth = [0] * (n + 1)
+        order = [1]
+        seen = {1}
+        for v in order:
+            for to in adj[v]:
+                if to not in seen:
+                    seen.add(to)
+                    self.parent[to] = v
+                    self.depth[to] = self.depth[v] + 1
+                    order.append(to)
+        size = [1] * (n + 1)
+        for v in reversed(order[1:]):
+            size[self.parent[v]] += size[v]
+        heavy = [0] * (n + 1)
+        for v in order[1:]:
+            p = self.parent[v]
+            if heavy[p] == 0 or size[v] > size[heavy[p]]:
+                heavy[p] = v
+        self.head = [0] * (n + 1)
+        self.pos = [0] * (n + 1)
+        cur = 0
+        for v in order:
+            if v == 1 or heavy[self.parent[v]] != v:
+                u = v
+                while u:
+                    self.head[u] = v
+                    self.pos[u] = cur
+                    cur += 1
+                    u = heavy[u]
+        self.size_t = 1
+        while self.size_t < n:
+            self.size_t *= 2
+        self.tree = [NEG] * (2 * self.size_t)
+        for v in range(1, n + 1):
+            self.tree[self.size_t + self.pos[v]] = val[v]
+        for i in range(self.size_t - 1, 0, -1):
+            self.tree[i] = max(self.tree[2 * i], self.tree[2 * i + 1])
+
+    def update(self, v, x):
+        i = self.size_t + self.pos[v]
+        self.tree[i] = x
+        i >>= 1
+        while i:
+            self.tree[i] = max(self.tree[2 * i], self.tree[2 * i + 1])
+            i >>= 1
+
+    def seg(self, l, r):
+        res = NEG
+        l += self.size_t
+        r += self.size_t + 1
+        while l < r:
+            if l & 1:
+                res = max(res, self.tree[l])
+                l += 1
+            if r & 1:
+                r -= 1
+                res = max(res, self.tree[r])
+            l >>= 1
+            r >>= 1
+        return res
+
+    def path_max(self, u, v):
+        res = NEG
+        while self.head[u] != self.head[v]:
+            if self.depth[self.head[u]] < self.depth[self.head[v]]:
+                u, v = v, u
+            res = max(res, self.seg(self.pos[self.head[u]], self.pos[u]))
+            u = self.parent[self.head[u]]
+        if self.depth[u] > self.depth[v]:
+            u, v = v, u
+        return max(res, self.seg(self.pos[u], self.pos[v]))
+
+edges = [(1, 2), (1, 3), (2, 4), (2, 5), (5, 6), (5, 7), (3, 8), (8, 9)]
+val = [0, 5, 1, 9, 2, 4, 3, 8, 7, 6]
+h = HLD(9, edges, val)
+print("head:", h.head[1:])
+print("pos :", h.pos[1:])
+print("max on path 4..9:", h.path_max(4, 9), "(towns 4, 2, 1, 3, 8, 9 have powers 2, 1, 5, 9, 7, 6)")
+
+random.seed(5)
+for _ in range(300):
+    n = random.randint(1, 30)
+    es = [(random.randint(1, v - 1), v) for v in range(2, n + 1)]
+    val = [0] + [random.randint(-50, 50) for _ in range(n)]
+    hl = HLD(n, es, val)
+    for _ in range(25):
+        if random.random() < 0.3:
+            v, x = random.randint(1, n), random.randint(-50, 50)
+            val[v] = x
+            hl.update(v, x)
+        else:
+            u, v = random.randint(1, n), random.randint(1, n)
+            a, b, best = u, v, NEG
+            while a != b:
+                if hl.depth[a] < hl.depth[b]:
+                    a, b = b, a
+                best = max(best, val[a])
+                a = hl.parent[a]
+            best = max(best, val[a])
+            assert hl.path_max(u, v) == best
+print("300 random trees with random updates: HLD equals the parent-walk answer")
+`} />
+
+## Where HLD pays off
+
+| query | what to store |
+| --- | --- |
+| max or min on a path, point update | segment tree over positions (this lesson) |
+| sum on a path, point or range update | Fenwick tree or lazy [segment tree](/cp/range-queries/lazy-propagation/) |
+| add a value to every vertex on a path | lazy segment tree, same `O(log^2 n)` loop |
+| subtree query | one range `[pos[v], pos[v] + size[v] - 1]` when children are visited **heavy first**, so HLD also gives an Euler order |
+| LCA | the same loop; the answer is the shallower of `u`, `v` at the end, usually faster than binary lifting |
+| edge weights | store on the deeper endpoint, query `pos[u] + 1` in the final range |
+
+If you only need LCA or only subtree sums, an [Euler tour](/cp/trees/euler-tour-subtree-queries/) or binary lifting is simpler. HLD is the tool for **path aggregates with updates**.
+
+## Pitfalls
+
+1. **Wrong chain top to move.** Always move the vertex whose **chain head** is deeper, not the deeper vertex itself; otherwise you can jump past the LCA.
+2. **Final range orientation.** After the loop `u` and `v` are on one chain; swap so `u` is the shallower, then query `[pos[u], pos[v]]`. A reversed range returns nothing.
+3. **Positions must be contiguous per chain.** Assigning positions during an arbitrary DFS order breaks that; either walk each chain from its head (as above) or visit the heavy child first in a DFS.
+4. **Edge versus vertex weights.** For edges, the LCA's own value must be excluded from the last range.
+5. **Recursion depth.** The recursive formulation overflows the stack on a path of `2·10^5` vertices. Use BFS order as here, or an explicit stack.
+6. **Segment tree identity.** Use a value below every possible weight (`-10^18`, not `0`) for a maximum, or negative weights break.
+7. **Forgetting `log^2`.** Path queries cost `O(log^2 n)`, which is fine for `q = 2·10^5`; for harder limits combine with a segment tree that supports `O(1)` or `O(log)` per chain.
+
+## Practice
+
+<Problem id="m15-path-boss" />
+
+## Problem ladder
+
+- [Path Queries II](https://cses.fi/problemset/task/2134) (CSES): path maximum with point updates, exactly this lesson.
+- [Path Queries](https://cses.fi/problemset/task/1138) (CSES): the sum version, solvable with an Euler tour and a Fenwick tree, a good contrast.
+- [Water Tree](https://codeforces.com/problemset/problem/343/D) (Codeforces 343D, rating about 2100): subtree fill and path empty with chain jumps.
+- [Query on a tree](https://www.spoj.com/problems/QTREE/) (SPOJ QTREE): edge weights with updates, the classic HLD exercise.
+- [Vertex Add Path Sum](https://judge.yosupo.jp/problem/vertex_add_path_sum) (Library Checker): the large-input benchmark.
+
+## Quiz
+
+<Quiz id="cp-m15-hld" tags={["trees", "hld", "segment-tree"]} questions={[
+  { type: "mcq", q: "Why does a root-to-vertex path cross only O(log n) light edges?", options: ["Light edges are rare in random trees", "Each light edge at least halves the subtree size", "Heavy edges are always short", "The tree is balanced"], answer: 1, explain: "A child connected by a light edge has at most half the vertices of its parent's subtree, so after log2(n) light edges the subtree is a single vertex." },
+  { type: "mcq", q: "In the path-query loop, which vertex is moved up at each step?", options: ["The deeper vertex", "The vertex whose chain head is deeper", "The vertex with the smaller position", "Always u"], answer: 1, explain: "Moving the vertex with the deeper head guarantees the jump stays below the LCA." },
+  { type: "predict", q: "A tree has 1,000,000 vertices. What is the maximum number of light edges on a root path?", code: "import math\nprint(int(math.log2(1_000_000)))", options: ["6", "19", "1000", "500000"], answer: 1, explain: "log2(10^6) is about 19.9, so at most 19 light edges, hence at most 20 chains." },
+  { type: "multi", q: "Which of these can HLD plus a segment tree answer?", options: ["Maximum on a path with point updates", "Add a value on a path, then sum on a path (with lazy propagation)", "Subtree sum with updates", "Number of leaves of the whole tree"], answer: [0, 1, 2], explain: "The last one needs only a counting pass, no query structure." },
+  { type: "mcq", q: "What is the time per path query in the standard HLD with a segment tree?", options: ["O(1)", "O(log n)", "O(log^2 n)", "O(n)"], answer: 2, explain: "O(log n) chains, each queried in O(log n) by the segment tree." }
+]} />

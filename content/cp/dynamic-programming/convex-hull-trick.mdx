@@ -1,0 +1,234 @@
+---
+title: The Convex Hull Trick
+track: cp
+module: dynamic-programming
+order: 9
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack, cp/stacks-and-queues/queues-deques-bfs]
+tags: [dp, convex-hull-trick, optimization, lines, deque]
+type: lesson
+problems: [m13-stone-hops]
+furtherReading:
+  - title: cp-algorithms, Convex Hull Trick and Li Chao Tree
+    url: https://cp-algorithms.com/geometry/convex_hull_trick.html
+  - title: AtCoder DP Contest, Problem Z (Frog 3)
+    url: https://atcoder.jp/contests/dp/tasks/dp_z
+  - title: CSES Problem Set, Monster Game I
+    url: https://cses.fi/problemset/task/2084
+---
+
+## Intuition
+
+Many DP transitions have the shape "the best over **all earlier** `j`":
+
+```text
+dp[i] = min over j < i of ( dp[j] + cost(j, i) )
+```
+
+Looping over every `j` makes it `O(n^2)`. Sometimes the cost expands into a product of something that depends only on `j` and something that depends only on `i`. Then, for a fixed `j`, the candidate value is a **straight line** in the variable determined by `i`. The DP step becomes: "among all the lines added so far, which one is lowest at this particular `x`?" Only the **lower envelope** of the lines matters, and that is a convex shape you can maintain cheaply. That is the convex hull trick.
+
+## Definition
+
+Take the transition from the practice problem: stones with strictly increasing heights `h`, a jump from `j` to `i` costs `(h[i] - h[j])^2 + C`:
+
+```text
+dp[i] = min over j < i of  dp[j] + (h[i] - h[j])^2 + C
+```
+
+Expand the square and group by what depends on `i` and what depends on `j`:
+
+```text
+dp[i] = h[i]^2 + C + min over j of ( (-2 h[j]) * h[i]  +  (dp[j] + h[j]^2) )
+                                       slope m_j   x        intercept b_j
+```
+
+So stone `j` contributes the line `y = m_j x + b_j` with `m_j = -2 h[j]` and `b_j = dp[j] + h[j]^2`, and stone `i` asks for the **minimum of all lines at `x = h[i]`**.
+
+**Lower envelope.** At any `x`, only the lowest line counts. Over all `x`, the lines that are ever lowest form a chain, each one lowest on an interval, with slopes decreasing from left to right.
+
+**Two monotonic conditions make it simple.**
+
+1. Lines arrive in **decreasing slope** order (`-2 h[j]` decreases because `h` increases), so each new line goes at the **end** of the chain.
+2. Queries `x = h[i]` arrive in **increasing** order, so the answer never moves back to a line already discarded from the front.
+
+Then a **deque** of lines is enough:
+
+```text
+query(x):   while the second line is at least as good as the first at x: pop front
+            return value of the front line at x
+add(line):  while the last line is never strictly lowest given its neighbours: pop back
+            push the new line at the back
+```
+
+A line `l2` between `l1` and `l3` (slopes `m1 > m2 > m3`) is **useless** when `l1` and `l3` cross at or before the point where `l1` and `l2` cross. With cross-multiplication, to avoid fractions:
+
+```text
+(b3 - b1) * (m1 - m2)  <=  (b2 - b1) * (m1 - m3)
+```
+
+Each line is pushed once and popped at most once, so the DP is `O(n)` in total.
+
+## Example, step by step
+
+Heights `1, 2, 4, 7`, `C = 3`. Stone 1 (index 0) has `dp = 0`.
+
+| stone | height `x` | lines available | best line at `x` | `dp` |
+| --- | --- | --- | --- | --- |
+| 1 | 1 | none (start) | | 0 |
+| 2 | 2 | `m=-2, b=1` (from stone 1) | `-4 + 1 = -3` | `-3 + 4 + 3 = 4` |
+| 3 | 4 | add `m=-4, b=4+4=8` (stone 2) | stone 1: `-8+1 = -7`, stone 2: `-16+8 = -8` | `-8 + 16 + 3 = 11` |
+| 4 | 7 | add `m=-8, b=11+16=27` (stone 3) | stone 1: `-13`, stone 2: `-20`, stone 3: `-56+27 = -29` | `-29 + 49 + 3 = 23` |
+
+Answer `dp = 23`. Check the last step directly: jumping from stone 3 costs `11 + (7-4)^2 + 3 = 23`, from stone 2 `4 + 25 + 3 = 32`, from stone 1 `0 + 36 + 3 = 39`. ✓
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from collections import deque
+
+hull = deque([(-2 * h[0], h[0] * h[0])])     # line for stone 0: slope, intercept (dp[0] = 0)
+dp = 0
+for i in range(1, n):
+    x = h[i]
+    while len(hull) >= 2 and hull[0][0] * x + hull[0][1] >= hull[1][0] * x + hull[1][1]:
+        hull.popleft()                        # the next line is already as good: front is obsolete
+    dp = hull[0][0] * x + hull[0][1] + x * x + C
+    line = (-2 * x, dp + x * x)
+    while len(hull) >= 2 and (line[1] - hull[-2][1]) * (hull[-2][0] - hull[-1][0]) \
+                             <= (hull[-1][1] - hull[-2][1]) * (hull[-2][0] - line[0]):
+        hull.pop()                            # middle line never lowest
+    hull.append(line)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> M(n), B(n);                 // lines stored in arrays; [head, tail) is the hull
+int head = 0, tail = 1;
+M[0] = -2 * h[0]; B[0] = h[0] * h[0];
+long long dp = 0;
+auto val = [&](int i, long long x) { return M[i] * x + B[i]; };
+auto useless = [&](int a, int b, int c) { return (B[c] - B[a]) * (M[a] - M[b]) <= (B[b] - B[a]) * (M[a] - M[c]); };
+for (int i = 1; i < n; i++) {
+    long long x = h[i];
+    while (tail - head >= 2 && val(head, x) >= val(head + 1, x)) head++;
+    dp = val(head, x) + x * x + C;
+    M[tail] = -2 * x; B[tail] = dp + x * x;   // new line sits at index tail, not yet counted
+    while (tail - head >= 2 && useless(tail - 2, tail - 1, tail)) {
+        M[tail - 1] = M[tail]; B[tail - 1] = B[tail]; tail--;
+    }
+    tail++;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] M = new long[n], B = new long[n];      // [head, tail) is the hull
+int head = 0, tail = 1;
+M[0] = -2 * h[0]; B[0] = h[0] * h[0];
+long dp = 0;
+for (int i = 1; i < n; i++) {
+    long x = h[i];
+    while (tail - head >= 2 && M[head] * x + B[head] >= M[head + 1] * x + B[head + 1]) head++;
+    dp = M[head] * x + B[head] + x * x + C;
+    M[tail] = -2 * x; B[tail] = dp + x * x;
+    while (tail - head >= 2 && (B[tail] - B[tail - 2]) * (M[tail - 2] - M[tail - 1])
+                              <= (B[tail - 1] - B[tail - 2]) * (M[tail - 2] - M[tail])) {
+        M[tail - 1] = M[tail]; B[tail - 1] = B[tail]; tail--;
+    }
+    tail++;
+}
+```
+
+</Tab>
+</Tabs>
+
+Compare with the slow `O(n^2)` DP on random inputs:
+
+<CodeRunner language="python" code={`import random
+from collections import deque
+
+def hops(h, C):
+    hull = deque([(-2 * h[0], h[0] * h[0])])
+    dp = 0
+    for i in range(1, len(h)):
+        x = h[i]
+        while len(hull) >= 2 and hull[0][0] * x + hull[0][1] >= hull[1][0] * x + hull[1][1]:
+            hull.popleft()
+        dp = hull[0][0] * x + hull[0][1] + x * x + C
+        line = (-2 * x, dp + x * x)
+        while len(hull) >= 2 and (
+            (line[1] - hull[-2][1]) * (hull[-2][0] - hull[-1][0])
+            <= (hull[-1][1] - hull[-2][1]) * (hull[-2][0] - line[0])
+        ):
+            hull.pop()
+        hull.append(line)
+    return dp
+
+def slow(h, C):
+    dp = [0] * len(h)
+    for i in range(1, len(h)):
+        dp[i] = min(dp[j] + (h[i] - h[j]) ** 2 + C for j in range(i))
+    return dp
+
+h, C = [1, 2, 4, 7], 3
+print("dp by the slow DP:", slow(h, C), " hull trick answer:", hops(h, C))
+
+random.seed(1)
+for _ in range(400):
+    n = random.randint(1, 30)
+    hh = sorted(random.sample(range(1, 200), n))
+    c = random.randint(0, 40)
+    assert hops(hh, c) == slow(hh, c)[-1]
+print("400 random inputs: the hull trick equals the O(n^2) DP")
+`} />
+
+## Variants and when the monotonicity fails
+
+| situation | tool |
+| --- | --- |
+| slopes sorted, queries sorted (this lesson) | monotone deque, `O(n)` |
+| slopes sorted, queries arbitrary | keep the hull in an array and **binary search** the query, `O(log n)` |
+| neither sorted | **Li Chao tree**: a segment tree over `x` that stores one line per node, `O(log n)` per insert and query |
+| `max` instead of `min` | negate the lines, or flip the comparisons |
+| the cost involves `i` only through a product `a[i] * b[j]` | same trick with slope `b[j]` and `x = a[i]` (CSES Monster Game) |
+| quadratic cost with a monotone optimal `j` | divide and conquer or Knuth optimisation can be an alternative |
+
+## Pitfalls
+
+1. **Recognition.** The trick needs a cost that splits as `f(j) + g(i) + p(j) * q(i)`. If two `i`-and-`j` terms mix in a non-product way, it does not apply.
+2. **Wrong comparison direction.** For min with decreasing slopes the useless-line test is `(b3 - b1) * (m1 - m2) <= (b2 - b1) * (m1 - m3)`. Mixing the sign conventions silently keeps a wrong hull.
+3. **Overflow in the cross product.** `b` can reach `10^10` and slopes `10^5`, so the product is `10^15`: fine for 64-bit, but for bigger values use `__int128`, long double, or a Li Chao tree.
+4. **Equal slopes.** If two lines have equal slopes, keep only the lower intercept; the formula divides by `m1 - m2`, which would be zero (cross-multiplication avoids the division, but the hull logic still needs one of them dropped).
+5. **Popping to fewer than two lines.** Both loops need `len >= 2`; with one line left there is nothing to compare.
+6. **Querying out of order.** The front-popping pointer assumes queries only increase. If they do not, use binary search on the hull or a Li Chao tree.
+7. **Forgetting the term outside the minimum.** The `h[i]^2 + C` part must be added back after reading the best line.
+
+## Practice
+
+<Problem id="m13-stone-hops" />
+
+## Problem ladder
+
+- [Frog 3](https://atcoder.jp/contests/dp/tasks/dp_z) (AtCoder DP Contest, Problem Z): exactly this lesson at `n = 2·10^5`.
+- [Monster Game I](https://cses.fi/problemset/task/2084) (CSES): `dp[i] = min dp[j] + a[i] * b[j]`, a pure line problem.
+- [Monster Game II](https://cses.fi/problemset/task/2085) (CSES): the same with a Li Chao tree because the queries are not sorted.
+- [Kalila and Dimna in the Logging Industry](https://codeforces.com/problemset/problem/319/C) (Codeforces 319C, rating about 2100): a classic cutting-cost DP solved with the hull.
+- [Line Add Get Min](https://judge.yosupo.jp/problem/line_add_get_min) (Library Checker): insert arbitrary lines, query arbitrary points: the Li Chao tree benchmark.
+
+## Quiz
+
+<Quiz id="cp-m13-convex-hull-trick" tags={["dp", "convex-hull-trick"]} questions={[
+  { type: "mcq", q: "Why does dp[i] = min over j of dp[j] + (h[i] - h[j])^2 + C turn into lines?", options: ["Because the heights are sorted", "Expanding the square leaves a term linear in h[i] with a coefficient that depends only on j", "Because dp is convex", "Because C is constant"], answer: 1, explain: "-2 h[j] * h[i] is a line in x = h[i] with slope -2 h[j]; the other j-dependent part is the intercept." },
+  { type: "mcq", q: "What two orders let a plain deque replace a search over the hull?", options: ["Lines sorted by slope and queries sorted by x", "Lines sorted by intercept and queries random", "Queries sorted and slopes random", "Neither, a deque is always enough"], answer: 0, explain: "Sorted slopes mean new lines go at the end; sorted queries mean discarded front lines never become useful again." },
+  { type: "predict", q: "Lines y = -2x + 1 and y = -4x + 8. Which one is lower at x = 4?", code: "x = 4\nprint(-2 * x + 1, -4 * x + 8)", options: ["the first (-7)", "the second (-8)", "they are equal", "neither is defined"], answer: 1, explain: "-2*4 + 1 = -7 and -4*4 + 8 = -8, so the second line gives the smaller value." },
+  { type: "multi", q: "Which structures handle lines and queries in arbitrary order?", options: ["Li Chao tree", "Monotone deque as in this lesson", "Hull in an array plus binary search (slopes sorted, queries arbitrary)", "A segment tree over x storing one line per node"], answer: [0, 2, 3], explain: "The deque needs both orders; binary search on the hull needs sorted slopes only; a Li Chao tree is the segment tree over x." },
+  { type: "mcq", q: "What is the total time of the monotone hull trick DP?", options: ["O(n)", "O(n log n)", "O(n^2)", "O(n sqrt n)"], answer: 0, explain: "Each line enters the deque once and leaves at most once." }
+]} />
