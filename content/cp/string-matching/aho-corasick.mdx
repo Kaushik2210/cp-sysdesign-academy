@@ -1,0 +1,311 @@
+---
+title: Tries and Aho-Corasick
+track: cp
+module: string-matching
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/string-matching/kmp, cp/stacks-and-queues/queues-deques-bfs]
+tags: [strings, trie, aho-corasick, automaton, multi-pattern]
+type: lesson
+problems: [m14-banned-words]
+furtherReading:
+  - title: cp-algorithms, Aho-Corasick algorithm
+    url: https://cp-algorithms.com/string/aho_corasick.html
+  - title: CSES Problem Set, String Matching
+    url: https://cses.fi/problemset/task/1753
+  - title: CSES Problem Set, Word Combinations
+    url: https://cses.fi/problemset/task/1731
+---
+
+## Intuition
+
+[KMP](/cp/string-matching/kmp/) finds **one** pattern in a text in linear time. With `k` banned words, running it `k` times costs `O(k · |text|)`, which is too slow when `k` is large.
+
+Two ideas fix this:
+
+1. Store all the words together in a **trie**, a tree where each root-to-node path spells a prefix of some word. Words sharing a prefix share nodes.
+2. Walk the text through the trie one letter at a time, always knowing the **longest suffix of what you have read that is still a prefix of some word**. When the next letter does not continue that prefix, do exactly what KMP does: **fall back** to the next-shorter suffix that is also a prefix. The fallback pointers are called **failure links**.
+
+The result, the **Aho-Corasick automaton**, reads each text letter in `O(1)` and reports every occurrence of every word in one pass.
+
+## Definition
+
+**Trie.** Node `0` is the root (empty prefix). For each word, walk from the root, creating a child for each letter that has none yet. Words that are prefixes of each other end at nodes on the same path.
+
+**Failure link.** For a node `v` representing the prefix `P`, `fail[v]` is the node for the **longest proper suffix of `P` that is also a trie prefix**. The root's link is the root.
+
+**BFS construction.** Process nodes in order of depth, so `fail` of shallower nodes is ready:
+
+```text
+for a child u = go[v][c]:    fail[u] = go[ fail[v] ][c]
+for a missing edge go[v][c]: go[v][c] = go[ fail[v] ][c]      (the automaton "completes" itself)
+```
+
+With the missing edges filled in, `go` is a full transition table: from any node, any letter leads somewhere in `O(1)`. This is exactly KMP's prefix-function automaton, generalised from one string to a set of strings.
+
+## Counting occurrences
+
+Scan the text with `v = go[v][ch]`. Reaching node `v` means the current text suffix equals the prefix at `v`, so every word that is a **suffix of that prefix** ends here too. Those words are reached by following failure links: `v`, `fail[v]`, `fail[fail[v]]`, ...
+
+Following the chain on every step could be slow. Instead:
+
+1. Add `1` to `cnt[v]` for each node visited while scanning.
+2. Process nodes in **reverse BFS order** and do `cnt[fail[v]] += cnt[v]`. Each node's total now includes all visits to nodes below it in the failure tree.
+3. The number of occurrences of a word is `cnt` at its end node. Duplicate words share a node and get the same answer.
+
+Total time: building is `O(total word length · alphabet)`, scanning is `O(|text|)`.
+
+## Example
+
+Words `a`, `ab`, `ba` and text `aba`:
+
+```text
+trie:   0 -a-> 1 -b-> 2          0 -b-> 3 -a-> 4
+fail:   fail[1]=0  fail[2]=3  fail[3]=0  fail[4]=1       (2 = "ab", its suffix "b" is node 3; 4 = "ba", suffix "a" is node 1)
+
+scan a: node 1       cnt[1]=1
+scan b: node 2       cnt[2]=1
+scan a: node 4       cnt[4]=1
+propagate (reverse BFS): cnt[fail[4]=1] += 1 -> cnt[1]=2 ; cnt[fail[2]=3] += 1 -> cnt[3]=1
+answers:  "a" -> cnt[1] = 2 (positions 1 and 3)   "ab" -> cnt[2] = 1   "ba" -> cnt[4] = 1
+```
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from collections import deque
+
+def count_occurrences(text, pats):
+    nxt = [[-1] * 26]
+    ends = []
+    for p in pats:                                   # 1. build the trie
+        v = 0
+        for ch in p:
+            c = ord(ch) - 97
+            if nxt[v][c] < 0:
+                nxt.append([-1] * 26)
+                nxt[v][c] = len(nxt) - 1
+            v = nxt[v][c]
+        ends.append(v)
+    size = len(nxt)
+    fail = [0] * size
+    order = []
+    q = deque()
+    for c in range(26):                              # 2. BFS: failure links and the full automaton
+        u = nxt[0][c]
+        if u < 0: nxt[0][c] = 0
+        else: q.append(u)
+    while q:
+        v = q.popleft()
+        order.append(v)
+        for c in range(26):
+            u = nxt[v][c]
+            if u < 0: nxt[v][c] = nxt[fail[v]][c]
+            else:
+                fail[u] = nxt[fail[v]][c]
+                q.append(u)
+    cnt = [0] * size                                 # 3. scan, then push counts up the failure tree
+    v = 0
+    for ch in text:
+        v = nxt[v][ord(ch) - 97]
+        cnt[v] += 1
+    for v in reversed(order):
+        cnt[fail[v]] += cnt[v]
+    return [cnt[e] for e in ends]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> countOccurrences(const string& text, const vector<string>& pats) {
+    vector<array<int, 26>> nxt(1);
+    nxt[0].fill(-1);
+    vector<int> ends;
+    for (const string& p : pats) {
+        int v = 0;
+        for (char ch : p) {
+            int c = ch - 'a';
+            if (nxt[v][c] < 0) {
+                nxt[v][c] = nxt.size();
+                nxt.push_back({});
+                nxt.back().fill(-1);
+            }
+            v = nxt[v][c];
+        }
+        ends.push_back(v);
+    }
+    int size = nxt.size();
+    vector<int> fail(size, 0), order;
+    queue<int> q;
+    for (int c = 0; c < 26; c++) {
+        int u = nxt[0][c];
+        if (u < 0) nxt[0][c] = 0; else q.push(u);
+    }
+    while (!q.empty()) {
+        int v = q.front(); q.pop();
+        order.push_back(v);
+        for (int c = 0; c < 26; c++) {
+            int u = nxt[v][c];
+            if (u < 0) nxt[v][c] = nxt[fail[v]][c];
+            else { fail[u] = nxt[fail[v]][c]; q.push(u); }
+        }
+    }
+    vector<long long> cnt(size, 0);
+    int v = 0;
+    for (char ch : text) { v = nxt[v][ch - 'a']; cnt[v]++; }
+    for (int i = (int)order.size() - 1; i >= 0; i--) cnt[fail[order[i]]] += cnt[order[i]];
+    vector<long long> res;
+    for (int e : ends) res.push_back(cnt[e]);
+    return res;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] countOccurrences(String text, String[] pats, int total) {
+    int[][] nxt = new int[total + 1][26];
+    for (int[] row : nxt) Arrays.fill(row, -1);
+    int size = 1;
+    int[] ends = new int[pats.length];
+    for (int i = 0; i < pats.length; i++) {
+        int v = 0;
+        for (char ch : pats[i].toCharArray()) {
+            int c = ch - 'a';
+            if (nxt[v][c] < 0) nxt[v][c] = size++;
+            v = nxt[v][c];
+        }
+        ends[i] = v;
+    }
+    int[] fail = new int[size], order = new int[size];
+    int head = 0, tail = 0;
+    for (int c = 0; c < 26; c++) {
+        int u = nxt[0][c];
+        if (u < 0) nxt[0][c] = 0; else order[tail++] = u;
+    }
+    while (head < tail) {
+        int v = order[head++];
+        for (int c = 0; c < 26; c++) {
+            int u = nxt[v][c];
+            if (u < 0) nxt[v][c] = nxt[fail[v]][c];
+            else { fail[u] = nxt[fail[v]][c]; order[tail++] = u; }
+        }
+    }
+    long[] cnt = new long[size];
+    int v = 0;
+    for (int i = 0; i < text.length(); i++) { v = nxt[v][text.charAt(i) - 'a']; cnt[v]++; }
+    for (int i = tail - 1; i >= 0; i--) cnt[fail[order[i]]] += cnt[order[i]];
+    long[] res = new long[pats.length];
+    for (int i = 0; i < pats.length; i++) res[i] = cnt[ends[i]];
+    return res;
+}
+```
+
+</Tab>
+</Tabs>
+
+Check it against a naive scan, and watch the automaton handle overlapping matches:
+
+<CodeRunner language="python" code={`import random
+from collections import deque
+
+def count_occurrences(text, pats):
+    nxt = [[-1] * 26]
+    ends = []
+    for p in pats:
+        v = 0
+        for ch in p:
+            c = ord(ch) - 97
+            if nxt[v][c] < 0:
+                nxt.append([-1] * 26)
+                nxt[v][c] = len(nxt) - 1
+            v = nxt[v][c]
+        ends.append(v)
+    size = len(nxt)
+    fail = [0] * size
+    order = []
+    q = deque()
+    for c in range(26):
+        u = nxt[0][c]
+        if u < 0: nxt[0][c] = 0
+        else: q.append(u)
+    while q:
+        v = q.popleft()
+        order.append(v)
+        for c in range(26):
+            u = nxt[v][c]
+            if u < 0: nxt[v][c] = nxt[fail[v]][c]
+            else:
+                fail[u] = nxt[fail[v]][c]
+                q.append(u)
+    cnt = [0] * size
+    v = 0
+    for ch in text:
+        v = nxt[v][ord(ch) - 97]
+        cnt[v] += 1
+    for v in reversed(order):
+        cnt[fail[v]] += cnt[v]
+    return [cnt[e] for e in ends]
+
+def naive(text, pats):
+    return [sum(1 for i in range(len(text) - len(p) + 1) if text.startswith(p, i)) for p in pats]
+
+print("text 'aba', words a, ab, ba:", count_occurrences("aba", ["a", "ab", "ba"]), "(worked example: 2, 1, 1)")
+print("text 'aaaa', words aa, aaa, aa:", count_occurrences("aaaa", ["aa", "aaa", "aa"]), "(overlaps counted, duplicate word agrees)")
+
+random.seed(14)
+for _ in range(500):
+    text = "".join(random.choice("abc") for _ in range(random.randint(1, 40)))
+    pats = ["".join(random.choice("abc") for _ in range(random.randint(1, 6))) for _ in range(random.randint(1, 8))]
+    assert count_occurrences(text, pats) == naive(text, pats), (text, pats)
+print("500 random cases agree with scanning for each word separately")
+`} />
+
+## Beyond counting
+
+The same automaton, with different bookkeeping, solves a family of problems:
+
+| task | what to store per node |
+| --- | --- |
+| does the text contain **any** word? | a flag that is true if the node, or any node on its failure chain, ends a word |
+| the **first / last** occurrence of each word | the position when the node is first reached, pushed along failure links |
+| number of **distinct** words occurring | propagate along the failure tree and count words whose end node was visited |
+| count strings of length `L` that **avoid** all banned words (DP over the automaton) | `dp[length][node]`, never stepping into a flagged node |
+| segment a text into dictionary words (CSES *Word Combinations*) | a plain trie suffices: `dp[i]` extends along the trie from position `i` |
+
+Because the automaton is an ordinary state machine, you can run DP *over its states* while generating strings. That is how "count strings of length `n` that contain no banned word" is solved.
+
+## Pitfalls
+
+1. **Not completing the transitions.** If you leave `go[v][c] = -1` for missing edges you must loop along failure links at scan time, which can degrade to `O(|text| · length)`.
+2. **Wrong BFS order for propagation.** Add counts to `fail[v]` in **reverse** BFS order, so deeper nodes are added before the shallower node that receives them.
+3. **Forgetting that a word can be a suffix of another.** When the text reaches the node for `ba`, the word `a` also ends there. Counting only the node you stand on misses it; the failure-link propagation is what adds it.
+4. **Duplicate words.** They share a trie node. Answer per original word through its end node, not per node.
+5. **Memory.** The table has `26 · nodes` entries; for `10^6` characters use `int` arrays (or a map for large alphabets).
+6. **Alphabet size.** For bytes or Unicode use a sparse map per node, or compress the alphabet.
+
+## Practice
+
+<Problem id="m14-banned-words" />
+
+## Problem ladder
+
+- [String Matching](https://cses.fi/problemset/task/1753) (CSES): one pattern; solve it with KMP or Z, then with a one-word automaton.
+- [Word Combinations](https://cses.fi/problemset/task/1731) (CSES): trie plus DP over the text.
+- [Stream of Characters](https://leetcode.com/problems/stream-of-characters/) (LeetCode, hard): online word lookup, a good fit for the automaton.
+- [Search Suggestions System](https://leetcode.com/problems/search-suggestions-system/) (LeetCode, medium): trie basics.
+
+## Quiz
+
+<Quiz id="cp-m14-aho-corasick" tags={["strings", "aho-corasick"]} questions={[
+  { type: "mcq", q: "What does a failure link of a trie node point to?", options: ["Its parent", "The node for the longest proper suffix of its prefix that is also a prefix of some word", "The root always", "The deepest leaf"], answer: 1, explain: "It generalises KMP's prefix function: it tells where to fall back when the next letter does not match." },
+  { type: "mcq", q: "Why do we add cnt[v] to cnt[fail[v]] in reverse BFS order?", options: ["To sort the words", "Because every word that is a suffix of the prefix at v also ends at each visit to v, and deeper nodes must be added before the nodes that receive them", "To free memory", "To detect duplicates"], answer: 1, explain: "Reverse BFS order handles deeper nodes first, so each node's total is complete before it is passed up." },
+  { type: "predict", q: "Text 'aaaa', word 'aa'. How many (overlapping) occurrences are there?", code: "text, w = 'aaaa', 'aa'\nprint(sum(1 for i in range(len(text) - len(w) + 1) if text.startswith(w, i)))", options: ["1", "2", "3", "4"], answer: 2, explain: "Starting positions 0, 1 and 2 all match." },
+  { type: "multi", q: "Which are true of the Aho-Corasick automaton?", options: ["It reads each text character in O(1) after construction", "Construction uses a BFS over the trie", "It only works for a single pattern", "It generalises KMP"], answer: [0, 1, 3], explain: "With one pattern it is exactly KMP's automaton; its purpose is many patterns at once." }
+]} />
