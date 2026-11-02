@@ -1,0 +1,220 @@
+---
+title: Paxos and Multi-Paxos
+track: sd
+module: consensus-and-coordination
+order: 2
+difficulty: expert
+estMinutes: 50
+prerequisites: ["sd/consensus-and-coordination/consensus-and-raft"]
+tags: [paxos, multi-paxos, consensus, ballots, quorum, dueling-proposers, viewstamped-replication, zab]
+type: lesson
+furtherReading:
+  - title: Lamport, Paxos Made Simple
+    url: https://lamport.azurewebsites.net/pubs/paxos-simple.pdf
+  - title: Burrows, The Chubby Lock Service for Loosely-Coupled Distributed Systems (OSDI 2006)
+    url: https://research.google/pubs/the-chubby-lock-service-for-loosely-coupled-distributed-systems/
+  - title: Hunt et al., ZooKeeper, Wait-free Coordination for Internet-scale Systems (USENIX ATC 2010)
+    url: https://www.usenix.org/legacy/event/atc10/tech/full_papers/Hunt.pdf
+  - title: The Raft consensus algorithm
+    url: https://raft.github.io/
+---
+
+## Intuition
+
+Raft is one way to make a group of machines agree. **Paxos** is the older and more general one, and the best-known family of consensus protocols. Google's Chubby and Spanner, many databases and a large share of production consensus code descend from it. Paxos is famous for being hard to understand, mostly because it is usually presented as the answer to a very small problem and then stretched, step by step, into a complete system.
+
+Learning Paxos is worthwhile even if you will use Raft: it exposes *why* consensus protocols need the rules they have, so you recognise them in other systems (ZooKeeper's Zab, Viewstamped Replication, EPaxos, Spanner).
+
+## Single-decree Paxos: agree on one value
+
+The smallest problem: several **proposers** each suggest a value, a group of **acceptors** (typically 5, or 2f + 1) must end up agreeing on **exactly one** of them. Messages can be lost, delayed or duplicated and nodes can crash and restart, but not lie.
+
+Every attempt is identified by a **ballot number** (also called a proposal number), unique and increasing, for example `(round, proposer id)`. An acceptor remembers two things, on disk: the **highest ballot it has promised** and the **proposal it last accepted** (ballot and value).
+
+### Phase 1: prepare and promise
+
+1. A proposer picks a ballot `b` higher than any it has used and sends `Prepare(b)` to the acceptors.
+2. An acceptor that has not already promised a ballot greater than `b` replies `Promise(b, accepted proposal)`, and **promises not to accept any proposal with a ballot lower than `b`**. Otherwise it ignores or rejects.
+
+### Phase 2: propose and accept
+
+3. If the proposer gets promises from a **majority**, it chooses a value: **if any acceptor reported an already accepted proposal, it must adopt the value of the one with the highest ballot**; only if none did may it use its own value.
+4. It sends `Accept(b, value)`. An acceptor accepts unless it has since promised a higher ballot.
+5. When a **majority** has accepted the same ballot and value, that value is **chosen**.
+
+<Diagram kind="mermaid" caption="Single-decree Paxos with one proposer and three acceptors" code={`sequenceDiagram
+  participant P as Proposer
+  participant A1 as Acceptor 1
+  participant A2 as Acceptor 2
+  participant A3 as Acceptor 3
+  P->>A1: Prepare(ballot 5)
+  P->>A2: Prepare(ballot 5)
+  P->>A3: Prepare(ballot 5)
+  A1-->>P: Promise (nothing accepted yet)
+  A2-->>P: Promise (nothing accepted yet)
+  Note over P: majority promised, free to propose its own value
+  P->>A1: Accept(5, "X")
+  P->>A2: Accept(5, "X")
+  A1-->>P: Accepted
+  A2-->>P: Accepted
+  Note over P: majority accepted, "X" is chosen`} />
+
+## Why it is safe
+
+The danger is two proposers getting two different values chosen. Paxos prevents it with one rule in phase 2: **a proposer must adopt the value of the highest-ballot proposal reported in the promises**. Here is the argument in outline. Suppose value `v` was chosen by a majority at ballot `b`. Any later proposer with ballot `b' > b` needs promises from a majority in phase 1. That majority overlaps the one that accepted `v` in at least one acceptor, which promised and reports its accepted proposal. By the rule, the later proposer adopts `v` (or an even later value that itself adopted `v`), so no different value can be chosen. Majorities overlapping is the entire engine.
+
+Phase 1 also serves a second purpose: the **promise** blocks old, slower proposals. An acceptor that promised ballot 5 will refuse an `Accept` from ballot 3 that arrives late, so a proposal can never sneak in behind a decision.
+
+## Liveness: dueling proposers
+
+Safety never fails, but progress can. Two proposers can interfere forever: proposer A's prepare (ballot 1) is followed by B's prepare (ballot 2), which makes the acceptors reject A's accept; A starts again with ballot 3, which makes them reject B's accept at ballot 2; B retries with ballot 4, and so on. This **livelock** is real, and consistent with the FLP impossibility. The standard fixes are **randomised backoff** before retrying, and, more fundamentally, electing a single **distinguished proposer** (a leader) so there is normally only one proposer.
+
+## From one value to a log: Multi-Paxos
+
+A real system needs not one value but an ever-growing sequence of them, a replicated log. **Multi-Paxos** runs a separate Paxos instance for each log slot, with a key optimisation: once a node becomes the stable **leader** by winning phase 1, it can reuse the same ballot for **all subsequent slots** and skip phase 1, doing only phase 2 (one round trip to a majority) for each command. Phase 1 is repeated only when the leader changes. This is essentially what Raft does, with a log, a leader per term and heartbeats, presented as one coherent algorithm.
+
+| | Multi-Paxos | Raft |
+| --- | --- | --- |
+| Leader | Optimisation on top of the protocol, loosely specified | Built into the protocol, one leader per term |
+| Log holes | Slots can be filled out of order | The log is contiguous; no holes |
+| Election | Any node with any log can win, then catches up and repairs | Only a node with an up-to-date log can win |
+| Understandability | Notoriously hard; many variants | Designed for understandability, with a complete spec |
+| Family | Chubby, Spanner, many internal systems | etcd, Consul, CockroachDB, many newer systems |
+
+Other relatives: **Viewstamped Replication** (leader-based, developed independently around the same time), **Zab** (ZooKeeper's atomic broadcast, ordered with a leader), **Flexible Paxos** (the observation that phase 1 and phase 2 quorums only need to intersect each other, not be majorities), and **EPaxos** (leaderless, exploiting commuting commands). The core rules, majorities and ballots, recur in all of them.
+
+## Paxos, simulated
+
+The simulation implements acceptors and proposers exactly as described. First it runs thousands of random interleavings of 3 competing proposers (A, B, C) over 5 acceptors with **25% message loss** and checks whether two **different** values were ever chosen. Then it compares the dueling-proposers schedule with random scheduling and with a single proposer.
+
+<CodeRunner language="python" code={`import random
+
+class Acceptor:
+    def __init__(self):
+        self.promised = 0          # highest ballot promised
+        self.acc_ballot = 0        # ballot of the accepted proposal (0 = none)
+        self.acc_value = None
+    def prepare(self, b):
+        if b > self.promised:
+            self.promised = b
+            return (True, self.acc_ballot, self.acc_value)
+        return (False, None, None)
+    def accept(self, b, v):
+        if b >= self.promised:
+            self.promised = b
+            self.acc_ballot, self.acc_value = b, v
+            return True
+        return False
+
+def run(seed, proposers=("A", "B", "C"), n=5, loss=0.25, max_steps=400, schedule="random", keep_going=0):
+    """Returns (chosen values, step of the first decision or None). Stops 'keep_going' steps after the first decision."""
+    rng = random.Random(seed)
+    acc = [Acceptor() for _ in range(n)]
+    maj = n // 2 + 1
+    state = {p: {"stage": 0, "ballot": 0, "promises": [], "value": p} for p in proposers}
+    next_ballot = 0
+    accepts = {}                           # ballot -> {"v": value, "who": set of acceptors}
+    chosen, first = set(), None
+    duel = list(proposers[:2])             # the adversarial order for two proposers: A B | A A B B A A B B ...
+    for step in range(max_steps):
+        if schedule == "random":
+            p = rng.choice(proposers)
+        else:
+            p = duel[step] if step < 2 else duel[((step - 2) // 2 + 0) % 2]   # steps 2,3 -> A; 4,5 -> B; 6,7 -> A ...
+        s = state[p]
+        if s["stage"] == 0:                # phase 1: pick a higher ballot, send prepare, collect promises
+            next_ballot += 1
+            s["ballot"], s["promises"] = next_ballot, []
+            for i in range(n):
+                if rng.random() < loss: continue
+                ok, ab, av = acc[i].prepare(s["ballot"])
+                if ok and rng.random() >= loss:
+                    s["promises"].append((ab, av))
+            s["stage"] = 1
+        else:                              # phase 2: with a majority of promises, propose; else start over
+            if len(s["promises"]) >= maj:
+                accepted = [(ab, av) for ab, av in s["promises"] if ab > 0]
+                value = max(accepted)[1] if accepted else s["value"]     # MUST adopt the highest accepted value
+                for i in range(n):
+                    if rng.random() < loss: continue
+                    if acc[i].accept(s["ballot"], value):
+                        e = accepts.setdefault(s["ballot"], {"v": value, "who": set()})
+                        e["who"].add(i)
+                        if len(e["who"]) == maj:
+                            chosen.add(value)
+                            if first is None: first = step + 1
+            s["stage"] = 0
+        if first is not None and step + 1 >= first + keep_going:
+            break
+    return chosen, first
+
+violations = decided = 0
+for seed in range(3000):
+    chosen, first = run(seed, keep_going=60)       # keep running after the first decision to look for a second value
+    if len(chosen) > 1: violations += 1
+    if chosen: decided += 1
+print("3000 random runs: 5 acceptors, 3 competing proposers (A, B, C), 25% message loss, random interleaving")
+print("  runs where some value was chosen:", decided, "| runs where TWO different values were chosen:", violations)
+
+print()
+print("two proposers, no message loss, up to 400 steps")
+for name, sched in (("dueling schedule (each prepare lands between the other's prepare and accept)", "duel"), ("random schedule", "random")):
+    firsts = [run(s, proposers=("A", "B"), loss=0.0, schedule=sched)[1] for s in range(500)]
+    done = sorted(f for f in firsts if f is not None)
+    print(f"  {name}: a value was chosen in {100 * len(done) / len(firsts):.1f}% of runs" + (f", median {done[len(done) // 2]} steps" if done else ""))
+solo = [run(s, proposers=("A",), loss=0.0, schedule="random")[1] for s in range(200)]
+print("  one proposer only (a stable leader): chosen after", sorted(solo)[len(solo) // 2], "steps (one prepare, one accept)")
+`} />
+
+A local run printed: across **3,000** random runs with message loss, a value was chosen in all 3,000 and **two different values were chosen in 0**, as safety demands. With two proposers and no loss, the strictly **dueling schedule** chose a value in **0.0%** of runs within 400 steps (the livelock), while a **random schedule** chose a value in **100.0%** of runs with a median of 3 steps, and a **single proposer** chose a value in **2 steps** (one prepare, one accept). Safety held under every schedule; progress needed the schedule to be kind, which is why real systems elect a leader and use randomised backoff.
+
+<Diagram kind="flow" caption="Where the rules of Paxos come from" nodes={[
+  { id: "maj", label: "Majority quorums", x: 0, y: 80, role: "Any two majorities of the acceptors share at least one acceptor.", failureModes: ["Losing a majority halts the system"], tradeoffs: ["Tolerates f failures with 2f + 1 acceptors"] },
+  { id: "promise", label: "Promise blocks old ballots", x: 200, y: 20, role: "Once promised, an acceptor refuses lower ballots, so stale proposals cannot be accepted late.", failureModes: ["Dueling proposers can starve each other"], tradeoffs: ["Safety over progress"] },
+  { id: "adopt", label: "Adopt the highest accepted value", x: 200, y: 140, role: "A new proposer must continue any proposal that may already have been chosen.", failureModes: ["A proposer that ignores this rule can break agreement"], tradeoffs: ["Forces progress to build on earlier decisions"] },
+  { id: "safe", label: "Safety: at most one value chosen", x: 430, y: 80, role: "Follows from overlapping majorities plus the two rules.", failureModes: ["Holds even with message loss and crashes"], tradeoffs: ["Liveness is not guaranteed under constant contention"] },
+  { id: "leader", label: "Elect a leader for liveness", x: 640, y: 80, role: "One distinguished proposer avoids dueling and lets Multi-Paxos skip phase 1.", failureModes: ["Leader failure needs a new election"], tradeoffs: ["Leader is a throughput bottleneck, but simple and fast"] }
+]} edges={[
+  { from: "maj", to: "promise" }, { from: "maj", to: "adopt" }, { from: "promise", to: "safe" }, { from: "adopt", to: "safe" }, { from: "safe", to: "leader", label: "add liveness" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Consensus protocol families" rows={[
+  { option: "Raft", pros: "Complete, understandable spec; contiguous log; many mature implementations", cons: "Single leader bottleneck; strict log order", chooseWhen: "You are building or choosing a replicated store and want clarity and good tooling" },
+  { option: "Multi-Paxos", pros: "Flexible; proven at very large scale", cons: "Under-specified in the original paper; many subtle variants", chooseWhen: "You need maximum flexibility or inherit a Paxos-based system" },
+  { option: "Viewstamped Replication / Zab", pros: "Leader-based total-order broadcast; ZooKeeper's Zab is battle tested", cons: "Less common to implement from scratch", chooseWhen: "You are using ZooKeeper or a system built on it" },
+  { option: "Leaderless consensus (EPaxos)", pros: "No single leader bottleneck; lower latency across regions when commands commute", cons: "Much more complex; dependency tracking", chooseWhen: "Wide-area deployments with mostly non-conflicting commands" },
+  { option: "Do not use consensus (use a single database)", pros: "Simplest operations", cons: "The database is a single point of failure unless replicated", chooseWhen: "The system does not need automatic failover or a replicated coordination layer" }
+]} />
+
+## Failure modes
+
+- **Dueling proposers** with no backoff: constant ballot escalation and no progress.
+- **Lost durable state:** an acceptor that forgets its promise after a restart can break safety; promises and accepted values must be written to disk before replying.
+- **Proposer ignoring the adopt rule** (a coding bug): two values chosen. Consensus code needs formal testing and model checking.
+- **Majority unreachable:** the group stalls rather than risk inconsistency.
+- **Slow acceptor disk:** every phase waits for a majority of fsyncs, so disk latency bounds consensus latency.
+- **Membership change done wrongly:** two overlapping configurations may create disjoint majorities.
+
+## Pitfalls
+
+- Believing Paxos guarantees progress; it guarantees safety.
+- Skipping phase 1 without a stable, single leader.
+- Not persisting promises and accepted values before replying.
+- Implementing it from scratch for production; use a well-tested library or a store (etcd, ZooKeeper, a database) that provides it.
+- Using consensus for bulk data instead of small control-plane state.
+
+## What would you choose and why?
+
+Your team must pick a coordination backbone for a new platform: one group needs a lock and leader-election service, another wants a strongly consistent key-value store for configuration. Would you build your own Paxos, adopt a Raft-based store, or use ZooKeeper? Explain what you would have to get right if you built it yourself, and how you would test that your implementation never chooses two different values.
+
+## Quiz
+
+<Quiz id="sd-m12-paxos" tags={["paxos", "consensus", "multi-paxos"]} questions={[
+  { type: "mcq", q: "In phase 2 of Paxos, what must a proposer do if the promises report previously accepted proposals?", options: ["Propose its own value anyway", "Adopt the value of the proposal with the highest ballot among them", "Abort forever", "Choose the smallest value"], answer: 1, explain: "That value might already have been chosen by a majority; adopting it is what keeps agreement." },
+  { type: "mcq", q: "What do the promises in phase 1 prevent?", options: ["Network failures", "Slow, old proposals with lower ballots from being accepted after the promise", "Disk failures", "Multiple proposers"], answer: 1, explain: "An acceptor that promised ballot b refuses lower ballots, so stale proposals cannot sneak in behind a decision." },
+  { type: "mcq", q: "Why can dueling proposers livelock?", options: ["Their messages are lost", "Each prepare with a higher ballot invalidates the other's pending accept, so neither ever completes", "Acceptors crash", "Ballots wrap around"], answer: 1, explain: "Safety is unaffected, but progress needs randomised backoff or a single leader, as the simulation showed." },
+  { type: "multi", q: "Which are true of Multi-Paxos?", options: ["A stable leader can skip phase 1 for later slots", "It runs one Paxos instance per log slot", "It guarantees progress without any leader", "Phase 1 is repeated when the leader changes"], answer: [0, 1, 3], explain: "Without a stable leader, competing proposers can still duel forever." },
+  { type: "mcq", q: "What must an acceptor do before replying to a prepare or accept request?", options: ["Nothing", "Persist its promise or accepted value durably", "Contact all other acceptors", "Wait for a leader"], answer: 1, explain: "If an acceptor forgot its promise or acceptance after a crash, overlapping majorities would no longer guarantee safety." }
+]} />
