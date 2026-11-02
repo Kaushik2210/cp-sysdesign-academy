@@ -1,0 +1,145 @@
+---
+title: Logs, Metrics and Traces
+track: sd
+module: observability-and-reliability
+order: 1
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/microservice-patterns/monolith-vs-microservices"]
+tags: [observability, logging, metrics, tracing, percentiles, histograms, red, use, opentelemetry, cardinality]
+type: lesson
+furtherReading:
+  - title: Google SRE Book - Monitoring Distributed Systems (the four golden signals)
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+  - title: OpenTelemetry documentation - concepts
+    url: https://opentelemetry.io/docs/concepts/
+  - title: Brendan Gregg - The USE Method
+    url: https://www.brendangregg.com/usemethod.html
+  - title: Prometheus documentation - histograms and summaries
+    url: https://prometheus.io/docs/practices/histograms/
+---
+
+## Intuition
+
+**Monitoring** tells you *that* something is wrong (a known question: is the error rate above 1%?). **Observability** lets you ask *new* questions of a running system to find out *why*, without shipping new code. In a distributed system a single request touches many services, so you need three kinds of telemetry that work together: **metrics** (the what, cheap and aggregated), **traces** (the where, per request), and **logs** (the detail, per event).
+
+## The three pillars
+
+| Signal | What it is | Strength | Weakness | Typical cost driver |
+| --- | --- | --- | --- | --- |
+| **Metrics** | Numbers over time (counters, gauges, histograms) | Cheap, fast to query, ideal for dashboards and alerts | Aggregated: cannot explain one request | Number of unique label combinations (**cardinality**) |
+| **Logs** | Timestamped records of events | Rich detail, great for debugging one incident | Expensive to store and search; noisy | Volume (GB per day) |
+| **Traces** | A tree of **spans** showing one request's path across services with timings | Pinpoints which hop is slow or failing | Needs instrumentation everywhere; usually sampled | Number of traces kept |
+
+Workflow in an incident: an **alert** (metric) says latency is up → a **dashboard** shows it is the checkout service → a **trace** shows 90% of the time in the inventory call → **logs** for that span show the database error.
+
+## Metrics
+
+Types:
+
+- **Counter**: only goes up (requests total, errors total). Query as a rate.
+- **Gauge**: goes up and down (queue depth, memory in use).
+- **Histogram**: counts observations into buckets so you can compute percentiles across many instances.
+
+What to measure first:
+
+- **The four golden signals** (Google SRE): **latency**, **traffic**, **errors**, **saturation**.
+- **RED** for request-driven services: **R**ate, **E**rrors, **D**uration.
+- **USE** for resources (CPU, disk, network, pools): **U**tilisation, **S**aturation, **E**rrors.
+
+### Why averages lie: use percentiles
+
+If 99 requests take 100 ms and 1 takes 10 seconds, the average is about 199 ms while 1% of users wait 10 s. Alert and set targets on **percentiles**: p50 (typical), p95, p99, p99.9 (the tail). Tails matter more at scale: a page that makes 100 backend calls will hit at least one p99 call in about `1 - 0.99^100 = 63%` of page loads.
+
+Percentiles cannot be averaged across instances. Aggregate histogram buckets first, then compute the percentile.
+
+```python
+import math, random
+
+def percentile(sorted_vals, p):
+    k = math.ceil(p / 100 * len(sorted_vals)) - 1
+    return sorted_vals[max(0, k)]
+
+random.seed(3)
+lat = [random.gauss(100, 15) for _ in range(990)] + [random.uniform(5000, 10000) for _ in range(10)]
+lat.sort()
+print(round(sum(lat) / len(lat)), round(percentile(lat, 50)), round(percentile(lat, 99)), round(percentile(lat, 99.9)))
+# mean about 180 ms, p50 about 100 ms, p99 about 150 ms, p99.9 about 9,800 ms: the tail is invisible in the median and p99
+print(round(1 - 0.99 ** 100, 2))   # 0.63: chance a 100-call page hits at least one p99 call
+
+# Histogram buckets (upper bounds in ms): cheap, mergeable across servers
+BOUNDS = [50, 100, 250, 500, 1000, float("inf")]
+def to_histogram(values):
+    h = [0] * len(BOUNDS)
+    for v in values:
+        for i, b in enumerate(BOUNDS):
+            if v <= b: h[i] += 1; break
+    return h
+h1, h2 = to_histogram(lat[:500]), to_histogram(lat[500:])
+print([a + b for a, b in zip(h1, h2)])   # merging servers = adding bucket counts
+```
+
+### Cardinality: the silent cost
+
+Each unique combination of label values is a separate time series. `http_requests{route, status}` is fine (tens of series). Adding `user_id` creates millions of series and can take your metrics system down. Put high-cardinality identifiers in logs and traces, not in metric labels.
+
+## Logs
+
+- Write **structured logs** (JSON with fields), not free text: `{"ts": "...", "level": "error", "service": "checkout", "trace_id": "...", "order_id": "...", "msg": "payment declined"}`.
+- Include a **trace id / request id** in every line so logs from many services join into one story.
+- Use levels deliberately (ERROR means a human may need to act). Do not log secrets or personal data.
+- Sample or rate-limit noisy logs; ship asynchronously to a central store (Elasticsearch/OpenSearch, Loki, a cloud service) so a logging outage never blocks requests.
+- Retain hot data for days and cheaper archives longer; cost scales with volume.
+
+## Distributed tracing
+
+A **trace** is the whole request; a **span** is one operation within it (an HTTP handler, a database query) with start time, duration, attributes and a parent span. A **trace context** (the W3C `traceparent` header) is passed across service boundaries and through message queues so spans link up.
+
+```
+GET /checkout (320 ms)
+ ├─ auth.verify (12 ms)
+ ├─ inventory.reserve (210 ms)   <- the slow hop
+ │   └─ db.query (195 ms)
+ └─ payment.authorise (80 ms)
+```
+
+- **Instrument with OpenTelemetry** (vendor-neutral APIs and SDKs); auto-instrumentation covers most frameworks.
+- **Sampling** is unavoidable at scale: *head* sampling decides at the start (cheap, may miss rare errors); *tail* sampling decides after the trace completes (keep all errors and slow traces, sample the rest) at the cost of buffering.
+- Propagate context through async boundaries (queues, background jobs), or traces break into fragments.
+
+<Diagram kind="flow" caption="Telemetry pipeline: instrument once, route to the right backends" nodes={[
+  { id: "svc", label: "Services (OpenTelemetry SDK)", x: 0, y: 90, role: "Emit metrics, logs and spans with a shared trace id.", failureModes: ["Instrumentation overhead", "Missing context propagation"], tradeoffs: ["Async export so telemetry never blocks requests"] },
+  { id: "col", label: "Collector / agent", x: 220, y: 90, role: "Batches, filters, samples and enriches telemetry before it leaves the node.", failureModes: ["Collector overload drops data"], tradeoffs: ["Central place for sampling and redaction of sensitive fields"] },
+  { id: "m", label: "Metrics store", x: 440, y: 20, role: "Time-series database for dashboards and alerting.", failureModes: ["Cardinality explosion"], tradeoffs: ["Cheap per point, lossy over time (downsampling)"] },
+  { id: "l", label: "Log store", x: 440, y: 100, role: "Searchable event records.", failureModes: ["Cost growth with volume"], tradeoffs: ["Retention tiers"] },
+  { id: "t", label: "Trace store", x: 440, y: 180, role: "Request-level span trees.", failureModes: ["Sampling hides rare problems"], tradeoffs: ["Tail sampling keeps interesting traces"] },
+  { id: "ui", label: "Dashboards + alerts + on-call", x: 660, y: 90, role: "Humans and pagers consume the signals.", failureModes: ["Alert fatigue"], tradeoffs: ["Alert on symptoms, investigate with all three signals"] }
+]} edges={[
+  { from: "svc", to: "col" }, { from: "col", to: "m" }, { from: "col", to: "l" }, { from: "col", to: "t" }, { from: "m", to: "ui" }, { from: "l", to: "ui" }, { from: "t", to: "ui" }
+]} />
+
+## Worked example
+
+Users report slow checkout. The p99 latency chart for checkout jumped from 400 ms to 3 s at 14:05. The error rate is normal, so it is slowness, not failure. Tail-sampled traces for that window show the `inventory.reserve` span at 2.5 s with a long `db.query` child. The logs for that span's trace id show "lock wait timeout" on one table after a batch job started at 14:05. The fix is to move the batch job off-peak and add an index; the alert you add is on lock-wait metrics, not on "CPU high".
+
+## Pitfalls
+
+- Alerting on averages, or on causes (CPU 80%) instead of symptoms (users failing).
+- High-cardinality labels.
+- Unstructured logs with no request id.
+- 100% trace sampling forever (too costly) or head-only sampling that misses errors.
+- Dashboards nobody owns, with 80 graphs and no questions they answer.
+- Telemetry that depends on the service being healthy (log from a failing process to a blocked pipe).
+
+## What would you choose and why?
+
+A startup spends 40% of its cloud bill on logs. They log every request body at INFO. Which logs do you keep, which become metrics, which become sampled traces, and what do you do about personal data in the bodies?
+
+## Quiz
+
+<Quiz id="sd-m16-logs-metrics-traces" tags={["observability", "metrics"]} questions={[
+  { type: "mcq", q: "Why alert on p99 latency rather than the mean?", options: ["Means cannot be computed", "A small share of very slow requests is invisible in the mean but hurts many users, especially across fan-out calls", "p99 is always lower", "Percentiles are cheaper"], answer: 1, explain: "Tail latency dominates user experience at scale; the mean hides it." },
+  { type: "mcq", q: "Which label is dangerous on a metric?", options: ["status_code", "route", "user_id", "region"], answer: 2, explain: "Millions of distinct values create millions of time series (cardinality explosion)." },
+  { type: "multi", q: "Which are the four golden signals?", options: ["Latency", "Traffic", "Errors", "Saturation"], answer: [0, 1, 2, 3], explain: "Latency, traffic, errors and saturation, from the Google SRE book." },
+  { type: "mcq", q: "What links a log line to the trace of the same request?", options: ["The timestamp only", "A shared trace id included in both", "The hostname", "The log level"], answer: 1, explain: "Propagating and logging the trace id lets you pivot between signals." }
+]} />

@@ -1,0 +1,131 @@
+---
+title: SLIs, SLOs, Error Budgets and Alerting
+track: sd
+module: observability-and-reliability
+order: 2
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/observability-and-reliability/logs-metrics-and-traces"]
+tags: [sre, sli, slo, sla, error-budget, burn-rate, alerting, availability]
+type: lesson
+furtherReading:
+  - title: Google SRE Book - Service Level Objectives
+    url: https://sre.google/sre-book/service-level-objectives/
+  - title: Google SRE Workbook - Alerting on SLOs
+    url: https://sre.google/workbook/alerting-on-slos/
+  - title: Google SRE Workbook - Implementing SLOs
+    url: https://sre.google/workbook/implementing-slos/
+  - title: Rob Ewaschuk - My Philosophy on Alerting
+    url: https://docs.google.com/document/d/199PqyG3UsyXlwieHaqbGiWVa8eMWi8zzAn0YfcApr8Q/edit
+---
+
+## Intuition
+
+"The site should be reliable" cannot be engineered. "99.9% of checkout requests succeed within 500 ms, measured monthly" can. Reliability work needs numbers that both engineers and the business agree on, a way to spend risk deliberately, and alerts that fire when users are actually being hurt. SLIs, SLOs and error budgets provide all three.
+
+## Definitions
+
+- **SLI (service level indicator)**: a measured ratio of good events to valid events. `successful requests / total requests`, or `requests faster than 500 ms / total requests`. Choose SLIs from the user's point of view (availability, latency, correctness, freshness, durability).
+- **SLO (service level objective)**: the target for an SLI over a window: "99.9% of requests are good over 30 days".
+- **SLA (service level agreement)**: a contract with consequences (credits, penalties). It is looser than the internal SLO (SLA 99.9%, SLO 99.95%), so you notice and fix problems before you breach the contract.
+- **Error budget**: `1 - SLO`. A 99.9% SLO over 30 days allows 0.1% bad events, or about 43.2 minutes of full downtime.
+
+## Availability numbers to know
+
+| SLO | Allowed downtime per 30 days | Per year |
+| --- | --- | --- |
+| 99% | 7.2 hours | 3.65 days |
+| 99.9% | 43.2 minutes | 8.76 hours |
+| 99.95% | 21.6 minutes | 4.38 hours |
+| 99.99% | 4.3 minutes | 52.6 minutes |
+| 99.999% | 26 seconds | 5.3 minutes |
+
+Each extra nine costs roughly 10 times more: redundancy across zones and regions, automated failover, careful deploys, and on-call maturity. Your SLO should be **no higher than users need**, and cannot exceed the SLOs of your critical dependencies (a service that depends serially on three 99.9% services cannot honestly promise 99.99%).
+
+```python
+def budget_minutes(slo, days=30):
+    return (1 - slo) * days * 24 * 60
+
+for slo in (0.99, 0.999, 0.9995, 0.9999, 0.99999):
+    print(slo, round(budget_minutes(slo), 1), "minutes per 30 days")
+# 0.99 432.0, 0.999 43.2, 0.9995 21.6, 0.9999 4.3, 0.99999 0.4
+```
+
+## Using the error budget
+
+The budget turns the reliability-versus-velocity argument into data:
+
+- **Budget remaining:** ship features, run experiments, do risky migrations.
+- **Budget exhausted:** freeze risky launches, spend time on reliability work until the window recovers.
+
+This gives product and engineering a shared rule and makes "100% reliable" visibly the wrong goal: it would mean never changing anything.
+
+## Choosing good SLIs
+
+- Measure at the edge (load balancer, client) where users feel it, not only inside a pod.
+- Define "good" precisely: HTTP status below 500 (4xx are the caller's fault), latency below a threshold, response correct.
+- Use ratios of counts, not averages. Prefer a **latency SLI as the share of requests faster than X**, not "average latency".
+- Keep to a few SLIs per user journey (checkout availability, checkout latency), not dozens.
+- For batch and pipelines: freshness (data is no more than 10 minutes old) and correctness.
+
+## Alerting on burn rate
+
+**Burn rate** is how fast you consume the budget relative to the allowed pace. Burn rate 1 means you will use exactly the whole budget by the end of the window. Burn rate 14.4 means the whole 30-day budget would be gone in about 2 days.
+
+If the error ratio over a window is `e` and the SLO error budget is `b = 1 - SLO`, then `burn_rate = e / b`.
+
+Multi-window, multi-burn-rate alerts (from the SRE Workbook) page on fast burns and ticket on slow ones, and require **both a long and a short window** to be over the threshold so the alert resets quickly after recovery:
+
+| Severity | Burn rate | Long window | Short window | Budget consumed if sustained |
+| --- | --- | --- | --- | --- |
+| Page | 14.4 | 1 hour | 5 minutes | 2% in an hour |
+| Page | 6 | 6 hours | 30 minutes | 5% in six hours |
+| Ticket | 1 | 3 days | 6 hours | 10% over three days |
+
+```python
+def burn_rate(error_ratio, slo):
+    return error_ratio / (1 - slo)
+
+def should_page(err_1h, err_5m, slo=0.999, threshold=14.4):
+    return burn_rate(err_1h, slo) >= threshold and burn_rate(err_5m, slo) >= threshold
+
+print(round(burn_rate(0.0144, 0.999), 1))     # 14.4: a 1.44% error rate on a 99.9% SLO
+print(should_page(0.0150, 0.0200))            # True: sustained and still happening
+print(should_page(0.0150, 0.0005))            # False: it was bad an hour ago but has recovered
+# days to exhaust a 30-day budget at burn rate r: 30 / r
+print(30 / 14.4, 30 / 6, 30 / 1)              # about 2.1 days, 5 days, 30 days
+```
+
+## Good alerting principles
+
+- **Page only for symptoms that need a human now** and are about user impact (SLO burn), not causes (CPU, a single pod restart). Every page should be urgent, actionable and novel.
+- Non-urgent signals become tickets or dashboard annotations, not pages.
+- Attach a **runbook link** and context (dashboards, recent deploys) to every alert.
+- Track alert quality: pages per on-call shift, share that were actionable. More than a couple of pages per 12-hour shift causes burnout and missed real incidents.
+- Keep a **cause-based** alert only when it gives lead time (disk will be full in 4 hours).
+
+## Worked example
+
+Checkout has an SLO of 99.9% good requests over 30 days (budget 43.2 minutes of equivalent downtime). A bad deploy raises the error rate to 5% for 20 minutes. At 5% the burn rate is 50. The fast-burn alert pages within minutes; the on-call rolls back. The incident consumed `20 min × 5% = 1` minute of full-outage equivalent, about 2.3% of the monthly budget, so there is still plenty to ship new features. Compare a slow leak of 0.3% errors for a week: burn rate 3, no page, but the ticket alert flags it before it quietly eats the whole budget.
+
+## Pitfalls
+
+- SLOs set by wishful thinking rather than user need and measured capability.
+- Measuring only in the service itself (it can be "up" while the load balancer returns errors).
+- Threshold alerts on raw error counts that fire at low traffic or miss high traffic.
+- No consequence when the budget is exhausted, so the SLO is decoration.
+- Setting the SLA equal to the SLO, with no safety margin.
+- Counting planned maintenance inconsistently.
+
+## What would you choose and why?
+
+A search API has an availability SLO of 99.95% and a latency SLO (p99 under 300 ms). Its main dependency is a database cluster with a 99.9% SLA. Is the 99.95% achievable? What design changes (caching, replicas, fallbacks) could make it honest, and what would you tell the product team?
+
+## Quiz
+
+<Quiz id="sd-m16-slos-error-budgets" tags={["sre", "slo", "error-budget"]} questions={[
+  { type: "mcq", q: "How much full downtime does a 99.9% SLO allow in a 30-day month?", options: ["4.3 minutes", "43.2 minutes", "7.2 hours", "72 hours"], answer: 1, explain: "0.1% of 43,200 minutes is 43.2 minutes." },
+  { type: "mcq", q: "The error ratio is 1.44% against a 99.9% SLO. What is the burn rate?", options: ["1.44", "14.4", "144", "0.144"], answer: 1, explain: "burn rate = 0.0144 / 0.001 = 14.4." },
+  { type: "multi", q: "Why use both a long and a short window in a burn-rate alert?", options: ["The long window avoids paging on brief blips", "The short window lets the alert clear quickly after recovery", "It doubles the SLO", "It removes the need for runbooks"], answer: [0, 1], explain: "Both must be over threshold: the problem is sustained and still happening." },
+  { type: "mcq", q: "What should happen when the error budget is exhausted?", options: ["Nothing", "Pause risky launches and prioritise reliability work until the budget recovers", "Raise the SLO", "Delete the SLI"], answer: 1, explain: "The budget gives the policy teeth; otherwise the SLO is only a dashboard number." }
+]} />

@@ -1,0 +1,131 @@
+---
+title: Safe Deployments and Incident Response
+track: sd
+module: observability-and-reliability
+order: 3
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/observability-and-reliability/slos-error-budgets-and-alerting", "sd/load-balancing/load-balancer-basics"]
+tags: [deployment, canary, blue-green, rolling, feature-flags, rollback, incident-response, postmortem, chaos-engineering]
+type: lesson
+furtherReading:
+  - title: Google SRE Book - Managing Incidents
+    url: https://sre.google/sre-book/managing-incidents/
+  - title: Google SRE Book - Postmortem Culture - Learning from Failure
+    url: https://sre.google/sre-book/postmortem-culture/
+  - title: Martin Fowler - BlueGreenDeployment and CanaryRelease
+    url: https://martinfowler.com/bliki/BlueGreenDeployment.html
+  - title: Principles of Chaos Engineering
+    url: https://principlesofchaos.org/
+---
+
+## Intuition
+
+Most outages are caused by **change**: a deploy, a config edit, a migration. So reliable systems are built around making change **small, gradual, observable and reversible**. When something still breaks (it will), what matters is how fast you detect it, how calmly you restore service, and whether you learn from it.
+
+## Deployment strategies
+
+| Strategy | How it works | Pros | Cons |
+| --- | --- | --- | --- |
+| **Recreate** | Stop the old version, start the new | Simplest | Downtime |
+| **Rolling** | Replace instances a few at a time | No extra capacity; no downtime | Old and new run together (must be compatible); slow rollback |
+| **Blue-green** | Run a full new environment (green) beside the live one (blue); switch traffic at the load balancer | Instant rollback by switching back; test green before the switch | Double the capacity; database changes must work for both versions |
+| **Canary** | Send a small share of traffic (1%, 5%, 25%...) to the new version, compare its health with the baseline, then widen | Limits blast radius; real-traffic validation | Needs good metrics and automation; sticky users see mixed versions |
+| **Shadow (mirroring)** | Copy production traffic to the new version without returning its responses | Tests with real load and no user risk | Side effects must be disabled; extra cost |
+
+### Canary analysis in practice
+
+Automate the decision. Compare the canary against the baseline on the SLIs from the previous lesson (error rate, latency percentiles, saturation) over a fixed observation window, with a statistical margin, and **promote only if healthy, roll back automatically if not**.
+
+```python
+def canary_decision(base_err, base_n, canary_err, canary_n, min_requests=1000, margin=0.005):
+    """Return 'wait', 'rollback' or 'promote' using a simple error-rate comparison."""
+    if canary_n < min_requests:
+        return "wait"                                   # not enough data yet
+    base_rate, canary_rate = base_err / base_n, canary_err / canary_n
+    if canary_rate > base_rate + margin:                # clearly worse than the baseline
+        return "rollback"
+    return "promote"
+
+print(canary_decision(50, 100000, 3, 500))      # wait      (only 500 canary requests)
+print(canary_decision(50, 100000, 40, 2000))    # rollback  (2.0% vs 0.05% baseline)
+print(canary_decision(50, 100000, 2, 2000))     # promote   (0.1% vs 0.05%, inside the margin)
+```
+
+Real systems use proper statistical tests and many metrics, and watch for slow-burning issues (memory leaks) with a long enough bake time.
+
+## Feature flags: separate deploy from release
+
+Ship code **dark** behind a flag, then turn the feature on gradually (1% of users, an internal group, a region) and off instantly without a deploy. Benefits: trunk-based development, instant kill switches, A/B tests. Costs: flag debt (remove flags after rollout), combinatorial testing, and flag service availability (default to a safe value if it is unreachable).
+
+## Making changes reversible
+
+- **Backward-compatible database migrations** using *expand and contract*: (1) add the new column/table (expand), (2) deploy code that writes both and reads the new one, (3) backfill, (4) switch reads, (5) remove the old (contract) in a later release. Never rename or drop in the same release as the code that stops using it, because rolling deploys and rollbacks need both versions to work against the schema.
+- **Rollback must be rehearsed.** If you cannot roll back (irreversible migration), treat it as a high-risk, staged change.
+- **Config changes are deploys**: review them, roll them gradually, and alert on them.
+- **Immutable artifacts**: deploy the exact artifact that passed tests; version everything; keep the previous version ready.
+- **Deploy guardrails**: no deploys on Friday evenings or during incidents, automatic halts when SLO burn is high, small batch sizes.
+
+## Incident response
+
+When an alert fires, the goal is **mitigation first** (stop the pain), root cause later.
+
+1. **Detect and declare.** Acknowledge the page. If user impact is plausible, declare an incident; do not wait for certainty.
+2. **Assign roles.** An **incident commander** coordinates and decides; an **operations lead** hands-on investigates and changes things; a **communications lead** updates stakeholders and the status page. One person speaking for each role prevents chaos. Others investigate only when asked.
+3. **Mitigate.** Prefer the fastest safe action: roll back the last change, toggle a feature flag off, fail over, shed load, scale up. Do not try to fix forward unless it is clearly faster.
+4. **Communicate** on a regular cadence (every 15 to 30 minutes) even if there is nothing new: "still investigating, next update at 14:45".
+5. **Resolve and verify** against the SLIs, not by feeling.
+6. **Follow up** with a blameless postmortem.
+
+Severity levels (SEV1 widespread outage, SEV2 major degradation, SEV3 minor) set who is paged and how often updates go out.
+
+## Blameless postmortems
+
+A postmortem asks "**how did the system and our process allow this?**", not "who did it?". People who fear blame hide information; people who are safe share it and the system improves.
+
+Contents: summary and impact (users, duration, error budget burned), timeline, detection (how long until we knew?), root causes and contributing factors, what went well and badly, and **action items with owners and dates** (fix the class of problem: better alerts, safer migration tooling, automated rollback). Track actions to completion. Share widely.
+
+Useful metrics: **MTTD** (time to detect), **MTTR** (time to restore), change failure rate and deploy frequency (the DORA metrics, which correlate with high-performing teams).
+
+## Testing reliability before production does
+
+- **Load and soak tests** for capacity and leaks.
+- **Chaos engineering**: deliberately inject failures (kill instances, add latency, cut a dependency) in a controlled way, starting in staging with a hypothesis ("checkout still works if recommendations is down") and a small blast radius, to find weaknesses before they find you.
+- **Game days / disaster-recovery drills**: practise failover and restore from backup. A backup you have never restored is a hope, not a backup.
+- **Pre-mortems**: before launch, imagine it failed and list why.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  A[Commit] --> B[Build + tests]
+  B --> C[Deploy to staging]
+  C --> D[Canary 1-5%]
+  D -->|healthy| E[25% then 100%]
+  D -->|SLI regression| R[Automatic rollback]
+  E --> F[Monitor SLO burn]
+  F -->|burn alert| R`} caption="A progressive delivery pipeline with automated rollback" />
+
+## Worked example
+
+A new recommendation ranking is deployed behind a flag. The deploy itself goes out through a canary: 5% for 15 minutes, error rate and p99 latency match the baseline, so it widens to 100%. The flag is then enabled for 1% of users; the click-through metric looks fine and p99 rises slightly. At 10% a memory leak shows up in the saturation graph; the flag is turned off (not a redeploy) in seconds, and the leak is fixed under no pressure. The incident never reaches an SLO breach because the change was gradual and reversible.
+
+## Pitfalls
+
+- Big-bang releases bundling many changes.
+- Rollouts without automated health checks or a stop button.
+- Irreversible migrations coupled to code deploys.
+- Debugging in the incident channel with ten people instead of a clear commander.
+- Fixing forward under pressure and breaking more.
+- Postmortems that name a person, or that produce action items nobody owns.
+- Feature flags that never get cleaned up.
+
+## What would you choose and why?
+
+You must rename a heavily used database column in a service with 200 instances that deploy rolling, and rollbacks must always be possible. Lay out the sequence of releases (expand and contract) and the checks between them. What is your rollback plan at each step?
+
+## Quiz
+
+<Quiz id="sd-m16-deploys-incidents" tags={["deployment", "incident-response"]} questions={[
+  { type: "mcq", q: "What is the first priority when responding to an incident?", options: ["Find the root cause", "Mitigate user impact (for example roll back)", "Write the postmortem", "Assign blame"], answer: 1, explain: "Restore service first; investigate causes after impact has stopped." },
+  { type: "mcq", q: "Why are database migrations done as expand and contract?", options: ["It is faster", "Old and new code versions must both work against the schema during rolling deploys and rollbacks", "To avoid indexes", "To reduce storage"], answer: 1, explain: "Backward-compatible steps keep every version of the code working through the transition." },
+  { type: "multi", q: "Which are advantages of canary releases?", options: ["Small blast radius", "Validation on real traffic", "No monitoring needed", "Automated rollback on regression"], answer: [0, 1, 3], explain: "Canaries depend on good metrics; without them they give false confidence." },
+  { type: "predict", q: "canary_decision(50, 100000, 40, 2000): baseline 0.05% errors, canary 2% errors. What is returned?", code: "canary_decision(50, 100000, 40, 2000)", options: ["wait", "promote", "rollback", "error"], answer: 2, explain: "The canary has enough requests and its error rate exceeds the baseline by more than the margin." }
+]} />
