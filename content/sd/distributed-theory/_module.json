@@ -1,0 +1,1 @@
+{ "title": "Distributed Systems Theory", "level": "Level 2: Distributed Systems", "order": 11, "summary": "What changes when one computer becomes many: there is no shared clock, replicas disagree, and a silent node may be slow or dead. Logical time, consistency models, quorums, failure detection, leases and fencing." }

@@ -1,0 +1,225 @@
+---
+title: Time, Clocks and Ordering
+track: sd
+module: distributed-theory
+order: 1
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/databases-2/replication", "sd/what-is-system-design/non-functional-tradeoffs"]
+tags: [clocks, lamport, vector-clocks, hybrid-logical-clock, ordering, happens-before, last-write-wins]
+type: lesson
+furtherReading:
+  - title: Lamport, Time, Clocks, and the Ordering of Events in a Distributed System (1978)
+    url: https://lamport.azurewebsites.net/pubs/time-clocks.pdf
+  - title: Corbett et al., Spanner, Google's Globally-Distributed Database (OSDI 2012), TrueTime
+    url: https://research.google/pubs/spanner-googles-globally-distributed-database/
+  - title: DeCandia et al., Dynamo, Amazon's Highly Available Key-value Store (SOSP 2007), vector clocks
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: Kleppmann, Designing Data-Intensive Applications, chapter 8 (unreliable clocks) and chapter 5 (conflicts)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+On one computer, "which happened first?" has an answer: look at the clock, or just at the order in which the program ran. Across many computers it does not. Each machine has its own clock, the clocks disagree, and the network delivers messages after unpredictable delays. A statement such as "event A happened before event B" can mean three different things: A's timestamp is smaller than B's, A really occurred earlier in physical time, or A could have *caused* B.
+
+These three are not the same, and most distributed-systems bugs about "lost updates" or "time going backwards" come from treating them as if they were. The good news is that the third notion, *causality*, is the one systems actually need, and it can be tracked exactly without any synchronised clocks.
+
+## Why wall-clock time is a trap
+
+A computer's clock is a counter driven by a quartz crystal. Three things make it unreliable as a global order:
+
+- **Drift.** Crystals run slightly fast or slow, by tens of parts per million. Fifty parts per million is about 4 seconds per day if never corrected.
+- **Correction.** NTP nudges clocks toward a reference, sometimes by *stepping* them, so a clock can jump forward or **backward**. Leap seconds make a minute 61 seconds long.
+- **Uncertainty.** Over a real network NTP typically reaches accuracy of a few to tens of milliseconds; inside a well-run data centre perhaps a millisecond or better. A request that takes 5 ms between two machines is already beyond the error bars of their clocks.
+
+So two writes 3 ms apart on different machines can easily be stamped in the *wrong* order. A common defect is **last-write-wins (LWW)** conflict resolution that keeps the value with the larger timestamp: if the clocks are skewed, the "later" write that actually happened earlier silently overwrites the real latest one, and no error is raised. Monotonic clocks (the counters your OS exposes for measuring durations) never go backward but are meaningless across machines.
+
+<Callout type="warning" title="Use the right clock for the job">
+Use a **monotonic** clock to measure how long something took (timeouts, latency). Use a **wall** clock for human display. Use a **logical** or **hybrid** clock to decide *order* between machines. Never subtract wall-clock readings taken on two different hosts and trust the sign.
+</Callout>
+
+## Happens-before: ordering by causality
+
+Lamport's key idea is to stop asking about physical time and define order from what could influence what. Write `a → b` ("a happens before b") when any of these holds:
+
+1. `a` and `b` are on the **same process** and `a` comes first in that process's program order.
+2. `a` is the **sending** of a message and `b` is the **receipt** of that same message.
+3. There is some event `c` with `a → c` and `c → b` (**transitivity**).
+
+If neither `a → b` nor `b → a`, the events are **concurrent** (written `a || b`). Concurrent does not mean "at the same instant"; it means no chain of messages connects them, so neither could have affected the other. Two writes made by different users to different replicas with no communication in between are concurrent, and the system must not pretend one was "first" without saying how it decided.
+
+<Diagram kind="mermaid" caption="Three processes, two messages. Event b2 happens after a1 (a message carries the causality), while c1 is concurrent with both" code={`sequenceDiagram
+  participant A as Process A
+  participant B as Process B
+  participant C as Process C
+  Note over A: a1 (Lamport 1)
+  A->>B: message from a1
+  Note over B: b1 receives it (Lamport 2)
+  Note over B: b2 (Lamport 3)
+  Note over C: c1 (Lamport 1), concurrent with a1 and b1
+  B->>C: message from b2
+  Note over C: c2 receives it (Lamport 4)`} />
+
+## Lamport clocks
+
+Give each process an integer counter, initially 0.
+
+- Before a local event or a send: `counter = counter + 1`. A sent message carries the counter.
+- On receive of a message with counter `m`: `counter = max(counter, m) + 1`.
+
+**Guarantee:** if `a → b` then `L(a) < L(b)`. The clock respects causality. **The converse is false:** `L(a) < L(b)` does *not* mean `a → b`; the two events may be concurrent. A Lamport timestamp therefore gives you a consistent **total order** (break ties with the process id, `(counter, pid)`) that is compatible with causality, but it cannot *detect* concurrency. That is enough for jobs like totally ordered broadcast and a distributed lock queue, where everyone just needs to agree on some order consistent with causality.
+
+## Vector clocks
+
+To detect concurrency, keep more information. A **vector clock** for `n` processes is an array of `n` counters, one per process.
+
+- On a local event or send at process `i`: `V[i] = V[i] + 1`. A sent message carries the whole vector.
+- On receive of a vector `W` at process `i`: `V = elementwise max(V, W)`, then `V[i] = V[i] + 1`.
+
+Compare two vectors: `V(a) <= V(b)` if every entry is at most the matching entry of the other. Then:
+
+```text
+a happens before b     <=>   V(a) <= V(b) and V(a) != V(b)
+a and b concurrent     <=>   neither V(a) <= V(b) nor V(b) <= V(a)
+```
+
+Vector clocks characterise happens-before **exactly**, in both directions. The price is size: one counter per participating process (or per client, in a key-value store). Dynamo-style stores attach a vector to each value, so when two replicas return versions that are concurrent, the client or the store keeps **both as siblings** and merges them, instead of silently discarding one.
+
+## Hybrid logical clocks
+
+Humans like timestamps that look like real time (for debugging, TTLs, "show me what changed in the last hour"). Logical clocks drift away from real time. A **hybrid logical clock (HLC)** pairs a physical component `l` with a small logical counter `c`: `l` follows the maximum of the local wall clock and every `l` seen so far, and `c` breaks ties when `l` does not advance. The result is a timestamp that is:
+
+- **causally consistent** like a Lamport clock (`a → b` implies `HLC(a) < HLC(b)`),
+- **close to real time**, within the clock-skew bound, so it can be shown to users and used for time-travel reads,
+- **compact**, a constant size regardless of cluster size.
+
+Several distributed databases, including CockroachDB, use HLC timestamps for exactly this reason.
+
+## TrueTime and waiting out the uncertainty
+
+Google's Spanner takes the opposite approach: instead of avoiding physical time, it makes the *uncertainty* explicit. Its TrueTime API returns an interval `[earliest, latest]` that is guaranteed to contain the true time, backed by GPS and atomic clocks in each data centre so the interval is a few milliseconds wide. To commit a transaction with timestamp `t`, Spanner **waits out the uncertainty** ("commit wait") until `t` is definitely in the past on every machine, which is what makes its timestamps match real-time order across the whole planet. The cost is a few milliseconds of added commit latency and specialised hardware.
+
+## The clocks side by side, runnable
+
+The simulation below runs thousands of random message traces on 4 processes. It computes the **true** happens-before relation from the trace (as ground truth) and checks both clocks against it.
+
+<CodeRunner language="python" code={`import random
+
+def run(seed, n=4, steps=40):
+    rng = random.Random(seed)
+    lam = [0] * n
+    vc = [[0] * n for _ in range(n)]
+    events = []                      # each event: dict(proc, lamport, vc, preds)
+    last = [None] * n                # last event index on each process
+    inflight = []                    # (msg_event, to, lamport, vc)
+    for _ in range(steps):
+        p = rng.randrange(n)
+        kind = rng.choice(["local", "send", "send", "recv"])
+        if kind == "recv":
+            mine = [m for m in inflight if m[1] == p]
+            if not mine:
+                kind = "local"
+            else:
+                m = mine[0]
+                inflight.remove(m)
+        preds = [last[p]] if last[p] is not None else []
+        if kind == "recv":
+            lam[p] = max(lam[p], m[2]) + 1
+            vc[p] = [max(a, b) for a, b in zip(vc[p], m[3])]
+            vc[p][p] += 1
+            preds.append(m[0])
+        else:
+            lam[p] += 1
+            vc[p][p] += 1
+        ev = dict(proc=p, lam=lam[p], vc=tuple(vc[p]), preds=preds)
+        events.append(ev)
+        last[p] = len(events) - 1
+        if kind == "send":
+            q = rng.choice([x for x in range(n) if x != p])
+            inflight.append((len(events) - 1, q, lam[p], tuple(vc[p])))
+    # ground truth happens-before by transitive closure over the causal predecessors
+    before = []
+    for i, e in enumerate(events):
+        s = set()
+        for pr in e["preds"]:
+            s.add(pr); s |= before[pr]
+        before.append(s)
+    return events, before
+
+def vc_less(a, b):
+    return all(x <= y for x, y in zip(a, b)) and a != b
+
+total = hb = conc = lam_ok = lam_false = vc_wrong = 0
+for seed in range(200):
+    ev, before = run(seed)
+    for i in range(len(ev)):
+        for j in range(len(ev)):
+            if i == j: continue
+            truth = i in before[j]
+            total += 1
+            if truth:
+                hb += 1
+                assert ev[i]["lam"] < ev[j]["lam"]          # Lamport: a -> b implies L(a) < L(b)
+                lam_ok += 1
+            elif j not in before[i]:
+                conc += 1
+                if ev[i]["lam"] < ev[j]["lam"]: lam_false += 1   # Lamport orders a concurrent pair
+            if vc_less(ev[i]["vc"], ev[j]["vc"]) != truth: vc_wrong += 1
+print("ordered pairs examined:", total, "| happens-before pairs:", hb, "| concurrent (a,b) with neither before the other:", conc)
+print("Lamport: every happens-before pair gets L(a) < L(b):", lam_ok == hb)
+print("Lamport clocks also say L(a) < L(b) for", lam_false, "concurrent ordered pairs (", round(100 * lam_false / conc, 1), "% of the concurrent ones )")
+print("vector clocks disagree with the true happens-before relation in", vc_wrong, "pairs")
+`} />
+
+A local run examined 312,000 ordered event pairs, of which 57,730 were genuinely causally ordered and 196,540 were concurrent. Lamport clocks gave a smaller timestamp to the causal predecessor in **every** one of the 57,730 causal pairs, but they also ranked **45.3%** of the concurrent ordered pairs as if one came first, so a Lamport timestamp alone cannot tell "caused" from "unrelated". Vector clocks disagreed with the true relation in **0** pairs.
+
+<Diagram kind="flow" caption="Choosing a clock for a feature" nodes={[
+  { id: "need", label: "What must the timestamp do?", x: 0, y: 80, role: "Decide what the ordering is for before picking a mechanism.", failureModes: ["Using wall-clock time for conflict resolution because it is convenient"], tradeoffs: ["Every option below buys one property and pays for it elsewhere"] },
+  { id: "dur", label: "Measure a duration or timeout", x: 210, y: 10, role: "Use the local monotonic clock; no cross-machine meaning needed.", failureModes: ["Using the wall clock, which can step backward"], tradeoffs: ["Cheap and exact locally; useless for comparing hosts"] },
+  { id: "caus", label: "Detect concurrent updates", x: 210, y: 80, role: "Vector clocks or version vectors attached to each value.", failureModes: ["Vectors grow with the number of writers", "Clients must resolve siblings"], tradeoffs: ["Exact causality; metadata cost and merge logic"] },
+  { id: "tot", label: "A total order consistent with causality", x: 210, y: 150, role: "Lamport clocks with a process-id tie-breaker, or an HLC.", failureModes: ["Cannot detect concurrency", "Lamport time drifts from real time"], tradeoffs: ["Constant size and simple; loses the concurrent/ordered distinction"] },
+  { id: "real", label: "Real-time order across the planet", x: 430, y: 80, role: "TrueTime-style bounded uncertainty and commit wait.", failureModes: ["Requires special clock hardware", "Adds commit latency"], tradeoffs: ["Strongest guarantee; highest cost"] }
+]} edges={[
+  { from: "need", to: "dur" }, { from: "need", to: "caus" }, { from: "need", to: "tot" }, { from: "tot", to: "real", label: "need real-time order" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Ways to order events in a distributed system" rows={[
+  { option: "Wall-clock timestamps (last-write-wins)", pros: "Trivial, human readable, constant size", cons: "Clock skew silently picks the wrong winner and loses writes; no concurrency detection", chooseWhen: "Data where losing an occasional concurrent update is acceptable, with clocks kept tight" },
+  { option: "Lamport clocks", pros: "Constant size; a total order consistent with causality", cons: "Cannot tell causal from concurrent; drifts from real time", chooseWhen: "Totally ordered broadcast, lock queues, log merging where any consistent order will do" },
+  { option: "Vector clocks / version vectors", pros: "Exact happens-before; detects conflicts instead of hiding them", cons: "Size grows with writers; needs conflict-resolution logic", chooseWhen: "Multi-writer replicated stores that must not lose concurrent updates" },
+  { option: "Hybrid logical clocks", pros: "Causally consistent, near real time, constant size", cons: "Does not detect concurrency; bounded only by the clock-skew assumption", chooseWhen: "Databases and services that want readable timestamps plus causal safety" },
+  { option: "TrueTime with commit wait", pros: "External consistency: timestamps match real-time order globally", cons: "Specialised clock hardware; a few milliseconds of commit latency", chooseWhen: "Globally distributed transactional databases with the budget for it" }
+]} />
+
+## Failure modes
+
+- **Clock step backward** after an NTP correction: durations go negative and timestamps repeat. Use monotonic clocks for durations and HLC rules for stored timestamps.
+- **Skewed writer** stamps its writes far in the future, so under LWW they win over everything that follows until real time catches up.
+- **Vector clock explosion** when every client gets its own entry and clients are short-lived; prune entries or use per-server version vectors.
+- **Lost concurrent update** because the system merged by timestamp instead of detecting the conflict.
+- **Leap second or VM pause** makes a process believe a different amount of time passed than really did.
+
+## Pitfalls
+
+- Comparing wall-clock timestamps from different hosts and treating the result as an order.
+- Assuming "same second" means "concurrent" or "different second" means "ordered".
+- Using a Lamport timestamp as proof of causality.
+- Storing only an update time and discarding the history needed to merge concurrent edits.
+- Trusting NTP to keep every machine within a millisecond.
+
+## What would you choose and why?
+
+A shopping cart is replicated on three servers and a user's two devices both add an item while offline. When the devices reconnect, the carts differ. What ordering mechanism lets you merge the carts without losing either item, and what would last-write-wins do to this user? Compare your answer with how you would order the entries of a single totally ordered audit log across all three servers.
+
+## Quiz
+
+<Quiz id="sd-m11-time-clocks" tags={["clocks", "lamport", "vector-clocks"]} questions={[
+  { type: "mcq", q: "Event a happens before event b if...", options: ["a has a smaller wall-clock timestamp", "a could have causally influenced b through program order or message passing", "a ran on a faster machine", "a and b ran at the same instant"], answer: 1, explain: "Happens-before is defined by causality (program order, send before receive, and transitivity), not by clock readings." },
+  { type: "mcq", q: "Which statement about Lamport clocks is true?", options: ["L(a) < L(b) implies a happened before b", "a happened before b implies L(a) < L(b), but not the converse", "They detect concurrent events exactly", "They equal real time"], answer: 1, explain: "Lamport clocks respect causality in one direction only; concurrent events can still get ordered timestamps." },
+  { type: "mcq", q: "What do vector clocks give you that Lamport clocks do not?", options: ["Smaller timestamps", "Exact detection of whether two events are causally ordered or concurrent", "Synchronised wall-clock time", "Faster message delivery"], answer: 1, explain: "Comparing two vectors tells you before, after or concurrent; the cost is one counter per process." },
+  { type: "multi", q: "Which problems can wall-clock last-write-wins cause?", options: ["A skewed clock makes an older write win", "Concurrent updates are silently lost", "Timestamps can repeat or go backward after a correction", "Causality is always preserved"], answer: [0, 1, 2], explain: "Wall clocks are not synchronised exactly, so using them to pick a winner can discard the real latest write without any error." },
+  { type: "mcq", q: "What does a hybrid logical clock add on top of a Lamport clock?", options: ["Exact concurrency detection", "A physical-time component so timestamps stay close to real time while remaining causally consistent", "No metadata at all", "Atomic clocks"], answer: 1, explain: "HLC keeps a physical component and a small counter, giving readable timestamps with causal safety in constant space." }
+]} />
