@@ -1,0 +1,213 @@
+---
+title: Time, Clocks and Ordering
+track: sd
+module: distributed-theory
+order: 2
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/distributed-theory/consistency-models"]
+tags: [clocks, lamport, vector-clocks, happens-before, causality, conflict-detection]
+type: lesson
+furtherReading:
+  - title: "Lamport, Time, Clocks, and the Ordering of Events in a Distributed System (1978)"
+    url: https://lamport.azurewebsites.net/pubs/time-clocks.pdf
+  - title: "Why Logical Clocks are Easy (ACM Queue)"
+    url: https://queue.acm.org/detail.cfm?id=2917756
+  - title: "Dynamo: Amazon's Highly Available Key-value Store, section 4.4 (vector clocks)"
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 8 (unreliable clocks) and chapter 5 (concurrent writes)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Two servers both accept a write to the same shopping cart at "10:00:00.003". Which write is later? If their clocks differ by 20 milliseconds, **nobody can tell**. Physical clocks on different machines drift, jump when corrected by NTP, and can even run backwards. Using them to order events across machines silently loses data (last-write-wins deletes a newer write that happened to carry a smaller timestamp).
+
+But often we do not need *when*. We need **which events could have influenced which**. If Alice reads a message and then replies, the reply must be ordered after the message. If two edits were made by people who had not seen each other's work, they are **concurrent**, and the system should notice that instead of picking a winner by accident. Logical clocks capture exactly this causal structure with plain counters.
+
+## Definition: happens-before
+
+Lamport defined the **happens-before** relation `a → b` on events:
+
+1. If `a` and `b` are on the same process and `a` comes first, then `a → b`.
+2. If `a` is sending a message and `b` is receiving that message, then `a → b`.
+3. If `a → b` and `b → c`, then `a → c` (transitivity).
+
+Two events with neither `a → b` nor `b → a` are **concurrent**. Concurrency does not mean "at the same instant"; it means "neither could have known about the other".
+
+## Lamport clocks
+
+Each process keeps one counter `L`.
+
+```text
+local event or send:   L = L + 1, stamp the event with L
+receive (stamp m):     L = max(L, m) + 1, stamp the event with L
+```
+
+**Guarantee:** if `a → b` then `L(a) < L(b)`. **Not guaranteed:** the converse. Two concurrent events get arbitrary relative stamps, so `L(a) < L(b)` does **not** mean `a` happened before `b`. Lamport clocks give a consistent total order (break ties by process id), which is enough for things like fair mutual exclusion, but they cannot detect concurrency.
+
+## Vector clocks
+
+Each process keeps a vector `V` with one entry per process.
+
+```text
+local event or send:   V[me] = V[me] + 1
+receive (vector m):    V = elementwise max(V, m), then V[me] = V[me] + 1
+```
+
+Compare two stamps `A` and `B`:
+
+- `A < B` (A happened before B) if every entry of `A` is `<=` the matching entry of `B` and they are not equal.
+- `B < A` symmetrically.
+- Otherwise they are **concurrent**.
+
+**Guarantee:** `a → b` **if and only if** `V(a) < V(b)`. Vector clocks detect concurrency exactly, at the price of a vector whose size grows with the number of writers.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant P1
+  participant P2
+  participant P3
+  Note over P1: a: V=[1,0,0]
+  P1->>P2: message
+  Note over P2: b: V=[1,1,0]
+  Note over P3: c: V=[0,0,1]
+  P2->>P3: message
+  Note over P3: d: V=[1,1,2]`} caption="a happens before b and d (their vectors are smaller). c is concurrent with a and b: [0,0,1] and [1,1,0] are not comparable." />
+
+## Where this shows up in real systems
+
+- **Dynamo-style stores** attach a vector clock (often called a version vector) to each value. If one version dominates another, the older is discarded. If two versions are concurrent, **both are kept as siblings** and the application (or a CRDT) merges them, for example by taking the union of two shopping carts.
+- **Causal consistency** is implemented by tagging writes with their dependencies and delaying visibility until the dependencies are visible.
+- **Hybrid logical clocks** (used by CockroachDB and others) combine a physical timestamp with a logical counter so that stamps are close to real time yet still respect causality.
+- **Google Spanner's TrueTime** takes the opposite route: it exposes a bounded clock uncertainty interval and waits it out before committing, buying external consistency with specialised hardware.
+
+## Code: logical clocks versus the truth
+
+The program below simulates 4 processes exchanging messages at random, computes the *true* happens-before relation from the event graph, and checks both clock types against it.
+
+<CodeRunner language="python" code={`import random
+
+random.seed(11)
+
+class Proc:
+    def __init__(self, pid, n):
+        self.pid, self.lamport, self.vc = pid, 0, [0] * n
+
+def run(n_procs=4, steps=40):
+    procs = [Proc(i, n_procs) for i in range(n_procs)]
+    events = []                       # (pid, lamport, vector, kind, send_index, previous_index_on_same_process)
+    last = [None] * n_procs
+    inflight = []
+    for _ in range(steps):
+        p = random.choice(procs)
+        if inflight and random.random() < 0.4:
+            k = random.randrange(len(inflight))
+            send_idx, l, v, dest = inflight[k]
+            q = procs[dest]
+            q.lamport = max(q.lamport, l) + 1
+            q.vc = [max(a, b) for a, b in zip(q.vc, v)]
+            q.vc[q.pid] += 1
+            events.append((q.pid, q.lamport, tuple(q.vc), "recv", send_idx, last[q.pid]))
+            last[q.pid] = len(events) - 1
+            inflight.pop(k)
+        elif random.random() < 0.5:
+            p.lamport += 1
+            p.vc[p.pid] += 1
+            events.append((p.pid, p.lamport, tuple(p.vc), "send", None, last[p.pid]))
+            last[p.pid] = len(events) - 1
+            dest = random.choice([i for i in range(n_procs) if i != p.pid])
+            inflight.append((len(events) - 1, p.lamport, tuple(p.vc), dest))
+        else:
+            p.lamport += 1
+            p.vc[p.pid] += 1
+            events.append((p.pid, p.lamport, tuple(p.vc), "local", None, last[p.pid]))
+            last[p.pid] = len(events) - 1
+    return events
+
+def happens_before_truth(events):
+    before = [set() for _ in events]
+    for i, (_, _, _, kind, send_idx, prev) in enumerate(events):
+        if prev is not None:
+            before[i] |= before[prev] | {prev}
+        if kind == "recv":
+            before[i] |= before[send_idx] | {send_idx}
+    return before
+
+def vc_less(a, b):
+    return all(x <= y for x, y in zip(a, b)) and a != b
+
+events = run()
+truth = happens_before_truth(events)
+pairs = causal = concurrent = lamport_wrong = vc_wrong = 0
+for i in range(len(events)):
+    for j in range(len(events)):
+        if i == j:
+            continue
+        pairs += 1
+        i_before_j = i in truth[j]
+        if vc_less(events[i][2], events[j][2]) != i_before_j:
+            vc_wrong += 1
+        if i_before_j:
+            causal += 1
+        elif j not in truth[i]:
+            concurrent += 1
+            if events[i][1] < events[j][1]:
+                lamport_wrong += 1
+print("events:", len(events))
+print("ordered pairs (i, j):", pairs)
+print("causally ordered pairs:", causal)
+print("concurrent ordered pairs:", concurrent)
+print("vector clocks that disagree with the true causal order:", vc_wrong)
+print("concurrent pairs Lamport timestamps nevertheless order i before j:", lamport_wrong)
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| quantity | value |
+| --- | --- |
+| events | 40 |
+| ordered pairs `(i, j)` | 1560 |
+| causally ordered pairs (`i` before `j` for certain) | 462 |
+| concurrent ordered pairs | 636 |
+| pairs where the vector clock comparison disagrees with the truth | **0** |
+| concurrent pairs that Lamport stamps still order `i` before `j` | **278** |
+
+The remaining 462 of the 1560 pairs are the reverse direction of the causal ones (`j` before `i`). Vector clocks reproduce the true relation exactly. Lamport stamps preserve causality (a causal pair always has the smaller stamp first) but hand a definite order to 278 pairs that are actually concurrent: if you used Lamport stamps to decide which concurrent write "wins", you would be inventing an order that no one observed. The exact counts depend on the random schedule; the zero and the large Lamport figure are the point.
+
+<Callout type="warning" title="Last-write-wins and clock skew">
+With wall-clock timestamps, a replica whose clock runs 50 ms ahead makes its writes beat newer writes from correct replicas. Cassandra's default timestamp resolution works this way, so concurrent updates to the same cell can lose data. If you need to keep both versions, use version vectors; if you need a single winner, use a leader or consensus rather than clocks.
+</Callout>
+
+## Trade-offs
+
+<TradeOffs caption="Ways to order events across machines" rows={[
+  { option: "Wall-clock timestamps (LWW)", pros: "Tiny, no coordination, easy to explain", cons: "Skew and NTP steps silently lose writes; no concurrency detection", chooseWhen: "Idempotent overwrites where losing a concurrent write is acceptable (cache refresh, last-seen time)" },
+  { option: "Lamport clocks", pros: "One integer; consistent total order that respects causality", cons: "Cannot tell causal from concurrent", chooseWhen: "You need a deterministic total order, such as ordering log entries or fair locks" },
+  { option: "Vector or version vectors", pros: "Exact causality and concurrency detection; enables sibling merge", cons: "Size grows with writers; application must merge siblings", chooseWhen: "Multi-leader or leaderless replicas where concurrent updates are possible" },
+  { option: "Hybrid logical clocks", pros: "Close to physical time and causality-preserving; fixed size", cons: "Still not detecting concurrency; needs bounded skew", chooseWhen: "Timestamps in a database where humans also read them" },
+  { option: "Bounded-uncertainty clocks (TrueTime)", pros: "External consistency without a single leader", cons: "Specialised hardware and commit-wait latency", chooseWhen: "Global strongly consistent databases built by a very large operator" }
+]} />
+
+## Pitfalls
+
+- Using `time.time()` to order events across machines.
+- Assuming a bigger Lamport stamp means "later in reality" or "caused by".
+- Unbounded vector clocks: with many clients each gets an entry. Systems prune old entries or version per replica instead of per client, and accept some false concurrency.
+- Silently dropping siblings. If you keep concurrent versions, someone has to merge them.
+- Forgetting that a clock can jump backwards (NTP step, virtual machine pause), which breaks code that assumes `t2 >= t1`; use a monotonic clock for durations.
+
+## What would you choose and why?
+
+You are building a collaborative note app where two people can edit the same note offline and sync later. What do you store with each version to detect that two edits were concurrent? What does the user see when they are? Would last-write-wins by device clock be acceptable for the *title* field but not for the *body*?
+
+## Quiz
+
+<Quiz id="sd-m11-clocks-and-ordering" tags={["clocks", "vector-clocks", "causality"]} questions={[
+  { type: "mcq", q: "If event a happened before event b, what do Lamport clocks guarantee?", options: ["L(a) < L(b)", "L(a) = L(b)", "L(a) > L(b)", "Nothing"], answer: 0, explain: "Lamport clocks respect causality: every message receive jumps the clock above the sender's stamp." },
+  { type: "predict", q: "Vector stamps A = [2, 1, 0] and B = [1, 2, 0]. How are the two events related?", code: "a = [2, 1, 0]\nb = [1, 2, 0]\nless = all(x <= y for x, y in zip(a, b)) and a != b\ngreater = all(x >= y for x, y in zip(a, b)) and a != b\nprint('concurrent' if not less and not greater else 'ordered')", options: ["A before B", "B before A", "Concurrent", "Equal"], answer: 2, explain: "A is larger in the first entry and smaller in the second, so neither dominates the other: the events are concurrent." },
+  { type: "mcq", q: "Why can last-write-wins with wall-clock timestamps lose data?", options: ["Clocks are too precise", "Skewed clocks can give an older write a larger timestamp", "Timestamps are not unique", "Replicas refuse small timestamps"], answer: 1, explain: "A replica whose clock is ahead beats later writes from correct replicas, and the losing write is discarded silently." },
+  { type: "multi", q: "Which statements about vector clocks are true?", options: ["They detect concurrent events exactly", "They have constant size regardless of the number of writers", "a happened before b if and only if V(a) < V(b)", "Dynamo-style stores keep concurrent versions as siblings"], answer: [0, 2, 3], explain: "Their size grows with the number of writers, which is their main cost." },
+  { type: "mcq", q: "In the lesson's simulation, how many concurrent pairs did Lamport stamps still order?", options: ["0", "278", "462", "1560"], answer: 1, explain: "Lamport stamps give an arbitrary order to concurrent events; the vector clocks had 0 disagreements." }
+]} />

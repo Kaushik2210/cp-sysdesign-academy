@@ -1,0 +1,1 @@
+{ "title": "Distributed Systems Theory", "level": "Level 2: Intermediate Systems", "order": 11, "summary": "What replicated systems can and cannot promise: consistency models and PACELC, logical and vector clocks, failure detection and gossip, and distributed commit with sagas." }

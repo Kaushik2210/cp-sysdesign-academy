@@ -1,0 +1,149 @@
+---
+title: Consistency Models and PACELC
+track: sd
+module: distributed-theory
+order: 1
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/databases-2/replication", "sd/what-is-system-design/non-functional-tradeoffs"]
+tags: [consistency, linearizability, causal-consistency, eventual-consistency, cap, pacelc, quorum]
+type: lesson
+furtherReading:
+  - title: "Jepsen: Consistency Models (clickable map)"
+    url: https://jepsen.io/consistency
+  - title: "Abadi, Consistency Tradeoffs in Modern Distributed Database System Design (PACELC)"
+    url: https://www.cs.umd.edu/~abadi/papers/abadi-pacelc.pdf
+  - title: "Brewer, CAP Twelve Years Later: How the Rules Have Changed"
+    url: https://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed/
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 9
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+You post a comment, refresh the page, and your comment is missing. A friend sees it a second later. Nothing is broken in the sense of crashed servers; the system simply made a **promise about what reads may return after writes**, and the promise was weak.
+
+A **consistency model** is that promise, stated precisely. It sits between the application and a replicated store and answers the question: *when I read, which writes am I guaranteed to see, and in what order?* Stronger promises make code simpler and users happier but cost latency and availability. Weaker promises are faster and survive more failures but push complexity onto the application.
+
+## The models, from strong to weak
+
+| model | what it guarantees | what you can still see |
+| --- | --- | --- |
+| **Linearizable** (strong) | The system behaves as if there were one copy and every operation took effect instantly at some moment between its start and its end. Once a write is acknowledged, every later read sees it. | Nothing surprising; this is the easiest model to program against. |
+| **Sequential** | All clients see operations in the same single order, which respects each client's own order, but that order need not match real time. | A read can return an older value than one a different client has already seen elsewhere (real-time staleness). |
+| **Causal** | If operation B could have been influenced by A (A happened before B), everyone sees A before B. Unrelated operations may be seen in different orders. | Two concurrent writes may be applied in different orders on different replicas. |
+| **Session guarantees** | Per client: *read your writes*, *monotonic reads* (never go back in time), *monotonic writes*, *writes follow reads*. | Other users may see your write later than you do. |
+| **Eventual** | If writes stop, all replicas eventually converge. Nothing is promised in the meantime. | Stale reads, reads going backwards, different replicas disagreeing for a while. |
+
+Every model above the last is a **contract on orderings**. Most real products mix them: strong consistency for money and inventory, causal or session guarantees for conversations and feeds, eventual for counters and analytics.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant A as Alice (writes)
+  participant P as Primary
+  participant R as Replica
+  participant B as Bob (reads)
+  A->>P: write x = 2 (was 1)
+  P-->>A: ok
+  B->>R: read x
+  R-->>B: 1 (replica not updated yet)
+  P-->>R: replicate x = 2
+  B->>R: read x
+  R-->>B: 2`} caption="An acknowledged write that Bob does not see yet: allowed under eventual and causal consistency, forbidden under linearizability" />
+
+## CAP stated carefully, and PACELC
+
+**CAP** says: when a **network partition** splits the replicas, an operation can either return an answer that respects consistency (and some replicas must refuse or wait: not *available*) or answer from whatever replica it can reach (available, but possibly *inconsistent*). It is a statement about **behaviour during partitions**, not a menu from which a system picks two properties for ever.
+
+- A *CP* design keeps linearizable behaviour and refuses requests on the minority side of a partition (typical for consensus-based stores such as etcd or ZooKeeper).
+- An *AP* design keeps answering on both sides and reconciles later (typical for Dynamo-style stores with eventual consistency).
+
+CAP says nothing about the normal case, when there is no partition. **PACELC** completes the picture:
+
+```text
+if Partition:  choose Availability or Consistency
+Else:          choose Latency or Consistency
+```
+
+Even without failures, a strongly consistent read or write must coordinate with other replicas, which costs round trips. So a system is described by two pairs of letters, for example **PA/EL** (Dynamo-style defaults: available under partition, low latency otherwise) or **PC/EC** (consensus stores: consistent in both situations, paying in latency and availability).
+
+## Quorums: dialing consistency with numbers
+
+With `n` replicas, a write waits for `w` acknowledgements and a read asks `r` replicas, taking the newest value. If `w + r > n`, every read set overlaps every acknowledged write set in at least one replica, so a read that starts after a write was acknowledged sees it. Choosing `w` and `r` trades read cost against write cost and failure tolerance. As the replication lesson warns, `w + r > n` by itself does **not** give linearizability (concurrent writes, sloppy quorums and clock-based tie-breaking can still bite), but the overlap is the foundation.
+
+## Code: how often does a read go stale?
+
+The program replicates a write to 5 replicas, each applying it after an independent random delay. A write is acknowledged when `w` replicas have it. A reader starts the moment the acknowledgement arrives and asks `r` random replicas. We count reads that miss the write.
+
+<CodeRunner language="python" code={`import random
+
+random.seed(7)
+N = 5
+TRIALS = 200000
+
+def stale_rate(w, r):
+    stale = 0
+    for _ in range(TRIALS):
+        applied_at = [random.expovariate(1.0) for _ in range(N)]
+        ack_time = sorted(applied_at)[w - 1]
+        asked = random.sample(range(N), r)
+        if all(applied_at[i] > ack_time for i in asked):
+            stale += 1
+    return stale / TRIALS
+
+print("n = 5 replicas, reader starts the moment the write is acknowledged")
+print(" w  r  w+r>n  stale reads")
+for w, r in [(1, 1), (1, 3), (2, 2), (3, 3), (2, 4), (4, 2), (5, 1), (1, 5)]:
+    print(f" {w}  {r}  {'yes' if w + r > N else 'no ':5}  {100 * stale_rate(w, r):5.2f}%")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| `w` | `r` | `w + r > n`? | stale reads |
+| --- | --- | --- | --- |
+| 1 | 1 | no | 80.01% |
+| 1 | 3 | no | 40.09% |
+| 2 | 2 | no | 29.94% |
+| 3 | 3 | yes | 0.00% |
+| 2 | 4 | yes | 0.00% |
+| 4 | 2 | yes | 0.00% |
+| 5 | 1 | yes | 0.00% |
+| 1 | 5 | yes | 0.00% |
+
+These match the closed forms. At acknowledgement time exactly `w` replicas hold the write, so a reader misses it only if all `r` replicas it asks are among the other `n - w`: probability `C(n-w, r) / C(n, r)`. For `w = 1, r = 1` that is `4/5 = 80%`; for `w = 1, r = 3`, `4/10 = 40%`; for `w = 2, r = 2`, `3/10 = 30%`. Whenever `w + r > n` the binomial is zero because there are fewer than `r` replicas without the write. The simulation measures only the overlap effect; it does not model concurrent writers, which is where quorum systems still need versioning (see the next lesson).
+
+<Callout type="tip" title="Read-your-writes without strong consistency">
+To make a user always see their own writes on an otherwise eventually consistent system, route that user's reads to the primary for a short window after they write (or remember the last version they wrote and refuse replicas that are behind it). Other users keep fast, possibly stale reads.
+</Callout>
+
+## Trade-offs
+
+<TradeOffs caption="Choosing a consistency level" rows={[
+  { option: "Linearizable", pros: "Simplest reasoning; uniqueness and locks work; acknowledged writes are visible to everyone", cons: "Coordination on every operation: higher latency, unavailable on the minority side of a partition", chooseWhen: "Money, inventory, leader election, unique usernames" },
+  { option: "Causal", pros: "Preserves cause and effect (a reply never appears before its question) with no global coordination", cons: "Needs dependency tracking (vector clocks or metadata); concurrent writes still need conflict handling", chooseWhen: "Comments, chat, collaborative state" },
+  { option: "Session guarantees", pros: "Cheap; fixes the most visible anomalies for one user", cons: "Says nothing about what other users see", chooseWhen: "Profile edits, settings, shopping carts" },
+  { option: "Eventual", pros: "Fast, highly available, simple to scale", cons: "Stale and out-of-order reads; conflicts to resolve", chooseWhen: "Counters, likes, caches, analytics" }
+]} />
+
+## Pitfalls
+
+- Treating CAP as "pick two of three" for the whole system instead of a per-operation choice during partitions.
+- Calling a store "consistent" without saying which model. ACID's C, CAP's C and linearizability are three different things.
+- Assuming `w + r > n` means linearizable; concurrent writers and sloppy quorums break that.
+- Reading from replicas right after a write and being surprised by stale data.
+- Using wall-clock timestamps to resolve write conflicts; clock skew silently drops writes (next lesson).
+
+## What would you choose and why?
+
+A ride-sharing app stores driver locations (updated every 3 seconds), trip state (requested, accepted, started, finished) and payments. For each, pick a consistency model and a quorum or replication setting, and say what the user sees when a replica is 2 seconds behind.
+
+## Quiz
+
+<Quiz id="sd-m11-consistency-models" tags={["consistency", "cap", "pacelc"]} questions={[
+  { type: "mcq", q: "Which model guarantees that once a write is acknowledged, every later read sees it?", options: ["Eventual", "Causal", "Linearizable", "Read-your-writes"], answer: 2, explain: "Linearizability makes the system behave like one copy where each operation takes effect at a single instant between its start and end." },
+  { type: "mcq", q: "What does PACELC add to CAP?", options: ["A fourth property", "The trade-off between latency and consistency when there is no partition", "A way to avoid partitions", "A replacement for quorums"], answer: 1, explain: "Even without partitions, coordinating replicas costs latency, so the choice is latency versus consistency (the ELC part)." },
+  { type: "predict", q: "n = 5, w = 2, r = 2 under the lesson's model. What is the chance that a read right after the acknowledgement misses the write?", code: "from math import comb\nn, w, r = 5, 2, 2\nprint(comb(n - w, r) / comb(n, r))", options: ["0.0", "0.3", "0.4", "0.8"], answer: 1, explain: "C(3,2) / C(5,2) = 3/10 = 0.3, which matches the measured 29.94%." },
+  { type: "multi", q: "Which statements are true?", options: ["w + r > n makes every read quorum overlap every acknowledged write quorum", "Eventual consistency promises that reads are never stale", "Causal consistency preserves cause and effect", "CAP only constrains behaviour during network partitions"], answer: [0, 2, 3], explain: "Eventual consistency only promises convergence once writes stop; reads can be stale in the meantime." },
+  { type: "mcq", q: "A user posts a comment and does not see it after a refresh. Which guarantee fixes exactly this?", options: ["Linearizability for all users", "Read-your-writes (a session guarantee)", "Higher replication factor", "Longer cache TTL"], answer: 1, explain: "Read-your-writes only has to hold for the writer, so it can be cheap, for example by reading that user's data from the primary for a while." }
+]} />

@@ -1,0 +1,147 @@
+---
+title: Raft Leader Election
+track: sd
+module: consensus-and-coordination
+order: 2
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/consensus-and-coordination/consensus-and-majorities"]
+tags: [raft, leader-election, terms, randomized-timeouts, request-vote, split-vote]
+type: lesson
+furtherReading:
+  - title: "Ongaro and Ousterhout, In Search of an Understandable Consensus Algorithm (extended version)"
+    url: https://raft.github.io/raft.pdf
+  - title: "The Secret Lives of Data: an interactive Raft visualization"
+    url: https://thesecretlivesofdata.com/raft/
+  - title: "Raft consensus algorithm site (implementations and visualisation)"
+    url: https://raft.github.io/
+  - title: etcd documentation, learning how Raft is used
+    url: https://etcd.io/docs/
+---
+
+## Intuition
+
+A group of servers replicates a log. One of them, the **leader**, receives every client command, appends it to its log and replicates it to the others. Having a single leader removes most of the difficulty: there is one place that decides the order.
+
+The difficulty moves to **choosing and replacing the leader**. If the leader crashes, the others must elect a new one, quickly, and they must **never end up with two leaders in the same period** (two leaders could order commands differently). Raft solves this with **terms**, **votes** and **randomised timeouts**.
+
+## Definition
+
+**Server states.** Every server is a *follower*, a *candidate* or the *leader*.
+
+**Terms.** Time is divided into numbered **terms**. A term starts with an election; it has at most one leader. A server stores the current term and a term number received in any message that is larger than its own replaces its own (and a leader or candidate seeing a larger term steps down to follower). Terms act as a logical clock that makes stale messages recognisable.
+
+**Heartbeats.** The leader sends `AppendEntries` messages (empty ones serve as heartbeats) to all followers at a regular interval.
+
+**Election.**
+
+1. A follower that hears nothing from a leader for an **election timeout** becomes a *candidate*: it increments its term, votes for itself and sends `RequestVote` to all other servers.
+2. A server grants its vote if it **has not voted in this term** and the candidate's log is **at least as up to date** as its own (compare the term of the last entry, then the length; the next lesson explains why).
+3. A candidate that receives votes from a **majority** of the servers becomes leader and immediately sends heartbeats to establish its authority.
+4. If it hears from a valid leader of the same or a higher term, it returns to follower.
+5. If **no one** reaches a majority (a *split vote*), the candidates time out and start a new term.
+
+**Safety (election safety):** each server votes **once per term** and a majority is needed, so at most one candidate can win a given term.
+
+**Liveness through randomisation.** If every follower used the same timeout, they would all become candidates at the same instant and split the vote again and again. Raft picks each election timeout **at random** from an interval (the paper suggests 150 to 300 ms). Usually one server times out first, wins the election before the others even start, and the others hear its heartbeat.
+
+<Diagram kind="mermaid" code={`stateDiagram-v2
+  [*] --> Follower
+  Follower --> Candidate: election timeout, no heartbeat
+  Candidate --> Candidate: split vote, new term
+  Candidate --> Leader: votes from a majority
+  Candidate --> Follower: sees a valid leader or higher term
+  Leader --> Follower: sees a higher term`} caption="Raft server states and the events that move between them" />
+
+## Choosing the timeout
+
+The election timeout must be **much larger than the heartbeat interval and the network round trip** (otherwise healthy leaders are deposed by lost heartbeats) and **much smaller than the time between failures** (otherwise the system spends its life electing). The **spread** of the random interval controls how often elections split.
+
+## Code: how much spread do randomised timeouts need?
+
+Five servers, a base timeout of 150 ms plus a random spread, and message delays of 5 to 15 ms. A server becomes a candidate if its timeout fires before any vote request reaches it; otherwise it votes for the request that reaches it first. The program measures how often the first round ends in a split vote, and how many rounds are needed on average until a leader exists.
+
+<CodeRunner language="python" code={`import random
+
+random.seed(12)
+
+def one_round(n, low, spread):
+    t = [random.uniform(low, low + spread) for _ in range(n)]
+    d = [[random.uniform(5, 15) for _ in range(n)] for _ in range(n)]
+    order = sorted(range(n), key=lambda i: t[i])
+    candidates, votes_for = [], {}
+    for i in order:
+        arrival = [(t[c] + d[c][i], c) for c in candidates]
+        if not arrival or t[i] < min(arrival)[0]:
+            candidates.append(i)
+            votes_for[i] = 1                       # votes for itself
+        else:
+            votes_for[min(arrival)[1]] += 1        # grants its vote to the first request that arrives
+    best = max(candidates, key=lambda c: votes_for[c])
+    return best if votes_for[best] > n // 2 else None
+
+def elect(n, low, spread):
+    rounds = 1
+    while one_round(n, low, spread) is None:
+        rounds += 1
+    return rounds
+
+print("5 servers, base timeout 150 ms, message delay 5 to 15 ms, 10000 first rounds and 3000 complete elections per row")
+print(" spread    split vote in the first round   average rounds until a leader")
+for spread in (10, 20, 50, 100, 150, 300):
+    splits = sum(one_round(5, 150, spread) is None for _ in range(10000)) / 10000
+    avg = sum(elect(5, 150, spread) for _ in range(3000)) / 3000
+    print(f" {spread:4d} ms   {100 * splits:12.1f}%                   {avg:8.2f}")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| timeout spread | split vote in the first round | average rounds until a leader |
+| --- | --- | --- |
+| 10 ms | 96.3% | 26.79 |
+| 20 ms | 55.8% | 2.19 |
+| 50 ms | 12.6% | 1.12 |
+| 100 ms | 3.1% | 1.03 |
+| 150 ms | 1.5% | 1.01 |
+| 300 ms | 0.4% | 1.00 |
+
+The spread has to be wide compared with the **message delay** (here 5 to 15 ms): with a 10 ms spread almost every first round splits and it takes about 27 rounds on average to get lucky; with a 150 ms spread (the 150 to 300 ms interval of the Raft paper) the first round succeeds 98.5% of the time. A split vote costs a full timeout, so the *unlucky* tail matters more than the average. The model is simple (independent delays, one failure event, no crashed candidates), so use the numbers for intuition about the shape of the curve, not as predictions for a real network.
+
+## Practical points
+
+- **Pre-vote.** A server that was partitioned away keeps timing out and raising its term. When it rejoins, its higher term forces the healthy leader to step down. The **pre-vote** extension makes a server first ask "would you vote for me?" without incrementing the term, which avoids this disruption (implemented in etcd and others).
+- **Leader leases and read safety.** A deposed leader may not know it was deposed. Linearizable reads must either go through the log, or the leader must confirm it still has a majority (a *read index* round trip) or hold a time-based lease with bounded clock drift.
+- **Membership changes** (adding or removing servers) must keep majorities overlapping; Raft uses joint consensus or one server at a time.
+
+## Trade-offs
+
+<TradeOffs caption="Election timeout settings" rows={[
+  { option: "Short timeout (about 150 ms)", pros: "Fast failover after a leader crash", cons: "A GC pause or a slow disk deposes a healthy leader; election churn under load", chooseWhen: "Low-latency LAN clusters with predictable pauses" },
+  { option: "Long timeout (seconds)", pros: "Stable leadership; tolerant of jitter", cons: "Seconds of unavailability after a real crash", chooseWhen: "Cross-region groups with high and variable latency" },
+  { option: "Narrow random spread", pros: "Slightly faster first election when it works", cons: "Frequent split votes", chooseWhen: "Almost never; keep the spread comparable to the timeout itself" },
+  { option: "Pre-vote enabled", pros: "Rejoining partitioned servers do not depose a healthy leader", cons: "One more message round before candidacy", chooseWhen: "Production clusters with flaky links" }
+]} />
+
+## Pitfalls
+
+- Setting election timeouts close to the heartbeat interval or the disk fsync time, causing constant elections.
+- Using the same timeout on all servers (or a tiny spread).
+- Letting a server vote twice in a term (persist `currentTerm` and `votedFor` before replying).
+- Serving reads from a leader that may be deposed, without a read index or lease.
+- Treating "I think I am the leader" as safe to act on: acting requires evidence of a current majority.
+
+## What would you choose and why?
+
+A five-node etcd cluster spans three availability zones with 2 ms latency inside a zone and 8 ms across zones. Pick a heartbeat interval and an election timeout range. What happens to write availability if one zone is cut off from the other two, and how do the clients behave during the election?
+
+## Quiz
+
+<Quiz id="sd-m12-raft-leader-election" tags={["raft", "leader-election"]} questions={[
+  { type: "mcq", q: "Why does Raft use randomised election timeouts?", options: ["To save CPU", "So that usually only one server times out first, avoiding repeated split votes", "To encrypt votes", "To keep clocks synchronised"], answer: 1, explain: "With identical timeouts all followers would become candidates together and split the vote forever." },
+  { type: "mcq", q: "How does Raft guarantee at most one leader per term?", options: ["Servers vote at most once per term and a majority is needed", "The oldest server always wins", "Leaders are chosen by an operator", "Terms are never reused by clocks"], answer: 0, explain: "Two different candidates cannot both gather a majority of single votes in the same term." },
+  { type: "predict", q: "With a timeout spread of 10 ms and message delays of 5 to 15 ms, about how many rounds does an election need on average in the lesson's model?", code: "# measured: spread 10 ms -> 96.3% split first rounds\nprint(26.79)", options: ["1", "About 3", "About 27", "About 270"], answer: 2, explain: "The spread is smaller than the message delay, so nearly every round splits (measured 26.79 rounds on average)." },
+  { type: "multi", q: "Which statements are true?", options: ["A server that sees a higher term steps down to follower", "A candidate needs votes from a majority of servers", "The election timeout should be much smaller than the heartbeat interval", "Pre-vote avoids disrupting a healthy leader when a partitioned server rejoins"], answer: [0, 1, 3], explain: "The timeout must be much larger than the heartbeat interval and round trip time." },
+  { type: "mcq", q: "A leader was partitioned away and a new leader was elected on the other side. Why should the old leader not serve linearizable reads without checks?", options: ["It might be out of memory", "It does not yet know it was deposed and may return stale data", "Reads are always forbidden on leaders", "Followers have newer data by definition"], answer: 1, explain: "Reads need a read-index confirmation or a valid lease to prove the leader still has a majority." }
+]} />

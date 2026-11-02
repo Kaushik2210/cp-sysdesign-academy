@@ -63,6 +63,24 @@ test("learning path page renders a daily checklist", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Day 1", exact: true })).toBeVisible();
 });
 
+test("distributed systems lessons render with a runnable program and a quiz", async ({ page }) => {
+  for (const [path, title] of [
+    ["/sd/distributed-theory/consistency-models/", "Consistency Models and PACELC"],
+    ["/sd/distributed-theory/clocks-and-ordering/", "Time, Clocks and Ordering"],
+    ["/sd/distributed-theory/failure-detection-and-gossip/", "Failure Detection and Gossip"],
+    ["/sd/distributed-theory/distributed-commit-and-sagas/", "Two-Phase Commit and Sagas"],
+    ["/sd/consensus-and-coordination/consensus-and-majorities/", "Consensus and Majorities"],
+    ["/sd/consensus-and-coordination/raft-leader-election/", "Raft Leader Election"],
+    ["/sd/consensus-and-coordination/raft-log-replication-and-safety/", "Raft Log Replication and Safety"],
+    ["/sd/consensus-and-coordination/leases-locks-and-fencing/", "Leases, Locks and Fencing Tokens"],
+  ]) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Quiz" }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Measured results" }).first()).toBeVisible();
+  }
+});
+
 test("review queue page loads", async ({ page }) => {
   await page.goto("/review/");
   await expect(page.getByRole("heading", { name: "Review queue" })).toBeVisible();
@@ -727,7 +745,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("133");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("141");
   });
 });
 

@@ -1,0 +1,191 @@
+---
+title: Raft Log Replication and Safety
+track: sd
+module: consensus-and-coordination
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/consensus-and-coordination/raft-leader-election", "sd/databases-2/replication"]
+tags: [raft, log-replication, commit-index, leader-completeness, replicated-state-machine, safety]
+type: lesson
+furtherReading:
+  - title: "Ongaro and Ousterhout, In Search of an Understandable Consensus Algorithm, sections 5.3 and 5.4"
+    url: https://raft.github.io/raft.pdf
+  - title: "Diego Ongaro, Consensus: Bridging Theory and Practice (PhD thesis)"
+    url: https://github.com/ongardie/dissertation
+  - title: "Raft TLA+ specification"
+    url: https://github.com/ongardie/raft.tla
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 9 (total order broadcast)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+A **replicated state machine** is the standard way to make a service fault tolerant: several servers each run the same deterministic program (a key-value store, a lock table) and apply the **same commands in the same order**. If the order is identical, the states are identical. So the problem reduces to keeping an identical **log of commands** on every server, even while servers crash and recover and leaders change.
+
+The leader receives a command, appends it to its log, copies it to followers, and when a **majority** has stored it, the entry is **committed**: it will never be lost, and every server may safely apply it. The safety question is the interesting one: after the leader crashes, how do we know that the next leader has every committed entry?
+
+## Definition
+
+Each log entry has an **index**, a **term** (the term of the leader that created it) and a **command**.
+
+**AppendEntries.** The leader sends followers the new entries together with the **index and term of the entry just before them** (`prevLogIndex`, `prevLogTerm`). A follower accepts only if its own log contains an entry at that position with that term. Otherwise it rejects, and the leader steps back one entry at a time (or jumps back using hints) until the logs agree, then overwrites the follower's conflicting suffix with its own entries.
+
+This enforces the **Log Matching Property**: if two logs contain an entry with the same index and term, then the logs are identical in all entries up to that index.
+
+**Commit.** An entry is committed once the leader has stored it on a majority of servers **and** it belongs to the leader's own term. The leader tells followers the commit index in later `AppendEntries` messages, and each server applies committed entries to its state machine in order. (Entries from earlier terms are committed *indirectly*, when a later entry of the current term is committed on top of them; the paper's Figure 8 shows what goes wrong otherwise.)
+
+**Election restriction (the safety rule).** A server votes for a candidate only if the candidate's log is **at least as up to date** as its own:
+
+```text
+candidate is up to date  if  its last entry has a higher term,
+                         or  the same last term and an equal or greater log length
+```
+
+Because a committed entry is on a majority and a winning candidate needs votes from a majority, **at least one voter has the committed entry**, and that voter will only vote for a candidate that also has it. So **every leader's log contains all committed entries** (the **Leader Completeness Property**).
+
+The five properties of Raft together:
+
+| property | meaning |
+| --- | --- |
+| Election Safety | at most one leader per term |
+| Leader Append-Only | a leader never overwrites or deletes its own entries |
+| Log Matching | same index and term means identical prefixes |
+| Leader Completeness | a committed entry appears in every later leader's log |
+| State Machine Safety | no two servers apply different commands at the same index |
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant L as Leader
+  participant F1 as Follower 1
+  participant F2 as Follower 2
+  C->>L: command x
+  L->>L: append to log (index 7, term 3)
+  L->>F1: AppendEntries(prev=6, entry 7)
+  L->>F2: AppendEntries(prev=6, entry 7)
+  F1-->>L: ok (stored)
+  Note over L: majority (leader + F1) has index 7: committed
+  L->>L: apply x to the state machine
+  L-->>C: result
+  L->>F2: next AppendEntries carries commitIndex = 7`} caption="A write is acknowledged to the client once a majority has stored the entry, even though one follower is still behind" />
+
+## Code: what the election restriction buys
+
+The program below simulates 5 servers with random crashes and recoveries. A leader appends client commands and copies its log to a random subset of followers; an entry is committed when a majority holds an identical log. When the leader fails, a random live server runs for election. We check, at every election, whether the new leader is **missing a committed entry**. We compare Raft's vote rule with a variant where every server grants every vote.
+
+<CodeRunner language="python" code={`import random
+
+random.seed(2024)
+N = 5
+MAJ = N // 2 + 1
+
+def up_to_date(cand_log, voter_log):
+    ct = cand_log[-1][0] if cand_log else 0
+    vt = voter_log[-1][0] if voter_log else 0
+    return ct > vt or (ct == vt and len(cand_log) >= len(voter_log))
+
+def run(steps, safe):
+    logs = [[] for _ in range(N)]
+    alive = [True] * N
+    leader, term, next_id = None, 0, 0
+    committed = []
+    violations = elections = 0
+    for _ in range(steps):
+        r = random.random()
+        if leader is None or not alive[leader]:
+            cands = [i for i in range(N) if alive[i]]
+            if len(cands) < MAJ:
+                alive[random.choice([i for i in range(N) if not alive[i]])] = True
+                continue
+            c = random.choice(cands)
+            term += 1
+            votes = sum(1 for v in cands if v == c or not safe or up_to_date(logs[c], logs[v]))
+            if votes >= MAJ:
+                leader = c
+                elections += 1
+                if any(e not in logs[leader] for e in committed):
+                    violations += 1
+            continue
+        if r < 0.55:
+            next_id += 1
+            logs[leader].append((term, next_id))
+            for f in range(N):
+                if f != leader and alive[f] and random.random() < 0.5:
+                    logs[f] = list(logs[leader])
+            have = sum(1 for f in range(N) if alive[f] and logs[f] == logs[leader])
+            if have >= MAJ:
+                committed.append((term, next_id))
+        elif r < 0.80:
+            for f in range(N):
+                if f != leader and alive[f] and random.random() < 0.7:
+                    logs[f] = list(logs[leader])
+        elif r < 0.92:
+            victim = leader if random.random() < 0.6 else random.randrange(N)
+            if sum(alive) > 1:
+                alive[victim] = False
+        else:
+            dead = [i for i in range(N) if not alive[i]]
+            if dead:
+                alive[random.choice(dead)] = True
+    return elections, violations
+
+for safe in (True, False):
+    elections = violations = 0
+    for _ in range(300):
+        e, v = run(200, safe)
+        elections += e
+        violations += v
+    label = "with Raft's up-to-date vote rule" if safe else "granting every vote (no rule)    "
+    print(f"{label}: {elections} leaders elected, {violations} elections where a committed entry was missing")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| voting rule | leaders elected | elections where a committed entry was missing |
+| --- | --- | --- |
+| Raft's up-to-date rule | 3,760 | **0** |
+| grant every vote | 3,878 | **2,504** |
+
+Without the rule, roughly two elections in three crowned a leader that lacked data a majority had already acknowledged: that leader would then overwrite followers' logs and **silently erase committed writes**. With the rule the count was zero in all 3,760 elections, as the Leader Completeness proof predicts. The model is deliberately small (whole-log copies instead of `AppendEntries` with consistency checks, no message loss), so treat it as an illustration of the invariant rather than a test of a real implementation. Real implementations are verified with model checkers (TLA+) and fault-injection suites such as Jepsen.
+
+## Practical points
+
+- **Persistence.** `currentTerm`, `votedFor` and the log must be flushed to disk **before** replying to RPCs; an fsync per commit is why consensus writes cost milliseconds. Batching and pipelining amortise it.
+- **Log compaction.** Logs grow forever, so servers periodically snapshot the state machine and discard the log prefix; slow followers receive the snapshot (`InstallSnapshot`).
+- **Reads.** Serving reads from the leader's state machine without a check can return stale data from a deposed leader. Options: append a no-op or use a read index to confirm leadership, or leader leases that rely on bounded clock drift. Follower reads are cheaper but may be stale.
+- **Throughput.** One leader per group is a bottleneck; large systems run many groups (one per shard) and use batching.
+- **Idempotency.** A client whose request timed out cannot tell whether it committed; commands need request ids so that retries are applied once.
+
+## Trade-offs
+
+<TradeOffs caption="Replication strategies for a log" rows={[
+  { option: "Raft or Paxos log (majority commit)", pros: "No lost acknowledged writes; automatic failover; linearizable", cons: "Commit latency of a majority round trip plus fsync; one leader bottleneck", chooseWhen: "Metadata, coordination, and databases that must not lose acknowledged writes" },
+  { option: "Primary with asynchronous replicas", pros: "Fast commit; simple", cons: "A failover can lose acknowledged writes; needs external failover logic", chooseWhen: "When a little data loss on failure is acceptable and latency matters most" },
+  { option: "Primary with synchronous replica(s)", pros: "No loss if the sync replica survives", cons: "A slow or dead replica blocks writes unless demoted", chooseWhen: "Traditional databases with a two-node durability goal" },
+  { option: "Leaderless quorum", pros: "Always writable during failures", cons: "No total order; conflicts and read repair", chooseWhen: "High availability, eventually consistent data" }
+]} />
+
+## Pitfalls
+
+- Acknowledging a client before the entry is committed (on a majority and persisted).
+- Counting votes or replication acknowledgements without persisting term and vote first.
+- Committing entries from an older term just because they are on a majority (the Figure 8 anomaly): only commit by counting replicas for an entry of the **current** term.
+- Applying a command more than once after a client retry.
+- Forgetting snapshots, so restarts replay millions of entries.
+- Trusting your own consensus implementation: use a battle-tested library and test it with network partitions and crashes.
+
+## What would you choose and why?
+
+You must build a payments ledger where an acknowledged transfer must never be lost, running in three zones. Would you use a Raft-backed database, synchronous replication to a hot standby, or asynchronous replicas with a recovery job? What do you tell the client when its request times out right at the moment the leader crashes?
+
+## Quiz
+
+<Quiz id="sd-m12-raft-log-replication" tags={["raft", "log-replication", "safety"]} questions={[
+  { type: "mcq", q: "When is a Raft log entry committed?", options: ["When the leader writes it to its own disk", "When it is stored on a majority of servers (and belongs to the leader's term)", "When all servers have it", "After one heartbeat interval"], answer: 1, explain: "A majority holding the entry guarantees that any future leader's voters will include a holder." },
+  { type: "mcq", q: "What does the election restriction guarantee?", options: ["Elections are fast", "Every elected leader's log contains all committed entries", "There is only ever one server", "Followers never lag"], answer: 1, explain: "A winner needs a majority of votes, at least one of those voters holds each committed entry, and it only votes for candidates whose logs are at least as up to date." },
+  { type: "predict", q: "In the lesson's simulation, how many elections with Raft's vote rule produced a leader missing a committed entry?", code: "# measured over 3,760 elections\nprint(0)", options: ["0", "About 5%", "About 65%", "All of them"], answer: 0, explain: "Zero. Without the rule, 2,504 of 3,878 elections (about 65%) lost committed entries." },
+  { type: "multi", q: "Which statements about Raft log replication are true?", options: ["Followers accept AppendEntries only if prevLogIndex and prevLogTerm match their log", "A leader may overwrite its own committed entries", "The log must be persisted before replying to RPCs", "Reads from a deposed leader can be stale unless leadership is confirmed"], answer: [0, 2, 3], explain: "A leader never overwrites or deletes its own entries (Leader Append-Only)." },
+  { type: "mcq", q: "A client times out on a write while the leader crashes. What should the client do?", options: ["Assume it failed and apply a different write", "Retry with the same request id so the command is applied at most once", "Never retry", "Retry with a new id every time"], answer: 1, explain: "The write may have committed; idempotent request ids make the retry safe." }
+]} />

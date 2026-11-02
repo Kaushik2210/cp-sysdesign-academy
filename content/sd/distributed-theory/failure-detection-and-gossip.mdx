@@ -1,0 +1,191 @@
+---
+title: Failure Detection and Gossip
+track: sd
+module: distributed-theory
+order: 3
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/distributed-theory/clocks-and-ordering", "sd/load-balancing/global-load-balancing-and-failover"]
+tags: [failure-detection, heartbeats, gossip, swim, phi-accrual, membership, epidemic]
+type: lesson
+furtherReading:
+  - title: "SWIM: Scalable Weakly-consistent Infection-style Process Group Membership Protocol"
+    url: https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf
+  - title: "The Phi Accrual Failure Detector (Hayashibara et al.)"
+    url: https://dspace.jaist.ac.jp/dspace/bitstream/10119/4784/1/IS-RR-2004-010.pdf
+  - title: "Demers et al., Epidemic Algorithms for Replicated Database Maintenance"
+    url: https://dl.acm.org/doi/10.1145/41840.41841
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 8 (detecting faults)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+In a cluster of hundreds of machines something is always failing. To route around a dead node you first have to **notice it is dead**, and then every other node has to **learn about it**. Both steps are harder than they sound.
+
+**Noticing.** A crashed machine and a slow machine look identical from the outside: both stop answering. A packet may be lost, a garbage-collection pause may freeze a healthy process for ten seconds, or the network between two of the nodes may be broken while both can talk to everyone else. A failure detector can only *suspect*; it can never be certain. The only design choice is **how long to wait**: a short wait detects real crashes fast but declares healthy nodes dead (and triggers expensive failovers for nothing); a long wait is safe but leaves users facing a dead node for longer.
+
+**Telling everyone.** A central coordinator that tells all nodes becomes a bottleneck and a single point of failure. **Gossip** spreads information like a rumour: each node periodically tells a few random peers, and the news reaches everyone in a number of rounds that grows only with `log n`.
+
+## Failure detectors
+
+A **heartbeat** detector: each node sends "I am alive" every `T` seconds; the monitor declares it dead if nothing arrives for `timeout` seconds. Two kinds of mistakes are possible:
+
+- **False positive:** a healthy node is declared dead (a pause or a lost heartbeat). Consequences: needless failover, double ownership if the old node is still serving (split brain).
+- **False negative / slow detection:** a really dead node is still considered alive for up to `timeout`.
+
+Improvements to the plain timeout:
+
+- **Phi-accrual detector** (used by Cassandra and Akka): instead of a yes/no, output a continuous *suspicion level* `phi` computed from the observed distribution of heartbeat inter-arrival times. Each application picks its own threshold, and the detector adapts when the network becomes jittery.
+- **Indirect probing (SWIM):** before declaring `B` dead, `A` asks `k` other nodes to ping `B`. If any gets an answer, `B` is alive and the problem was only the path from `A`. This removes false positives caused by one broken link.
+- **Suspicion state:** a node goes `alive -> suspect -> dead`. A suspected node can refute the rumour by announcing that it is alive (with a higher incarnation number), so brief pauses do not become permanent evictions.
+
+## Gossip
+
+In **push gossip** every round each informed node sends the news to a few random nodes. In **pull gossip** nodes ask random peers what they know. **Push-pull** does both and spreads fastest. Properties that make gossip popular:
+
+- No coordinator, no single point of failure.
+- Load per node is constant (a few messages per round) regardless of cluster size.
+- Spread time grows like `log n`; the process is robust to message loss and node crashes because the information arrives over many redundant paths.
+- It is only **eventually** consistent: at any moment different nodes know different things.
+
+SWIM combines the two ideas: failure detection by random probing, with membership updates *piggybacked* on the probe messages, so no extra messages are needed to disseminate them.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant A
+  participant B
+  participant C
+  participant D
+  A->>B: ping
+  Note over A,B: no answer within the timeout
+  A->>C: ping-req(B)
+  A->>D: ping-req(B)
+  C->>B: ping
+  D->>B: ping
+  B-->>C: ack
+  C-->>A: B is alive (via C)
+  Note over A: B stays alive; only the A to B link was bad`} caption="SWIM indirect probe: a failed direct ping is double-checked through other nodes before suspecting B" />
+
+## Code 1: how fast does a rumour spread?
+
+Each round every informed node picks `fanout` random nodes and informs them. The program counts rounds until all `n` nodes know, averaged over 20 runs.
+
+<CodeRunner language="python" code={`import math, random
+
+random.seed(3)
+
+def rounds_to_inform_all(n, fanout=1):
+    informed = {0}
+    rounds = 0
+    while len(informed) < n:
+        new = set()
+        for _ in informed:
+            for _ in range(fanout):
+                new.add(random.randrange(n))
+        informed |= new
+        rounds += 1
+    return rounds
+
+print("push gossip: every informed node tells fanout random nodes per round")
+print("    n  fanout  avg rounds  log2(n)")
+for n in (100, 1000, 10000, 100000):
+    for f in (1, 3):
+        avg = sum(rounds_to_inform_all(n, f) for _ in range(20)) / 20
+        print(f"{n:6d}  {f:6d}  {avg:10.1f}  {math.log2(n):7.1f}")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| nodes `n` | fanout 1: rounds | fanout 3: rounds | `log2(n)` |
+| --- | --- | --- | --- |
+| 100 | 12.6 | 5.7 | 6.6 |
+| 1,000 | 19.0 | 8.2 | 10.0 |
+| 10,000 | 23.6 | 10.6 | 13.3 |
+| 100,000 | 29.6 | 13.2 | 16.6 |
+
+A thousand times more nodes (100 to 100,000) costs only about 17 extra rounds at fanout 1. The textbook estimate for push gossip with fanout 1 is `log2(n) + ln(n)` rounds, which is 11.2, 16.9, 22.5 and 28.1 for these four sizes; the measured values (12.6, 19.0, 23.6, 29.6) sit a little above it because we wait for the very last node, and they follow the same logarithmic growth. A larger fanout cuts the constant (3 messages per round roughly halves the time) at the price of more traffic.
+
+## Code 2: choosing a heartbeat timeout
+
+A healthy node sends a heartbeat every second. Network delay is lognormal (typically 50 ms) with rare long delays, and the node occasionally stalls for 1 to 12 seconds (garbage collection, CPU starvation) during which it sends nothing. We count how often a healthy node would have been declared dead for each timeout.
+
+<CodeRunner language="python" code={`import math, random
+
+random.seed(5)
+
+def simulate(hours=48):
+    arrivals = []
+    sec = 0
+    total = hours * 3600
+    while sec < total:
+        if random.random() < 0.0004:                     # a stall begins
+            sec += random.uniform(1.0, 12.0)
+            continue
+        delay = random.lognormvariate(math.log(0.05), 0.6)
+        if random.random() < 0.002:
+            delay += random.uniform(1.0, 6.0)
+        arrivals.append(sec + delay)
+        sec += 1
+    arrivals.sort()
+    return arrivals
+
+arrivals = simulate()
+hours = 48
+print("healthy node, heartbeat every 1 s, 48 simulated hours with rare stalls of 1 to 12 s")
+print(" timeout  false alarms per day   crash detected after")
+for timeout in (1.5, 2, 3, 5, 8, 12):
+    alarms = sum(1 for a, b in zip(arrivals, arrivals[1:]) if b - a > timeout)
+    print(f" {timeout:5.1f} s  {alarms / (hours / 24):14.1f}   {timeout:5.1f} s after the last heartbeat")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| timeout | false alarms per day (healthy node) | a real crash is detected after |
+| --- | --- | --- |
+| 1.5 s | 205.5 | 1.5 s |
+| 2 s | 116.0 | 2 s |
+| 3 s | 31.5 | 3 s |
+| 5 s | 24.0 | 5 s |
+| 8 s | 14.0 | 8 s |
+| 12 s | 1.5 | 12 s |
+
+There is no free setting. Dropping the timeout from 12 s to 1.5 s speeds up detection of real crashes eightfold but multiplies false alarms by more than a hundred. The curve flattens between 3 and 8 seconds because most false alarms there come from long stalls that a short timeout cannot distinguish from death. This is exactly why production systems use **suspicion plus indirect probing plus fencing**, not a single timeout: a false alarm should cost a retry, not a failover. The model is simplified (one monitor, independent stalls, one kind of delay); real clusters add correlated failures such as a whole rack losing its switch.
+
+<Callout type="warning" title="Detection is not agreement">
+Two nodes may disagree about whether a third is dead. If both act on their own view, you can end up with two leaders for the same shard. Failure detection tells a system *whom to suspect*; deciding *who is the leader* needs consensus or a lease with a **fencing token**, so that a node that wrongly thinks it is still the leader is rejected by the storage layer.
+</Callout>
+
+## Trade-offs
+
+<TradeOffs caption="Failure detection and dissemination designs" rows={[
+  { option: "Fixed heartbeat timeout", pros: "Trivial to implement and reason about", cons: "One number must fit all network conditions; false positives or slow detection", chooseWhen: "Small clusters on a stable network, or as a first line before a stronger check" },
+  { option: "Phi-accrual detector", pros: "Adapts to jitter; thresholds expressed as a probability of error", cons: "More state and tuning; still local to one observer", chooseWhen: "Databases and actor clusters on shared or cloud networks" },
+  { option: "SWIM with indirect probes", pros: "Constant per-node load; fewer false positives; piggybacked membership", cons: "Eventually consistent membership view; tuning of suspicion timeout", chooseWhen: "Large peer-to-peer clusters (Consul, Serf, many databases)" },
+  { option: "Central coordinator or lease service", pros: "One authoritative view; easy to reason about", cons: "The coordinator is a scaling and availability concern (needs consensus underneath)", chooseWhen: "When you need a single agreed leader or exact membership, not just suspicion" }
+]} />
+
+## Pitfalls
+
+- A single timeout with no suspicion state: a GC pause evicts a healthy node and triggers a failover storm.
+- Acting on suspicion without fencing, which allows two leaders after a pause.
+- Correlated timeouts: all nodes use the same timeout and fire together after a network blip, causing a thundering herd of retries; add jitter.
+- Gossiping membership without incarnation numbers, so a stale "dead" rumour overrides a fresh "alive" one.
+- Assuming gossip delivers instantly: during the spreading time, nodes route according to different views.
+
+## What would you choose and why?
+
+You run a 300-node cache cluster behind consistent hashing, with a 10-second goal for removing a dead node from rotation. Would you use plain heartbeats, SWIM or a central service? What do clients do while some of them still route to a node that others already consider dead, and how do you keep a node that was only paused from corrupting data when it wakes up?
+
+## Quiz
+
+<Quiz id="sd-m11-failure-detection-and-gossip" tags={["failure-detection", "gossip", "swim"]} questions={[
+  { type: "mcq", q: "Why can a failure detector never be perfectly accurate in an asynchronous network?", options: ["Heartbeats are too large", "A crashed node and a slow or unreachable node look the same from outside", "Clocks are too precise", "Gossip is random"], answer: 1, explain: "Without a bound on delays, silence could mean death or just slowness, so the detector can only suspect." },
+  { type: "mcq", q: "What problem does SWIM's indirect probing (ping-req) address?", options: ["Message encryption", "False positives caused by one broken link between two nodes", "Clock skew", "Leader election"], answer: 1, explain: "If other nodes can reach B, then B is alive and only the path from A was bad." },
+  { type: "predict", q: "Fanout 1 push gossip needs about 19 rounds for 1,000 nodes. For 100,000 nodes, which is the best estimate?", code: "# measured: n=1000 -> 19.0 rounds, n=100000 -> ?\n# growth is logarithmic in n", options: ["About 19 times more (361)", "About 30", "About 190", "About 1,900"], answer: 1, explain: "Spread time grows like log n, so a hundredfold larger cluster adds only about 10 rounds (measured 29.6)." },
+  { type: "multi", q: "Which statements are true about gossip?", options: ["Load per node stays roughly constant as the cluster grows", "It gives every node the same view at every instant", "It tolerates message loss thanks to redundant paths", "It spreads information in O(log n) rounds"], answer: [0, 2, 3], explain: "Gossip is eventually consistent: for a while different nodes know different things." },
+  { type: "mcq", q: "A node was paused for 10 seconds, was declared dead and replaced, then wakes up. What protects the data?", options: ["A shorter heartbeat interval", "A fencing token that makes storage reject the old leader", "More gossip fanout", "Nothing is needed"], answer: 1, explain: "Fencing tokens let the storage layer ignore writes from a node that no longer holds the lease." }
+]} />
