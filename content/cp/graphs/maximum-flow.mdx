@@ -1,0 +1,328 @@
+---
+title: Maximum Flow
+track: cp
+module: graphs
+order: 9
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/graphs/dijkstra-shortest-paths, cp/stacks-and-queues/queues-deques-bfs]
+tags: [graph, max-flow, min-cut, dinic, edmonds-karp, matching]
+type: lesson
+problems: [m11-pipe-network]
+furtherReading:
+  - title: cp-algorithms, Maximum flow - Ford-Fulkerson and Edmonds-Karp
+    url: https://cp-algorithms.com/graph/edmonds_karp.html
+  - title: cp-algorithms, Dinic's algorithm
+    url: https://cp-algorithms.com/graph/dinic.html
+  - title: CSES Problem Set, Download Speed
+    url: https://cses.fi/problemset/task/1694
+---
+
+## Intuition
+
+A network of pipes, each with a capacity, carries water from a source `s` to a sink `t`. How much can reach `t` per second?
+
+The obvious method is greedy: find any path with spare capacity, push as much as fits, repeat. It fails. The first path you pick may use a pipe that a better overall plan needed for something else, and now that pipe is full.
+
+The fix is one clever idea: allow **undoing**. After pushing water along `u → v`, record that you could *send it back* along `v → u`. A later path is allowed to use that "reverse pipe", which cancels part of the earlier decision. With undo available, greedy becomes correct: when no path with spare capacity remains, you are done, and you have the maximum.
+
+## Definition
+
+A **flow** assigns each edge `e` an amount `f(e)` with `0 ≤ f(e) ≤ cap(e)`, such that at every vertex other than `s` and `t` the flow in equals the flow out. Its **value** is the net amount leaving `s`. The **maximum flow** problem asks for the largest value.
+
+The **residual graph** records what is still possible. Each edge `e` with capacity `c` is stored together with a **twin** edge in the opposite direction with capacity `0`:
+
+```text
+send d along e:   cap[e] -= d      (less room forward)
+                  cap[e ^ 1] += d  (the twin can now carry d back, i.e. undo)
+```
+
+Storing the edges in pairs at indices `2i` and `2i + 1` makes the twin of `e` simply `e ^ 1`.
+
+An **augmenting path** is a path from `s` to `t` using only edges with positive residual capacity. Pushing the bottleneck amount along it increases the flow. When no augmenting path exists the flow is maximum.
+
+## Max-flow min-cut
+
+A **cut** is a set `S` containing `s` but not `t`; its capacity is the total capacity of the edges leaving `S`. Any flow must cross every cut, so `value ≤ capacity of any cut`. The theorem says the bound is tight:
+
+```text
+maximum flow  =  minimum cut capacity
+```
+
+When the algorithm stops, let `S` be the vertices still reachable from `s` in the residual graph. Every edge leaving `S` is saturated, so the cut `S` has capacity exactly equal to the flow. That gives you the **minimum cut for free**: the saturated edges leaving the reachable set.
+
+## Algorithms
+
+| algorithm | idea | time |
+| --- | --- | --- |
+| Ford-Fulkerson | any augmenting path (DFS) | `O(E · F)`, depends on the flow value `F`; can be awful |
+| Edmonds-Karp | shortest augmenting path by BFS | `O(V · E²)` |
+| **Dinic** | BFS levels, then a *blocking flow* with DFS | `O(V² · E)`; very fast in practice |
+
+**Dinic's algorithm** works in phases:
+
+1. **BFS** from `s` in the residual graph to give every vertex a `level` (its distance).
+2. **DFS** from `s`, following only edges that go from level `L` to level `L + 1` and have spare capacity. A pointer `it[v]` remembers which edge of `v` to try next, so a dead end is never explored twice. Repeat until the DFS finds nothing: that is a *blocking flow*.
+3. Repeat from step 1. The distance from `s` to `t` strictly increases each phase, so there are at most `V` phases.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from collections import deque
+
+def max_flow(n, edges, s, t):                 # edges: (u, v, capacity), vertices 1..n
+    to, cap = [], []
+    adj = [[] for _ in range(n + 1)]
+    for u, v, c in edges:
+        adj[u].append(len(to)); to.append(v); cap.append(c)     # edge 2i
+        adj[v].append(len(to)); to.append(u); cap.append(0)     # twin 2i + 1
+    flow = 0
+    while True:
+        level = [-1] * (n + 1); level[s] = 0
+        q = deque([s])
+        while q:                                                # BFS levels
+            v = q.popleft()
+            for e in adj[v]:
+                if cap[e] > 0 and level[to[e]] < 0:
+                    level[to[e]] = level[v] + 1
+                    q.append(to[e])
+        if level[t] < 0:
+            return flow                                         # t unreachable: done
+        it = [0] * (n + 1)
+        def dfs(v, f):                                          # blocking flow
+            if v == t: return f
+            while it[v] < len(adj[v]):
+                e = adj[v][it[v]]
+                if cap[e] > 0 and level[to[e]] == level[v] + 1:
+                    d = dfs(to[e], min(f, cap[e]))
+                    if d > 0:
+                        cap[e] -= d; cap[e ^ 1] += d
+                        return d
+                it[v] += 1
+            return 0
+        while True:
+            f = dfs(s, 10 ** 18)
+            if f == 0: break
+            flow += f
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int n, t;
+vector<int> to, level_, it_;
+vector<long long> cap;
+vector<vector<int>> adj;
+
+void addEdge(int u, int v, long long c) {
+    adj[u].push_back(to.size()); to.push_back(v); cap.push_back(c);
+    adj[v].push_back(to.size()); to.push_back(u); cap.push_back(0);
+}
+long long dfs(int v, long long f) {
+    if (v == t) return f;
+    for (; it_[v] < (int)adj[v].size(); it_[v]++) {
+        int e = adj[v][it_[v]];
+        if (cap[e] > 0 && level_[to[e]] == level_[v] + 1) {
+            long long d = dfs(to[e], min(f, cap[e]));
+            if (d > 0) { cap[e] -= d; cap[e ^ 1] += d; return d; }
+        }
+    }
+    return 0;
+}
+long long maxFlow(int s) {
+    long long flow = 0;
+    while (true) {
+        level_.assign(n + 1, -1); level_[s] = 0;
+        queue<int> q; q.push(s);
+        while (!q.empty()) {
+            int v = q.front(); q.pop();
+            for (int e : adj[v]) if (cap[e] > 0 && level_[to[e]] < 0) { level_[to[e]] = level_[v] + 1; q.push(to[e]); }
+        }
+        if (level_[t] < 0) return flow;
+        it_.assign(n + 1, 0);
+        long long f;
+        while ((f = dfs(s, LLONG_MAX)) > 0) flow += f;
+    }
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static int n, t;
+static int[] to, level, it;
+static long[] cap;
+static List<Integer>[] adj;
+
+static long dfs(int v, long f) {
+    if (v == t) return f;
+    for (; it[v] < adj[v].size(); it[v]++) {
+        int e = adj[v].get(it[v]);
+        if (cap[e] > 0 && level[to[e]] == level[v] + 1) {
+            long d = dfs(to[e], Math.min(f, cap[e]));
+            if (d > 0) { cap[e] -= d; cap[e ^ 1] += d; return d; }
+        }
+    }
+    return 0;
+}
+static long maxFlow(int s) {
+    long flow = 0;
+    while (true) {
+        Arrays.fill(level, -1); level[s] = 0;
+        ArrayDeque<Integer> q = new ArrayDeque<>(); q.add(s);
+        while (!q.isEmpty()) {
+            int v = q.poll();
+            for (int e : adj[v]) if (cap[e] > 0 && level[to[e]] < 0) { level[to[e]] = level[v] + 1; q.add(to[e]); }
+        }
+        if (level[t] < 0) return flow;
+        it = new int[n + 1];
+        long f;
+        while ((f = dfs(s, Long.MAX_VALUE)) > 0) flow += f;
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, watch the naive greedy fall into a trap, and confirm max-flow equals min-cut on random graphs:
+
+<CodeRunner language="python" code={`import random
+from collections import deque
+
+def max_flow(n, edges, s, t):
+    to, cap = [], []
+    adj = [[] for _ in range(n + 1)]
+    for u, v, c in edges:
+        adj[u].append(len(to)); to.append(v); cap.append(c)
+        adj[v].append(len(to)); to.append(u); cap.append(0)
+    flow = 0
+    while True:
+        level = [-1] * (n + 1); level[s] = 0
+        q = deque([s])
+        while q:
+            v = q.popleft()
+            for e in adj[v]:
+                if cap[e] > 0 and level[to[e]] < 0:
+                    level[to[e]] = level[v] + 1
+                    q.append(to[e])
+        if level[t] < 0:
+            return flow
+        it = [0] * (n + 1)
+        def dfs(v, f):
+            if v == t: return f
+            while it[v] < len(adj[v]):
+                e = adj[v][it[v]]
+                if cap[e] > 0 and level[to[e]] == level[v] + 1:
+                    d = dfs(to[e], min(f, cap[e]))
+                    if d > 0:
+                        cap[e] -= d; cap[e ^ 1] += d
+                        return d
+                it[v] += 1
+            return 0
+        while True:
+            f = dfs(s, 10 ** 18)
+            if f == 0: break
+            flow += f
+
+def greedy_without_undo(n, edges, s, t):
+    # pushes along the first path a DFS finds (edges in input order) and never creates reverse edges
+    cap = {}
+    adj = [[] for _ in range(n + 1)]
+    for u, v, c in edges:
+        if (u, v) not in cap:
+            adj[u].append(v)
+        cap[(u, v)] = cap.get((u, v), 0) + c
+    def find(v, seen):
+        if v == t:
+            return []
+        seen.add(v)
+        for y in adj[v]:
+            if cap[(v, y)] > 0 and y not in seen:
+                rest = find(y, seen)
+                if rest is not None:
+                    return [(v, y)] + rest
+        return None
+    total = 0
+    while True:
+        path = find(s, set())
+        if path is None:
+            return total
+        f = min(cap[e] for e in path)
+        for e in path:
+            cap[e] -= f
+        total += f
+
+def min_cut(n, edges):
+    inner = list(range(2, n))
+    best = None
+    for mask in range(1 << len(inner)):
+        S = {1} | {v for i, v in enumerate(inner) if mask >> i & 1}
+        c = sum(w for u, v, w in edges if u in S and v not in S)
+        best = c if best is None else min(best, c)
+    return best
+
+# The classic trap: the first path found is 1-2-3-4, which blocks the better plan 1-2-4 plus 1-3-4.
+trap = [(1, 2, 1), (2, 3, 1), (3, 4, 1), (1, 3, 1), (2, 4, 1)]
+print("trap graph: greedy gets", greedy_without_undo(4, trap, 1, 4), "but the true maximum flow is", max_flow(4, trap, 1, 4))
+
+random.seed(9)
+for _ in range(400):
+    n = random.randint(2, 9)
+    es = []
+    for _ in range(random.randint(0, 20)):
+        u, v = random.randint(1, n), random.randint(1, n)
+        if u != v: es.append((u, v, random.randint(1, 9)))
+    f = max_flow(n, es, 1, n)
+    assert f == min_cut(n, es), (n, es)
+    assert greedy_without_undo(n, es, 1, n) <= f      # greedy never beats the optimum, it can only fall short
+print("400 random networks: max flow equals the minimum cut every time, and greedy never exceeds it")
+`} />
+
+## What flow can model
+
+Maximum flow is a general-purpose tool: model your problem as a network and read the answer off the flow.
+
+| problem | network |
+| --- | --- |
+| **Bipartite matching** | source → each left vertex (cap 1), left → right for allowed pairs (cap 1), each right vertex → sink (cap 1). The flow value is the matching size. |
+| **Edge-disjoint paths** | give every edge capacity 1; the max flow is the number of paths. |
+| **Vertex-disjoint paths** | split each vertex `v` into `v_in → v_out` with capacity 1. |
+| **Minimum cut / "which roads to close"** | run the flow, then take the edges from the residual-reachable set to the rest. |
+| **Project selection** (profit minus dependencies) | source → profitable projects, costly projects → sink, dependency edges with infinite capacity; answer = total profit − min cut. |
+| **Assignment with capacities** (workers, shifts, seats) | source → workers, workers → tasks, tasks → sink, with the capacities as limits. |
+
+## Pitfalls
+
+1. **Forgetting the twin edge.** Without the zero-capacity reverse edge you get the greedy trap and wrong answers. Always add both.
+2. **Undirected edges.** Give both directions the full capacity (`u → v` and `v → u`, each with its own twin), or model one edge pair with capacity `c` on both.
+3. **Overflow.** The total can reach `m · max capacity`; use 64-bit integers, and a large `INF` such as `10^18` (not `INT_MAX`) as the initial push.
+4. **Re-running BFS inside the DFS.** The per-vertex pointer `it[v]` is what makes a phase fast; resetting it mid-phase makes Dinic slow.
+5. **Treating the answer as a path count when capacities are not 1.** Max flow is a total amount; for path counting, set capacities to 1.
+6. **Recursion depth.** The DFS depth is bounded by the number of levels (at most `V`), fine for hundreds of vertices; for very large graphs use an iterative DFS.
+7. **Parallel edges and self-loops.** Parallel edges are fine (they just add). A self-loop never helps and can be skipped.
+
+## Practice
+
+<Problem id="m11-pipe-network" />
+
+## Problem ladder
+
+- [Download Speed](https://cses.fi/problemset/task/1694) (CSES): pure maximum flow, this lesson exactly.
+- [Police Chase](https://cses.fi/problemset/task/1695) (CSES): print a minimum cut, using the residual-reachable set.
+- [School Dance](https://cses.fi/problemset/task/1696) (CSES): bipartite matching as flow.
+- [Distinct Routes](https://cses.fi/problemset/task/1711) (CSES): edge-disjoint paths, and recovering the paths from the flow.
+
+## Quiz
+
+<Quiz id="cp-m11-max-flow" tags={["graph", "max-flow"]} questions={[
+  { type: "mcq", q: "Why does each edge need a reverse (twin) edge with capacity 0 in the residual graph?", options: ["To make the graph undirected", "So a later augmenting path can cancel flow that an earlier path pushed", "To store the edge weights twice", "It is only needed for cycles"], answer: 1, explain: "Sending d forward adds d of capacity on the twin; using that twin undoes part of an earlier decision, which is what makes the greedy method correct." },
+  { type: "mcq", q: "What does the max-flow min-cut theorem say?", options: ["The max flow equals the number of edges", "The maximum flow value equals the minimum capacity of a cut separating s from t", "The min cut is always one edge", "Flow and cut are unrelated"], answer: 1, explain: "Every flow crosses every cut, so flow <= cut; when no augmenting path remains the cut of residual-reachable vertices has capacity equal to the flow." },
+  { type: "predict", q: "A network has exactly two parallel edges from s to t with capacities 3 and 4. What is the maximum flow?", code: "caps = [3, 4]\nprint(sum(caps))", options: ["3", "4", "7", "12"], answer: 2, explain: "Parallel edges simply add: both can carry water at the same time." },
+  { type: "multi", q: "Which statements about Dinic's algorithm are true?", options: ["It finds BFS levels and then a blocking flow along level edges", "A per-vertex pointer avoids re-exploring dead ends", "It needs no residual graph", "The distance from s to t increases every phase"], answer: [0, 1, 3], explain: "Dinic works on the residual graph; that is the same structure that provides undo." }
+]} />
