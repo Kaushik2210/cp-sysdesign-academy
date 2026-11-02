@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 210 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 216 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -47,7 +47,9 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 13 Dynamic programming | Partial (9 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths, bitmask DP, interval DP, digit DP, DP optimisations (convex hull trick, divide and conquer, Knuth); no Aliens trick or Li Chao tree implementation yet) | 9 |
 | 14 String matching | Partial (3 lessons: KMP, Z-function, suffix arrays with LCP; no suffix automaton, Aho-Corasick or hashing lesson yet) | 3 |
 | 15 Trees and ancestors | Partial (4 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter, heavy-light decomposition; no rerooting or centroid decomposition yet) | 4 |
-| 16-26 (Levels 2-3) | Planned | 0 |
+| 17 Number theory II | Partial (3 lessons: extended Euclid and CRT, Euler totient and Moebius, Miller-Rabin and Pollard rho; no FFT/NTT, discrete logarithm or quadratic residues yet) | 3 |
+| 25 Geometry | Partial (3 lessons: cross product and segments, convex hull, closest pair; no half-plane intersection, sweep-line segment intersection or circle problems yet) | 3 |
+| 16, 18-24, 26 (Levels 2-3) | Planned | 0 |
 
 ## Track 2: System Design
 
