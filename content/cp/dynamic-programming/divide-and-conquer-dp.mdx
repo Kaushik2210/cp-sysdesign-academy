@@ -1,0 +1,274 @@
+---
+title: Divide and Conquer DP
+track: cp
+module: dynamic-programming
+order: 9
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack, cp/dynamic-programming/interval-dp, cp/arrays-and-windows/prefix-sums]
+tags: [dp, divide-and-conquer-dp, optimization, monotone-opt, quadrangle-inequality]
+type: lesson
+problems: [m13-fair-batches]
+furtherReading:
+  - title: cp-algorithms, Divide and Conquer DP
+    url: https://cp-algorithms.com/dynamic_programming/divide-and-conquer-dp.html
+  - title: Codeforces 868F, Yet Another Minimization Problem
+    url: https://codeforces.com/problemset/problem/868/F
+  - title: Codeforces 321E, Ciel and Gondolas
+    url: https://codeforces.com/problemset/problem/321/E
+---
+
+## Intuition
+
+Many DPs have the shape
+
+```text
+dp[g][i] = min over j < i of  dp[g-1][j] + cost(j, i)
+```
+
+"Split the first `i` items into `g` groups; the last group is `j+1 .. i`." Filling the table costs `O(k · n²)`: for each of `k` layers, each of `n` positions tries up to `n` split points. Too slow when `n` is large.
+
+But often there is a pattern in *where the best split point is*. If you cut a row of crates into batches, then as the right end `i` moves right, the best place to start the last batch also moves right (or stays), never left. The best split `opt(i)` is **monotone non-decreasing in `i`**.
+
+Knowing that, you do not need to scan every `j` for every `i`. Compute `opt` for the *middle* `i` first. That tells you the left half of the positions only need splits `≤ opt(mid)`, and the right half only need splits `≥ opt(mid)`. Recurse, and the scans shrink dramatically.
+
+## Definition
+
+Let `opt(i)` be the (smallest) `j` achieving the minimum for position `i` in one layer. The technique requires
+
+```text
+opt(i) <= opt(i + 1)          (monotone optimum)
+```
+
+A sufficient condition is that the cost function satisfies the **quadrangle inequality**:
+
+```text
+for  a <= b <= c <= d :     cost(a, c) + cost(b, d)  <=  cost(a, d) + cost(b, c)
+```
+
+Intuition: nesting two ranges is never cheaper than overlapping them. Squared sums `(pre[i] − pre[j])²`, "sum of pairwise distances in a group", and "number of distinct values in a group" are standard examples.
+
+## The algorithm
+
+For one layer, define `compute(lo, hi, optLo, optHi)`: fill `dp[g][lo..hi]`, knowing every best split lies in `[optLo, optHi]`.
+
+```text
+compute(lo, hi, optLo, optHi):
+    if lo > hi: return
+    mid = (lo + hi) / 2
+    best = infinity;  bestK = optLo
+    for j in optLo .. min(mid - 1, optHi):
+        value = dp[g-1][j] + cost(j, mid)
+        if value < best: best = value; bestK = j
+    dp[g][mid] = best
+    compute(lo,      mid - 1, optLo, bestK)       # smaller positions: splits <= bestK
+    compute(mid + 1, hi,      bestK, optHi)       # larger positions:  splits >= bestK
+```
+
+**Why it is fast.** At each depth of the recursion the split ranges `[optLo, optHi]` of the different calls overlap only at their endpoints, so all the scans at one depth add up to `O(n)`. There are `O(log n)` depths, so one layer costs `O(n log n)` and all `k` layers `O(k · n log n)`. Only the previous layer is needed, so memory is `O(n)`.
+
+Call it with `compute(g, n, g − 1, n − 1)` for layer `g`: at least `g` items are needed for `g` groups, and the last group starts at `j ≥ g − 1`.
+
+## Example
+
+Crates `[1, 2, 3, 4, 5]` into `k = 2` consecutive batches, batch cost = (weight)². Try every cut:
+
+```text
+[1] [2 3 4 5]      1²  + 14² = 197
+[1 2] [3 4 5]      3²  + 12² = 153
+[1 2 3] [4 5]      6²  +  9² = 117
+[1 2 3 4] [5]     10²  +  5² = 125
+best = 117
+```
+
+Divide and conquer reaches the same answer while looking at far fewer cuts when `n` is large.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def split_cost(a, k):
+    n = len(a)
+    pre = [0] * (n + 1)
+    for i, x in enumerate(a): pre[i + 1] = pre[i] + x
+    INF = 1 << 62
+    prev = [INF] * (n + 1); prev[0] = 0          # prev[i]: i items in g - 1 groups
+    for g in range(1, k + 1):
+        cur = [INF] * (n + 1)
+        def compute(lo, hi, olo, ohi):
+            if lo > hi: return
+            mid = (lo + hi) // 2
+            best, bk = INF, olo
+            for j in range(olo, min(mid - 1, ohi) + 1):
+                v = prev[j] + (pre[mid] - pre[j]) ** 2
+                if v < best: best, bk = v, j
+            cur[mid] = best
+            compute(lo, mid - 1, olo, bk)
+            compute(mid + 1, hi, bk, ohi)
+        compute(g, n, g - 1, n - 1)
+        prev = cur
+    return prev[n]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+const ll INF = LLONG_MAX / 4;
+vector<ll> pre, prev_, cur;
+
+void compute(int lo, int hi, int olo, int ohi) {
+    if (lo > hi) return;
+    int mid = (lo + hi) / 2;
+    ll best = INF; int bk = olo;
+    for (int j = olo; j <= min(mid - 1, ohi); j++) {
+        ll d = pre[mid] - pre[j], v = prev_[j] + d * d;
+        if (v < best) { best = v; bk = j; }
+    }
+    cur[mid] = best;
+    compute(lo, mid - 1, olo, bk);
+    compute(mid + 1, hi, bk, ohi);
+}
+// for each layer g = 1..k:  cur.assign(n + 1, INF);  compute(g, n, g - 1, n - 1);  prev_ = cur;
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] pre, prev, cur;
+static final long INF = Long.MAX_VALUE / 4;
+
+static void compute(int lo, int hi, int olo, int ohi) {
+    if (lo > hi) return;
+    int mid = (lo + hi) / 2;
+    long best = INF; int bk = olo;
+    for (int j = olo; j <= Math.min(mid - 1, ohi); j++) {
+        long d = pre[mid] - pre[j], v = prev[j] + d * d;
+        if (v < best) { best = v; bk = j; }
+    }
+    cur[mid] = best;
+    compute(lo, mid - 1, olo, bk);
+    compute(mid + 1, hi, bk, ohi);
+}
+// for each layer g = 1..k:  cur = new long[n + 1]; fill with INF; compute(g, n, g - 1, n - 1); prev = cur;
+```
+
+</Tab>
+</Tabs>
+
+Check it against the plain `O(k n²)` DP, and count how many split candidates each method looks at:
+
+<CodeRunner language="python" code={`import random
+
+def brute(a, k):
+    n = len(a); pre = [0]
+    for x in a: pre.append(pre[-1] + x)
+    INF = 10 ** 30
+    dp = [[INF] * (n + 1) for _ in range(k + 1)]
+    dp[0][0] = 0
+    looked = 0
+    for g in range(1, k + 1):
+        for i in range(g, n + 1):
+            best = INF
+            for j in range(g - 1, i):
+                looked += 1
+                best = min(best, dp[g - 1][j] + (pre[i] - pre[j]) ** 2)
+            dp[g][i] = best
+    return dp[k][n], looked
+
+def dnc(a, k):
+    n = len(a); pre = [0]
+    for x in a: pre.append(pre[-1] + x)
+    INF = 1 << 62
+    prev = [INF] * (n + 1); prev[0] = 0
+    looked = 0
+    for g in range(1, k + 1):
+        cur = [INF] * (n + 1)
+        def compute(lo, hi, olo, ohi):
+            nonlocal looked
+            if lo > hi: return
+            mid = (lo + hi) // 2
+            best, bk = INF, olo
+            for j in range(olo, min(mid - 1, ohi) + 1):
+                looked += 1
+                v = prev[j] + (pre[mid] - pre[j]) ** 2
+                if v < best: best, bk = v, j
+            cur[mid] = best
+            compute(lo, mid - 1, olo, bk)
+            compute(mid + 1, hi, bk, ohi)
+        compute(g, n, g - 1, n - 1)
+        prev = cur
+    return prev[n], looked
+
+print("[1, 2, 3, 4, 5] into 2 batches:", dnc([1, 2, 3, 4, 5], 2)[0], "(worked example: 117)")
+
+random.seed(33)
+for _ in range(600):
+    n = random.randint(1, 14); k = random.randint(1, n)
+    a = [random.randint(1, 20) for _ in range(n)]
+    assert brute(a, k)[0] == dnc(a, k)[0], (a, k)
+print("600 random cases agree with the plain DP")
+
+n, k = 600, 12
+a = [random.randint(1, 1000) for _ in range(n)]
+b_val, b_looked = brute(a, k)
+d_val, d_looked = dnc(a, k)
+print("n =", n, ", k =", k, ": same answer?", b_val == d_val)
+print("split candidates examined - plain DP:", b_looked, " divide and conquer:", d_looked, " (about", round(b_looked / d_looked, 1), "times fewer)")
+`} />
+
+## When can you use it?
+
+| check | meaning |
+| --- | --- |
+| the recurrence has the form `dp[g][i] = min_j dp[g-1][j] + cost(j, i)` | one layer depends only on the previous layer |
+| `cost` satisfies the **quadrangle inequality** (or you can argue `opt` is monotone) | the optimum moves only one way |
+| `cost(j, i)` is computable in `O(1)` after preprocessing | each candidate is cheap; otherwise maintain a sliding structure |
+
+If `cost(j, i)` is expensive, see Codeforces 868F, where the cost is the number of distinct values in a range and a Mo-style pointer is maintained as `j` and `i` move; the divide and conquer order keeps the pointer movement `O(n log n)` per layer.
+
+## Relatives of this technique
+
+| technique | requirement | time per layer |
+| --- | --- | --- |
+| **divide and conquer** | monotone `opt` | `O(n log n)` |
+| **Knuth's optimisation** (interval DP) | `opt(i, j-1) ≤ opt(i, j) ≤ opt(i+1, j)` | total `O(n²)` instead of `O(n³)` |
+| **convex hull trick** | cost splits into a product of a function of `j` and a function of `i` (lines) | `O(n)` or `O(n log n)` |
+| **Aliens trick** (lambda optimisation) | answer is convex in the number of groups `k` | binary search on a penalty, one `O(n)` or `O(n log n)` pass per step |
+| plain DP | none | `O(n²)` |
+
+Divide and conquer is the most forgiving: it asks for monotonicity only, and needs no special data structure.
+
+## Pitfalls
+
+1. **Applying it without monotonicity.** If `opt(i)` is not monotone, the pruned ranges can miss the true optimum and the answer is silently wrong. When in doubt, compare with the `O(k n²)` DP on random small inputs before trusting it.
+2. **Wrong candidate range.** The split `j` must satisfy `g − 1 ≤ j ≤ mid − 1`. A range that allows `j = mid` makes an empty last group.
+3. **Infinity arithmetic.** `prev[j]` may be infinite for unreachable states; add carefully, or restrict to reachable ranges so no `INF + cost` overflows.
+4. **Ties.** Choosing the smallest or the largest optimal `j` consistently is fine, but mixing the two can break the monotone bound. Use strict `<` as above.
+5. **Recursion depth.** The depth is `O(log n)`, so recursion is safe even for `n = 10^5`.
+6. **Forgetting that layers are sequential.** Each layer needs the finished previous layer; do not reuse the array being written.
+7. **Overflow.** Costs like squared sums can reach `(n · max a)²`; use 64-bit integers.
+
+## Practice
+
+<Problem id="m13-fair-batches" />
+
+## Problem ladder
+
+- [Yet Another Minimization Problem](https://codeforces.com/problemset/problem/868/F) (Codeforces 868F, rating about 2500): the cost is distinct values per group; the standard divide and conquer DP exercise.
+- [Ciel and Gondolas](https://codeforces.com/problemset/problem/321/E) (Codeforces 321E, rating about 2600): group unfamiliarity, solved by divide and conquer (or by the Aliens trick).
+- [Array Division](https://cses.fi/problemset/task/1085) (CSES): a *different* technique (binary search on the answer) for the same "split into `k` parts" shape; solve it to see the contrast.
+- [Divide and Conquer DP](https://cp-algorithms.com/dynamic_programming/divide-and-conquer-dp.html) (cp-algorithms): the reference article, with more examples.
+
+## Quiz
+
+<Quiz id="cp-m13-divide-conquer-dp" tags={["dp", "divide-and-conquer-dp"]} questions={[
+  { type: "mcq", q: "What property of the best split point opt(i) does divide and conquer DP rely on?", options: ["opt(i) is always 0", "opt(i) is non-decreasing in i", "opt(i) equals i - 1", "opt(i) is random"], answer: 1, explain: "If the best split never moves left as i grows, solving the middle position bounds the search ranges of both halves." },
+  { type: "mcq", q: "What is the time complexity of one layer of divide and conquer DP for n positions?", options: ["O(n)", "O(n log n)", "O(n^2)", "O(2^n)"], answer: 1, explain: "Each recursion depth scans O(n) candidates in total, and there are O(log n) depths." },
+  { type: "predict", q: "Crates [1, 2, 3] split into 2 consecutive batches with cost = (weight)^2. What is the minimum total cost?", code: "options = [(1 ** 2 + 5 ** 2), (3 ** 2 + 3 ** 2)]\nprint(min(options))", options: ["18", "26", "36", "9"], answer: 0, explain: "[1 2][3] costs 9 + 9 = 18, which beats [1][2 3] at 1 + 25 = 26." },
+  { type: "multi", q: "Which are valid uses or properties of the technique?", options: ["It requires dp[g][i] to depend only on layer g - 1", "A cost satisfying the quadrangle inequality guarantees a monotone optimum", "It works for any cost function", "Memory can be O(n) by keeping only the previous layer"], answer: [0, 1, 3], explain: "Without monotonicity the pruning can discard the true optimum, so it does not work for every cost." }
+]} />
