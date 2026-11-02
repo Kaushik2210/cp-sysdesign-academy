@@ -1,0 +1,142 @@
+---
+title: Consensus and Majorities
+track: sd
+module: consensus-and-coordination
+order: 1
+difficulty: hard
+estMinutes: 30
+prerequisites: ["sd/distributed-theory/consistency-models", "sd/distributed-theory/failure-detection-and-gossip"]
+tags: [consensus, quorum, majority, paxos, raft, flp, fault-tolerance]
+type: lesson
+furtherReading:
+  - title: "Lamport, Paxos Made Simple"
+    url: https://lamport.azurewebsites.net/pubs/paxos-simple.pdf
+  - title: "Fischer, Lynch, Paterson, Impossibility of Distributed Consensus with One Faulty Process"
+    url: https://groups.csail.mit.edu/tds/papers/Lynch/jacm85.pdf
+  - title: "Ongaro and Ousterhout, In Search of an Understandable Consensus Algorithm (Raft)"
+    url: https://raft.github.io/raft.pdf
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 9 (consensus)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+Three servers must decide who the leader is, or which of two conflicting writes comes first, or whether a transaction commits. Messages can be delayed or lost and any server can crash at any moment. Yet the three must **never disagree** about the answer, and they should still be able to decide while one of them is down.
+
+That problem is **consensus**, and it sits underneath almost every strongly consistent system: leader election, replicated logs, distributed locks, configuration stores, and atomic commit. The central trick is to insist on **majorities**. Any two majorities of the same group share at least one member, so two decisions that each needed a majority cannot both happen without one member having witnessed both. That shared witness is what prevents the system from deciding two different things.
+
+## Definition
+
+A consensus protocol lets a group of nodes each **propose** a value and requires that:
+
+- **Agreement:** no two nodes decide different values.
+- **Validity:** the decided value was proposed by some node (not made up).
+- **Termination:** every non-crashed node eventually decides.
+- **Integrity:** a node decides at most once.
+
+**FLP impossibility.** Fischer, Lynch and Paterson showed that in a fully *asynchronous* network (no bound on message delay) with even **one** crash-prone node, no deterministic protocol can guarantee **both** safety and termination: you cannot tell a crashed node from a slow one, so you can wait forever. Real protocols sidestep this: they **always** preserve safety (agreement and validity) and guarantee termination only when the network is *reasonably behaved* for long enough (partial synchrony), using timeouts and randomisation. Raft and Paxos work this way: during a partition or a storm they may stall, but they will never return two different answers.
+
+**Why a majority.** With `n = 2f + 1` nodes, a protocol that needs `f + 1` of them to take any step:
+
+- tolerates `f` crash failures (the remaining `f + 1` still form a majority),
+- guarantees that any two steps share a node (two sets of `f + 1` out of `2f + 1` must overlap),
+- cannot split into two independent halves: during a partition at most one side has a majority and may proceed.
+
+Tolerating `f` *Byzantine* (arbitrarily malicious) nodes needs `3f + 1` nodes; blockchains and some high-assurance systems pay that price, while most datacentre systems assume crash-only failures.
+
+| nodes `n` | majority needed | crash failures tolerated |
+| --- | --- | --- |
+| 1 | 1 | 0 |
+| 2 | 2 | 0 |
+| 3 | 2 | 1 |
+| 4 | 3 | 1 |
+| 5 | 3 | 2 |
+| 7 | 4 | 3 |
+
+An **even** cluster size buys nothing: 4 nodes tolerate the same single failure as 3 but need a bigger majority.
+
+## The two main families
+
+- **Paxos** (Lamport): proposers send *prepare(n)* to acceptors, which *promise* not to accept anything older and report the highest value they accepted; the proposer then sends *accept(n, value)*, choosing the reported value if there was one. A value is chosen when a majority accepts it. **Multi-Paxos** runs this repeatedly to build a log. Famously subtle to implement.
+- **Raft** (Ongaro, Ousterhout): designed for understandability. It makes one server the **leader**, which sequences all commands, and splits the problem into leader election, log replication and safety. The next lessons walk through it.
+
+Others: ZAB (ZooKeeper), Viewstamped Replication, and Byzantine protocols such as PBFT.
+
+## Code: what a majority costs and buys
+
+Each node is up independently with probability `p`. The cluster works while a majority is up. The program computes the exact probability with the binomial formula and checks it by simulation.
+
+<CodeRunner language="python" code={`import random
+from math import comb
+
+random.seed(1)
+
+def majority_up(n, p):
+    need = n // 2 + 1
+    return sum(comb(n, k) * p**k * (1 - p) ** (n - k) for k in range(need, n + 1))
+
+def simulate(n, p, trials=200000):
+    need = n // 2 + 1
+    return sum(sum(random.random() < p for _ in range(n)) >= need for _ in range(trials)) / trials
+
+print("each node is up with probability p; the cluster works while a majority is up")
+print("  n  failures tolerated  p=0.99 exact   simulated    p=0.90 exact")
+for n in (1, 2, 3, 4, 5, 6, 7, 9):
+    print(f" {n:2d}  {(n - 1) // 2:18d}  {100 * majority_up(n, 0.99):11.5f}%  {100 * simulate(n, 0.99):8.4f}%  {100 * majority_up(n, 0.90):9.4f}%")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| `n` | failures tolerated | `p = 0.99` exact | `p = 0.99` simulated | `p = 0.90` exact |
+| --- | --- | --- | --- | --- |
+| 1 | 0 | 99.00000% | 98.9985% | 90.0000% |
+| 2 | 0 | 98.01000% | 98.0365% | 81.0000% |
+| 3 | 1 | 99.97020% | 99.9680% | 97.2000% |
+| 4 | 1 | 99.94080% | 99.9355% | 94.7700% |
+| 5 | 2 | 99.99901% | 99.9985% | 99.1440% |
+| 6 | 2 | 99.99804% | 99.9960% | 98.4150% |
+| 7 | 3 | 99.99997% | 100.0000% | 99.7272% |
+| 9 | 4 | 100.00000% | 100.0000% | 99.9109% |
+
+Three things stand out. Two nodes are **worse than one** (98.01% against 99.00%): both must be up. Four nodes are **worse than three** (99.9408% against 99.9702%) because they tolerate the same one failure but have more things that can break. And the steep improvement from 1 to 3 to 5 nodes (99.00% to 99.97% to 99.999%) explains why production clusters use 3 or 5. Beyond that, more nodes add write latency (the leader must reach a bigger majority) for almost no availability gain, and the model assumes independent failures; a shared rack, switch or software bug can take down several nodes at once, which is why replicas are spread across failure domains.
+
+## Where consensus is used
+
+- **Coordination services:** ZooKeeper (ZAB), etcd and Consul (Raft) store small amounts of critical data (leaders, configuration, locks) with strong consistency.
+- **Replicated databases:** CockroachDB, TiDB, Spanner and YugabyteDB replicate each shard with Raft or Paxos.
+- **Metadata layers:** Kafka's KRaft mode and many storage systems keep their metadata in a consensus group.
+
+You rarely implement consensus; you **use** a system built on it, and keep that group small and dedicated.
+
+## Trade-offs
+
+<TradeOffs caption="Using consensus" rows={[
+  { option: "Consensus group (3 or 5 nodes)", pros: "Strong consistency, automatic failover, no split brain", cons: "Every write pays a majority round trip; unavailable without a majority; limited throughput on one group", chooseWhen: "Metadata, leader election, locks, small critical state" },
+  { option: "Consensus per shard (sharded replicated log)", pros: "Scales throughput by running many independent groups", cons: "Cross-shard operations need atomic commit on top", chooseWhen: "Large strongly consistent databases" },
+  { option: "Leaderless quorum (Dynamo style)", pros: "Available during failures; low latency", cons: "No single order; conflicts and read repair to handle", chooseWhen: "High availability stores where eventual consistency is acceptable" },
+  { option: "Single node with backups", pros: "Simplest; no coordination", cons: "Failover is manual or risky; downtime on failure", chooseWhen: "Small systems with relaxed availability" }
+]} />
+
+## Pitfalls
+
+- Running an even number of nodes, or two nodes "for redundancy".
+- Putting all replicas in the same rack, zone or deployment, so failures are not independent.
+- Using the consensus store for bulk data or high-rate writes: it is for small critical state.
+- Assuming a quorum read is always fresh without checking how the system confirms leadership.
+- Confusing consensus with replication: asynchronous replication does not require agreement and can lose acknowledged writes.
+
+## What would you choose and why?
+
+You need a service that hands out a unique, increasing order id to 20 microservices, and it must keep working if one data centre is lost. How many nodes, in how many zones? What happens to order creation if two of five nodes are unreachable, and what if the *leader's* zone is partitioned from the others?
+
+## Quiz
+
+<Quiz id="sd-m12-consensus-and-majorities" tags={["consensus", "quorum", "flp"]} questions={[
+  { type: "mcq", q: "How many crash failures does a consensus group of 5 nodes tolerate?", options: ["1", "2", "3", "4"], answer: 1, explain: "A majority of 5 is 3, so up to 2 nodes may fail while 3 remain." },
+  { type: "mcq", q: "What does the FLP result say?", options: ["Consensus is impossible in any network", "No deterministic protocol can guarantee both safety and termination in a fully asynchronous system with one crash fault", "Raft is incorrect", "Majorities are not needed"], answer: 1, explain: "Real protocols keep safety always and terminate only when the network behaves well enough (partial synchrony)." },
+  { type: "predict", q: "Which cluster size gives more availability at p = 0.99, 3 nodes or 4?", code: "from math import comb\ndef up(n, p):\n    need = n // 2 + 1\n    return sum(comb(n, k) * p**k * (1 - p)**(n - k) for k in range(need, n + 1))\nprint(up(3, 0.99) > up(4, 0.99))", options: ["4 nodes", "3 nodes", "They are equal", "It depends on the leader"], answer: 1, explain: "Both tolerate one failure, but 4 nodes have more components to fail: 99.9702% for 3 nodes against 99.9408% for 4." },
+  { type: "multi", q: "Why does requiring a majority prevent two different decisions?", options: ["Any two majorities of the same group overlap in at least one node", "Majorities are faster than minorities", "During a partition at most one side can hold a majority", "It removes the need for timeouts"], answer: [0, 2], explain: "The overlap node carries knowledge of the first decision into the second; timeouts are still needed for liveness." },
+  { type: "mcq", q: "Which is a good use of a Raft-based coordination service such as etcd?", options: ["Storing terabytes of user uploads", "Storing the current leader and cluster configuration", "Serving 100,000 writes per second of click events", "Caching web pages"], answer: 1, explain: "Consensus stores are for small, critical, strongly consistent state." }
+]} />

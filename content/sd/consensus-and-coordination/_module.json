@@ -1,0 +1,1 @@
+{ "title": "Consensus and Coordination", "level": "Level 2: Intermediate Systems", "order": 12, "summary": "How a group of unreliable machines agrees on one answer: majorities, Raft leader election and log replication, and leases, locks and fencing tokens for coordination." }
