@@ -1,0 +1,155 @@
+---
+title: "Case Study: Metrics and Monitoring System"
+track: sd
+module: case-studies
+order: 13
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/notification-system", "sd/observability-and-reliability/logs-metrics-and-traces", "sd/queues-and-streaming/stream-processing-basics"]
+tags: [case-study, metrics, monitoring, time-series, tsdb, compression, downsampling, alerting, cardinality]
+type: case-study
+furtherReading:
+  - title: Pelkonen et al. - Gorilla, a fast, scalable, in-memory time series database (Facebook)
+    url: https://www.vldb.org/pvldb/vol8/p1816-teller.pdf
+  - title: Prometheus documentation - Storage
+    url: https://prometheus.io/docs/prometheus/latest/storage/
+  - title: Google SRE Book - Monitoring Distributed Systems
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+  - title: Thanos / Cortex / Mimir - scalable Prometheus-compatible architectures
+    url: https://thanos.io/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Collect numeric metrics (CPU, request rate, latency histograms, business counters) from thousands of hosts and services.
+- Store them, query them (graphs, aggregations over time and labels), and **alert** when rules are violated.
+- Dashboards, retention policies, multi-team access.
+
+**Non-functional**
+- **The monitoring system must be more reliable than what it monitors.** It has to work during an outage, when everything else is failing.
+- Writes are heavy and constant, reads are bursty (dashboards, alert evaluation).
+- Recent data should appear within seconds; old data can be coarser.
+- Assume 10 million active time series, each sampled every 10 seconds.
+
+## 2. Estimate
+
+- Samples: 10M series / 10 s = **1M samples/s** ingest.
+- Per day: 1M × 86,400 = **86.4 billion samples**. Raw at 16 bytes (timestamp 8 + value 8) = **1.38 TB/day**.
+- With time-series compression (Gorilla-style, about 1.4 bytes per sample on average): **about 120 GB/day**, or ~44 TB per year at full resolution. Downsampling shrinks long-term storage far more.
+- Reads: dashboards and alert rules typically query recent data over a few series at a time. 1,000 alert rules evaluated every minute = ~17 queries/s, plus humans.
+- **Cardinality** (number of distinct label combinations) drives memory and index size more than raw sample volume.
+
+## 3. Data model
+
+A metric is a **time series** identified by a name plus labels:
+
+```
+http_requests_total{service="checkout", route="/pay", status="500", region="eu"}  ->  [(t1, v1), (t2, v2), ...]
+```
+
+Types: counter (monotonic; query as a rate), gauge, histogram (bucketed, mergeable across instances; do not average percentiles). Storing a **series id → compressed block of (timestamp, value)** plus an **inverted index** from label pairs to series ids (the same structure as a search engine) lets queries like `{service="checkout", status=~"5.."}` find matching series quickly.
+
+## 4. Collection: push or pull?
+
+| | Pull (Prometheus-style) | Push (agents, StatsD, OpenTelemetry) |
+| --- | --- | --- |
+| How | The collector scrapes `/metrics` endpoints on a schedule | Services or agents send data to the collector |
+| Pros | Collector knows what is *down* (a failed scrape is a signal); easy to debug targets by hand; no client buffering logic | Works for short-lived jobs and behind NAT or firewalls; simpler for serverless |
+| Cons | Needs service discovery and reachability; short-lived jobs need a push gateway | Silent failures look like "no data"; clients need buffering and backoff |
+
+Large systems use both: pull inside a cluster, push through an agent/collector tier. Use service discovery (Kubernetes, Consul) so targets appear automatically, and **shard scrape targets** across collectors by hashing.
+
+## 5. Storage engine: why a time-series database
+
+Time-series data is append-mostly, ordered by time, queried by recent ranges and aggregations, and almost never updated. Specialised stores exploit this:
+
+- **Write path:** samples go to an in-memory buffer and a **write-ahead log**; periodically the buffer is flushed as an immutable, compressed **block** covering a time range (for example 2 hours). Old blocks are compacted into bigger ones.
+- **Compression** (Gorilla):
+  - **Timestamps** are stored as **delta-of-delta**: scrapes arrive at near-regular intervals, so the second difference is almost always 0 and costs 1 bit.
+  - **Values** are XORed with the previous value; similar consecutive floats share leading and trailing bits, so only the differing middle bits are stored.
+  - This reaches roughly 12x compression (16 bytes down to ~1.4).
+- **Retention and downsampling:** keep raw data for days, then roll up to 1-minute, then 1-hour aggregates (min, max, avg, sum, count; never just the average) for months or years.
+
+```python
+def delta_of_delta(ts):
+    out, prev, pd = [], None, 0
+    for t in ts:
+        if prev is None: out.append(t)
+        else:
+            d = t - prev; out.append(d - pd); pd = d
+        prev = t
+    return out
+print(delta_of_delta([1000, 1010, 1020, 1030, 1041, 1050]))   # [1000, 10, 0, 0, 1, -2]: mostly zeros, tiny to encode
+
+def downsample(points, bucket):
+    agg = {}
+    for t, v in points:
+        b = t - t % bucket
+        a = agg.setdefault(b, [0, 0.0, float("inf"), float("-inf")])
+        a[0] += 1; a[1] += v; a[2] = min(a[2], v); a[3] = max(a[3], v)
+    return {b: {"avg": a[1] / a[0], "min": a[2], "max": a[3], "n": a[0]} for b, a in sorted(agg.items())}
+print(downsample([(0, 1.0), (15, 3.0), (60, 5.0), (75, 7.0), (119, 9.0)], 60))
+# {0: {'avg': 2.0, 'min': 1.0, 'max': 3.0, 'n': 2}, 60: {'avg': 7.0, 'min': 5.0, 'max': 9.0, 'n': 3}}
+```
+
+Keeping min, max, count and sum in each rollup lets you recover averages correctly later and still spot spikes that an average would hide.
+
+## 6. Architecture at scale
+
+A single Prometheus-style server handles a few million active series. Beyond that, shard and replicate:
+
+<Diagram kind="flow" caption="Collectors scrape and forward to a sharded, replicated storage tier; queries fan out; alert evaluation is separate from dashboards" nodes={[
+  { id: "targets", label: "Services + exporters", x: 0, y: 90, role: "Expose metrics endpoints or push via agents.", failureModes: ["Label explosion from bad instrumentation"], tradeoffs: ["Enforce label allow-lists and per-team series limits"] },
+  { id: "col", label: "Collectors (sharded scrapers)", x: 200, y: 90, role: "Discover targets, scrape, and write to the stream.", failureModes: ["Collector crash loses a scrape interval", "Target overload from too-frequent scrapes"], tradeoffs: ["Run replicated pairs scraping the same targets; dedupe downstream"] },
+  { id: "kafka", label: "Ingest buffer (Kafka)", x: 400, y: 20, role: "Decouples collection from storage; absorbs bursts.", failureModes: ["Lag"], tradeoffs: ["Adds latency and an extra dependency, buys durability under storage outages"] },
+  { id: "tsdb", label: "TSDB shards (hash by series)", x: 600, y: 20, role: "Write-ahead log, in-memory head block, compressed on-disk blocks; replicated across zones.", failureModes: ["Hot shard from a high-volume metric", "Disk full"], tradeoffs: ["Replication factor 2 to 3; shard by series id for even load"] },
+  { id: "obj", label: "Object storage (long term)", x: 800, y: 20, role: "Cheap, durable storage for old blocks and downsampled data.", failureModes: ["Slow queries over cold data"], tradeoffs: ["Cache hot blocks; query layer merges recent and historical"] },
+  { id: "query", label: "Query layer", x: 600, y: 160, role: "Fans queries out to shards, merges, caches results, enforces limits.", failureModes: ["Expensive queries overload the system"], tradeoffs: ["Query timeouts, series-per-query limits and result caching"] },
+  { id: "rules", label: "Alert rule evaluator", x: 400, y: 160, role: "Evaluates rules on a schedule, handles pending periods and sends firing alerts to the alert manager.", failureModes: ["If it stops, no alerts fire (and nobody knows)"], tradeoffs: ["Run redundantly; add a 'dead man's switch' alert that must always fire"] },
+  { id: "am", label: "Alert manager", x: 200, y: 160, role: "Deduplicates, groups, silences, routes to pager, chat and email.", failureModes: ["Alert storm during a big outage"], tradeoffs: ["Grouping and inhibition rules (do not page for symptoms when the root cause alert is firing)"] }
+]} edges={[
+  { from: "targets", to: "col" }, { from: "col", to: "kafka" }, { from: "kafka", to: "tsdb" }, { from: "tsdb", to: "obj", label: "compact + upload" }, { from: "query", to: "tsdb" }, { from: "query", to: "obj" }, { from: "rules", to: "query" }, { from: "rules", to: "am", label: "firing" }
+]} />
+
+## 7. Alerting design
+
+- Evaluate rules on a schedule against recent data; a rule fires after the condition holds for a **`for` duration** (for example 5 minutes) to avoid flapping.
+- **Alert manager** groups related alerts into one notification, silences planned maintenance, and **inhibits** downstream alerts when a root-cause alert is active.
+- Alert on **symptoms and SLO burn rates** (see the SLO lesson) rather than every cause.
+- **Missing data** is a signal: use `absent()`-style rules, and have the pull model tell you when a target is down.
+- **Watch the watcher:** a heartbeat alert that must continuously fire and an external probe that pages if it stops; run monitoring in a separate failure domain from production (so a region outage does not take out the thing that would tell you about it).
+- Route by ownership label to the team's channel and escalate if unacknowledged.
+
+## 8. Deep dives and trade-offs
+
+- **Cardinality control:** the number one failure mode. One label like `user_id` or `request_id` creates millions of series and exhausts memory. Enforce per-metric limits, drop or aggregate offending labels at ingest, and alert on series growth.
+- **Histograms vs summaries:** histograms aggregate across instances; client-side summaries do not. Exemplars link a metric sample to a trace id.
+- **Rollups at ingest vs query time:** pre-aggregating (recording rules) makes dashboards fast and cheap but fixes the question in advance.
+- **Consistency:** monitoring tolerates eventual consistency and small gaps; prefer availability for writes (buffer and retry) and bounded staleness for reads.
+- **Multi-tenancy:** per-tenant limits on ingest rate, series count and query cost, with isolated storage prefixes.
+- **Cost:** retention length × resolution × cardinality. Tier storage, downsample, and delete unused metrics.
+- **Build vs buy:** managed observability platforms trade money for operational effort; self-hosting (Prometheus + Thanos/Mimir/VictoriaMetrics) trades effort for control.
+
+## Pitfalls
+
+- Unbounded label cardinality.
+- Averages of percentiles, or storing only the average in rollups.
+- A single monitoring server in the same failure domain as production.
+- Alerting on every cause and paging for non-urgent signals.
+- No alert for "the monitoring itself is broken".
+- Dashboards that run expensive queries on every refresh.
+- Treating ingestion like a database that must never drop a sample.
+
+## What would you choose and why?
+
+A team wants per-customer request latency metrics for 200,000 customers across 50 services and 10 routes. That is 100 million series. What do you propose instead (logs, traces, top-k customers, sampled metrics, a different store), and what question does each alternative answer?
+
+## Quiz
+
+<Quiz id="sd-m17-metrics-monitoring" tags={["case-study", "metrics", "tsdb"]} questions={[
+  { type: "mcq", q: "Why does delta-of-delta compress timestamps so well?", options: ["Timestamps are random", "Samples arrive at nearly regular intervals, so the second difference is usually zero", "It removes the clock", "It sorts timestamps"], answer: 1, explain: "A regular scrape interval makes most second differences 0, costing about one bit each." },
+  { type: "mcq", q: "What is the most common way to break a metrics system?", options: ["Too many dashboards", "Unbounded label cardinality such as user_id", "Using counters", "Using TLS"], answer: 1, explain: "Each unique label combination is a series; millions of them exhaust memory and indexes." },
+  { type: "multi", q: "Which help keep alerting trustworthy?", options: ["A `for` duration before firing", "Grouping and inhibition in the alert manager", "A dead man's switch alert that must always fire", "Paging on every CPU spike"], answer: [0, 1, 2], explain: "Paging on non-urgent causes creates fatigue and hides real incidents." },
+  { type: "mcq", q: "When rolling data up for long-term storage, what should you keep besides the average?", options: ["Nothing", "Min, max, count and sum so spikes and correct averages can be recovered", "Only the first sample", "Only the last sample"], answer: 1, explain: "Averages alone hide spikes and cannot be re-aggregated correctly without counts." }
+]} />

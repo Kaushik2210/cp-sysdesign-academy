@@ -1,0 +1,165 @@
+---
+title: "Case Study: Ticket Booking and Flash Sales"
+track: sd
+module: case-studies
+order: 12
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/payment-system", "sd/distributed-theory/distributed-transactions-2pc-and-sagas", "sd/scalability/load-shedding-and-bulkheads"]
+tags: [case-study, ticketing, booking, inventory, concurrency, flash-sale, waiting-room, holds]
+type: case-study
+furtherReading:
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 7, transactions, write skew and phantoms
+    url: https://dataintensive.net/
+  - title: PostgreSQL documentation - Explicit locking (SELECT FOR UPDATE, SKIP LOCKED)
+    url: https://www.postgresql.org/docs/current/explicit-locking.html
+  - title: Redis documentation - Distributed locks with Redis (and their limits)
+    url: https://redis.io/docs/latest/develop/use/patterns/distributed-locks/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Browse events and see a seat map with live availability.
+- Select seats, **hold** them briefly, pay, and receive tickets. Unpaid holds expire and the seats are released.
+- Cancellations and refunds; waitlists are an extension.
+
+**Non-functional**
+- **Never sell the same seat twice.** Correctness beats availability for the booking step.
+- Survive **flash sales**: a popular concert goes on sale and 500,000 fans arrive in the same minute for 50,000 seats.
+- Browsing stays fast and available even when booking is overloaded.
+- Fairness and anti-bot measures; no lost payments.
+
+## 2. Estimate
+
+- Normal load is modest (hundreds of bookings per second at most). The design is driven by **spikes**: 500,000 users in 60 seconds ≈ **8,000 requests/s** to the seat map, with perhaps 50,000 seat-hold attempts concentrated on the best seats.
+- Data is small: 50,000 seats per event × 100 B ≈ 5 MB. It fits in memory; the problem is **contention on hot rows**, not volume.
+- Payment and ticket delivery are external, slow and failure-prone.
+
+## 3. API
+
+```
+GET  /v1/events/{id}/seats                     -> seat map with status (cached, may be slightly stale)
+POST /v1/holds        { eventId, seatIds[] }   -> 201 { holdId, expiresAt } | 409 { unavailable: [...] }
+POST /v1/bookings     { holdId } + Idempotency-Key -> 202 { bookingId, status }
+DELETE /v1/holds/{id}
+```
+
+Seat availability on the map is advisory. The **hold** call is the authoritative decision.
+
+## 4. The core problem: no double sale
+
+Two users click the last seat at the same instant. Both read "free", both write "sold". The fix is an **atomic check-and-set**, enforced in the database that owns the seat state.
+
+Options:
+
+| Approach | How | Notes |
+| --- | --- | --- |
+| **Conditional update** | `UPDATE seats SET status='held', holder=?, expires=? WHERE id=? AND status='free'` and check the affected row count | Simplest and correct; the database serialises per row |
+| Pessimistic lock | `SELECT ... FOR UPDATE` on the seat rows, then update | Correct; holds locks during the transaction; lock seats in a **consistent order** to avoid deadlocks |
+| Optimistic version | `WHERE id=? AND version=?`, retry on conflict | Good when contention is low; wasteful on hot seats |
+| Distributed lock (Redis) | Lock per seat | Extra moving part; needs fencing (see locks lesson); the DB check is still required |
+| Unique constraint | `UNIQUE(event_id, seat_id)` on a `sold` table | A last line of defence that makes double sale impossible even with a bug |
+
+Multi-seat holds (a group of 4 together) must be **all or nothing**: do it in one transaction, ordering seat ids, and roll back if any is unavailable.
+
+```python
+import threading
+
+class Seats:
+    def __init__(self, ids, hold_ttl=300, clock=None):
+        self.state = {s: ("free", None, 0) for s in ids}      # seat -> (status, holder, expires_at)
+        self.ttl, self.clock, self.lock = hold_ttl, clock, threading.Lock()
+    def _expire(self, s):
+        st, who, exp = self.state[s]
+        if st == "held" and self.clock() >= exp:
+            self.state[s] = ("free", None, 0)                   # lazy release of an expired hold
+    def hold(self, seat, user):                                 # atomic check-and-set
+        with self.lock:
+            self._expire(seat)
+            if self.state[seat][0] != "free": return False
+            self.state[seat] = ("held", user, self.clock() + self.ttl); return True
+    def confirm(self, seat, user):
+        with self.lock:
+            self._expire(seat)
+            st, who, _ = self.state[seat]
+            if st != "held" or who != user: return False        # only the holder, only while the hold lives
+            self.state[seat] = ("sold", user, 0); return True
+
+t = [0]
+s = Seats(["A1", "A2"], hold_ttl=300, clock=lambda: t[0])
+print(s.hold("A1", "ann"), s.hold("A1", "bob"))        # True False  (second user loses the race)
+print(s.confirm("A1", "bob"), s.confirm("A1", "ann"))  # False True
+s.hold("A2", "bob"); t[0] = 301                        # bob's hold expires before he pays
+print(s.confirm("A2", "bob"), s.hold("A2", "cy"))      # False True  (seat returned to the pool)
+
+s2 = Seats([f"S{i}" for i in range(100)], clock=lambda: 0)
+wins = []
+def worker(u):
+    for i in range(100):
+        if s2.hold(f"S{i}", u): wins.append(i)
+ts = [threading.Thread(target=worker, args=(f"u{k}",)) for k in range(8)]
+[x.start() for x in ts]; [x.join() for x in ts]
+print(len(wins), len(set(wins)))                       # 100 100: 8 threads, every seat won exactly once
+```
+
+## 5. Holds and expiry
+
+- A hold is a **time-limited reservation** (for example 5 to 10 minutes) stored with the seat: `status=held, holder, expires_at`.
+- **Lazy expiry**: any read or write treats an expired hold as free (as in the code). A background sweeper also clears them so the seat map and counts stay accurate.
+- Extend the hold only once, and show a countdown in the UI.
+- **Payment races:** the user pays at second 299 and the hold expires at 300. Confirm the booking inside a transaction that re-checks the hold; if payment succeeded but the seat is gone, **refund automatically** rather than leave the user charged with no ticket. Or extend the hold while a payment is in flight.
+
+## 6. Architecture
+
+<Diagram kind="flow" caption="A waiting room admits users at the rate booking can handle; seat state lives in one strongly consistent store" nodes={[
+  { id: "users", label: "Fans (500k)", x: 0, y: 90, role: "Hit the site the moment sales open.", failureModes: ["Refresh storms", "Bots buying in bulk"], tradeoffs: ["Rate limits, CAPTCHAs, verified accounts and per-user ticket caps"] },
+  { id: "cdn", label: "CDN + cached seat map", x: 200, y: 20, role: "Serves event pages and a short-TTL seat map snapshot.", failureModes: ["Stale availability shows seats that are gone"], tradeoffs: ["Advisory data; the hold call is authoritative"] },
+  { id: "wr", label: "Virtual waiting room", x: 200, y: 160, role: "Queues users and admits them in batches (token with a time window), keeping booking load within capacity.", failureModes: ["Unfair ordering", "Queue state loss"], tradeoffs: ["Trades some waiting for stability; randomised or first-come admission policy"] },
+  { id: "book", label: "Booking service", x: 420, y: 90, role: "Creates holds and bookings; idempotent; enforces limits.", failureModes: ["Hot rows for the best seats", "Payment callback arrives after hold expiry"], tradeoffs: ["Conditional updates; short transactions; stateless scaling"] },
+  { id: "db", label: "Seat store (strongly consistent SQL)", x: 640, y: 20, role: "Source of truth for seat status, with unique constraints.", failureModes: ["Primary failure during the on-sale"], tradeoffs: ["Sync replica for failover; shard by event so each event has one writer"] },
+  { id: "pay", label: "Payment service", x: 640, y: 160, role: "Charges the user, idempotently.", failureModes: ["Timeouts with unknown outcome"], tradeoffs: ["Saga with refund compensation; reconciliation"] },
+  { id: "q", label: "Queue + workers", x: 860, y: 90, role: "Issue tickets, send emails, update analytics asynchronously.", failureModes: ["Duplicate delivery"], tradeoffs: ["Idempotent consumers keyed by booking id"] }
+]} edges={[
+  { from: "users", to: "cdn" }, { from: "users", to: "wr" }, { from: "wr", to: "book", label: "admitted" }, { from: "book", to: "db", label: "hold / confirm" }, { from: "book", to: "pay" }, { from: "book", to: "q", label: "after confirm" }
+]} />
+
+## 7. Surviving the flash sale
+
+- **Virtual waiting room:** instead of letting 500,000 users hammer booking, issue each a queue position and admit them in batches sized to what the seat store can process. Users get an honest wait; the core stays healthy. Implement with a signed admission token (so it cannot be forged or skipped) and a short validity window.
+- **Cache and CDN the read path**: event details and the seat map snapshot (1 to 2 second TTL) never touch the primary.
+- **Partition by event**: each event's seats live on one shard, so there is no cross-shard transaction. A hugely popular event may be served by a dedicated stack.
+- **Shed load gracefully**: return a friendly "try again" with `Retry-After` when overloaded rather than timing out; protect the database with connection pools and bulkheads.
+- **Best-available assignment** for users who just want "2 tickets together": the service chooses seats (reducing hot-spot contention on specific rows) instead of every user fighting over seat 1A.
+- **Bots and scalpers:** account verification, per-person limits, proof-of-work or CAPTCHA at the queue entrance, device and behavioural signals, and delayed ticket transfer rules.
+
+## 8. Trade-offs and extensions
+
+- **Consistency vs availability:** the booking path is CP. During a database failover some requests fail; users retry safely thanks to idempotency keys. The browsing path is AP and cached.
+- **Overbooking** (airlines) is a business policy: sell more than capacity based on no-show rates and compensate. Not for concerts.
+- **General admission** (no seat numbers) is a counter: `UPDATE events SET remaining = remaining - ? WHERE id = ? AND remaining >= ?`. Contention on one hot row; mitigate by splitting the counter into N sub-counters (sharded counter) and trying others when one is empty.
+- **Waitlists:** when a hold expires or a booking is cancelled, offer the seat to the head of the waitlist via a short-lived hold.
+- **Observability:** hold success rate, expired-hold ratio, queue length and admission rate, payment failure rate, duplicate-booking attempts blocked by the unique constraint, p99 hold latency.
+
+## Pitfalls
+
+- Read-then-write without an atomic check-and-set.
+- Relying on a cache or distributed lock alone to prevent double sale.
+- Deadlocks from locking multiple seats in random order.
+- Letting a flash-sale crowd reach the database directly.
+- Charging the user and then discovering the seat is gone, with no refund path.
+- Holds that never expire, locking inventory.
+- Treating the displayed seat map as truth.
+
+## What would you choose and why?
+
+The business wants a "fair" on-sale where speed of clicking does not decide who wins, and also wants to stop resale bots. How would you design admission (lottery vs queue), per-person limits, identity checks and ticket transfer rules, and what failure modes does each choice create?
+
+## Quiz
+
+<Quiz id="sd-m17-ticket-booking" tags={["case-study", "booking", "concurrency"]} questions={[
+  { type: "mcq", q: "Which statement most reliably prevents double-selling a seat?", options: ["Check the cache then update the database", "An atomic conditional update in the database that owns the seat (plus a unique constraint as a backstop)", "A faster server", "Showing the seat map less often"], answer: 1, explain: "Check-and-set must be atomic in the source of truth; everything else is advisory." },
+  { type: "mcq", q: "Why use a virtual waiting room in a flash sale?", options: ["To collect emails", "To admit users at a rate the booking path can sustain, protecting the core system", "To avoid payments", "To cache the seat map"], answer: 1, explain: "It converts an unbounded spike into a controlled, fair flow." },
+  { type: "multi", q: "Which are sound practices for holds?", options: ["Time-limited holds with lazy and background expiry", "Re-checking the hold inside the confirmation transaction", "Automatic refund if payment succeeds after the seat is lost", "Holds that last until the user returns"], answer: [0, 1, 2], explain: "Unbounded holds let inventory be locked indefinitely." },
+  { type: "predict", q: "In the demo, 8 threads each try to hold all 100 seats. How many seats are won in total and how many distinct?", code: "len(wins), len(set(wins))", options: ["800 and 100", "100 and 100", "100 and 800", "8 and 8"], answer: 1, explain: "Each seat can be held only once, so exactly 100 holds succeed across all threads." }
+]} />

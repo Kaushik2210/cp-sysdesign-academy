@@ -1,0 +1,161 @@
+---
+title: "Case Study: File Sync and Cloud Storage (Dropbox-style)"
+track: sd
+module: case-studies
+order: 14
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/video-streaming", "sd/case-studies/collaborative-editing", "sd/storage/blob-stores", "sd/storage/durability-backups-tiering"]
+tags: [case-study, file-sync, storage, chunking, deduplication, content-defined-chunking, metadata, conflict-resolution, sync]
+type: case-study
+furtherReading:
+  - title: Xia et al. - FastCDC, a fast and efficient content-defined chunking approach
+    url: https://www.usenix.org/conference/atc16/technical-sessions/presentation/xia
+  - title: Dropbox Tech Blog - Scaling to exabytes and beyond (Magic Pocket)
+    url: https://dropbox.tech/infrastructure/scaling-to-exabytes-and-beyond
+  - title: Dropbox Tech Blog - Rewriting the heart of our sync engine
+    url: https://dropbox.tech/infrastructure/rewriting-the-heart-of-our-sync-engine
+  - title: rsync algorithm (Tridgell and Mackerras)
+    url: https://rsync.samba.org/tech_report/
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Users keep a folder on their devices in sync with the cloud and with their other devices.
+- Upload, download, edit, rename, move, delete; sharing folders with others.
+- Version history and undelete; offline edits sync later; **conflict handling**.
+
+**Non-functional**
+- **Never lose data** (durability around 11 nines), and never silently corrupt it.
+- Syncing a small edit to a large file should be fast and use little bandwidth.
+- Changes propagate to other devices within seconds.
+- Assume 500M users, 100M daily active, 10 GB stored on average (5 EB total), average file edit rate of a few per user per day.
+
+## 2. Estimate
+
+- Storage: 500M users × 10 GB = **5 exabytes**. Even at 3x replication that is 15 EB, so the design needs erasure coding and tiering, plus **deduplication**.
+- Metadata is small per file but huge in count: 500M users × ~5,000 files = **2.5 trillion file records** at ~500 B = ~1.25 PB. Metadata is the hard-to-scale database; file bytes are blob storage.
+- Change events: 100M DAU × ~20 file changes = 2B/day ≈ **23,000 changes/s** average.
+- Devices holding **long-lived connections** for change notification: perhaps 200M open connections.
+
+## 3. Key design: separate metadata from blocks
+
+- **Block storage** (huge, cheap, immutable): file contents split into **chunks** (for example 4 MB), each stored by the hash of its content (**content-addressable storage**).
+- **Metadata service** (smaller, transactional): the namespace (folders, names, permissions, versions) plus, for each file version, the **ordered list of chunk hashes**.
+
+A file version is just a list of hashes: `[h1, h2, h3]`. Editing the middle of a file changes only the chunks that actually changed; the new version reuses the other hashes.
+
+## 4. Chunking and deduplication
+
+**Fixed-size chunking** splits every N bytes. It is simple but fragile: inserting a few bytes at the front shifts every later boundary, so *every chunk* changes.
+
+**Content-defined chunking (CDC)** places boundaries where a rolling hash over a small window of recent bytes meets a condition (for example its low bits are zero). Boundaries depend on local content, so an insert only disturbs the nearby chunks and the rest keep identical hashes.
+
+```python
+import hashlib, random
+
+rng = random.Random(42)
+GEAR = [rng.getrandbits(32) for _ in range(256)]           # fixed random table
+
+def fixed_chunks(data, n):
+    return [data[i:i + n] for i in range(0, len(data), n)]
+
+def cdc_chunks(data, mask=0x3F, min_size=16, max_size=256):
+    out, start, h = [], 0, 0
+    for i, b in enumerate(data):
+        h = ((h << 1) + GEAR[b]) & 0xFFFFFFFF                # old bytes shift out: only recent bytes matter
+        size = i - start + 1
+        if (size >= min_size and (h & mask) == 0) or size >= max_size:
+            out.append(data[start:i + 1]); start = i + 1
+    if start < len(data): out.append(data[start:])
+    return out
+
+def digests(chunks): return {hashlib.sha256(c).hexdigest()[:8] for c in chunks}
+
+r = random.Random(5)
+a = bytes(r.randrange(256) for _ in range(4000))
+b = b"INSERTED" + a                                          # 8 bytes inserted at the front
+for name, fn in (("fixed", lambda d: fixed_chunks(d, 100)), ("cdc", cdc_chunks)):
+    da, db = digests(fn(a)), digests(fn(b))
+    print(name, len(da), "chunks; reusable after insert:", len(da & db))
+# fixed 40 chunks; reusable after insert: 0
+# cdc 46 chunks; reusable after insert: 45
+```
+
+After an 8-byte insert, fixed chunking can reuse none of its 40 chunks, while content-defined chunking reuses 45 of 46. In the real world that is the difference between re-uploading a gigabyte and uploading a few kilobytes.
+
+**Deduplication** follows for free: before uploading a chunk the client asks "do you have hash H?" If yes, skip the upload. Identical files across users (a popular installer, the same PDF) are stored once. Considerations: hashing reveals whether others already store a file (a privacy side channel); some systems scope dedup per user or use convergent encryption with care; verify chunk integrity with the hash on every read.
+
+For compressible data, compress chunks before storing; for very similar large files, delta encoding (rsync-style) can save more at the cost of CPU.
+
+## 5. Upload and sync protocol
+
+1. The client watches the folder, detects a change, chunks the file and computes hashes.
+2. It sends the metadata service a **commit** request: "path P new version = [h1..hn], based on version v".
+3. The service replies with which hashes it **does not have**; the client uploads only those chunks, in parallel, resumably, to block storage.
+4. Once all chunks exist, the metadata commit **atomically** creates the new version. (Uploading blocks first, then committing metadata, means a half-uploaded file is never visible.)
+5. The server appends the change to a per-user (or per-namespace) **journal** with an increasing cursor and notifies the user's other devices.
+6. Other devices pull the journal from their last cursor, fetch only the missing chunks, and apply the changes locally.
+
+<Diagram kind="flow" caption="Metadata commit points at immutable, deduplicated chunks; change notifications flow through a journal" nodes={[
+  { id: "dev", label: "Desktop client", x: 0, y: 90, role: "Watches files, chunks them, hashes, uploads missing chunks, applies remote changes.", failureModes: ["Crash mid-sync", "Clock skew", "Partial local state"], tradeoffs: ["Idempotent operations and a local database of last-synced state allow recovery"] },
+  { id: "meta", label: "Metadata service (sharded SQL)", x: 220, y: 20, role: "Namespace, versions, permissions and chunk lists; atomic commits; per-namespace journal.", failureModes: ["Hot shards for huge shared folders", "Primary failover"], tradeoffs: ["Shard by namespace or user; strong consistency inside a namespace"] },
+  { id: "blocks", label: "Block service + storage", x: 220, y: 160, role: "Content-addressed chunk store with replication or erasure coding across zones.", failureModes: ["Bit rot", "Loss of a storage node"], tradeoffs: ["Erasure coding cuts cost versus 3x replication; background scrubbing verifies hashes"] },
+  { id: "notify", label: "Notification service", x: 440, y: 20, role: "Long-lived connections that tell devices a journal has new entries.", failureModes: ["Mass reconnects after an outage"], tradeoffs: ["Notifications are hints; devices poll the journal cursor as a fallback"] },
+  { id: "other", label: "Other devices / web / mobile", x: 440, y: 160, role: "Pull journal changes and fetch missing chunks.", failureModes: ["Slow or offline devices fall behind"], tradeoffs: ["Cursor-based catch-up works after any gap"] },
+  { id: "gc", label: "Garbage collection + versioning", x: 660, y: 90, role: "Reference-counts chunks, expires old versions and deleted files by policy.", failureModes: ["Premature deletion destroys shared chunks"], tradeoffs: ["Mark-and-sweep with a grace period; never delete a chunk still referenced"] }
+]} edges={[
+  { from: "dev", to: "blocks", label: "upload missing chunks" }, { from: "dev", to: "meta", label: "commit version" }, { from: "meta", to: "notify", label: "journal entry" }, { from: "notify", to: "other" }, { from: "other", to: "meta", label: "pull journal" }, { from: "other", to: "blocks", label: "download chunks" }, { from: "meta", to: "gc" }, { from: "gc", to: "blocks" }
+]} />
+
+## 6. Conflicts
+
+Two devices edit the same file while offline, then both commit "based on version v". The metadata service accepts the first and rejects the second as stale (an **optimistic concurrency check** on the base version). The second client then:
+
+- For opaque files (images, binaries): keep both. The loser is saved as a **conflicted copy** ("report (Ann's conflicted copy 2026-11-02).docx"). It is crude but never loses data.
+- For structured, mergeable content (text, collaborative documents): merge automatically (three-way merge or the OT/CRDT techniques of the collaborative editing lesson).
+- Folder-level conflicts (rename vs delete) follow explicit rules, usually favouring preserving data.
+
+Never resolve conflicts by silently overwriting. Deletes become **tombstones** kept for the retention window so they can be undone and so offline devices learn about them.
+
+## 7. Durability, cost and operations
+
+- **Durability:** replicate or erasure-code chunks across zones/regions (for example 6+3 Reed-Solomon tolerates 3 lost shards at 1.5x overhead versus 3x for triple replication), continuous **scrubbing** to detect and repair corruption, and checksums at every layer.
+- **Tiering:** recently used chunks on fast storage; cold chunks on cheaper media or archival tiers; hot-set cached near users.
+- **Metadata scaling:** shard by namespace id; keep a big shared team folder from becoming a hot shard by separating its journal and using finer locking; cache directory listings.
+- **Sharing and permissions:** a shared folder is a namespace mounted into several users' trees; permission checks use the authorization model from the security module (ReBAC fits).
+- **Bandwidth control:** throttle on metered or slow links; prioritise small files first so the user sees progress; resume interrupted uploads.
+- **Security:** encrypt in transit and at rest with per-user or per-namespace keys; audit access; scan for malware; support remote wipe.
+- **Observability:** sync latency (change to visible on another device), conflict rate, dedup ratio, upload failure rate, chunk integrity failures, GC lag.
+
+## 8. Trade-offs
+
+- **Chunk size:** small chunks give better dedup and smaller deltas but more metadata and requests; large chunks the reverse. 4 MB is a common compromise.
+- **Client-side vs server-side chunking and hashing:** client-side saves bandwidth (skip existing chunks) but requires trusting and updating client code; the server must still verify hashes.
+- **Strong vs eventual consistency:** metadata commits are strongly consistent within a namespace so versions are well defined; propagation to devices is eventually consistent.
+- **Dedup vs privacy and encryption:** global dedup conflicts with per-user encryption. Choose based on threat model.
+- **Polling vs push:** push is fast but connection-heavy; polling is simple and robust; use both.
+
+## Pitfalls
+
+- Fixed-size chunking for editable files.
+- Making metadata visible before all chunks are uploaded.
+- Overwriting on conflict instead of preserving both versions.
+- Deleting chunks by reference count without a grace period or mark-and-sweep safety.
+- Trusting the client's hash without server verification.
+- Using wall-clock modification times to decide which version is newer.
+- One global lock or journal for a giant shared folder.
+
+## What would you choose and why?
+
+A customer stores 2 TB of virtual machine images that change in small scattered ways, and another stores millions of tiny files. How do chunk size, dedup, metadata design and sync batching differ between them, and what would you tell each about expected sync latency and cost?
+
+## Quiz
+
+<Quiz id="sd-m17-file-sync" tags={["case-study", "file-sync", "chunking"]} questions={[
+  { type: "mcq", q: "Why does content-defined chunking beat fixed-size chunking for edited files?", options: ["It is faster to compute", "Boundaries depend on local content, so an insert changes only nearby chunks instead of shifting all later ones", "It compresses better always", "It avoids hashing"], answer: 1, explain: "Fixed boundaries all move after an insertion; content-defined ones resynchronise." },
+  { type: "mcq", q: "In what order should a client commit a new file version?", options: ["Commit metadata first, then upload chunks", "Upload missing chunks first, then commit metadata atomically", "Upload everything every time", "Commit twice"], answer: 1, explain: "Chunks first guarantees metadata never points at data that does not exist." },
+  { type: "multi", q: "Which are reasonable conflict-handling practices?", options: ["Optimistic concurrency on the base version", "Saving the loser as a conflicted copy for opaque files", "Silently overwriting with the latest timestamp", "Keeping delete tombstones for the retention window"], answer: [0, 1, 3], explain: "Silent overwrites lose data; the other practices preserve it." },
+  { type: "predict", q: "After inserting 8 bytes at the front of a 4000-byte file, how many chunks does the demo's fixed-size scheme (100-byte chunks) reuse?", code: "fixed 40 chunks; reusable after insert: ?", options: ["0", "20", "39", "40"], answer: 0, explain: "Every boundary shifts by 8 bytes, so no chunk has identical content." }
+]} />
