@@ -1,0 +1,152 @@
+---
+title: OOP Modelling and the SOLID Principles
+track: sd
+module: lld-foundations
+order: 1
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/what-is-system-design/requirements-and-framework"]
+tags: [lld, oop, solid, encapsulation, composition, interfaces, design]
+type: lesson
+furtherReading:
+  - title: Robert C. Martin - Design Principles and Design Patterns (the SOLID principles)
+    url: https://web.archive.org/web/20150906155800/http://www.objectmentor.com/resources/articles/Principles_and_Patterns.pdf
+  - title: Gamma, Helm, Johnson, Vlissides - Design Patterns (the Gang of Four book)
+    url: https://www.informit.com/store/design-patterns-elements-of-reusable-object-oriented-9780201633610
+  - title: Refactoring Guru - Design patterns catalog
+    url: https://refactoring.guru/design-patterns
+---
+
+## Intuition
+
+High-level design asks "which services and databases?" **Low-level design (LLD)** asks "which classes, what responsibilities, and how do they talk?" for one service or one feature, such as a parking lot, an elevator or a rate limiter. Interviewers watch for four things: you find the right **entities**, give each a clear **responsibility**, keep the design **extensible** when requirements change, and write **clean, working code**.
+
+## A repeatable approach (use it in every LLD interview)
+
+1. **Clarify requirements** (5 min): actors, core use cases, scale of one process, what is out of scope. Write them down.
+2. **Identify entities** by underlining the nouns: the *things* with state and behaviour (`Vehicle`, `Ticket`, `Slot`).
+3. **Identify behaviours** by underlining the verbs and assign each to the object that owns the data it needs.
+4. **Sketch relationships**: *is-a* (inheritance, use sparingly), *has-a* (composition, prefer), *uses* (dependency).
+5. **Find the variation points**: what is likely to change? (pricing rule, allocation strategy, notification channel). Put those behind an **interface**.
+6. **Code the core flow**, then walk through two or three scenarios and one edge case or failure.
+7. **Discuss extensions and concurrency** if time remains.
+
+## Four pillars, said precisely
+
+- **Encapsulation**: hide state, expose behaviour. A `Account` offers `withdraw(amount)`, not a public `balance` field that anyone can set. Invariants (balance never negative) live in one place.
+- **Abstraction**: depend on *what* something does, not *how*. Callers use a `PaymentMethod`, not `VisaCard`.
+- **Inheritance**: *is-a* reuse. Powerful but couples child to parent. Use for true subtype relationships.
+- **Polymorphism**: one call, different behaviour depending on the concrete type. This is what lets you add a new `Vehicle` kind without editing the code that parks it.
+
+**Composition over inheritance.** Prefer an object that *has* a `PricingStrategy` to a class tree `WeekendParkingLot extends ParkingLot extends ...`. Composition swaps behaviour at runtime and avoids deep hierarchies.
+
+## SOLID
+
+### S: Single Responsibility
+
+A class has **one reason to change**. If invoice formatting, tax rules and database writes are in one class, three different stakeholders force edits to it.
+
+### O: Open/Closed
+
+Software entities are **open for extension, closed for modification**. Add behaviour by adding a new class, not by editing a growing `if/elif` chain.
+
+```python
+from abc import ABC, abstractmethod
+
+# Violates O: adding a vehicle type means editing this function.
+def fee_bad(kind, hours):
+    if kind == "car": return 20 * hours
+    elif kind == "bike": return 10 * hours
+    raise ValueError(kind)
+
+# Respects O: new vehicle types are new classes.
+class Vehicle(ABC):
+    @abstractmethod
+    def hourly_rate(self) -> int: ...
+class Car(Vehicle):
+    def hourly_rate(self): return 20
+class Bike(Vehicle):
+    def hourly_rate(self): return 10
+class Truck(Vehicle):                      # added later; no existing code changed
+    def hourly_rate(self): return 40
+
+def fee(v: Vehicle, hours: int) -> int:
+    return v.hourly_rate() * hours
+
+print(fee_bad("car", 3), fee(Car(), 3), fee(Truck(), 3))   # 60 60 120
+```
+
+### L: Liskov Substitution
+
+Code written against a base type must keep working when given any subtype. A subtype must not strengthen preconditions, weaken postconditions or throw surprises. The classic violation: `Square extends Rectangle` where setting the width also changes the height, breaking callers that assume independence. If a subclass has to override a method to raise `NotImplementedError`, the hierarchy is wrong.
+
+### I: Interface Segregation
+
+Many small, focused interfaces beat one fat one. A `Printer` interface with `print`, `scan` and `fax` forces a basic printer to implement methods it cannot support. Split into `Printable`, `Scannable`, `Faxable`.
+
+### D: Dependency Inversion
+
+High-level policy should depend on **abstractions**, and details should depend on the same abstractions. Pass dependencies in (constructor injection) rather than constructing them inside.
+
+```python
+from abc import ABC, abstractmethod
+
+class Notifier(ABC):
+    @abstractmethod
+    def send(self, user: str, msg: str) -> str: ...
+class Email(Notifier):
+    def send(self, user, msg): return f"email to {user}: {msg}"
+class Sms(Notifier):
+    def send(self, user, msg): return f"sms to {user}: {msg}"
+
+class OrderService:                       # depends on the abstraction, not on Email or Sms
+    def __init__(self, notifier: Notifier):
+        self.notifier = notifier
+    def ship(self, user): return self.notifier.send(user, "shipped")
+
+print(OrderService(Email()).ship("ann"))
+print(OrderService(Sms()).ship("ann"))    # swap behaviour without touching OrderService
+class FakeNotifier(Notifier):             # a test double comes for free
+    def send(self, user, msg): return "fake"
+print(OrderService(FakeNotifier()).ship("ann"))
+```
+
+DIP is also what makes code **testable**: you inject a fake.
+
+<Callout type="pitfall" title="SOLID is a tool, not a checklist">
+Applying every principle to a 50-line problem produces ten classes and no clarity. Add an interface where you can name a **real second implementation or a likely change**. In an interview, say why you extracted something. "YAGNI" (you aren't gonna need it) is a valid counterweight.
+</Callout>
+
+## Worked example: the smell and the fix
+
+A first draft of a `ParkingLot` class that decides prices with `if vehicle_type == ...`, prints to the console, and stores tickets in a global list breaks S (three jobs), O (edit to add a type) and D (hard-wired printing and storage). The fix: `Vehicle` subclasses (or a `PricingStrategy`), a `TicketRepository` interface, and `ParkingLot` orchestrating them through constructor-injected collaborators. The next lessons show these shapes.
+
+## Code smells that suggest a violated principle
+
+- Long `if/elif` chains on a type code (O).
+- A class whose name ends in `Manager` or `Util` and has 30 methods (S).
+- Subclasses that ignore or reject inherited behaviour (L).
+- Constructors that create their own `Database()` (D).
+- Fat interfaces with methods many implementers leave empty (I).
+
+## Pitfalls
+
+- Jumping into code before agreeing on requirements and entities.
+- Inheritance chains three levels deep for code reuse alone.
+- Public mutable fields; setters that can create invalid objects.
+- Putting all logic in a `Main` or `Manager` and leaving entities as bare data holders (anemic model).
+- Over-engineering with patterns nobody needs.
+- Ignoring thread safety when the problem implies concurrent use.
+
+## What would you choose and why?
+
+You must model "discounts" in a shopping cart: percentage off, buy-one-get-one, free shipping over a threshold, and a stackable coupon code. Which of these are separate classes, what is the shared interface, and how do you order and combine them without editing the cart each time a new discount is invented?
+
+## Quiz
+
+<Quiz id="sd-m27-oop-solid" tags={["lld", "solid"]} questions={[
+  { type: "mcq", q: "A function uses if/elif on a type string to compute prices. Which principle does adding a new type by editing it violate?", options: ["Single Responsibility", "Open/Closed", "Interface Segregation", "Liskov Substitution"], answer: 1, explain: "The design should allow extension by adding a class, not by modifying existing code." },
+  { type: "mcq", q: "Square extends Rectangle, and setWidth also changes height. Which principle is broken?", options: ["Dependency Inversion", "Liskov Substitution", "Open/Closed", "Single Responsibility"], answer: 1, explain: "Callers that assume width and height are independent break when given a Square." },
+  { type: "multi", q: "Which practices follow Dependency Inversion?", options: ["Inject a Notifier interface through the constructor", "Create a concrete SmtpClient inside the service", "Depend on an abstract repository to ease testing", "Call static singletons everywhere"], answer: [0, 2], explain: "Depend on abstractions supplied from outside; hard-wired concrete dependencies defeat substitution and testing." },
+  { type: "mcq", q: "When should you prefer composition over inheritance?", options: ["Never", "When behaviour should be swappable at runtime or the relationship is has-a rather than a true is-a", "Only in Java", "When you want deeper hierarchies"], answer: 1, explain: "Composition avoids rigid hierarchies and lets you change strategies without new subclasses." }
+]} />

@@ -1,0 +1,199 @@
+---
+title: Creational and Structural Patterns
+track: sd
+module: lld-foundations
+order: 2
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/lld-foundations/oop-modelling-and-solid"]
+tags: [lld, design-patterns, factory, builder, singleton, adapter, decorator, facade]
+type: lesson
+furtherReading:
+  - title: Refactoring Guru - Creational patterns
+    url: https://refactoring.guru/design-patterns/creational-patterns
+  - title: Refactoring Guru - Structural patterns
+    url: https://refactoring.guru/design-patterns/structural-patterns
+  - title: Gamma et al. - Design Patterns (catalog)
+    url: https://www.informit.com/store/design-patterns-elements-of-reusable-object-oriented-9780201633610
+---
+
+## Intuition
+
+A **design pattern** is a named, reusable solution shape to a recurring design problem. The value in an interview is vocabulary and judgement: recognise the problem, name the pattern, say what it costs. This lesson covers patterns about **creating objects** (creational) and **composing objects** (structural). Only the ones that appear often are included.
+
+## Creational patterns
+
+### Factory (method / simple factory)
+
+**Problem:** callers should not know which concrete class to build; the choice depends on input or configuration.
+
+```python
+from abc import ABC, abstractmethod
+
+class Notifier(ABC):
+    @abstractmethod
+    def send(self, msg): ...
+class Email(Notifier):
+    def send(self, msg): return "email:" + msg
+class Sms(Notifier):
+    def send(self, msg): return "sms:" + msg
+
+REGISTRY = {"email": Email, "sms": Sms}          # new kinds register here, callers unchanged
+def make_notifier(kind: str) -> Notifier:
+    try:
+        return REGISTRY[kind]()
+    except KeyError:
+        raise ValueError(f"unknown notifier {kind!r}")
+
+print(make_notifier("sms").send("hi"))
+```
+
+Use when construction logic is non-trivial or varies. A **registry** (dictionary) keeps it open for extension.
+
+### Abstract factory
+
+A factory of *families* of related objects (a `DarkThemeFactory` producing a dark `Button` and a dark `Menu`) so products of one family are used together. Use sparingly; it adds many classes.
+
+### Builder
+
+**Problem:** an object has many optional parameters, and a telescoping constructor is unreadable and error-prone. A builder collects them step by step and validates at `build()`.
+
+```python
+class Pizza:
+    def __init__(self, size, toppings, extra_cheese):
+        self.size, self.toppings, self.extra_cheese = size, tuple(toppings), extra_cheese
+    def __repr__(self): return f"Pizza({self.size}, {list(self.toppings)}, cheese={self.extra_cheese})"
+
+class PizzaBuilder:
+    def __init__(self): self._size, self._top, self._cheese = "M", [], False
+    def size(self, s):
+        if s not in ("S", "M", "L"): raise ValueError("bad size")
+        self._size = s; return self
+    def topping(self, t): self._top.append(t); return self
+    def extra_cheese(self): self._cheese = True; return self
+    def build(self):
+        if len(self._top) > 4: raise ValueError("max 4 toppings")
+        return Pizza(self._size, self._top, self._cheese)
+
+print(PizzaBuilder().size("L").topping("olives").topping("corn").extra_cheese().build())
+```
+
+In Python, keyword arguments and `dataclasses` often replace builders; in Java the builder is common.
+
+### Singleton
+
+**Problem:** exactly one instance (a configuration holder, a connection pool).
+
+```python
+import threading
+class Config:
+    _inst, _lock = None, threading.Lock()
+    def __new__(cls):
+        if cls._inst is None:
+            with cls._lock:                       # double-checked locking
+                if cls._inst is None:
+                    cls._inst = super().__new__(cls)
+        return cls._inst
+print(Config() is Config())    # True
+```
+
+<Callout type="warning" title="Singleton is often a smell">
+It is global state in disguise: hard to test (violates dependency inversion), hidden coupling, thread-safety traps. Prefer creating one object at startup and **injecting** it. Mention singleton when asked, but explain this trade-off.
+</Callout>
+
+### Prototype
+
+Create new objects by copying an existing one (`copy.deepcopy`). Useful when construction is expensive. Rare in interviews.
+
+## Structural patterns
+
+### Adapter
+
+**Problem:** an existing class has the wrong interface. Wrap it to expose the one clients expect.
+
+```python
+class LegacyGateway:                       # third-party; we cannot change it
+    def make_payment(self, cents, cur): return f"paid {cents} {cur}"
+
+class PaymentProcessor:                    # the interface our code expects
+    def pay(self, amount_dollars: float) -> str: raise NotImplementedError
+
+class LegacyAdapter(PaymentProcessor):
+    def __init__(self, gw): self.gw = gw
+    def pay(self, amount_dollars):
+        return self.gw.make_payment(round(amount_dollars * 100), "USD")
+
+print(LegacyAdapter(LegacyGateway()).pay(12.5))      # paid 1250 USD
+```
+
+### Decorator
+
+**Problem:** add behaviour to an object dynamically without subclass explosion (`Coffee`, `CoffeeWithMilk`, `CoffeeWithMilkAndSugar`...). Wrappers share the component's interface and delegate.
+
+```python
+class Coffee:
+    def cost(self): return 50
+    def desc(self): return "coffee"
+class Milk:
+    def __init__(self, inner): self.inner = inner
+    def cost(self): return self.inner.cost() + 10
+    def desc(self): return self.inner.desc() + "+milk"
+class Sugar:
+    def __init__(self, inner): self.inner = inner
+    def cost(self): return self.inner.cost() + 5
+    def desc(self): return self.inner.desc() + "+sugar"
+
+order = Sugar(Milk(Coffee()))
+print(order.desc(), order.cost())        # coffee+milk+sugar 65
+```
+
+Python's `@decorator` syntax is the same idea for functions; middleware stacks (logging, auth, retry) are decorators.
+
+### Facade
+
+A simple front door to a complex subsystem: `OrderFacade.place_order()` coordinates inventory, payment and shipping so callers do not.
+
+### Composite
+
+Treat single objects and groups uniformly via a shared interface (a folder contains files and folders; both have `size()`). Recursion over a tree of parts.
+
+### Proxy
+
+A stand-in that controls access: lazy loading (virtual proxy), access control (protection proxy), caching or remote calls. Same interface as the real object.
+
+## Choosing quickly
+
+| Need | Pattern |
+| --- | --- |
+| Pick a class from input without exposing `new` | Factory |
+| Build a complex object with many options | Builder |
+| Exactly one shared instance (be careful) | Singleton / inject one instance |
+| Fit an incompatible interface | Adapter |
+| Stack optional behaviours at runtime | Decorator |
+| Hide a subsystem behind one simple API | Facade |
+| Part-whole trees | Composite |
+| Control or defer access to an object | Proxy |
+
+## Worked example
+
+A reporting module must export data as PDF, CSV or JSON, from a legacy data source, with optional encryption and compression. **Factory** chooses the exporter by format; an **Adapter** gives the legacy source the repository interface the exporters use; **Decorators** (`EncryptedExporter`, `CompressedExporter`) wrap any exporter in any order; a **Facade** `ReportService.export(format, options)` hides all of it from callers.
+
+## Pitfalls
+
+- Forcing a pattern where a function or dictionary suffices.
+- Singleton for things that are really just "created once at startup".
+- Decorator chains whose order matters but is undocumented (compress then encrypt, not the reverse).
+- Confusing Adapter (changes an interface) with Decorator (keeps the interface, adds behaviour) and Proxy (keeps the interface, controls access).
+
+## What would you choose and why?
+
+Your app needs to read configuration from files, environment variables and a remote service, in that priority order, and layer on caching and validation. Which patterns describe each part, and where would you refuse to use a singleton?
+
+## Quiz
+
+<Quiz id="sd-m27-creational-structural" tags={["lld", "patterns"]} questions={[
+  { type: "mcq", q: "Which pattern stacks optional behaviours such as milk and sugar on a coffee without a subclass per combination?", options: ["Factory", "Decorator", "Singleton", "Facade"], answer: 1, explain: "Decorators wrap a component with the same interface and add behaviour, composable in any order." },
+  { type: "mcq", q: "A third-party class exposes make_payment(cents, currency) but your code expects pay(dollars). Which pattern fits?", options: ["Adapter", "Builder", "Prototype", "Composite"], answer: 0, explain: "An adapter translates between the interface you have and the one clients expect." },
+  { type: "multi", q: "Why is Singleton often discouraged?", options: ["It hides global state and coupling", "It makes unit testing harder", "It always runs slowly", "It invites thread-safety bugs"], answer: [0, 1, 3], explain: "Prefer creating one instance at startup and injecting it." },
+  { type: "predict", q: "What does this print?", code: "order = Sugar(Milk(Coffee()))\nprint(order.desc(), order.cost())", options: ["coffee 50", "coffee+milk+sugar 65", "coffee+sugar+milk 65", "coffee+milk+sugar 50"], answer: 1, explain: "Desc is built inside-out: coffee, then +milk, then +sugar; costs 50 + 10 + 5." }
+]} />

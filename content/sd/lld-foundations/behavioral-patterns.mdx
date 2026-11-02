@@ -1,0 +1,190 @@
+---
+title: Behavioural Patterns
+track: sd
+module: lld-foundations
+order: 3
+difficulty: medium
+estMinutes: 40
+prerequisites: ["sd/lld-foundations/creational-and-structural-patterns"]
+tags: [lld, design-patterns, strategy, observer, state, command, chain-of-responsibility, template-method]
+type: lesson
+furtherReading:
+  - title: Refactoring Guru - Behavioral patterns
+    url: https://refactoring.guru/design-patterns/behavioral-patterns
+  - title: Gamma et al. - Design Patterns (catalog)
+    url: https://www.informit.com/store/design-patterns-elements-of-reusable-object-oriented-9780201633610
+  - title: Martin Fowler - Refactoring catalog
+    url: https://refactoring.com/catalog/
+---
+
+## Intuition
+
+Behavioural patterns organise **how objects collaborate and who is responsible for what at runtime**. They are the patterns that matter most in machine-coding rounds, because almost every problem (parking lot, elevator, vending machine, notifications) hides a Strategy, a State machine or an Observer.
+
+## Strategy
+
+**Problem:** several interchangeable algorithms (pricing, sorting, allocation, routing) that vary independently of the code using them. Put each behind a common interface and inject the one you want.
+
+```python
+from abc import ABC, abstractmethod
+
+class Pricing(ABC):
+    @abstractmethod
+    def fee(self, hours: int) -> int: ...
+class Hourly(Pricing):
+    def fee(self, hours): return 10 * hours
+class Flat(Pricing):
+    def fee(self, hours): return 50
+class Capped(Pricing):
+    def __init__(self, rate, cap): self.rate, self.cap = rate, cap
+    def fee(self, hours): return min(self.rate * hours, self.cap)
+
+class Garage:
+    def __init__(self, pricing: Pricing): self.pricing = pricing
+    def checkout(self, hours): return self.pricing.fee(hours)
+
+print(Garage(Hourly()).checkout(8), Garage(Flat()).checkout(8), Garage(Capped(10, 60)).checkout(8))  # 80 50 60
+```
+
+This is Open/Closed and Dependency Inversion in action: adding a "weekend" pricing means one new class.
+
+## Observer (publish-subscribe)
+
+**Problem:** when one object changes, others must react, without the subject knowing who they are.
+
+```python
+class EventBus:
+    def __init__(self): self.subs = {}
+    def subscribe(self, topic, fn): self.subs.setdefault(topic, []).append(fn)
+    def publish(self, topic, payload):
+        for fn in list(self.subs.get(topic, [])):    # copy: handlers may unsubscribe
+            fn(payload)
+
+log = []
+bus = EventBus()
+bus.subscribe("order.placed", lambda o: log.append(f"email {o}"))
+bus.subscribe("order.placed", lambda o: log.append(f"stock {o}"))
+bus.publish("order.placed", "A1")
+print(log)     # ['email A1', 'stock A1']
+```
+
+Costs: order of handlers, exceptions in one handler, memory leaks from forgotten subscriptions, and debugging "who reacted?". At system scale the same idea is a message broker.
+
+## State
+
+**Problem:** an object's behaviour depends on its state, and a growing `if state == ...` chain appears in every method. Model each state as an object (or a transition table) that decides what each action does.
+
+```python
+class VendingMachine:
+    # state -> {event -> next state}; illegal events are rejected
+    T = {
+        "idle":       {"insert_coin": "has_coin"},
+        "has_coin":   {"select": "dispensing", "refund": "idle"},
+        "dispensing": {"take_item": "idle"},
+    }
+    def __init__(self): self.state = "idle"
+    def fire(self, event):
+        nxt = self.T[self.state].get(event)
+        if nxt is None:
+            raise ValueError(f"{event} not allowed in {self.state}")
+        self.state = nxt
+        return nxt
+
+m = VendingMachine()
+print(m.fire("insert_coin"), m.fire("select"), m.fire("take_item"))   # has_coin dispensing idle
+try: m.fire("select")
+except ValueError as e: print(e)                                     # select not allowed in idle
+```
+
+A table is the simplest honest implementation; full State classes help when each state carries different behaviour and data.
+
+## Command
+
+**Problem:** encapsulate a request as an object so it can be queued, logged, retried or **undone**.
+
+```python
+class Editor:
+    def __init__(self): self.text = ""
+class Append:
+    def __init__(self, ed, s): self.ed, self.s = ed, s
+    def do(self): self.ed.text += self.s
+    def undo(self): self.ed.text = self.ed.text[:-len(self.s)]
+
+ed, history = Editor(), []
+for s in ("Hello", " world"):
+    c = Append(ed, s); c.do(); history.append(c)
+print(ed.text)               # Hello world
+history.pop().undo()
+print(ed.text)               # Hello
+```
+
+Used for undo/redo stacks, job queues, macro recording and transactional batches.
+
+## Chain of Responsibility
+
+**Problem:** several handlers may process a request; the first that can, does. Middleware pipelines, approval workflows, validation chains, logging levels.
+
+```python
+class Handler:
+    def __init__(self, nxt=None): self.nxt = nxt
+    def handle(self, amount):
+        if self.can(amount): return self.name + " approves"
+        if self.nxt: return self.nxt.handle(amount)
+        return "rejected"
+class Manager(Handler):
+    name = "manager"
+    def can(self, a): return a <= 1000
+class Director(Handler):
+    name = "director"
+    def can(self, a): return a <= 10000
+
+chain = Manager(Director())
+print(chain.handle(500), "|", chain.handle(5000), "|", chain.handle(50000))
+# manager approves | director approves | rejected
+```
+
+## Template Method
+
+Define the skeleton of an algorithm in a base class and let subclasses fill in steps (`load()`, `process()`, `save()` in a data pipeline). Reverse of Strategy: inheritance rather than composition. Prefer Strategy when you can.
+
+## Iterator, Mediator, others
+
+- **Iterator:** traverse a collection without exposing its structure (built into Python via `__iter__`).
+- **Mediator:** centralise communication between components so they do not reference each other (a chat room, an air-traffic controller).
+- **Memento:** snapshot and restore state (checkpoints), **Visitor:** add operations over a structure without changing it (rare).
+
+## Choosing quickly
+
+| Signal in the problem | Pattern |
+| --- | --- |
+| "different pricing / allocation / routing rules" | Strategy |
+| "notify multiple parties when X happens" | Observer |
+| "behaves differently depending on its status" | State |
+| "undo / redo / queue / retry requests" | Command |
+| "pass through a series of checks or approvers" | Chain of Responsibility |
+| "same steps, some steps differ" | Template Method (or Strategy) |
+
+## Worked example: a ride request
+
+`Ride` has states (`requested → matched → in_progress → completed | cancelled`) managed by a **State** table; a **Strategy** chooses the matching algorithm (nearest, highest-rated, fewest-trips); an **Observer** bus tells rider notifications, billing and analytics when the state changes; a **Chain of Responsibility** applies fare adjustments (surge, promo, cap). Four patterns, each answering a different change request, and none of them needed more than a few classes.
+
+## Pitfalls
+
+- Naming patterns without showing the problem they solve.
+- Observer with no unsubscribe, causing leaks, or with handlers that throw and break the others.
+- State machines with implicit transitions scattered across methods.
+- Undo that does not restore exact prior state (store enough information in the command).
+- Template Method hierarchies that grow brittle; favour composition.
+
+## What would you choose and why?
+
+An order has statuses (placed, paid, packed, shipped, delivered, returned), an audit trail, undoable manual edits by support staff, and several teams who want events. Which patterns map to each requirement, and what would you refuse to build until a second use case appears?
+
+## Quiz
+
+<Quiz id="sd-m27-behavioral-patterns" tags={["lld", "patterns"]} questions={[
+  { type: "mcq", q: "Pricing rules change often (hourly, flat, capped, weekend). Which pattern isolates them?", options: ["Singleton", "Strategy", "Facade", "Prototype"], answer: 1, explain: "Each rule is an interchangeable implementation behind a common interface." },
+  { type: "mcq", q: "Which pattern best supports undo/redo?", options: ["Adapter", "Command", "Builder", "Proxy"], answer: 1, explain: "Commands encapsulate an action and its inverse, so a history stack can undo them." },
+  { type: "multi", q: "Which are real risks of Observer?", options: ["Handlers that raise exceptions interrupt others", "Forgotten subscriptions leak memory", "Hard to see who reacted to an event", "It forbids more than one subscriber"], answer: [0, 1, 2], explain: "Observer allows many subscribers; its costs are error isolation, lifetime management and traceability." },
+  { type: "predict", q: "Using chain = Manager(Director()), what does chain.handle(5000) return?", code: "chain.handle(5000)", options: ["manager approves", "director approves", "rejected", "error"], answer: 1, explain: "The manager limit is 1000, so the request passes to the director whose limit is 10000." }
+]} />
