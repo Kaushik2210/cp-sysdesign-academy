@@ -1,0 +1,196 @@
+---
+title: "LLD Case Study: Parking Lot"
+track: sd
+module: lld-case-studies
+order: 1
+difficulty: medium
+estMinutes: 40
+prerequisites: ["sd/lld-foundations/behavioral-patterns"]
+tags: [lld, case-study, parking-lot, strategy, concurrency, oop]
+type: case-study
+furtherReading:
+  - title: Refactoring Guru - Strategy pattern
+    url: https://refactoring.guru/design-patterns/strategy
+  - title: Python documentation - threading.Lock
+    url: https://docs.python.org/3/library/threading.html#lock-objects
+  - title: Gamma et al. - Design Patterns (catalog)
+    url: https://www.informit.com/store/design-patterns-elements-of-reusable-object-oriented-9780201633610
+---
+
+## 1. Clarify requirements
+
+Ask, then write down:
+
+- Multiple floors; slots of types **motorcycle, car, large**. A vehicle may use a larger slot if its own size is full (policy: yes for a car in a large slot, never the reverse).
+- Entry issues a **ticket** with entry time; exit computes the **fee** and frees the slot.
+- Pricing: hourly rate per vehicle type, rounded up to whole hours (configurable later).
+- Display: free slots per floor and type.
+- Out of scope for now: payments integration, reservations, multiple gates running as separate processes. Mention thread safety for concurrent entry gates.
+
+## 2. Entities and responsibilities
+
+| Entity | Responsibility |
+| --- | --- |
+| `VehicleType` (enum) | Motorcycle, Car, Large |
+| `Slot` | Knows its type, id, whether it is free; can `assign` and `release` |
+| `Floor` | Owns slots; finds a free slot of a given size |
+| `Ticket` | Immutable record: id, vehicle plate and type, slot, entry time |
+| `PricingStrategy` | Computes fee from vehicle type and duration (Strategy) |
+| `SlotAllocator` | Chooses which free slot to give (nearest to entrance, lowest floor...), swappable (Strategy) |
+| `ParkingLot` | Orchestrates: `park(vehicle)` and `unpark(ticket_id)`; the facade used by gates |
+
+Relationships: `ParkingLot` **has** floors, a pricing strategy and an allocator (composition, injected). Nothing inherits from anything unnecessarily.
+
+## 3. Class design and code
+
+```python
+import math, threading, time
+from dataclasses import dataclass
+from enum import IntEnum
+from abc import ABC, abstractmethod
+
+class VehicleType(IntEnum):
+    MOTORCYCLE = 1
+    CAR = 2
+    LARGE = 3
+
+class Slot:
+    def __init__(self, sid: str, kind: VehicleType):
+        self.id, self.kind, self.vehicle = sid, kind, None
+    def is_free(self): return self.vehicle is None
+    def fits(self, vt: VehicleType): return self.is_free() and self.kind >= vt   # larger slot may host smaller vehicle
+
+class Floor:
+    def __init__(self, number: int, slots):
+        self.number, self.slots = number, slots
+    def free_slots(self, vt): return [s for s in self.slots if s.fits(vt)]
+
+@dataclass(frozen=True)
+class Ticket:
+    id: int
+    plate: str
+    vtype: VehicleType
+    slot_id: str
+    entry_time: float
+
+class PricingStrategy(ABC):
+    @abstractmethod
+    def fee(self, vtype: VehicleType, seconds: float) -> int: ...
+class HourlyPricing(PricingStrategy):
+    RATES = {VehicleType.MOTORCYCLE: 10, VehicleType.CAR: 20, VehicleType.LARGE: 40}
+    def fee(self, vtype, seconds):
+        hours = max(1, math.ceil(seconds / 3600))        # minimum one hour, round up
+        return self.RATES[vtype] * hours
+
+class SlotAllocator(ABC):
+    @abstractmethod
+    def choose(self, floors, vt): ...
+class LowestFloorBestFit(SlotAllocator):
+    def choose(self, floors, vt):
+        for f in sorted(floors, key=lambda f: f.number):
+            cands = f.free_slots(vt)
+            if cands:
+                return min(cands, key=lambda s: s.kind)   # smallest slot that fits: keep large ones free
+        return None
+
+class ParkingFull(Exception): pass
+
+class ParkingLot:
+    def __init__(self, floors, pricing: PricingStrategy, allocator: SlotAllocator, clock=None):
+        self.floors, self.pricing, self.allocator = floors, pricing, allocator
+        self.clock = clock or time.time
+        self._tickets, self._next_id = {}, 1
+        self._slots = {s.id: s for f in floors for s in f.slots}
+        self._lock = threading.Lock()                     # one critical section for allocate+assign
+
+    def park(self, plate: str, vt: VehicleType) -> Ticket:
+        with self._lock:
+            slot = self.allocator.choose(self.floors, vt)
+            if slot is None:
+                raise ParkingFull(f"no slot for {vt.name}")
+            slot.vehicle = plate
+            t = Ticket(self._next_id, plate, vt, slot.id, self.clock())
+            self._next_id += 1
+            self._tickets[t.id] = t
+            return t
+
+    def unpark(self, ticket_id: int) -> int:
+        with self._lock:
+            t = self._tickets.pop(ticket_id, None)
+            if t is None:
+                raise KeyError("invalid or already used ticket")
+            self._slots[t.slot_id].vehicle = None
+            return self.pricing.fee(t.vtype, self.clock() - t.entry_time)
+
+    def availability(self):
+        return {f.number: {vt.name: len(f.free_slots(vt)) for vt in VehicleType} for f in self.floors}
+
+# demo with a fake clock so the output is deterministic
+now = [0.0]
+lot = ParkingLot(
+    [Floor(1, [Slot("1A", VehicleType.MOTORCYCLE), Slot("1B", VehicleType.CAR)]),
+     Floor(2, [Slot("2A", VehicleType.LARGE)])],
+    HourlyPricing(), LowestFloorBestFit(), clock=lambda: now[0])
+
+t1 = lot.park("CAR-1", VehicleType.CAR)        # takes 1B (smallest fit on lowest floor)
+t2 = lot.park("CAR-2", VehicleType.CAR)        # 1B busy, so the large slot 2A on floor 2
+print(t1.slot_id, t2.slot_id)                  # 1B 2A
+try:
+    lot.park("CAR-3", VehicleType.CAR)
+except ParkingFull as e:
+    print("full:", e)                          # full: no slot for CAR
+now[0] = 2 * 3600 + 1                          # 2h 0m 1s later
+print(lot.unpark(t1.id))                       # 60  (3 hours x 20, rounded up)
+print(lot.availability())
+try:
+    lot.unpark(t1.id)
+except KeyError as e:
+    print("error:", e)                         # a ticket cannot be used twice
+```
+
+## 4. Why this shape
+
+- **Strategy for pricing and allocation**: both are likely to change ("weekend rates", "closest to the elevator"). New rules mean new classes, no edits to `ParkingLot` (Open/Closed, Dependency Inversion).
+- **Dataclass `Ticket` frozen**: tickets are facts; making them immutable prevents accidental edits.
+- **`fits` rule in one place**: the "larger slot may take a smaller vehicle" policy lives in `Slot`, so changing it touches one method.
+- **Injected clock**: tests do not need to sleep; any time-based logic should accept a clock.
+- **Best-fit allocation** (smallest slot that fits) preserves large slots for large vehicles: a classic fragmentation consideration to mention.
+
+## 5. Concurrency
+
+Two gates can call `park` at once. Without the lock both could pick the same free slot. The lock covers *choose and assign* as one atomic step. Alternatives to mention:
+
+- Per-floor locks (less contention, but cross-floor allocation needs care).
+- A **compare-and-set** on the slot (`assign_if_free`) with retry, or database row locks if slots live in a database.
+- At larger scale (many lots, many gates in separate processes) the lock becomes a transaction or a lease in a shared store, as in the distributed locking lesson.
+
+## 6. Extensions interviewers ask for
+
+- **New vehicle type (electric with charging slots):** add an enum value and a slot attribute; `fits` gains a capability check. If it requires editing many places, the design is too rigid.
+- **Reservations:** a `Reservation` with an expiry that holds a slot; allocation skips held slots; a sweeper releases expired ones.
+- **Multiple payment methods:** a `PaymentMethod` interface; `unpark` returns the amount, payment is a separate step.
+- **Displays and notifications:** Observer on slot state changes.
+- **Persistence:** a `TicketRepository` interface so memory can be swapped for a database.
+- **Finding the nearest slot fast:** keep a heap or sorted set of free slots per type instead of scanning; discuss complexity.
+
+## Pitfalls
+
+- A giant `ParkingLot` class doing pricing, allocation and printing.
+- Inheritance trees like `Car extends Vehicle extends Object` with no behaviour differences, instead of an enum.
+- Storing the slot choice logic as `if floor == 1`.
+- Forgetting to release the slot on every exit path, or letting a ticket be reused.
+- Floating point money.
+- Ignoring concurrent gates.
+
+## What would you choose and why?
+
+The business adds monthly passes (free entry up to 12 hours a day), a surcharge during events, and valet service where staff move cars between slots. Which of these are new strategies, which change the entities, and where does valet's moving of cars create a consistency problem with tickets?
+
+## Quiz
+
+<Quiz id="sd-m28-parking-lot" tags={["lld", "parking-lot"]} questions={[
+  { type: "mcq", q: "Why are pricing and allocation behind interfaces?", options: ["To use more classes", "They are the likely variation points; new rules should not require editing ParkingLot", "Python requires it", "To avoid tickets"], answer: 1, explain: "Strategy isolates change, honouring Open/Closed." },
+  { type: "mcq", q: "Two gates call park() simultaneously. What goes wrong without synchronisation?", options: ["Nothing", "Both may choose the same free slot and double-assign it", "Tickets print twice", "The clock stops"], answer: 1, explain: "Choose-then-assign is a check-then-act race; it must be atomic." },
+  { type: "multi", q: "Which are reasonable allocation considerations?", options: ["Prefer the smallest slot that fits to keep large slots free", "Allow a larger slot to host a smaller vehicle", "Allow a motorcycle slot to host a truck", "Make the policy swappable"], answer: [0, 1, 3], explain: "A smaller slot cannot host a larger vehicle." },
+  { type: "predict", q: "With the demo's HourlyPricing, a CAR parks for 2 hours and 1 second. What is the fee?", code: "HourlyPricing().fee(VehicleType.CAR, 2*3600+1)", options: ["20", "40", "60", "80"], answer: 2, explain: "Duration rounds up to 3 hours at 20 per hour." }
+]} />

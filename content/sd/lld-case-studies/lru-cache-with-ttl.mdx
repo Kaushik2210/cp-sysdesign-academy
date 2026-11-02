@@ -1,0 +1,171 @@
+---
+title: "LLD Case Study: LRU Cache with TTL"
+track: sd
+module: lld-case-studies
+order: 2
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/lld-foundations/behavioral-patterns", "sd/caching/eviction-policies"]
+tags: [lld, case-study, lru, cache, linked-list, hash-map, ttl, thread-safety]
+type: case-study
+furtherReading:
+  - title: Python documentation - collections.OrderedDict
+    url: https://docs.python.org/3/library/collections.html#collections.OrderedDict
+  - title: Caffeine (Java) - design of a high performance cache, eviction policies
+    url: https://github.com/ben-manes/caffeine/wiki/Design
+  - title: Redis documentation - Key eviction
+    url: https://redis.io/docs/latest/develop/reference/eviction/
+---
+
+## 1. Clarify requirements
+
+- `get(key)` returns the value or a miss; `put(key, value)` stores it.
+- Fixed **capacity**; when full, evict the **least recently used** entry. Both operations must be **O(1)**.
+- Optional **TTL** per entry (or a default): an expired entry behaves as absent.
+- Thread-safe for concurrent callers. Generic over key and value types.
+- Out of scope: persistence, distributed caching (see the caching module).
+
+## 2. The data-structure insight
+
+An LRU cache needs two things at O(1):
+
+1. **Lookup by key** → a hash map.
+2. **Maintain recency order**: move an item to "most recent" on access and drop the "oldest" on eviction → a **doubly linked list** (O(1) removal and insertion when you hold a pointer to the node).
+
+Combine them: the map's values are *pointers to list nodes*. A hit: find node by key, unlink it, relink at the head. Eviction: remove the tail node and its map entry.
+
+Python's `collections.OrderedDict` is exactly this structure (a dict plus a linked list), with `move_to_end` and `popitem(last=False)`. In an interview, first build it by hand to show you understand it; mention `OrderedDict` as the production shortcut.
+
+## 3. Hand-built LRU (the interview version)
+
+```python
+class Node:
+    __slots__ = ("key", "val", "prev", "next")
+    def __init__(self, key=None, val=None): self.key, self.val, self.prev, self.next = key, val, None, None
+
+class LRUCache:
+    def __init__(self, capacity: int):
+        if capacity <= 0: raise ValueError("capacity must be positive")
+        self.cap, self.map = capacity, {}
+        self.head, self.tail = Node(), Node()           # sentinels avoid null checks
+        self.head.next, self.tail.prev = self.tail, self.head
+    def _remove(self, n): n.prev.next, n.next.prev = n.next, n.prev
+    def _push_front(self, n):
+        n.next, n.prev = self.head.next, self.head
+        self.head.next.prev = n; self.head.next = n
+    def get(self, key):
+        n = self.map.get(key)
+        if n is None: return None
+        self._remove(n); self._push_front(n)            # mark most recently used
+        return n.val
+    def put(self, key, val):
+        n = self.map.get(key)
+        if n:
+            n.val = val; self._remove(n); self._push_front(n); return
+        if len(self.map) == self.cap:
+            lru = self.tail.prev                         # least recently used
+            self._remove(lru); del self.map[lru.key]
+        n = Node(key, val); self.map[key] = n; self._push_front(n)
+
+c = LRUCache(2)
+c.put("a", 1); c.put("b", 2)
+print(c.get("a"))        # 1  (a is now most recent)
+c.put("c", 3)            # evicts b
+print(c.get("b"), c.get("c"), c.get("a"))   # None 3 1
+```
+
+<Complexity time="O(1) get and put" space="O(capacity)" note="Sentinel head and tail nodes remove edge cases when the list is empty or has one element" />
+
+## 4. Adding TTL and thread safety
+
+Design decisions:
+
+- Store an **expiry timestamp** with each entry; check it on `get` (**lazy expiry**: no background thread needed for correctness).
+- Optionally purge expired entries in the background or opportunistically on `put`, so dead entries do not occupy capacity forever. Mention both.
+- Inject a **clock** so tests are deterministic.
+- Use a **lock** around each operation. `get` mutates recency order, so even reads need exclusive access (a read-write lock does not help here).
+
+```python
+import threading, time
+from collections import OrderedDict
+
+class TTLCache:
+    def __init__(self, capacity, default_ttl=None, clock=time.monotonic):
+        if capacity <= 0: raise ValueError("capacity must be positive")
+        self.cap, self.ttl, self.clock = capacity, default_ttl, clock
+        self.d = OrderedDict()          # key -> (value, expires_at or None); order = recency
+        self.lock = threading.Lock()
+        self.hits = self.misses = 0
+    def _expired(self, exp): return exp is not None and self.clock() >= exp
+    def get(self, key):
+        with self.lock:
+            item = self.d.get(key)
+            if item is None or self._expired(item[1]):
+                if item is not None: del self.d[key]       # lazy removal
+                self.misses += 1; return None
+            self.d.move_to_end(key)                         # most recent at the end
+            self.hits += 1; return item[0]
+    def put(self, key, value, ttl=None):
+        with self.lock:
+            ttl = self.ttl if ttl is None else ttl
+            exp = None if ttl is None else self.clock() + ttl
+            if key in self.d: self.d.move_to_end(key)
+            self.d[key] = (value, exp)
+            if len(self.d) > self.cap:
+                self._evict()
+    def _evict(self):
+        for k in [k for k, (_, e) in self.d.items() if self._expired(e)]:   # drop dead entries first
+            del self.d[k]
+        while len(self.d) > self.cap:
+            self.d.popitem(last=False)                       # then the least recently used
+
+t = [0.0]
+c = TTLCache(2, default_ttl=10, clock=lambda: t[0])
+c.put("a", 1); c.put("b", 2)
+t[0] = 5
+print(c.get("a"))          # 1
+c.put("c", 3)              # b is least recent, evicted
+print(c.get("b"))          # None
+t[0] = 20                  # everything expired
+print(c.get("a"), c.get("c"), c.hits, c.misses)   # None None 1 3
+```
+
+## 5. Design choices to discuss
+
+- **Why evict expired entries first?** They are dead weight; evicting a live LRU entry while expired ones remain lowers the hit rate for no reason.
+- **Lazy vs active expiry:** lazy is simple and cheap; active (a timer wheel or a min-heap of expiry times, as in Redis sampling) bounds memory held by never-read entries.
+- **Lock granularity:** one global lock is correct and simple, but a bottleneck under heavy contention. Options: **shard** the cache into N independent LRUs by key hash (each with its own lock; recency is then per-shard, a small accuracy loss), or approximate LRU such as CLOCK, which avoids reordering on every read (Caffeine and CPU caches use ideas like this).
+- **Cache stampede:** if many threads miss the same key, they all compute it. A `get_or_compute(key, fn)` that holds a per-key lock or shares a future solves it (see the stampede lesson).
+- **Memory by size, not count:** if values vary widely in size, the capacity should be bytes with a `weigher`.
+- **Alternatives to LRU:** LFU (frequency) handles scans better; TinyLFU/W-TinyLFU combine recency with frequency. A single large scan can flush an LRU cache, which is its known weakness.
+- **Generics and API:** return an explicit "miss" signal if `None` is a valid value (use a sentinel or a `(found, value)` result).
+
+## 6. Testing strategy
+
+- Capacity 1 edge case; put the same key twice; get of a missing key.
+- Eviction order after a mix of gets and puts.
+- TTL boundary (exactly at expiry), and an expired key does not count toward capacity pressure after cleanup.
+- Concurrency test: many threads doing random get/put; assert size never exceeds capacity and no exception.
+- Fake clock, not `sleep`.
+
+## Pitfalls
+
+- Using a list for recency (O(n) removal) or a heap (O(log n) and awkward updates).
+- Forgetting to update the map when evicting from the list.
+- Not moving the item to the front on `put` of an existing key.
+- Reading `None` as a miss when `None` is a legitimate cached value.
+- A lock that guards the map but not the list updates.
+- Sleeping in tests to check TTL.
+
+## What would you choose and why?
+
+The cache is read 99% of the time by 64 threads and the single lock shows up as the top contention point in a profiler. Compare sharding, approximate LRU (CLOCK) and a read-mostly design with batched recency updates. What accuracy do you give up in each?
+
+## Quiz
+
+<Quiz id="sd-m28-lru-cache" tags={["lld", "lru", "cache"]} questions={[
+  { type: "mcq", q: "Which combination gives O(1) get and put for LRU?", options: ["Array and binary search", "Hash map to nodes of a doubly linked list", "Min-heap by timestamp", "Singly linked list only"], answer: 1, explain: "The map finds the node in O(1); the doubly linked list reorders and evicts in O(1)." },
+  { type: "mcq", q: "Why does even get() need the lock in an LRU cache?", options: ["Reads are slow", "It reorders recency, which mutates shared structures", "The GIL requires it", "Keys might be integers"], answer: 1, explain: "A hit moves the entry to the front, so reads are writes to the list." },
+  { type: "multi", q: "Which are valid ways to reduce lock contention?", options: ["Shard the cache into independent LRUs by key hash", "Use an approximate policy such as CLOCK", "Remove the lock and hope", "Batch recency updates"], answer: [0, 1, 3], explain: "Each trades some LRU accuracy for less contention; removing the lock breaks correctness." },
+  { type: "predict", q: "Capacity 2: put(a), put(b), get(a), put(c). Which key is evicted?", code: "c = LRUCache(2); c.put('a',1); c.put('b',2); c.get('a'); c.put('c',3)", options: ["a", "b", "c", "none"], answer: 1, explain: "a was used most recently, so b is the least recently used." }
+]} />

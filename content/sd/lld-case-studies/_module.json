@@ -1,0 +1,1 @@
+{ "title": "Low-Level Design Case Studies", "level": "Level 4: Low-Level Design", "order": 28, "summary": "Machine-coding style designs worked end to end with runnable code: parking lot, LRU cache with TTL, and an elevator system." }

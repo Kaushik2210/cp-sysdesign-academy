@@ -1,0 +1,161 @@
+---
+title: "LLD Case Study: Elevator System"
+track: sd
+module: lld-case-studies
+order: 3
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/lld-foundations/behavioral-patterns", "sd/lld-case-studies/parking-lot"]
+tags: [lld, case-study, elevator, state-machine, scheduling, scan, strategy]
+type: case-study
+furtherReading:
+  - title: Operating Systems - Three Easy Pieces, disk scheduling (the SCAN/elevator algorithm)
+    url: https://pages.cs.wisc.edu/~remzi/OSTEP/file-disks.pdf
+  - title: Refactoring Guru - State pattern
+    url: https://refactoring.guru/design-patterns/state
+  - title: Refactoring Guru - Strategy pattern
+    url: https://refactoring.guru/design-patterns/strategy
+---
+
+## 1. Clarify requirements
+
+- A building with `F` floors and `E` elevators.
+- **Hall calls**: a person on a floor presses UP or DOWN. **Car calls**: a person inside presses a destination floor.
+- The system assigns hall calls to an elevator, and each elevator serves its stops efficiently.
+- Doors open at stops; capacity limits and maintenance mode are extensions.
+- Out of scope: hardware, emergency modes (list them as extensions). Simulation steps one floor per tick for testing.
+
+## 2. Entities and responsibilities
+
+| Entity | Responsibility |
+| --- | --- |
+| `Direction` (enum) | UP, DOWN, IDLE |
+| `Elevator` | Current floor, direction, pending stops; `step()` moves one tick and serves stops. Owns its movement policy |
+| `Request` | A hall call (floor + direction); car calls are just stops on a specific elevator |
+| `Dispatcher` | Receives hall calls and picks an elevator (Strategy: nearest idle, least cost, round robin) |
+| `ElevatorController` | Facade: `hall_call(floor, direction)`, `car_call(elevator_id, floor)`, `tick()` |
+
+Two **separate decisions** are worth naming: (1) **dispatch** (which elevator takes the call) and (2) **scheduling within an elevator** (in which order it visits its stops). Keeping them separate is the key design move.
+
+## 3. Scheduling within an elevator: the SCAN idea
+
+Visiting stops in request order wastes travel (up, down, up...). The **elevator algorithm (SCAN)**: keep moving in the current direction, serving every stop on the way; reverse only when no stops remain ahead. This bounds waiting and avoids starvation.
+
+The elevator keeps two sets: `up_stops` and `down_stops`.
+
+## 4. Code
+
+```python
+from enum import Enum
+from abc import ABC, abstractmethod
+
+class Direction(Enum):
+    UP, DOWN, IDLE = 1, -1, 0
+
+class Elevator:
+    def __init__(self, eid: int, floor: int = 0):
+        self.id, self.floor, self.direction = eid, floor, Direction.IDLE
+        self.stops = set()                       # floors to visit
+        self.served = []                         # log for tests: floors where doors opened
+    def add_stop(self, floor: int):
+        if floor != self.floor or self.direction != Direction.IDLE:
+            self.stops.add(floor)
+        else:
+            self.served.append(floor)            # already here: open doors immediately
+    def _ahead(self, d):
+        return [f for f in self.stops if (f - self.floor) * d.value > 0]
+    def _choose_direction(self):
+        if self.direction != Direction.IDLE and self._ahead(self.direction):
+            return self.direction                # SCAN: keep going while stops remain ahead
+        for d in (Direction.UP, Direction.DOWN):
+            if self._ahead(d):
+                if self.direction == Direction.IDLE or not self._ahead(self.direction):
+                    return d
+        return Direction.IDLE
+    def step(self):
+        self.direction = self._choose_direction()
+        self.floor += self.direction.value
+        if self.floor in self.stops:
+            self.stops.discard(self.floor)
+            self.served.append(self.floor)       # open doors here
+
+    def cost(self, floor: int, direction: Direction) -> int:
+        """Estimated ticks to serve a hall call; lower is better."""
+        dist = abs(self.floor - floor)
+        if self.direction == Direction.IDLE:
+            return dist
+        on_the_way = (floor - self.floor) * self.direction.value >= 0 and direction == self.direction
+        if on_the_way:
+            return dist                          # can pick up while passing
+        far = max((abs(s - self.floor) for s in self.stops), default=0)
+        return far + abs((self.floor + self.direction.value * far) - floor)   # finish current sweep, then turn around
+
+class Dispatcher(ABC):
+    @abstractmethod
+    def choose(self, elevators, floor, direction): ...
+class LeastCostDispatcher(Dispatcher):
+    def choose(self, elevators, floor, direction):
+        return min(elevators, key=lambda e: (e.cost(floor, direction), len(e.stops), e.id))
+
+class ElevatorController:
+    def __init__(self, elevators, dispatcher: Dispatcher):
+        self.elevators, self.dispatcher = {e.id: e for e in elevators}, dispatcher
+    def hall_call(self, floor, direction):
+        e = self.dispatcher.choose(list(self.elevators.values()), floor, direction)
+        e.add_stop(floor); return e.id
+    def car_call(self, eid, floor): self.elevators[eid].add_stop(floor)
+    def tick(self):
+        for e in self.elevators.values(): e.step()
+
+# --- simulation -------------------------------------------------------------
+a, b = Elevator(0, floor=0), Elevator(1, floor=9)
+ctl = ElevatorController([a, b], LeastCostDispatcher())
+print(ctl.hall_call(8, Direction.DOWN), ctl.hall_call(2, Direction.UP))   # 1 0  (nearest idle car each time)
+ctl.car_call(0, 5); ctl.car_call(0, 3)
+for _ in range(10): ctl.tick()
+print(a.served, a.floor, a.direction.name)     # [2, 3, 5] 5 IDLE  -> ascending sweep, no zig-zag
+print(b.served, b.floor)                       # [8] 8
+```
+
+Walk through the output: elevator 0 (at floor 0) gets the call at floor 2 and has car calls to 5 and 3. SCAN visits **2, 3, 5** in one upward sweep even though the requests arrived as 2, 5, 3.
+
+## 5. State machine view
+
+Each elevator is a small state machine: `IDLE → MOVING_UP / MOVING_DOWN → DOORS_OPEN → (MOVING... | IDLE)`. In a fuller design, make the states explicit (State pattern or transition table as in the behavioural patterns lesson) with timings: doors open for N ticks, a safety check before closing, an out-of-service state that the dispatcher skips.
+
+## 6. Design choices to discuss
+
+- **Dispatch strategies:** nearest idle car (simple), least estimated cost (shown), round robin (fair, poor latency), **destination dispatch** (passengers enter the destination at the hall, the system groups them to cut stops), and zoning (some cars serve floors 1-20, others 20-40 in tall buildings). Wrap each in the `Dispatcher` interface.
+- **Why not a global queue of requests?** Per-elevator stop sets keep each car's schedule local, so cars are independent and the controller scales to many cars.
+- **Starvation:** SCAN is fair to stops in both directions; naive "nearest first" can starve a distant call forever.
+- **Hall call direction matters:** a car going up should not stop for someone who wants to go down unless it is turning around there. The `cost` function encodes that.
+- **Concurrency:** requests arrive from many threads or devices while `tick` runs. Guard the controller with a lock, or funnel requests through a thread-safe queue consumed by the tick loop (single writer to elevator state, no locks inside elevators).
+- **Capacity and weight:** a full car should ignore hall calls (cost = infinity) and only serve car calls.
+- **Failure handling:** if an elevator goes out of service, reassign its pending hall calls through the dispatcher.
+- **Testing:** deterministic ticks with scripted requests; assert the order of `served`; property test: every request is eventually served within a bound.
+
+## 7. Extensions
+
+Priority/VIP or fire-service mode (override: go to the lobby and park), peak-time patterns (send idle cars to the lobby in the morning), energy saving, door-open-time tuning, an observer feeding floor displays, and logging each trip for analytics.
+
+## Pitfalls
+
+- A single `Elevator` class that also assigns requests.
+- Handling stops FIFO and zig-zagging.
+- Ignoring direction of hall calls.
+- Treating "idle at the requested floor" as needing to move.
+- Mutating elevator state from multiple threads without a single owner or lock.
+- Scheduling inside `step()` with O(n²) scans on huge stop sets when a sorted structure would do (mention as an optimisation).
+
+## What would you choose and why?
+
+A 60-floor tower has 8 elevators and the lobby floods at 9am with everyone going up. How do dispatch, zoning and idle-car positioning change, and which of those changes live inside the `Dispatcher` strategy versus new entities?
+
+## Quiz
+
+<Quiz id="sd-m28-elevator" tags={["lld", "elevator", "scheduling"]} questions={[
+  { type: "mcq", q: "Why does the elevator keep moving in its current direction until no stops remain ahead?", options: ["It is cheaper in energy only", "SCAN serves stops in a sweep, avoiding zig-zag travel and starvation", "Hall buttons are broken otherwise", "It simplifies the UI"], answer: 1, explain: "Sweeping in one direction serves many stops per trip and gives bounded waiting." },
+  { type: "mcq", q: "Which separation of concerns is central to the design?", options: ["UI vs database", "Dispatch (which elevator) vs scheduling (stop order within an elevator)", "Floors vs buildings", "Doors vs buttons"], answer: 1, explain: "They change independently and live behind different abstractions." },
+  { type: "multi", q: "Which are sensible extensions behind the Dispatcher interface?", options: ["Destination dispatch grouping passengers", "Zoning by floor ranges", "Ignoring hall calls from floors above 10 always", "Cost-based selection that includes direction"], answer: [0, 1, 3], explain: "These are alternative strategies; an arbitrary hard-coded exclusion is not a design." },
+  { type: "predict", q: "Elevator 0 starts at floor 0 and receives stops 2, 5, 3 in that order. In which order are doors opened?", code: "stops = {2, 5, 3}  # SCAN upward from 0", options: ["2, 5, 3", "2, 3, 5", "5, 3, 2", "3, 2, 5"], answer: 1, explain: "Moving up, the car stops at 2, then 3, then 5 regardless of request order." }
+]} />
