@@ -1,0 +1,145 @@
+---
+title: Distributed Search Architecture
+track: sd
+module: search
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/search/relevance-tf-idf-and-bm25", "sd/databases-2/sharding-and-partitioning", "sd/databases-2/replication"]
+tags: [search, elasticsearch, sharding, replication, scatter-gather, near-real-time, indexing-pipeline, reindexing]
+type: lesson
+furtherReading:
+  - title: Elasticsearch Guide - Clusters, nodes and shards
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/scalability.html
+  - title: Elasticsearch Guide - Near real-time search (refresh, flush, translog)
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/near-real-time.html
+  - title: Dean - Challenges in building large-scale information retrieval systems (WSDM 2009 keynote)
+    url: https://research.google/pubs/challenges-in-building-large-scale-information-retrieval-systems/
+---
+
+## Intuition
+
+One machine can hold and search maybe a few hundred gigabytes of index. Beyond that, or when you need more query throughput or fault tolerance, you spread the index across a cluster. Search distributes differently from a key-value store: a query has no single owner key, so it must ask **every shard** and combine the answers.
+
+## Sharding the index
+
+- The index is split into **shards**; each is a self-contained mini search index. A document goes to one shard by hashing its id (or a routing key) modulo the shard count.
+- **Primary + replicas:** each shard has one primary and N replica copies on other nodes. Replicas give fault tolerance and extra read capacity, since any copy can serve a query.
+- Fixed shard count: the number of primary shards is hard to change later (changing it reshuffles all routing), so plan ahead: aim for shards of roughly 10 to 50 GB, and avoid thousands of tiny shards (each has memory and file-handle overhead).
+
+## Query execution: scatter-gather
+
+1. A client sends the query to any node, which becomes the **coordinator**.
+2. **Scatter (query phase):** the coordinator forwards the query to one copy (primary or replica) of every shard. Each shard finds its local top `from + size` hits (ids and scores) and returns just those.
+3. **Gather (merge):** the coordinator merges the lists into the global top `size`.
+4. **Fetch phase:** it requests the actual documents (source, snippets) only for the winning ids from the shards that own them.
+
+```python
+import heapq
+
+def shard_search(shard_docs, query_terms, k):
+    """Each shard returns its local top-k (score, doc_id)."""
+    hits = [(sum(d["text"].split().count(t) for t in query_terms), d["id"]) for d in shard_docs]
+    return heapq.nlargest(k, [h for h in hits if h[0] > 0])
+
+def coordinator(shards, query, k):
+    partial = [shard_search(s, query.split(), k) for s in shards]      # scatter
+    return heapq.nlargest(k, [h for part in partial for h in part])    # gather: merge local top-k lists
+
+def route(doc_id, n_shards): return hash(doc_id) % n_shards
+
+docs = [{"id": i, "text": t} for i, t in enumerate(
+    ["raft leader", "paxos", "raft raft raft", "leader lease raft", "cache", "raft"], 1)]
+n = 3
+shards = [[] for _ in range(n)]
+for d in docs: shards[d["id"] % n].append(d)        # deterministic routing for the demo
+print([h for h in coordinator(shards, "raft", 3)])  # [(3, 3), (1, 6), (1, 4)]
+```
+
+Why each shard returns its local top `k` is enough: the global top `k` is a subset of the union of local top `k`s.
+
+**Deep pagination is costly:** page 1000 with size 10 needs every shard to produce its top 10,010 and the coordinator to merge them. Use `search_after` (cursor by the last sort values) or a scroll/point-in-time snapshot for exports instead of large offsets.
+
+**Latency is set by the slowest shard** (tail latency from the previous modules). Mitigations: replicas plus **adaptive replica selection** (send to the least loaded copy), request hedging, per-query timeouts that return partial results, and keeping shard sizes uniform.
+
+## Getting data in: near-real-time indexing
+
+- A write goes to the primary shard, is appended to a durable **translog** (write-ahead log), buffered in memory, and replicated to the replicas.
+- A periodic **refresh** (default about 1 second) makes buffered documents searchable by writing a new small segment. That is why search is **near-real-time**, not instant. Refresh less often for heavy bulk loads.
+- Background **merges** keep the segment count down; a **flush** persists segments and truncates the translog.
+- **Bulk APIs** batch many documents per request: much higher throughput than one at a time.
+
+## Keeping the index in sync with the source of truth
+
+The search index is a **derived view**. Typical patterns:
+
+| Pattern | How | Pros | Cons |
+| --- | --- | --- | --- |
+| Dual write | App writes to DB and to the index | Simple | Inconsistent when one write fails; no ordering |
+| **Change-data-capture (CDC)** | Stream DB changes (Debezium → Kafka) into an indexer | Reliable, ordered per key, replayable | More infrastructure |
+| Outbox + indexer | Transactional outbox events feed the indexer | Atomic with the business write | Needs the outbox relay |
+| Periodic batch reindex | Rebuild from the DB on a schedule | Simple and self-healing | Stale between runs, heavy |
+
+Use CDC or the outbox, make indexing **idempotent** (index by document id with a version, so replays and reordering do not regress data), and ship **deletes** too.
+
+## Reindexing without downtime
+
+Analysers, mappings and shard counts cannot be changed on a live index. Use **aliases**:
+
+1. Create `products_v2` with the new settings.
+2. Backfill it from the source (or reindex from `products_v1`) while dual-feeding live changes.
+3. Verify counts and sample queries, then atomically switch the alias `products` from `v1` to `v2`.
+4. Keep `v1` for a rollback window, then delete.
+
+Treat every search schema change as a migration like any other (expand and contract).
+
+## Architecture
+
+<Diagram kind="flow" caption="A source of truth feeds a derived search cluster; queries scatter to all shards" nodes={[
+  { id: "db", label: "Primary database", x: 0, y: 90, role: "Source of truth for products, documents, users.", failureModes: ["Schema changes break the indexer"], tradeoffs: ["Search is rebuildable from here"] },
+  { id: "cdc", label: "CDC / outbox + Kafka", x: 200, y: 90, role: "Ordered stream of changes and deletes.", failureModes: ["Lag makes search stale", "Poison messages block a partition"], tradeoffs: ["Replayable; consumers idempotent by document id and version"] },
+  { id: "idx", label: "Indexer workers", x: 400, y: 20, role: "Transform records to search documents and bulk-index them.", failureModes: ["Backpressure from a slow cluster"], tradeoffs: ["Batching raises throughput but adds latency to freshness"] },
+  { id: "coord", label: "Coordinator node", x: 400, y: 160, role: "Receives queries, scatters to shards, merges, fetches.", failureModes: ["Overload from heavy aggregations"], tradeoffs: ["Dedicated coordinating nodes isolate query load from indexing"] },
+  { id: "s1", label: "Shard 1 (primary + replicas)", x: 640, y: 20, role: "Local inverted index segments.", failureModes: ["Node loss: replica promoted"], tradeoffs: ["Replicas add read capacity and durability for storage cost"] },
+  { id: "s2", label: "Shard 2 (primary + replicas)", x: 640, y: 100, role: "Local inverted index segments.", failureModes: ["Hot shard from skewed routing"], tradeoffs: ["Hash routing evens load; custom routing co-locates tenants but risks hotspots"] },
+  { id: "s3", label: "Shard 3 (primary + replicas)", x: 640, y: 180, role: "Local inverted index segments.", failureModes: ["Slowest shard sets query latency"], tradeoffs: ["Even sizes and replica selection reduce tail latency"] },
+  { id: "app", label: "Search API", x: 200, y: 200, role: "Applies auth, filters, query rewriting, caching, and result shaping.", failureModes: ["Returns private documents if filters are missing"], tradeoffs: ["Enforce access filters server-side on every query"] }
+]} edges={[
+  { from: "db", to: "cdc" }, { from: "cdc", to: "idx" }, { from: "idx", to: "s1" }, { from: "idx", to: "s2" }, { from: "idx", to: "s3" }, { from: "app", to: "coord" }, { from: "coord", to: "s1" }, { from: "coord", to: "s2" }, { from: "coord", to: "s3" }
+]} />
+
+## Operating a search cluster
+
+- **Capacity:** on-disk index size is often roughly 1 to 1.5 times the raw text (it varies widely with analysed fields and doc values), and total storage is that multiplied by (1 + number of replicas). Memory matters: keep hot segments in the OS page cache and avoid heap pressure from huge aggregations and high-cardinality fields.
+- **Cluster health:** watch shard allocation, unassigned shards, heap, GC pauses, search and indexing latency, queue rejections, merge backlog, and refresh time.
+- **Safety:** avoid split brain with a proper quorum of master-eligible nodes (3 dedicated masters); set watermark thresholds so a nearly full disk stops accepting writes before corrupting; snapshot to object storage and **test restores**.
+- **Multi-tenancy:** index per tenant (clean isolation, shard explosion at scale) vs shared index with a tenant filter and routing key (efficient, needs strict filtering). Apply document- or field-level security for permissions.
+- **Caching:** query/filter caches for repeated filters; cache whole popular responses at the API layer with short TTLs.
+- **Alternatives:** Elasticsearch/OpenSearch (general), Solr, managed services, Postgres full-text search (good enough for modest scale and avoids a second system), and purpose-built engines (Typesense, Meilisearch) for simpler needs.
+
+## Worked example
+
+A marketplace has 200M listings (about 1 KB of searchable text each, 200 GB). Target: 3,000 queries/s peak, p99 under 150 ms, new listings searchable within 5 seconds. Plan: 12 primary shards of ~17 GB (comfortable), 2 replicas each for availability and read throughput (36 shard copies across ~12 data nodes), 3 dedicated masters, 3 coordinating nodes. Updates arrive via CDC from the listings database into Kafka and bulk-index every second. Search API applies seller visibility and region filters, caches the top 1,000 queries for 30 seconds and returns partial results if one shard times out at 120 ms. A reindex to change the analyser uses a versioned index and an alias swap.
+
+## Pitfalls
+
+- Too many small shards, or too few huge ones.
+- Treating the search cluster as the system of record without backups.
+- Dual writes without reconciliation.
+- Deep offset pagination.
+- Forgetting access control filters (data leaks through search).
+- Changing mappings in place instead of reindexing.
+- Heavy aggregations on the same nodes that serve user queries.
+
+## What would you choose and why?
+
+Your Postgres database holds 5M rows and users want typo-tolerant, ranked search. Would you add Elasticsearch, use Postgres full-text search with trigram indexes, or adopt a lightweight engine? Name the signals (data size, query features, team skills, freshness needs) that would make you change your answer.
+
+## Quiz
+
+<Quiz id="sd-m14-distributed-search" tags={["search", "sharding", "scatter-gather"]} questions={[
+  { type: "mcq", q: "Why does each shard return only its local top k hits to the coordinator?", options: ["Shards cannot return more", "The global top k is always contained in the union of the local top k lists", "To save disk", "Because replicas require it"], answer: 1, explain: "Any global top-k document must be in the top k of its own shard." },
+  { type: "mcq", q: "Why is search 'near real time'?", options: ["Network latency", "New documents become searchable only after a periodic refresh writes a new segment", "Indexes are read-only", "Replicas are slow"], answer: 1, explain: "Buffered documents are searchable after the refresh interval, about a second by default." },
+  { type: "multi", q: "Which approaches keep a search index in sync with a database reliably?", options: ["CDC into a message stream with idempotent indexers", "Transactional outbox events consumed by an indexer", "Application dual writes with no reconciliation", "Periodic full reindex as a safety net"], answer: [0, 1, 3], explain: "Dual writes without reconciliation drift when one write fails." },
+  { type: "mcq", q: "How do you change an analyser on a live index with zero downtime?", options: ["Edit the mapping in place", "Build a new versioned index, backfill and dual-feed it, then atomically switch an alias", "Delete the index during low traffic", "Restart the cluster"], answer: 1, explain: "Aliases make the cutover atomic and reversible." }
+]} />

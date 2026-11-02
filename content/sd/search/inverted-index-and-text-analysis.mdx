@@ -1,0 +1,152 @@
+---
+title: Inverted Indexes and Text Analysis
+track: sd
+module: search
+order: 1
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/databases-1/indexes-and-query-plans"]
+tags: [search, inverted-index, tokenization, stemming, postings, boolean-queries, lucene]
+type: lesson
+furtherReading:
+  - title: Manning, Raghavan, Schutze - Introduction to Information Retrieval, chapters 1 and 2
+    url: https://nlp.stanford.edu/IR-book/
+  - title: Apache Lucene - Core documentation (analysis and index file formats)
+    url: https://lucene.apache.org/core/
+  - title: Elasticsearch Guide - Text analysis
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/analysis.html
+---
+
+## Intuition
+
+A relational index answers "find the row whose id is 42" or "all rows with price between 10 and 20". It cannot cheaply answer "all documents that mention *distributed* and *consensus*". Scanning every document per query is far too slow at scale. A search engine flips the data: instead of `document → words`, it stores `word → documents`. That is the **inverted index**, the same structure as the index at the back of a book.
+
+## The inverted index
+
+For each distinct **term** keep a **postings list**: the sorted ids of documents containing it (often with positions and counts).
+
+```
+docs: 1 "raft elects a leader"
+      2 "paxos and raft are consensus protocols"
+      3 "a leader holds a lease"
+
+raft      -> [1, 2]
+leader    -> [1, 3]
+consensus -> [2]
+lease     -> [3]
+```
+
+A query becomes set operations on sorted lists:
+
+- `raft AND leader` → intersect `[1,2]` and `[1,3]` = `[1]`.
+- `raft OR lease` → union = `[1,2,3]`.
+- `raft AND NOT leader` → `[2]`.
+
+Intersection of sorted lists is a linear **merge** (two pointers), costing `O(|a| + |b|)`; with **skip pointers** or galloping search you can jump over long runs, which makes short-list-against-long-list queries fast. Start with the rarest term.
+
+```python
+import re
+from collections import defaultdict
+
+STOP = {"a", "an", "the", "and", "are", "of", "is", "in"}
+
+def analyze(text):
+    """Lowercase, split on non-letters, drop stop words, crude suffix stemming."""
+    out = []
+    for tok in re.findall(r"[a-z0-9]+", text.lower()):
+        if tok in STOP: continue
+        for suf in ("ing", "es", "s"):
+            if tok.endswith(suf) and len(tok) - len(suf) >= 3:
+                tok = tok[:-len(suf)]; break
+        out.append(tok)
+    return out
+
+class Index:
+    def __init__(self):
+        self.post = defaultdict(list)            # term -> sorted doc ids
+        self.docs = {}
+    def add(self, doc_id, text):                 # ids are added in increasing order
+        self.docs[doc_id] = text
+        for t in set(analyze(text)):
+            self.post[t].append(doc_id)
+    def _intersect(self, a, b):
+        i = j = 0; out = []
+        while i < len(a) and j < len(b):
+            if a[i] == b[j]: out.append(a[i]); i += 1; j += 1
+            elif a[i] < b[j]: i += 1
+            else: j += 1
+        return out
+    def search_and(self, query):
+        terms = analyze(query)
+        lists = sorted((self.post.get(t, []) for t in terms), key=len)   # rarest first
+        if not lists: return []
+        res = lists[0]
+        for l in lists[1:]:
+            res = self._intersect(res, l)
+            if not res: break
+        return res
+
+ix = Index()
+for i, t in enumerate(["Raft elects a leader", "Paxos and Raft are consensus protocols", "A leader holds a lease"], 1):
+    ix.add(i, t)
+print(dict(ix.post)["raft"], dict(ix.post)["leader"])   # [1, 2] [1, 3]
+print(ix.search_and("raft leader"), ix.search_and("raft protocols"), ix.search_and("raft lease"))   # [1] [2] []
+```
+
+## Text analysis: from raw text to terms
+
+The same analysis chain must run at **index time** and **query time**, or terms will not match.
+
+1. **Character filtering**: strip HTML, normalise Unicode (accents, full-width characters).
+2. **Tokenisation**: split into tokens. Easy for English (whitespace and punctuation), hard for Chinese and Japanese (no spaces: use dictionary or n-gram tokenisers) and for compounds in German.
+3. **Lowercasing and accent folding**: `Café` matches `cafe` (a choice: sometimes accents matter).
+4. **Stop-word removal**: drop very common words (`the`, `of`). Modern engines often keep them (cheap, and needed for phrases like "to be or not to be").
+5. **Stemming or lemmatisation**: reduce `running`, `runs`, `ran` toward `run`. Stemmers (Porter) chop suffixes quickly; lemmatisers use a dictionary and are more accurate. Gains **recall** (finds more) and can lose **precision** (`university` and `universe` stem together).
+6. **Synonyms and expansion**: `tv` ↔ `television`, applied at query time (flexible, no reindex) or index time.
+
+Trade-off to name: aggressive analysis increases recall and lowers precision. Choose per field: exact fields (ids, emails, SKUs) are indexed as a single **keyword** term with no analysis; free-text fields get the full chain.
+
+## Beyond boolean: phrases, fields, and fuzziness
+
+- **Phrase queries** ("leader election") need **positions** in postings: check the terms appear adjacent.
+- **Field-level indexes**: title, body, tags are indexed separately so title matches can be boosted.
+- **Prefix and wildcard**: a sorted term dictionary (a trie or finite-state transducer in Lucene) makes `lead*` a range scan over terms. Leading wildcards (`*ader`) are expensive.
+- **Fuzzy matching**: find terms within an edit distance of 1 or 2 (`consenus` → `consensus`) using Levenshtein automata over the term dictionary, or n-gram indexes.
+- **Filters** (price range, in stock, category) are exact and do not need scoring; engines use bitsets or doc-values columns and combine them with the text query.
+
+## Index structure and storage
+
+Production indexes (Lucene, used inside Elasticsearch, OpenSearch and Solr) are built from immutable **segments**:
+
+- New documents are buffered in memory, then flushed as a new small segment. Segments are **never modified**; deletes are marked in a bitmap and applied when segments **merge** in the background into larger ones.
+- Postings are **compressed** (delta-encode the sorted doc ids, then bit-pack or use variable-byte encoding), so large indexes fit in the OS page cache.
+- A **term dictionary** maps term → postings location; a **doc-values** column store keeps per-document fields for sorting and aggregations.
+- A query runs against every segment and merges the results.
+
+Immutability is why search engines write fast, cache well and are crash-safe, and also why updating a document is really "delete the old + add the new".
+
+## Worked example
+
+A help centre has 2 million articles. The index stores `title` (boosted), `body`, `tags` (keyword) and `updated_at`. A user types `reset 2fa phone`. The analyser lowercases and stems to `reset`, `2fa`, `phone`; the engine intersects postings (rarest first: `2fa`), applies a filter `language:en`, scores matches (next lesson), and returns the top 10 with highlighted snippets. Latency is a few milliseconds because it touches only the postings of three terms, not 2 million documents.
+
+## Pitfalls
+
+- Different analysers at index and query time.
+- Indexing structured identifiers as analysed text (the SKU `AB-12` split into two tokens).
+- Over-stemming or removing stop words and breaking phrase queries.
+- Leading wildcards on large indexes.
+- Treating the search index as the primary database: it is a derived, rebuildable view (see CQRS).
+- Ignoring language: one analyser for every language.
+
+## What would you choose and why?
+
+You must search product names that mix English and Japanese, SKUs like `ZX-900/B`, and user typos. Which fields get which analysers, what do you do about tokenising Japanese text, and how do you keep exact SKU lookups perfectly precise?
+
+## Quiz
+
+<Quiz id="sd-m14-inverted-index" tags={["search", "inverted-index"]} questions={[
+  { type: "mcq", q: "What does an inverted index store?", options: ["For each document, its words", "For each term, the list of documents containing it", "Only document titles", "A hash of each query"], answer: 1, explain: "Mapping term to postings is what makes lookups fast without scanning documents." },
+  { type: "mcq", q: "Why intersect the rarest term's postings list first?", options: ["It is alphabetical", "The result can never be larger than the shortest list, so later merges do less work", "It guarantees ranking", "It avoids stemming"], answer: 1, explain: "Starting with the shortest list bounds the work and can stop early on an empty result." },
+  { type: "multi", q: "Which statements about Lucene-style segments are true?", options: ["Segments are immutable once written", "Deletes are recorded and applied at merge time", "Updating a document edits it in place in its segment", "Background merges combine small segments into larger ones"], answer: [0, 1, 3], explain: "An update is a delete plus an add in a new segment." },
+  { type: "predict", q: "With the demo index, what does ix.search_and('raft lease') return?", code: "ix.search_and('raft lease')", options: ["[1]", "[2]", "[3]", "[]"], answer: 3, explain: "raft is in docs 1 and 2; lease is only in doc 3; the intersection is empty." }
+]} />

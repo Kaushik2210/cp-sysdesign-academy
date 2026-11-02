@@ -1,0 +1,125 @@
+---
+title: Relevance Ranking with TF-IDF and BM25
+track: sd
+module: search
+order: 2
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/search/inverted-index-and-text-analysis"]
+tags: [search, ranking, tf-idf, bm25, relevance, precision, recall, ndcg, learning-to-rank]
+type: lesson
+furtherReading:
+  - title: Robertson and Zaragoza - The Probabilistic Relevance Framework, BM25 and Beyond
+    url: https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf
+  - title: Elastic blog - Practical BM25 (how shards, scoring and the b and k1 parameters work)
+    url: https://www.elastic.co/blog/practical-bm25-part-2-the-bm25-algorithm-and-its-variables
+  - title: Manning, Raghavan, Schutze - Introduction to Information Retrieval, chapters 6 to 8
+    url: https://nlp.stanford.edu/IR-book/
+---
+
+## Intuition
+
+Boolean matching returns *every* document containing the words, in no useful order. A query like `database` may match a million documents. Users read the first page. Search quality is mostly **ranking**: put the most relevant results first. Classic ranking rests on two observations:
+
+1. A document that mentions a term **more often** is probably more about it (**term frequency**, TF).
+2. A term that appears in **few documents** is more informative than one that appears in nearly all (**inverse document frequency**, IDF). `the` tells you nothing; `paxos` tells you a lot.
+
+## TF-IDF
+
+For a term `t` in document `d` within a collection of `N` documents:
+
+`tfidf(t, d) = tf(t, d) × idf(t)` where `idf(t) = log(N / df(t))` and `df(t)` is the number of documents containing `t`.
+
+A document's score for a query is the sum over query terms. TF is usually dampened (use `1 + log(tf)`), because ten mentions are not ten times more relevant than one.
+
+## BM25: the practical standard
+
+BM25 (used by default in Lucene, Elasticsearch, OpenSearch) improves TF-IDF in two ways: TF **saturates** (extra repetitions help less and less), and scores are **normalised by document length** (a long document mentions words by chance more often).
+
+`score(d, q) = Σ over t in q of  idf(t) × ( tf × (k1 + 1) ) / ( tf + k1 × (1 - b + b × |d| / avgdl) )`
+
+- `k1` (typically 1.2): how quickly TF saturates. Larger means more weight on repeats.
+- `b` (typically 0.75): how strongly to penalise length. `b = 0` ignores length; `b = 1` fully normalises.
+- `|d|` is the document length in terms; `avgdl` the average length.
+- A common smoothed IDF: `idf = ln(1 + (N - df + 0.5) / (df + 0.5))`, which stays positive.
+
+```python
+import math
+from collections import Counter
+
+DOCS = {
+    1: "raft elects a leader and the leader replicates the log",
+    2: "paxos is a consensus protocol",
+    3: "raft raft raft raft raft raft raft raft raft raft raft raft is a protocol " + "filler " * 40,
+    4: "leader election in raft uses randomized timeouts",
+}
+tokens = {i: t.split() for i, t in DOCS.items()}
+N = len(tokens)
+avgdl = sum(len(v) for v in tokens.values()) / N
+df = Counter(t for toks in tokens.values() for t in set(toks))
+
+def idf(t): return math.log(1 + (N - df[t] + 0.5) / (df[t] + 0.5))
+
+def bm25(doc_id, query, k1=1.2, b=0.75):
+    toks, score = tokens[doc_id], 0.0
+    tf = Counter(toks)
+    for t in query.split():
+        if t not in tf: continue
+        norm = tf[t] + k1 * (1 - b + b * len(toks) / avgdl)
+        score += idf(t) * tf[t] * (k1 + 1) / norm
+    return score
+
+ranked = sorted(DOCS, key=lambda d: -bm25(d, "raft leader"))
+print(ranked)                                                  # [1, 4, 3, 2]
+print([round(bm25(d, "raft leader"), 2) for d in ranked])      # doc 3 repeats "raft" 12 times but loses: saturation + length penalty
+```
+
+Document 3 contains `raft` twelve times but is long and has no `leader`; BM25 ranks the two short documents about both terms above it. Plain term counting would have ranked it first.
+
+## Evaluating relevance
+
+You cannot improve what you do not measure. Build a **judged set**: queries paired with documents graded by humans (0 = irrelevant, 1 = ok, 2 = great), or derived from clicks (noisy and biased towards top positions).
+
+- **Precision@k**: of the top k results, how many are relevant.
+- **Recall**: of all relevant documents, how many were returned.
+- **MRR** (mean reciprocal rank): `1 / rank of the first relevant result`, good for "find one answer" queries.
+- **NDCG@k**: uses graded relevance and discounts lower positions: `DCG = Σ (2^rel_i − 1) / log2(i + 1)`, normalised by the best possible ordering. The standard for ranked lists.
+- Online: click-through rate, reformulation rate, "no results" rate, time to first click, and A/B tests.
+
+## Going beyond lexical scoring
+
+- **Field boosts**: a title match counts 3x a body match.
+- **Signals** beyond text: freshness, popularity, authority (PageRank-style link analysis), personalisation, location, price and stock. Combine with a **function score** or learn the combination.
+- **Learning to rank (LTR)**: a model (gradient-boosted trees, neural) re-orders the top few hundred candidates using many features. Two stages is standard: cheap **retrieval** (BM25) selects ~1,000 candidates, expensive **re-ranking** orders the best ~100.
+- **Semantic / vector search**: encode queries and documents as embeddings and find nearest neighbours (approximate indexes such as HNSW). It finds meaning (`car` ~ `automobile`) that keyword matching misses, but is weaker at exact names, codes and rare terms. **Hybrid search** runs both and fuses the rankings (for example reciprocal rank fusion). See the Applied AI roadmap phase.
+- **Query understanding**: spelling correction, synonyms, intent classification, entity recognition, and rewriting.
+
+<Callout type="note" title="Relevance is a product decision">
+There is no universally correct ranking. A legal search wants high recall; a shopping search wants popular in-stock items first; a code search wants exact identifiers. Agree on the success metric with the product owner before tuning.
+</Callout>
+
+## Worked example
+
+A shop's search for `red running shoes` returns old clearance items first. Diagnosis with the judged set: BM25 on the description field over-rewards long, keyword-stuffed listings. Fixes tried and measured by NDCG@10: raise the title boost (+4%), raise `b` to penalise length more strongly (+2%), add a popularity and in-stock signal via function score (+7%), and finally an LTR re-ranker over the top 200 (+5% more). Each change is accepted only if NDCG improves and an online A/B shows better conversion.
+
+## Pitfalls
+
+- Tuning against a handful of favourite queries.
+- Comparing BM25 scores across different queries or indexes (scores are not comparable).
+- Per-shard IDF statistics that differ, skewing scores in small shards (solved by global stats or enough data per shard).
+- Over-boosting recency or popularity so results become a feedback loop.
+- Replacing keyword search with vectors and losing exact matches.
+- No evaluation set, so changes are judged by anecdote.
+
+## What would you choose and why?
+
+Users search an internal knowledge base for error codes like `E1042` and also for vague questions like "why is my deploy slow". Which retrieval (BM25, vectors, hybrid), which evaluation metrics, and what do you do when the two query types need opposite behaviour?
+
+## Quiz
+
+<Quiz id="sd-m14-bm25" tags={["search", "ranking", "bm25"]} questions={[
+  { type: "mcq", q: "What do the IDF component and BM25's length normalisation each do?", options: ["IDF boosts common words; normalisation boosts long documents", "IDF boosts rare, informative terms; normalisation prevents long documents winning just by containing more words", "Both remove stop words", "IDF measures freshness"], answer: 1, explain: "IDF weights term informativeness; normalisation compensates for longer documents mentioning terms by chance." },
+  { type: "mcq", q: "Which metric uses graded relevance and discounts lower ranks?", options: ["Precision@k", "NDCG@k", "Recall", "Click count"], answer: 1, explain: "NDCG gives more credit to highly relevant results appearing early." },
+  { type: "multi", q: "Why use a two-stage retrieve-then-rerank pipeline?", options: ["The cheap stage narrows millions of documents to a few hundred", "The expensive model runs only on a small candidate set", "Re-ranking removes the need for an index", "It keeps latency and cost manageable"], answer: [0, 1, 3], explain: "Expensive models cannot score the whole collection per query." },
+  { type: "mcq", q: "A hybrid search combines BM25 with vector search mainly because:", options: ["Vectors are faster", "Vectors capture meaning while BM25 handles exact terms and rare identifiers", "BM25 cannot rank", "It avoids needing a judged set"], answer: 1, explain: "Each covers the other's weakness; fusing the rankings gives better overall quality." }
+]} />
