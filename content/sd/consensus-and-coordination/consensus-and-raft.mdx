@@ -1,0 +1,236 @@
+---
+title: Consensus and Raft
+track: sd
+module: consensus-and-coordination
+order: 1
+difficulty: hard
+estMinutes: 50
+prerequisites: ["sd/distributed-theory/failure-detection-leases-and-fencing", "sd/distributed-theory/consistency-models-and-quorums"]
+tags: [consensus, raft, replicated-state-machine, leader-election, log-replication, quorum, etcd]
+type: lesson
+furtherReading:
+  - title: Ongaro and Ousterhout, In Search of an Understandable Consensus Algorithm (the Raft paper)
+    url: https://raft.github.io/raft.pdf
+  - title: The Raft consensus algorithm, interactive visualisation and implementations
+    url: https://raft.github.io/
+  - title: Fischer, Lynch and Paterson, Impossibility of Distributed Consensus with One Faulty Process
+    url: https://groups.csail.mit.edu/tds/papers/Lynch/jacm85.pdf
+  - title: etcd documentation (a production Raft-based store)
+    url: https://etcd.io/docs/
+---
+
+## Intuition
+
+The previous module ended on a hard question: how can several machines agree on *one* leader, *one* order of writes, or *one* value, when any of them may crash and any message may be late? Quorums and fencing tokens stop damage, but they do not by themselves choose a single answer. **Consensus** is the problem of making a group of nodes agree on a value in a way that survives failures, and a consensus **protocol** is the algorithm that does it.
+
+Consensus is the foundation underneath many systems you rely on: the metadata store that holds a Kubernetes cluster's state (etcd), the lock service behind many large systems (Chubby, ZooKeeper), the replicated logs of distributed SQL databases, and leader election in practically every replicated service. If you need *one machine's behaviour* from *several machines*, consensus is how.
+
+## The idea: a replicated state machine
+
+Suppose every node starts in the same state and runs the same deterministic program. If they all apply the **same commands in the same order**, they all end in the same state, and any of them can answer reads or take over from a failed peer. That is a **replicated state machine**. The hard part is therefore reduced to one thing: agree on the **order of commands**, a shared **log**.
+
+```text
+client -> leader: "set x = 5"
+leader appends to its log, copies the entry to followers
+once a MAJORITY has stored it, the entry is COMMITTED
+every node applies committed entries, in log order, to its state machine
+```
+
+## What a consensus protocol promises
+
+- **Agreement (safety):** no two nodes decide different values.
+- **Validity:** the decided value was proposed by some node (it is not invented).
+- **Termination (liveness):** every working node eventually decides.
+
+The FLP result says that in a fully asynchronous network, where message delay has no bound, no deterministic protocol can guarantee all three if even one node may crash. Practical protocols such as Raft and Paxos choose **safety always, liveness when the network behaves**: they never give a wrong answer, but during a prolonged partition or a very unlucky timing pattern they may stall for a while.
+
+## Why majorities
+
+Consensus protocols require a **majority (quorum)** of nodes to agree on each step. Two majorities of the same set always overlap in at least one node, so a decision made by one majority is visible to any later majority, and the group cannot "forget" it. With `n = 2f + 1` nodes a majority is `f + 1`, so the cluster survives **`f` crashed nodes**:
+
+| nodes | majority | failures tolerated |
+| --- | --- | --- |
+| 3 | 2 | 1 |
+| 5 | 3 | 2 |
+| 7 | 4 | 3 |
+
+Even sizes add cost without adding tolerance: 4 nodes need a majority of 3 and still tolerate only 1 failure, so clusters use odd sizes. More nodes mean more failures tolerated but slower writes (more acknowledgements), which is why 3 or 5 is typical.
+
+## Raft in one page
+
+Raft was designed to be understandable. It splits consensus into three sub-problems: **leader election**, **log replication** and **safety**.
+
+### Roles and terms
+
+Every node is a **follower**, a **candidate** or a **leader**. Time is divided into **terms**, numbered with increasing integers. Each term begins with an election; there is at most one leader per term. A term number acts as a logical clock: a node that sees a higher term immediately steps down and updates its own.
+
+### Leader election
+
+Followers expect a periodic **heartbeat** (an empty append message) from the leader. If a follower hears nothing for its **election timeout**, it assumes the leader failed: it increments the term, becomes a candidate, votes for itself and asks the others for votes (`RequestVote`). Each node grants **one vote per term**, first come first served. A candidate that collects votes from a majority becomes the leader and immediately sends heartbeats to assert itself.
+
+If several followers time out at nearly the same moment, they split the vote and nobody reaches a majority. The term simply ends with no leader and a new election starts. To make that rare, every node picks its election timeout **at random** from a range (the Raft paper suggests 150 to 300 ms), so one node usually times out first and wins before the others even notice.
+
+### Log replication
+
+The leader appends each client command to its log and sends `AppendEntries` to followers. Each message carries the index and term of the entry just before the new ones, and a follower accepts it only if its own log matches at that position. If not, the follower refuses, and the leader backs up and resends until the logs agree; from then on the follower's log is a copy of the leader's. An entry is **committed** once the leader has stored it on a majority; the leader then tells the followers, and everyone applies it to their state machine.
+
+<Diagram kind="mermaid" caption="A write in Raft: the leader needs acknowledgements from a majority (itself plus one of two followers) before committing and replying" code={`sequenceDiagram
+  participant C as Client
+  participant L as Leader
+  participant F1 as Follower 1
+  participant F2 as Follower 2
+  C->>L: set x = 5
+  L->>L: append to log (index 7, term 3)
+  L->>F1: AppendEntries (index 7)
+  L->>F2: AppendEntries (index 7)
+  F1-->>L: success
+  Note over L: majority stored (L and F1), entry 7 is committed
+  L->>L: apply to state machine
+  L-->>C: ok
+  F2-->>L: success (late)
+  L->>F1: next heartbeat tells F1 that 7 is committed`} />
+
+### Safety: why a committed entry is never lost
+
+Raft adds two rules that make this work:
+
+- **Election restriction:** a node votes for a candidate only if the candidate's log is **at least as up to date** as its own (compare the last entry's term, then its index). Since a committed entry is on a majority, and any winning candidate collected a majority of votes, the winner must contain every committed entry.
+- **Commit rule:** a leader only counts entries from its **own term** as committed by counting replicas; earlier-term entries become committed indirectly once a later entry of the current term is committed.
+
+Together these guarantee **leader completeness**: any leader has all committed entries, so committed entries are never overwritten.
+
+## Reads, membership and performance
+
+- **Reads:** reading from the leader's state machine without checking could return stale data if the node has been deposed without knowing it. Raft systems either run reads through the log, confirm leadership with a heartbeat round (a "read index"), or use time-based **leader leases** (which rely on bounded clock drift). Reads served by followers are cheaper but may be stale.
+- **Membership changes:** adding or removing nodes must never create two disjoint majorities. Raft uses **joint consensus** (or one-at-a-time changes), so old and new configurations overlap during the switch.
+- **Throughput:** the leader is the bottleneck. Real systems batch many commands per message, pipeline replication, and write the log to disk with group commit. Each commit costs about one network round trip plus a durable disk write on a majority.
+- **Log growth:** nodes periodically take a **snapshot** of the state machine and discard the log up to that point; a very slow follower is brought up to date by sending it the snapshot.
+
+## Leader election, simulated
+
+The simulation below runs repeated Raft-style elections for 5 nodes after a leader failure, with one-way latency between 5 and 15 ms and a base election timeout of 150 ms plus a random **spread**. A split vote ends the round and everyone retries with new random timeouts. Elections that never produce a leader within 20 rounds are reported as failures.
+
+<CodeRunner language="python" code={`import random
+
+MAX_ROUNDS = 20
+
+def election(n, base, spread, rng, lat=(5, 15)):
+    """Repeat election rounds until some node gets a majority. Returns (rounds, total_time_ms)."""
+    need = n // 2 + 1
+    total = 0.0
+    rounds = 0
+    while rounds < MAX_ROUNDS:
+        rounds += 1
+        timeouts = sorted((base + rng.random() * spread, i) for i in range(n))
+        voted = {}                     # node -> time it cast its vote in this round (self-vote or for a candidate)
+        votes = {}                     # candidate -> list of times the votes reached it
+        events = []                    # (time, kind, node, from)
+        for t, i in timeouts:
+            events.append((t, 0, i, i))                      # kind 0: timeout fires
+        events.sort()
+        # process events in time order; requests and replies are scheduled dynamically
+        import heapq
+        heap = list(events); heapq.heapify(heap)
+        winner = None
+        while heap and winner is None:
+            t, kind, node, src = heapq.heappop(heap)
+            if kind == 0:                                    # timeout: become candidate if no vote cast yet
+                if node in voted: continue
+                voted[node] = t                              # votes for itself
+                votes.setdefault(node, []).append(t)
+                for j in range(n):
+                    if j != node:
+                        heapq.heappush(heap, (t + rng.uniform(*lat), 1, j, node))   # RequestVote arrives
+            elif kind == 1:                                  # request arrives at node from candidate src
+                if node not in voted:
+                    voted[node] = t
+                    heapq.heappush(heap, (t + rng.uniform(*lat), 2, src, node))    # vote reply travels back
+            else:                                            # a vote reaches candidate 'node'
+                votes[node].append(t)
+                if len(votes[node]) >= need:
+                    winner = (node, t)
+        if winner is not None:
+            return rounds, total + winner[1]
+        # split vote: the round times out and everyone tries again after a fresh random timeout
+        total += base + spread + 2 * lat[1]
+    return None, None                                        # no leader after MAX_ROUNDS rounds: livelock
+
+def study(n, base, spread, trials=3000, seed=5):
+    rng = random.Random(seed)
+    rs, ts, split, failed = [], [], 0, 0
+    for _ in range(trials):
+        r, t = election(n, base, spread, rng)
+        if r is None:
+            failed += 1
+            continue
+        rs.append(r); ts.append(t)
+        if r > 1: split += 1
+    ok = len(ts)
+    if ok == 0:
+        return None
+    ts.sort()
+    return sum(rs) / ok, sum(ts) / ok, ts[int(0.99 * ok)], 100 * split / ok, 100 * failed / trials
+
+print("5 nodes, base timeout 150 ms, one-way latency 5-15 ms, 3000 elections after a leader failure (give up after 20 rounds)")
+print("  timeout spread   avg rounds   avg time to leader   99th pct time   split-vote elections   never elected a leader")
+for spread in (0, 5, 20, 50, 150):
+    res = study(5, 150, spread)
+    if res is None:
+        print(f"  {spread:>10} ms   {'-':>10}   {'-':>18}   {'-':>13}   {'-':>20}   {100.0:>20.1f}%")
+    else:
+        r, t, p99, sp, fl = res
+        print(f"  {spread:>10} ms   {r:>10.3f}   {t:>15.0f} ms   {p99:>10.0f} ms   {sp:>19.1f}%   {fl:>20.1f}%")
+`} />
+
+A local run with 3,000 elections per row printed: with a spread of **0 ms** or **5 ms** no election ever produced a leader within 20 rounds (100% livelock, because all nodes time out before any request arrives and each votes for itself); with **20 ms**, 55.4% of elections split the vote and the average time to a leader was 421 ms; with **50 ms**, 11.8% split and 208 ms; and with **150 ms**, the range the Raft paper recommends, only 1.5% split and the average was 200 ms with a 99th percentile of 517 ms. Randomising the timeout over a range comparable to or larger than the network delay is what makes elections finish.
+
+<Diagram kind="flow" caption="What a Raft cluster does when the leader fails" nodes={[
+  { id: "hb", label: "Heartbeats stop", x: 0, y: 80, role: "Followers notice silence for longer than their election timeout.", failureModes: ["Timeout too short: needless elections during GC pauses", "Timeout too long: slow failover"], tradeoffs: ["Typical timeouts are hundreds of milliseconds to seconds"] },
+  { id: "cand", label: "A follower becomes candidate", x: 200, y: 80, role: "Increments the term, votes for itself, requests votes.", failureModes: ["Split votes when several time out together"], tradeoffs: ["Randomised timeouts make this rare"] },
+  { id: "vote", label: "Majority votes", x: 410, y: 80, role: "Voters grant one vote per term and only to a candidate with an up-to-date log.", failureModes: ["Minority partition can never win", "Stale candidate rejected by the log check"], tradeoffs: ["Safety first: no leader beats availability on the minority side"] },
+  { id: "lead", label: "New leader, new term", x: 620, y: 80, role: "Sends heartbeats and resumes replicating and committing entries.", failureModes: ["Old leader may still believe it leads until it sees the higher term"], tradeoffs: ["Clients retry and may need idempotent commands"] }
+]} edges={[
+  { from: "hb", to: "cand" }, { from: "cand", to: "vote" }, { from: "vote", to: "lead", label: "majority" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Using consensus (Raft-style) in a design" rows={[
+  { option: "Consensus-replicated state (3 or 5 nodes)", pros: "Linearizable, survives f failures out of 2f + 1, no split brain", cons: "Writes pay a majority round trip plus disk sync; throughput bounded by the leader", chooseWhen: "Metadata, configuration, locks, leader election, coordination" },
+  { option: "Leader plus asynchronous replicas", pros: "Fast writes, simple", cons: "Failover can lose acknowledged writes; needs fencing against two leaders", chooseWhen: "High write throughput where a small loss window is acceptable" },
+  { option: "Leaderless quorums (Dynamo style)", pros: "No election, always writable, tunable", cons: "Not linearizable; conflicts need resolution", chooseWhen: "Highly available key-value data with weak consistency needs" },
+  { option: "Read from the leader", pros: "Linearizable reads", cons: "Leader load; needs leadership confirmation or a lease", chooseWhen: "Reads that must see the latest write" },
+  { option: "Read from followers", pros: "Scales reads", cons: "May be stale", chooseWhen: "Dashboards, caches, reads that tolerate lag" }
+]} />
+
+## Failure modes
+
+- **Leader crash:** a short unavailability while a new leader is elected (hundreds of milliseconds to seconds).
+- **Minority partition:** the minority side cannot elect a leader or commit, so it stalls instead of diverging.
+- **Disk stalls:** a slow disk on the leader looks like a failed leader and triggers elections; consensus is sensitive to disk latency.
+- **Majority loss:** with 2 of 3 nodes down, the cluster stops; restoring needs manual recovery or bringing nodes back.
+- **Timeout misconfiguration:** too tight, and normal pauses cause election storms; too loose, and failover is slow.
+- **Large clusters:** each extra node slows commits and adds failure surface; consensus clusters stay small, and large datasets are sharded across many small groups.
+
+## Pitfalls
+
+- Running an even number of nodes and expecting extra tolerance.
+- Putting all nodes in one availability zone, so one outage removes the majority.
+- Storing large or frequently changing data in the consensus group; keep it for small, critical metadata.
+- Serving reads from a follower or an old leader and assuming they are fresh.
+- Forgetting that a client may not know whether a timed-out write was committed; commands need request ids.
+- Treating consensus as a way to get availability; it trades availability on the minority side for safety.
+
+## What would you choose and why?
+
+You are designing a configuration service for 200 microservices. Updates are rare (a few per minute) but every service must see a consistent, current value, and the service must keep working if one data centre fails. How many nodes would you run, across how many zones, and how would you let thousands of clients read the configuration cheaply without every read going through the leader?
+
+## Quiz
+
+<Quiz id="sd-m12-raft" tags={["consensus", "raft", "leader-election", "quorum"]} questions={[
+  { type: "mcq", q: "Why does a consensus cluster use odd sizes such as 3 or 5?", options: ["Odd numbers are faster", "An extra even node adds cost but no extra failure tolerance (4 nodes still tolerate only 1 failure)", "Raft forbids even sizes", "To save disk space"], answer: 1, explain: "Tolerance is floor((n - 1) / 2); going from 3 to 4 nodes keeps it at 1 while needing a bigger majority." },
+  { type: "mcq", q: "Why does Raft randomise election timeouts?", options: ["To confuse attackers", "So one follower usually times out first and wins before others also become candidates, making split votes rare", "To balance load", "To reduce disk writes"], answer: 1, explain: "If all nodes time out together they split the vote; a random spread, as the simulation showed, makes elections finish." },
+  { type: "mcq", q: "When is a Raft log entry committed?", options: ["When the leader has written it locally", "When it is stored on a majority of nodes (counted by the leader for its own term)", "When the client reads it", "When all followers have it"], answer: 1, explain: "A majority overlaps any later majority, so any future leader must contain the entry." },
+  { type: "multi", q: "Which statements about Raft safety are true?", options: ["A node only votes for a candidate whose log is at least as up to date as its own", "A committed entry is never overwritten by a later leader", "A minority partition can elect a leader and accept writes", "A node that sees a higher term steps down"], answer: [0, 1, 3], explain: "A minority cannot gather a majority of votes, so it cannot elect a leader or commit." },
+  { type: "mcq", q: "What does the FLP result imply for practical consensus protocols?", options: ["Consensus is impossible", "In a fully asynchronous network no deterministic protocol guarantees termination with a crash failure, so practical protocols keep safety always and liveness only while the network is timely", "Consensus needs atomic clocks", "Only Paxos works"], answer: 1, explain: "Raft and Paxos never decide wrongly, but they can stall during prolonged instability." }
+]} />
