@@ -1,0 +1,295 @@
+---
+title: Bridges and Articulation Points
+track: cp
+module: graphs
+order: 9
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/graphs/strongly-connected-components]
+tags: [graphs, dfs, bridges, articulation-points, low-link, 2-edge-connected]
+type: lesson
+problems: [m11-critical-cables]
+furtherReading:
+  - title: cp-algorithms, Finding bridges in an undirected graph
+    url: https://cp-algorithms.com/graph/bridge-searching.html
+  - title: cp-algorithms, Finding articulation points in a graph
+    url: https://cp-algorithms.com/graph/cutpoints.html
+  - title: LeetCode 1192, Critical Connections in a Network
+    url: https://leetcode.com/problems/critical-connections-in-a-network/
+---
+
+## Intuition
+
+A communication network has a **single point of failure** if cutting one cable, or losing one server, splits it in two. Finding those weak points is the reliability question behind road networks, computer networks and power grids. In graph words:
+
+- A **bridge** is an edge whose removal increases the number of connected components.
+- An **articulation point** (cut vertex) is a vertex whose removal, together with its edges, increases the number of components.
+
+Testing each edge by deleting it and recounting components costs `O(m * (n + m))`. A single DFS finds all of them in `O(n + m)`, using the same low-link idea as [strongly connected components](/cp/graphs/strongly-connected-components/).
+
+## Definition
+
+Run a DFS. It classifies every edge as a **tree edge** (used to discover a new vertex) or a **back edge** (to an already-visited vertex). In an undirected graph, all non-tree edges join a vertex to one of its **ancestors** or descendants, so there are no cross edges.
+
+For every vertex `u`:
+
+- `tin[u]`: discovery time.
+- `low[u]`: the smallest `tin` reachable from the subtree of `u` using tree edges and **at most one back edge**.
+
+```text
+low[u] = min( tin[u],
+              tin[w] for every back edge (v, w) with v in the subtree of u,
+              low[c] for every DFS child c of u )
+```
+
+**Bridge rule.** A tree edge `(u, v)` with `v` a child of `u` is a bridge if and only if
+
+```text
+low[v] > tin[u]
+```
+
+Nothing in `v`'s subtree can climb back to `u` or above, so the edge is the only connection.
+
+**Articulation rule.** A vertex `u` is an articulation point if and only if
+
+- `u` is **not** the DFS root and has a child `v` with `low[v] >= tin[u]` (the subtree of `v` cannot escape strictly above `u`, so removing `u` cuts it off), or
+- `u` **is** the DFS root and has **two or more** DFS children (the children's subtrees are not connected to each other except through the root).
+
+The difference between `>` for bridges and `>=` for articulation points is the thing to remember: a back edge to `u` itself saves the **edge** `(u, v)` from being a bridge but does not save the **vertex** `u`.
+
+## Example, step by step
+
+Graph: a triangle `0-1-2`, a path from `2` to `3`, and a triangle `3-4-5`, then one more edge `5-6`.
+
+- DFS from 0: `tin[0]=0`, go to 1 (`tin=1`), 2 (`tin=2`). The edge `2-0` is a back edge: `low[2] = 0`, so `low[1] = 0`.
+- From 2 go to 3 (`tin=3`), then 4 (`tin=4`), then 5 (`tin=5`). The edge `5-3` is a back edge: `low[5] = 3`, so `low[4] = 3`. Then 5 goes to 6 (`tin=6`, no back edges: `low[6] = 6`).
+- Edge `5-6`: `low[6] = 6 > tin[5] = 5`: **bridge**. Edge `2-3`: `low[3] = 3 > tin[2] = 2`: **bridge**.
+- Articulation points: `2` (child `3` has `low = 3 >= tin[2] = 2`), `3` (child `4` has `low[4] = 3 >= tin[3] = 3`), `5` (child `6` has `low = 6 >= 5`). Vertex `0` is the root with a single child, so not an articulation point; `1` and `4` are not either.
+
+The edge `3-4`, in contrast, is **not** a bridge: `low[4] = 3` is not greater than `tin[3] = 3`, because the cycle through `5-3` returns to 3. But `3` is still an articulation point.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import sys
+sys.setrecursionlimit(10000)
+
+adj = [[] for _ in range(n)]
+for i, (u, v) in enumerate(edges):
+    adj[u].append((v, i))            # keep the edge id
+    adj[v].append((u, i))
+
+tin = [-1] * n
+low = [0] * n
+is_cut = [False] * n
+bridges = []
+timer = 0
+
+def dfs(u, parent_edge):
+    global timer
+    tin[u] = low[u] = timer
+    timer += 1
+    children = 0
+    for v, eid in adj[u]:
+        if eid == parent_edge:       # skip the edge we came by, by id, not by neighbour
+            continue
+        if tin[v] >= 0:
+            low[u] = min(low[u], tin[v])
+        else:
+            dfs(v, eid)
+            low[u] = min(low[u], low[v])
+            if low[v] > tin[u]:
+                bridges.append(eid)
+            if parent_edge != -1 and low[v] >= tin[u]:
+                is_cut[u] = True
+            children += 1
+    if parent_edge == -1 and children >= 2:
+        is_cut[u] = True
+
+for u in range(n):
+    if tin[u] < 0:
+        dfs(u, -1)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<pair<int,int>>> adj(n);          // (neighbour, edge id)
+vector<int> tin(n, -1), low(n);
+vector<bool> is_cut(n, false);
+vector<int> bridges;
+int timer_ = 0;
+
+void dfs(int u, int parent_edge) {
+    tin[u] = low[u] = timer_++;
+    int children = 0;
+    for (auto [v, eid] : adj[u]) {
+        if (eid == parent_edge) continue;
+        if (tin[v] >= 0) low[u] = min(low[u], tin[v]);
+        else {
+            dfs(v, eid);
+            low[u] = min(low[u], low[v]);
+            if (low[v] > tin[u]) bridges.push_back(eid);
+            if (parent_edge != -1 && low[v] >= tin[u]) is_cut[u] = true;
+            children++;
+        }
+    }
+    if (parent_edge == -1 && children >= 2) is_cut[u] = true;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static ArrayList<int[]>[] adj;                  // {neighbour, edge id}
+static int[] tin, low;
+static boolean[] isCut;
+static ArrayList<Integer> bridges = new ArrayList<>();
+static int timer = 0;
+
+static void dfs(int u, int parentEdge) {
+    tin[u] = low[u] = timer++;
+    int children = 0;
+    for (int[] pr : adj[u]) {
+        int v = pr[0], eid = pr[1];
+        if (eid == parentEdge) continue;
+        if (tin[v] >= 0) low[u] = Math.min(low[u], tin[v]);
+        else {
+            dfs(v, eid);
+            low[u] = Math.min(low[u], low[v]);
+            if (low[v] > tin[u]) bridges.add(eid);
+            if (parentEdge != -1 && low[v] >= tin[u]) isCut[u] = true;
+            children++;
+        }
+    }
+    if (parentEdge == -1 && children >= 2) isCut[u] = true;
+}
+```
+
+</Tab>
+</Tabs>
+
+The demo compares the DFS with remove-and-recount on random multigraphs, shows what goes wrong with parallel edges if you skip the parent by vertex, and builds the **bridge tree**:
+
+<CodeRunner language="python" code={`import random, sys
+sys.setrecursionlimit(10000)
+
+def lowlink(n, edges, skip_by_edge_id=True):
+    adj = [[] for _ in range(n)]
+    for i, (u, v) in enumerate(edges):
+        adj[u].append((v, i)); adj[v].append((u, i))
+    tin, low = [-1] * n, [0] * n
+    bridges, cuts, t = [], set(), [0]
+    def dfs(u, pv, pe):
+        tin[u] = low[u] = t[0]; t[0] += 1
+        children = 0
+        for v, e in adj[u]:
+            if (e == pe) if skip_by_edge_id else (v == pv):
+                continue
+            if tin[v] >= 0:
+                low[u] = min(low[u], tin[v])
+            else:
+                dfs(v, u, e)
+                low[u] = min(low[u], low[v])
+                if low[v] > tin[u]: bridges.append(e)
+                if pe != -1 and low[v] >= tin[u]: cuts.add(u)
+                children += 1
+        if pe == -1 and children >= 2: cuts.add(u)
+    for s in range(n):
+        if tin[s] < 0: dfs(s, -1, -1)
+    return sorted(bridges), sorted(cuts)
+
+def components(n, edges, skip_edge=-1, skip_vertex=-1):
+    p = list(range(n))
+    def f(x):
+        while p[x] != x:
+            p[x] = p[p[x]]; x = p[x]
+        return x
+    c = sum(1 for v in range(n) if v != skip_vertex)
+    for i, (u, v) in enumerate(edges):
+        if i == skip_edge or u == skip_vertex or v == skip_vertex: continue
+        a, b = f(u), f(v)
+        if a != b: p[a] = b; c -= 1
+    return c
+
+def brute(n, edges):
+    base = components(n, edges)
+    br = [i for i in range(len(edges)) if components(n, edges, skip_edge=i) > base]
+    cu = [v for v in range(n) if components(n, edges, skip_vertex=v) > base]
+    return br, cu
+
+random.seed(8)
+for _ in range(400):
+    n = random.randint(2, 8)
+    edges = []
+    for _ in range(random.randint(0, 11)):
+        u, v = random.sample(range(n), 2)
+        edges.append((u, v))
+    assert lowlink(n, edges) == brute(n, edges), (n, edges)
+print("low-link agrees with remove-and-recount on 400 random multigraphs")
+
+two = [(0, 1), (0, 1)]                      # two parallel cables
+print("parallel cables, skipping the parent by edge id    :", lowlink(2, two)[0], "bridges")
+print("parallel cables, skipping the parent by vertex (bug):", lowlink(2, two, skip_by_edge_id=False)[0], "bridges")
+
+# Bridge tree: contract every 2-edge-connected component
+n = 7
+edges = [(0, 1), (1, 2), (2, 0), (2, 3), (3, 4), (4, 5), (5, 3), (5, 6)]
+bridges, cuts = lowlink(n, edges)
+print("bridges (edge ids):", bridges, [edges[i] for i in bridges], "| cut vertices:", cuts)
+p = list(range(n))
+def find(x):
+    while p[x] != x:
+        p[x] = p[p[x]]; x = p[x]
+    return x
+for i, (u, v) in enumerate(edges):
+    if i not in bridges: p[find(u)] = find(v)
+label = {}
+comp = [label.setdefault(find(v), len(label)) for v in range(n)]
+tree = sorted({tuple(sorted((comp[edges[i][0]], comp[edges[i][1]]))) for i in bridges})
+print("2-edge-connected components:", comp, "-> bridge tree edges:", tree)
+`} />
+
+## What you can do with them
+
+- **2-edge-connected components.** Delete all bridges: each remaining connected piece is a 2-edge-connected component (it survives the loss of any one edge). Contract each piece to a vertex and the bridges form a **tree**, the **bridge tree**. Many problems ("how many roads to add so the network survives any single failure?", "longest path between two cities using bridges") reduce to tree problems on it. The number of leaves `L` of the bridge tree gives the answer `ceil(L / 2)` to "fewest edges to add so there are no bridges".
+- **Biconnected components (blocks).** Maximal pieces with no articulation point. Contract them with the articulation points into the **block-cut tree**.
+- **Orienting edges.** An undirected connected graph can be oriented to become strongly connected exactly when it has **no bridge** (Robbins' theorem). Orient tree edges downward and back edges upward in the DFS.
+- **Reliability checks.** "Is the network still connected after any single failure?" is "no bridges and no articulation points".
+
+## Pitfalls
+
+1. **Skipping the parent by vertex** instead of by edge id. With two parallel cables between `u` and its parent, the second one is a back edge that makes the first not a bridge. The demo shows the wrong answer.
+2. **Using `>=` for bridges or `>` for articulation points.** Bridges need `low[v] > tin[u]`; articulation points need `low[v] >= tin[u]`.
+3. **Forgetting the root rule.** For the DFS root the condition `low[v] >= tin[root]` is always true, so counting it would mark every root. Count children instead.
+4. **Marking an articulation point more than once** and then counting duplicates. Use a boolean array or a set.
+5. **Not running the DFS from every unvisited vertex** for disconnected graphs.
+6. **Recursion depth** on long paths. Use an iterative DFS or a larger stack for graphs with 10^5 or more vertices.
+7. **Mixing directed and undirected logic.** For directed graphs the analogue is strongly connected components, not bridges.
+8. **Updating `low[u]` with `low[v]` through a back edge** instead of `tin[v]`. The standard uses `tin[v]` for back edges (it matters for the block decomposition, even if bridges survive either).
+
+## Practice
+
+<Problem id="m11-critical-cables" />
+
+## Problem ladder
+
+- [Critical Connections in a Network](https://leetcode.com/problems/critical-connections-in-a-network/) (LeetCode 1192, hard): list all bridges.
+- [Practice problems for bridges](https://cp-algorithms.com/graph/bridge-searching.html) (cp-algorithms): the page ends with a list that includes UVa 796 Critical Links and several articulation-point exercises.
+- [Bertown Roads](https://codeforces.com/problemset/problem/118/E) (Codeforces 118E, rating about 2000): orient the edges to make the graph strongly connected, or report that a bridge makes it impossible.
+- [We Need More Bosses](https://codeforces.com/problemset/problem/1000/E) (Codeforces 1000E, rating about 2100): build the bridge tree and find its diameter.
+
+## Quiz
+
+<Quiz id="cp-m11-bridges" tags={["bridges", "articulation-points", "low-link"]} questions={[
+  { type: "mcq", q: "For a tree edge (u, v) with v a child of u, when is it a bridge?", options: ["low[v] >= tin[u]", "low[v] > tin[u]", "low[v] == 0", "tin[v] > low[u]"], answer: 1, explain: "If nothing in v's subtree reaches u or above, the edge is the only link. A back edge to u itself gives low[v] == tin[u], which saves the edge." },
+  { type: "mcq", q: "Why is the DFS root treated differently for articulation points?", options: ["The root has no tin", "Its children can never reach above it, so the 'low >= tin' test is always true; it is a cut vertex only if it has two or more DFS children", "The root is always a cut vertex", "The root is never visited"], answer: 1, explain: "With one child the rest of the graph hangs below the root, and removing the root leaves one piece." },
+  { type: "predict", q: "Two servers joined by two parallel cables. How many bridges does a correct low-link DFS report?", code: "edges = [(0, 1), (0, 1)]", options: ["0", "1", "2", "It depends on the DFS order"], answer: 0, explain: "The second cable is a back edge to the parent through a different edge id, so neither cable is a bridge." },
+  { type: "mcq", q: "After deleting all bridges and contracting each remaining connected piece, what do you get?", options: ["A complete graph", "A tree (the bridge tree)", "A cycle", "A bipartite graph that may contain cycles"], answer: 1, explain: "A cycle among the contracted pieces would imply a non-bridge edge." },
+  { type: "multi", q: "Which statements are true?", options: ["A leaf of a tree is never an articulation point", "Every edge of a tree is a bridge", "A cycle graph has no bridge and no articulation point", "A path with 3 vertices has no articulation point"], answer: [0, 1, 2], explain: "The middle vertex of a 3-vertex path is an articulation point." }
+]} />
