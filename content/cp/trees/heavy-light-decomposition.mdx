@@ -1,0 +1,357 @@
+---
+title: Heavy-Light Decomposition
+track: cp
+module: trees
+order: 4
+difficulty: expert
+estMinutes: 55
+prerequisites: [cp/range-queries/segment-trees, cp/trees/lowest-common-ancestor, cp/trees/euler-tour-subtree-queries]
+tags: [trees, hld, heavy-light-decomposition, segment-tree, path-query, lca]
+type: lesson
+problems: [m15-courier-routes]
+furtherReading:
+  - title: cp-algorithms, Heavy-light decomposition
+    url: https://cp-algorithms.com/graph/hld.html
+  - title: CSES Problem Set, Path Queries II
+    url: https://cses.fi/problemset/task/2134
+  - title: Sleator and Tarjan, A data structure for dynamic trees (the origin of the idea)
+    url: https://www.cs.cmu.edu/~sleator/papers/dynamic-trees.pdf
+---
+
+## Intuition
+
+A segment tree answers "maximum over positions `l..r`" in `O(log n)`, but only for a **line** of elements. On a **tree**, the question "what is the largest value on the path between `u` and `v`?" is about a path that bends up and down. Walking it vertex by vertex costs `O(n)` per query, which is hopeless if the tree is a long chain and you ask `10^5` times.
+
+**Heavy-light decomposition** (HLD) cuts the tree into a few **vertical chains** so that every path from a vertex up to the root crosses only `O(log n)` of them. Lay each chain out as a contiguous stretch of an array and a path becomes `O(log n)` array ranges, each answered by a segment tree. Total per query: `O(log^2 n)`.
+
+## Definition
+
+Root the tree. For every vertex `v` let `size[v]` be the number of vertices in its subtree.
+
+- The **heavy child** of `v` is the child with the largest `size`. (Leaves have none.)
+- An edge from `v` to its heavy child is a **heavy edge**; every other parent-child edge is a **light edge**.
+- Following heavy edges partitions the vertices into vertical **chains**. Each vertex is on exactly one chain, and each chain has a topmost vertex, its **head**.
+
+**Key lemma.** Going from any vertex up to the root crosses at most `log2 n` light edges. Why: moving along a light edge from a child `c` to its parent `p`, the heavy child of `p` has `size` at least as large as `c`'s, so `size[p] >= 2 * size[c] + 1`. The subtree size at least doubles with every light edge, and it cannot exceed `n`.
+
+Number the vertices so that **each chain occupies consecutive positions, head first**. Then the segment tree built over these positions can aggregate any piece of a chain with one range query.
+
+## Query on a path `u -> v`
+
+```text
+res = identity
+while head[u] != head[v]:
+    if depth[head[u]] < depth[head[v]]: swap(u, v)      # move the one whose chain head is deeper
+    res = combine(res, range(pos[head[u]], pos[u]))      # the piece of u's chain from its head down to u
+    u = parent[head[u]]                                  # jump over the light edge above the head
+# now u and v are on the same chain
+if depth[u] > depth[v]: swap(u, v)
+res = combine(res, range(pos[u], pos[v]))
+```
+
+Each loop iteration crosses one light edge from one of the two endpoints, so there are at most `2 * log2 n` iterations, each costing one `O(log n)` segment-tree query: **`O(log^2 n)`** per path query. Point updates cost `O(log n)`.
+
+The loop ends exactly at the **lowest common ancestor**: the shallower of the final `u` and `v` is the LCA. HLD is therefore also a compact `O(log n)` LCA method with no extra table.
+
+## Building it without recursion
+
+On a path of `10^5` vertices, a recursive DFS overflows the stack. Compute everything with explicit stacks:
+
+1. **Parents, depths and a preorder** with a stack-based DFS from the root.
+2. **Subtree sizes and heavy children**: process the preorder in **reverse**; add each vertex's `size` to its parent's and track the parent's largest child.
+3. **Positions**: walk the preorder; every time you meet a vertex that is the root or is *not* its parent's heavy child, it is a chain head: follow heavy children downward, assigning `head` and consecutive positions.
+
+## Example, step by step
+
+Tree: `0` with children `1`, `2`; `1` with children `3`, `4`; `2` with children `5`, `6` (a balanced tree of 7 vertices).
+
+- Sizes: leaves 1; vertices `1` and `2` have 3; the root has 7. Where two children tie, either may be chosen; say the heavy children are `0 -> 1`, `1 -> 3`, `2 -> 5`.
+- Chains: `0, 1, 3` (head 0), `4` (head 4), `2, 5` (head 2), `6` (head 6).
+- Query from `4` to `5`: heads `4` and `2` differ. `4`'s head is deeper than `2`'s (depth 2 vs 1), so take the piece `[4]` and jump to `parent[4] = 1`. Now `u = 1` (head 0) and `v = 5` (head 2): `5`'s chain head `2` is deeper than `0`, so query the piece `[2, 5]` and jump to `parent[2] = 0`. Now both are on the chain headed by `0`: the final piece is positions of `0` and `1`. The route `4 - 1 - 0 - 2 - 5` was covered by three ranges: `{4}`, `{2, 5}`, `{0, 1}`. The LCA is `0`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+# adj, n, val are given; the tree is rooted at 0
+parent = [-1] * n
+depth = [0] * n
+order, stack = [], [0]
+while stack:
+    u = stack.pop()
+    order.append(u)
+    for v in adj[u]:
+        if v != parent[u]:
+            parent[v] = u
+            depth[v] = depth[u] + 1
+            stack.append(v)
+
+size, heavy = [1] * n, [-1] * n
+for u in reversed(order):
+    p = parent[u]
+    if p >= 0:
+        size[p] += size[u]
+        if heavy[p] == -1 or size[u] > size[heavy[p]]:
+            heavy[p] = u
+
+head, pos, cur = [0] * n, [0] * n, 0
+for u in order:
+    if parent[u] == -1 or heavy[parent[u]] != u:       # u heads a chain
+        v = u
+        while v != -1:
+            head[v], pos[v] = u, cur
+            cur += 1
+            v = heavy[v]
+
+# segment tree over `pos`: tree[n + pos[u]] = val[u]; range_max(l, r) inclusive
+def path_max(u, v):
+    res = NEG
+    while head[u] != head[v]:
+        if depth[head[u]] < depth[head[v]]:
+            u, v = v, u
+        res = max(res, range_max(pos[head[u]], pos[u]))
+        u = parent[head[u]]
+    if depth[u] > depth[v]:
+        u, v = v, u
+    return max(res, range_max(pos[u], pos[v]))
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> parent(n, -1), depth(n, 0), order, st = {0};
+while (!st.empty()) {
+    int u = st.back(); st.pop_back();
+    order.push_back(u);
+    for (int v : adj[u])
+        if (v != parent[u]) { parent[v] = u; depth[v] = depth[u] + 1; st.push_back(v); }
+}
+vector<int> sz(n, 1), heavy(n, -1);
+for (int i = n - 1; i >= 0; i--) {
+    int u = order[i], p = parent[u];
+    if (p >= 0) {
+        sz[p] += sz[u];
+        if (heavy[p] == -1 || sz[u] > sz[heavy[p]]) heavy[p] = u;
+    }
+}
+vector<int> head(n), pos(n);
+int cur = 0;
+for (int u : order)
+    if (parent[u] == -1 || heavy[parent[u]] != u)
+        for (int v = u; v != -1; v = heavy[v]) { head[v] = u; pos[v] = cur++; }
+
+long long path_max(int u, int v) {
+    long long res = NEG;
+    while (head[u] != head[v]) {
+        if (depth[head[u]] < depth[head[v]]) swap(u, v);
+        res = max(res, range_max(pos[head[u]], pos[u]));
+        u = parent[head[u]];
+    }
+    if (depth[u] > depth[v]) swap(u, v);
+    return max(res, range_max(pos[u], pos[v]));
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] parent = new int[n], depth = new int[n], order = new int[n], stack = new int[n];
+Arrays.fill(parent, -1);
+int cnt = 0, sp = 0;
+stack[sp++] = 0;
+while (sp > 0) {
+    int u = stack[--sp];
+    order[cnt++] = u;
+    for (int v : adj[u])
+        if (v != parent[u]) { parent[v] = u; depth[v] = depth[u] + 1; stack[sp++] = v; }
+}
+int[] size = new int[n], heavy = new int[n];
+Arrays.fill(size, 1);
+Arrays.fill(heavy, -1);
+for (int i = n - 1; i >= 0; i--) {
+    int u = order[i], p = parent[u];
+    if (p >= 0) {
+        size[p] += size[u];
+        if (heavy[p] == -1 || size[u] > size[heavy[p]]) heavy[p] = u;
+    }
+}
+int[] head = new int[n], pos = new int[n];
+int cur = 0;
+for (int i = 0; i < n; i++) {
+    int u = order[i];
+    if (parent[u] == -1 || heavy[parent[u]] != u)
+        for (int v = u; v != -1; v = heavy[v]) { head[v] = u; pos[v] = cur++; }
+}
+// path_max(u, v) exactly as in the Python version, using a segment tree over pos
+```
+
+</Tab>
+</Tabs>
+
+The demo implements the whole structure with updates, checks every answer against walking up the tree, counts the chain jumps per route, and uses the same climb for LCA:
+
+<CodeRunner language="python" code={`import math, random
+
+class HLD:
+    """Heavy-light decomposition with a segment tree for maximum, built without recursion."""
+    def __init__(self, n, edges, val):
+        self.n = n
+        adj = [[] for _ in range(n)]
+        for u, v in edges:
+            adj[u].append(v); adj[v].append(u)
+        self.parent, self.depth, order = [-1] * n, [0] * n, []
+        stack = [0]
+        while stack:
+            u = stack.pop()
+            order.append(u)
+            for v in adj[u]:
+                if v != self.parent[u]:
+                    self.parent[v] = u; self.depth[v] = self.depth[u] + 1; stack.append(v)
+        size, self.heavy = [1] * n, [-1] * n
+        for u in reversed(order):
+            p = self.parent[u]
+            if p >= 0:
+                size[p] += size[u]
+                if self.heavy[p] == -1 or size[u] > size[self.heavy[p]]:
+                    self.heavy[p] = u
+        self.head, self.pos, cur = [0] * n, [0] * n, 0
+        for u in order:
+            if self.parent[u] == -1 or self.heavy[self.parent[u]] != u:      # u is the top of a chain
+                v = u
+                while v != -1:
+                    self.head[v], self.pos[v] = u, cur
+                    cur += 1
+                    v = self.heavy[v]
+        self.tree = [-10**18] * (2 * n)
+        for u in range(n):
+            self.tree[n + self.pos[u]] = val[u]
+        for i in range(n - 1, 0, -1):
+            self.tree[i] = max(self.tree[2 * i], self.tree[2 * i + 1])
+
+    def set(self, u, x):
+        i = self.pos[u] + self.n
+        self.tree[i] = x
+        i //= 2
+        while i >= 1:
+            self.tree[i] = max(self.tree[2 * i], self.tree[2 * i + 1]); i //= 2
+
+    def _range_max(self, l, r):                       # inclusive positions
+        res, l, r = -10**18, l + self.n, r + self.n + 1
+        while l < r:
+            if l & 1: res = max(res, self.tree[l]); l += 1
+            if r & 1: r -= 1; res = max(res, self.tree[r])
+            l //= 2; r //= 2
+        return res
+
+    def path_max(self, u, v):
+        res, jumps = -10**18, 0
+        while self.head[u] != self.head[v]:
+            if self.depth[self.head[u]] < self.depth[self.head[v]]:
+                u, v = v, u
+            res = max(res, self._range_max(self.pos[self.head[u]], self.pos[u]))
+            u = self.parent[self.head[u]]
+            jumps += 1
+        if self.depth[u] > self.depth[v]:
+            u, v = v, u
+        return max(res, self._range_max(self.pos[u], self.pos[v])), jumps
+
+    def lca(self, u, v):
+        while self.head[u] != self.head[v]:
+            if self.depth[self.head[u]] < self.depth[self.head[v]]:
+                u, v = v, u
+            u = self.parent[self.head[u]]
+        return u if self.depth[u] < self.depth[v] else v
+
+def brute_path_max(h, val, u, v):
+    res = -10**18
+    while u != v:
+        if h.depth[u] < h.depth[v]: u, v = v, u
+        res = max(res, val[u]); u = h.parent[u]
+    return max(res, val[u])
+
+random.seed(9)
+for trial in range(200):
+    n = random.randint(1, 30)
+    edges = [(random.randint(0, v - 1), v) for v in range(1, n)]
+    val = [random.randint(-50, 50) for _ in range(n)]
+    h = HLD(n, edges, val)
+    for _ in range(40):
+        if random.random() < 0.3:
+            u = random.randrange(n); x = random.randint(-50, 50)
+            val[u] = x; h.set(u, x)
+        else:
+            u, v = random.randrange(n), random.randrange(n)
+            assert h.path_max(u, v)[0] == brute_path_max(h, val, u, v)
+print("path maximum matches walking up the tree, on 200 random trees with updates")
+
+# How many chain jumps does a route need? At most about log2(n), even for a path-shaped or balanced tree.
+for name, n, edges in [("path", 4096, [(v - 1, v) for v in range(1, 4096)]),
+                       ("balanced binary", 4095, [((v - 1) // 2, v) for v in range(1, 4095)]),
+                       ("random", 4096, [(random.randint(0, v - 1), v) for v in range(1, 4096)])]:
+    h = HLD(n, edges, [0] * n)
+    worst = max(h.path_max(random.randrange(n), random.randrange(n))[1] for _ in range(3000))
+    print(f"{name:16s} n={n}: worst chain jumps over 3000 random routes = {worst} (the bound is 2 * log2 n = {2 * int(math.log2(n))})")
+
+h = HLD(7, [(0, 1), (0, 2), (1, 3), (1, 4), (2, 5), (2, 6)], list(range(7)))
+print("lca(3, 4) =", h.lca(3, 4), "| lca(3, 5) =", h.lca(3, 5), "| lca(4, 1) =", h.lca(4, 1))
+`} />
+
+## Variations
+
+| question | what changes |
+| --- | --- |
+| path sum, path xor, path gcd | any **associative** operation works; replace `max` in the segment tree. For non-commutative operations, remember which direction each piece is traversed. |
+| values on **edges** | store the edge's value on the **child** endpoint; in the last same-chain query skip the position of the LCA itself (`pos[u] + 1 .. pos[v]`). |
+| **subtree** query or update | give the heavy child the first DFS slot so that every subtree is a contiguous block `[pos[v], pos[v] + size[v] - 1]`; then subtree and path queries share one segment tree. |
+| range **add** on a path | use a segment tree with lazy propagation (see the lazy propagation lesson) and the same `O(log n)` pieces. |
+| path with a **Fenwick tree** | for sums with point updates, a Fenwick tree replaces the segment tree and is faster. |
+| **LCA** only | the climbing loop alone, no segment tree, `O(log n)` per query. |
+| count of **distinct** colours on a path | much harder; use Mo's algorithm on trees or offline techniques, not plain HLD. |
+
+## When to use it
+
+| tool | path query + update | notes |
+| --- | --- | --- |
+| walk up the parents | `O(n)` | fine for tiny trees or few queries |
+| binary lifting | `O(log n)` for static paths | no updates of values along the path |
+| Euler tour + segment tree | subtree queries and updates | does not handle arbitrary paths with an associative non-invertible operation |
+| **HLD + segment tree** | `O(log^2 n)` path queries and point or range updates | the general-purpose tool |
+| link-cut tree | `O(log n)` amortised, dynamic trees | when the tree **itself changes** (edges added and cut online) |
+| centroid decomposition | queries about distances or counts among pairs | different problem family |
+
+## Pitfalls
+
+1. **Picking the heavy child by depth or by degree** instead of subtree size. Only subtree size gives the `log n` bound.
+2. **Not making chains contiguous.** Positions must run head first down the chain; numbering by plain DFS order without following the heavy child breaks range queries.
+3. **Comparing `depth[u]` instead of `depth[head[u]]`** in the loop. You must advance the vertex whose **chain head** is deeper.
+4. **Forgetting the last same-chain query**, or using it before swapping `u` and `v` into depth order.
+5. **Edge values handled on the wrong endpoint** (store on the child; skip the LCA position at the end).
+6. **Recursion overflow** on a path graph. Use explicit stacks for the DFS, as above.
+7. **Non-commutative operations.** The pieces collected from the two sides of the path must be combined in the correct order (and one side reversed).
+8. **Rebuilding on every update.** Only the segment tree changes on a value update; the decomposition is fixed as long as the tree shape is.
+
+## Practice
+
+<Problem id="m15-courier-routes" />
+
+## Problem ladder
+
+- [Path Queries](https://cses.fi/problemset/task/1138) (CSES): sum from the root to a vertex with updates, solvable with an Euler tour and a Fenwick tree.
+- [Path Queries II](https://cses.fi/problemset/task/2134) (CSES): exactly this lesson: path maximum with point updates.
+- [Distance Queries](https://cses.fi/problemset/task/1135) (CSES): distance between two vertices, practise the LCA climb.
+- [HLD practice problems](https://cp-algorithms.com/graph/hld.html) (cp-algorithms): the page ends with a list of harder problems, including path-painting and edge-weight variants.
+- [Vertex Add Path Sum](https://judge.yosupo.jp/problem/vertex_add_path_sum) (Library Checker): the large-input benchmark for sums.
+
+## Quiz
+
+<Quiz id="cp-m15-hld" tags={["trees", "hld"]} questions={[
+  { type: "mcq", q: "How is the heavy child of a vertex chosen?", options: ["The child with the smallest label", "The child with the largest subtree size", "The deepest child", "A random child"], answer: 1, explain: "Choosing by subtree size guarantees that each light edge at least doubles the subtree size, giving the log n bound." },
+  { type: "mcq", q: "Why does a path from any vertex to the root cross at most log2(n) light edges?", options: ["There are only log n light edges in the tree", "Every light edge goes to a parent whose subtree is at least twice as large", "Heavy edges are free", "The tree is balanced"], answer: 1, explain: "Subtree sizes at least double with each light edge, and they cannot exceed n." },
+  { type: "predict", q: "What is the time of one path query with a segment tree over the chains?", code: "# O(log n) chain pieces, each a range query of O(log n)", options: ["O(log n)", "O(log^2 n)", "O(n)", "O(sqrt n)"], answer: 1, explain: "There are O(log n) pieces and each range query costs O(log n)." },
+  { type: "mcq", q: "In the climbing loop, which endpoint should move up?", options: ["The one with the smaller label", "The one whose chain head is deeper", "The one with the larger value", "Always u"], answer: 1, explain: "Advancing the endpoint whose head is deeper guarantees the other endpoint's chain is not skipped, and the loop ends at the LCA." },
+  { type: "multi", q: "Which statements are true?", options: ["Edge values can be stored on the child endpoint", "The same loop gives the LCA", "HLD is the right tool when edges are added and removed online", "Updating one value does not change the decomposition"], answer: [0, 1, 3], explain: "Dynamic trees (changing edges) call for link-cut trees." }
+]} />
