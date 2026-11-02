@@ -1,0 +1,1 @@
+{ "title": "Microservice Patterns", "level": "Level 2: Distributed Systems", "order": 13, "summary": "Splitting a system into services without creating a distributed monolith: service boundaries and communication, sagas and the transactional outbox, and event sourcing with CQRS." }

@@ -1,0 +1,170 @@
+---
+title: Service Boundaries and Communication
+track: sd
+module: microservice-patterns
+order: 1
+difficulty: medium
+estMinutes: 45
+prerequisites: ["sd/consensus-and-coordination/two-phase-commit-and-coordination", "sd/networking-and-apis/api-styles-rest-graphql-grpc", "sd/load-balancing/reverse-proxies-and-api-gateways"]
+tags: [microservices, bounded-context, service-discovery, api-composition, bff, sync-vs-async, modular-monolith, distributed-monolith]
+type: lesson
+furtherReading:
+  - title: Fowler and Lewis, Microservices (the original definition)
+    url: https://martinfowler.com/articles/microservices.html
+  - title: Fowler, Monolith First
+    url: https://martinfowler.com/bliki/MonolithFirst.html
+  - title: Dean and Barroso, The Tail at Scale
+    url: https://research.google/pubs/the-tail-at-scale/
+  - title: Richardson, Microservices patterns catalogue
+    url: https://microservices.io/patterns/index.html
+---
+
+## Intuition
+
+A **microservice architecture** splits one application into many small services, each owning a piece of the business and deployable on its own, usually by its own team. The promise is organisational: teams ship independently, scale independently and choose their own tools. The price is technical: every call that used to be a function call is now a network call that can be slow, fail, return a stale answer or arrive twice. You exchange the complexity of a large codebase for the complexity of a distributed system.
+
+That trade is excellent when you have many teams and a large, fast-changing product, and poor when you have a small team and a modest product. The most common failure is not too few services but the wrong boundaries: services that must be changed together, call each other constantly and share a database form a **distributed monolith**, which has all the costs of microservices and none of the benefits.
+
+## Draw boundaries around business capabilities
+
+The goal is that most changes touch **one** service. Boundaries drawn around technical layers (a "database service", a "validation service") force every feature to cross all of them. Boundaries drawn around **business capabilities** (orders, payments, inventory, shipping, catalogue) keep a feature's logic and data together.
+
+**Bounded contexts.** From domain-driven design: each part of the business has its own model and vocabulary. "Customer" means one thing to billing (a payer with invoices), another to support (a person with tickets) and another to marketing (a segment). Each context owns its own model; services map onto contexts, and translate at the edges instead of sharing one giant "Customer" table.
+
+**Data ownership.** Each service owns its data and is the **only** one that reads or writes it. Others get at it through the service's API or through events it publishes. A shared database is the strongest coupling there is: a schema change breaks every reader, and you cannot scale, secure or migrate one service independently.
+
+**Signs the boundary is wrong**
+
+- Two services are always deployed together, or one cannot work when the other is down.
+- A single feature needs coordinated changes in three or more services.
+- Services call each other in long synchronous chains, or in circles.
+- A "shared library" contains business rules that every service imports.
+- You need a distributed transaction for an everyday operation.
+
+**Start with a modular monolith.** Build one deployable application with clean internal module boundaries and enforced dependencies, and extract a module into a service only when a real need appears (independent scaling, a different team, different release cadence, fault isolation). Getting a boundary wrong inside a monolith costs a refactor; getting it wrong across a network costs a migration.
+
+## How services talk
+
+| Style | How | Good for | Cost |
+| --- | --- | --- | --- |
+| **Synchronous request/response** (REST, gRPC) | Caller waits for the answer | Queries, user-facing reads, commands needing an immediate result | Caller depends on the callee being up and fast; failures and latency propagate |
+| **Asynchronous messaging** (queue, command) | Caller sends a message and moves on | Work that can finish later, load levelling, decoupling in time | No immediate result; delivery semantics and idempotency matter |
+| **Event publishing** (pub/sub, log) | A service announces "something happened"; any number of consumers react | Many consumers, loose coupling, building read models | Consumers can lag; the event contract becomes a public API; harder to trace |
+
+A good rule: use **synchronous calls for queries** the user is waiting on, and **events for facts** other services react to. Avoid using synchronous calls for operations that merely "tell" another service something; that couples availability for no reason.
+
+### API composition and backends for frontends
+
+A screen often needs data from many services. Instead of the browser calling ten services, a **composition layer** calls them in parallel and merges the results. An **API gateway** does this generically (plus authentication, rate limiting and routing); a **backend for frontend (BFF)** is a composition service tailored to one client (mobile, web) so each gets exactly the shape it needs.
+
+<Diagram kind="mermaid" caption="API composition: one request fans out to three services in parallel and the gateway merges the answers" code={`sequenceDiagram
+  participant C as Client
+  participant G as Gateway / BFF
+  participant O as Orders service
+  participant U as User service
+  participant P as Payments service
+  C->>G: GET /dashboard
+  par fan out
+    G->>O: recent orders
+  and
+    G->>U: profile
+  and
+    G->>P: payment methods
+  end
+  O-->>G: orders
+  U-->>G: profile
+  P-->>G: methods
+  G-->>C: one merged response`} />
+
+### Service discovery
+
+Instances come and go with deploys and autoscaling, so callers cannot hard-code addresses. **Service discovery** maps a service name to the currently healthy instances:
+
+- **Client-side discovery:** the caller asks a registry (Consul, etcd, Eureka) and load-balances itself.
+- **Server-side discovery:** the caller talks to a stable name (DNS, a load balancer, Kubernetes Service) that forwards to healthy instances.
+- **Service mesh:** a sidecar proxy next to each service handles discovery, retries, timeouts, mutual TLS and metrics uniformly, so application code does not have to.
+
+Health checks decide who is in the pool; see the failure-detection lesson for why a ping alone is a weak signal.
+
+### Contracts and versioning
+
+When services deploy independently, the interface between them is a **contract**. Keep changes **backward compatible**: add optional fields rather than renaming or removing, tolerate unknown fields ("be liberal in what you accept"), and version when you must break. **Consumer-driven contract tests** let each consumer publish the requests and responses it relies on, so a provider's pipeline fails before it breaks a consumer.
+
+## The arithmetic of chained calls
+
+Every synchronous dependency multiplies risk. Two effects deserve numbers.
+
+**Availability in series.** A request that needs `n` services in sequence is only up if all are up: availability is the product. **Tail latency under fan-out.** If a request calls `n` services in parallel and waits for all of them, it is slow whenever any one call is slow, so rare per-call slowness becomes common per-request slowness.
+
+<CodeRunner language="python" code={`import random
+
+# Part 1: availability of a chain of synchronous calls (each service independently up with probability a)
+print("a request that must pass through n services in series, each 99.9% available")
+print("   n   chain availability   downtime per 30-day month")
+for n in (1, 3, 5, 10, 20):
+    chain = 0.999 ** n
+    print(f"  {n:>2}   {100 * chain:>17.3f}%   {30 * 24 * 60 * (1 - chain):>9.1f} min")
+
+# Part 2: tail latency amplification when one request fans out to n services in parallel and waits for all
+rng = random.Random(42)
+print()
+print("one request fans out to n services in parallel and waits for the slowest; each call is slow (above the 99th percentile) 1% of the time")
+print("   n   requests that hit a slow call (simulated)   exact 1 - 0.99^n")
+trials = 100000
+for n in (1, 5, 10, 25, 50, 100):
+    slow = sum(1 for _ in range(trials) if any(rng.random() < 0.01 for _ in range(n)))
+    print(f"  {n:>3}   {100 * slow / trials:>38.1f}%   {100 * (1 - 0.99 ** n):>14.1f}%")
+`} />
+
+A local run printed: for services that are each 99.9% available, a chain of 5 is only **99.501%** available (about 216 minutes of downtime in a 30-day month) and a chain of 20 is **98.019%** (about 856 minutes, over 14 hours). For fan-out where each call is slow 1% of the time, a request that waits on 10 services hits a slow call **9.5%** of the time (exact 9.6%), on 50 services **39.4%**, and on 100 services **63.2%**. Each individual service looks healthy; the composed request does not. This is why chatty call graphs, deep chains and wide fan-outs are architecture problems, not tuning problems, and why you set per-call timeouts, hedge or cut slow calls, and keep the critical path short.
+
+<Diagram kind="flow" caption="Choosing how two services interact" nodes={[
+  { id: "q", label: "Does the caller need the answer now?", x: 0, y: 80, role: "The first question that decides sync versus async.", failureModes: ["Making a call synchronous only because it is easier to code"], tradeoffs: ["Synchronous couples availability and latency; asynchronous couples through contracts and delivery"] },
+  { id: "sync", label: "Yes: synchronous call", x: 220, y: 20, role: "REST or gRPC with a timeout, retries with backoff and a circuit breaker.", failureModes: ["Cascading failure through call chains", "Latency adds up"], tradeoffs: ["Simple to reason about; ties the two services together at runtime"] },
+  { id: "async", label: "No: message or event", x: 220, y: 140, role: "Publish a command or event and continue; the receiver processes later.", failureModes: ["Duplicates and reordering", "Poison messages"], tradeoffs: ["Decouples in time and absorbs bursts; needs idempotent consumers"] },
+  { id: "many", label: "Many consumers react to a fact", x: 440, y: 140, role: "Publish an event; each consumer subscribes independently.", failureModes: ["The event schema becomes a public contract that is hard to change"], tradeoffs: ["Open for extension without changing the publisher"] }
+]} edges={[
+  { from: "q", to: "sync", label: "yes" }, { from: "q", to: "async", label: "no" }, { from: "async", to: "many", label: "fan out" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Architectural styles for a growing system" rows={[
+  { option: "Modular monolith", pros: "One deployment, in-process calls, easy transactions and refactoring", cons: "One release train; scaling and fault isolation are coarse", chooseWhen: "Small to medium teams, unclear boundaries, early products" },
+  { option: "Microservices", pros: "Independent deploys and scaling; team autonomy; fault isolation", cons: "Network failures, distributed data consistency, operational overhead, harder debugging", chooseWhen: "Many teams, stable boundaries, strong platform and observability" },
+  { option: "Synchronous calls between services", pros: "Immediate answer; simple mental model", cons: "Availability and latency compound; cascading failures", chooseWhen: "Queries and commands the user waits on, on a short call path" },
+  { option: "Event-driven integration", pros: "Loose coupling, easy to add consumers, absorbs bursts", cons: "Eventual consistency; harder to trace and test end to end", chooseWhen: "Facts that several services react to; work that can finish later" },
+  { option: "Shared database between services", pros: "Easy joins and transactions", cons: "Hidden coupling, schema changes break everyone, no independent scaling", chooseWhen: "Almost never; accept only as a temporary migration step" }
+]} />
+
+## Failure modes
+
+- **Cascading failure:** a slow dependency ties up callers' threads, which makes them slow, which spreads upstream.
+- **Retry storm:** every layer retries, multiplying load on a struggling service.
+- **Version skew:** a consumer deployed before a provider supports a new field (or after it removed an old one).
+- **Chatty coupling:** one user action triggers dozens of calls and a hundred milliseconds of network time.
+- **Lost event contract:** a producer changes an event's meaning and silently breaks consumers.
+- **Registry outage or stale entries:** callers send traffic to dead instances.
+
+## Pitfalls
+
+- Splitting by technical layer instead of by business capability.
+- Sharing a database or a "common" library full of business logic.
+- Making everything synchronous, so the system is only as available as its worst dependency.
+- Decomposing too early, before the domain is understood.
+- Forgetting the operational cost: each service needs deploy pipelines, monitoring, alerts, on-call ownership and security.
+- Treating the number of services as a measure of maturity.
+
+## What would you choose and why?
+
+A 12-person team runs a monolithic e-commerce application and wants to move to microservices because "Netflix does it". Deploys are slow and the checkout code and the catalogue code step on each other. What would you ask before agreeing, which one or two modules would you extract first (if any), and what would you put in place (observability, contracts, deployment automation) before the first extraction?
+
+## Quiz
+
+<Quiz id="sd-m13-boundaries" tags={["microservices", "bounded-context", "sync-vs-async", "service-discovery"]} questions={[
+  { type: "mcq", q: "What is a distributed monolith?", options: ["A monolith deployed on several servers", "A set of services that must change and deploy together and call each other constantly, with all the costs of microservices and none of the benefits", "A service with many instances", "A monolith with a large database"], answer: 1, explain: "Tight coupling across a network keeps the coordination cost of a monolith and adds the failure modes of distribution." },
+  { type: "mcq", q: "Why should each service own its data?", options: ["To use more databases", "A shared database couples services through the schema, so they cannot change, scale or be secured independently", "Because SQL is slow", "To avoid backups"], answer: 1, explain: "Access through APIs or events keeps the internals free to change; a shared schema is hidden coupling." },
+  { type: "predict", q: "Each service is 99.9% available. What is the availability of a request that needs 10 of them in series?", code: "print(round(100 * 0.999 ** 10, 2))", options: ["99.9", "99.0", "90.0", "99.99"], answer: 1, explain: "0.999 to the power 10 is about 0.990, so the chain is 99.0% available, almost ten times the downtime of one service." },
+  { type: "mcq", q: "A request waits for 50 parallel calls, each slow 1% of the time. About how often is the request slow?", options: ["1%", "5%", "About 39%", "50%"], answer: 2, explain: "1 - 0.99^50 is about 0.395: tail latency compounds with fan-out." },
+  { type: "multi", q: "Which are signs that a service boundary is wrong?", options: ["Two services always deploy together", "A single feature needs coordinated changes in many services", "Services share a database schema", "Each service owns its own data and exposes an API"], answer: [0, 1, 2], explain: "The last option describes a healthy boundary." }
+]} />
