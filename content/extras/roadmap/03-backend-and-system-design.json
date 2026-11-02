@@ -30,12 +30,14 @@
     { "kind": "lesson", "ref": "sd/case-studies/payment-system" },
     { "kind": "lesson", "ref": "sd/case-studies/ride-hailing-and-proximity-search" },
     { "kind": "lesson", "ref": "sd/case-studies/distributed-key-value-store" },
+    { "kind": "lesson", "ref": "sd/case-studies/video-streaming" },
+    { "kind": "lesson", "ref": "sd/case-studies/search-autocomplete" },
     { "kind": "external", "title": "Designing Data-Intensive Applications (Martin Kleppmann)", "url": "https://dataintensive.net/", "type": "book", "note": "Read chapters 1 to 9 alongside the lessons. It is the best single book on this subject." },
     { "kind": "external", "title": "The System Design Primer", "url": "https://github.com/donnemartin/system-design-primer", "type": "article", "note": "Free reference with diagrams and practice questions." },
     { "kind": "external", "title": "The Twelve-Factor App", "url": "https://12factor.net/", "type": "article", "note": "Short and practical rules for deployable services." },
     { "kind": "page", "title": "Glossary", "href": "/glossary/", "note": "240 terms, cross-linked to the lessons." },
     { "kind": "project", "title": "Design, build and load-test a URL shortener", "brief": "Write a one-page design doc first (requirements, estimates, API, data model, trade-offs). Build it with a database, a cache and rate limiting, deploy it, and load test it with a tool such as k6 or wrk. Record the p50 and p99 latency before and after the cache.", "deliverable": "A deployed service, a design doc in the repository and a results table showing how the cache changed latency and throughput." },
-    { "kind": "planned", "title": "More case studies: video streaming, search, and low-level design", "note": "Further case studies and low-level design (the rest of SD modules 17 to 28) are not written on this site yet. Practise them with the System Design Primer and DDIA examples, and sketch your own designs on paper first." }
+    { "kind": "planned", "title": "More case studies (web crawler, notifications, collaborative editing, and others) and low-level design", "note": "Further case studies and low-level design (the rest of SD modules 17 to 28) are not written on this site yet. Practise them with the System Design Primer and DDIA examples, and sketch your own designs on paper first." }
   ],
   "exit": [
     "You can run the full framework (clarify, estimate, API, data model, high-level design, deep dive, bottlenecks) on an unfamiliar problem in 45 minutes.",
