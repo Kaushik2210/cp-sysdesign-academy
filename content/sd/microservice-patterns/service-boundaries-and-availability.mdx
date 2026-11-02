@@ -52,7 +52,7 @@ Every additional hard dependency multiplies in another factor below 1. Two defen
 
 Each service is up 99.9% of the time ("three nines": about 8.8 hours of downtime a year). The program computes `a^k` exactly, checks it by simulation, and compares ten required dependencies with a design where six of them have fallbacks.
 
-<CodeRunner language="python" code={`import random
+<CodeRunner language="python" timeoutMs={30000} code={`import random
 
 random.seed(4)
 

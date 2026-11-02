@@ -15,12 +15,15 @@ export function CodeRunner({
   snippets,
   stdin = "",
   height,
+  timeoutMs,
 }: {
   language?: Language;
   code?: string;
   snippets?: Snippets;
   stdin?: string;
   height?: number;
+  /** Time limit for one run in milliseconds; the default (5 s) suits small demos, simulations may ask for more. */
+  timeoutMs?: number;
 }) {
   const initial: Snippets = snippets ?? { [language]: code ?? "" };
   const langs = Object.keys(initial) as Language[];
@@ -33,7 +36,7 @@ export function CodeRunner({
   const run = async () => {
     setRunning(true);
     setResult(undefined);
-    setResult(await runCode(lang, sources[lang] ?? "", input));
+    setResult(await runCode(lang, sources[lang] ?? "", input, timeoutMs ? { timeoutMs } : undefined));
     setRunning(false);
   };
 

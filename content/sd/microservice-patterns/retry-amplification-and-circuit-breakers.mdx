@@ -47,7 +47,7 @@ In a call chain the problem compounds. If the edge service retries 3 times, and 
 
 A three-tier chain: **edge**, **middle**, **dependency**. The dependency fails a fixed fraction of calls. We compare five setups: no retries, retries at the edge only, retries (3 attempts) at both layers, both layers with a retry budget (each first attempt earns 0.1 of a retry), and the budget plus a circuit breaker in front of the dependency (opens after 5 consecutive failures, fails fast for 50 calls, then probes).
 
-<CodeRunner language="python" code={`import random
+<CodeRunner language="python" timeoutMs={30000} code={`import random
 
 random.seed(21)
 

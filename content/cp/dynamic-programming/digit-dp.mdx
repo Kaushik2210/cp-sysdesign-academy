@@ -152,7 +152,7 @@ static long f(long n, int S) {       // how many x in [0, n] have digit sum S
 
 Check the counts against brute force on random inputs, and reproduce the table above:
 
-<CodeRunner language="python" code={`import random
+<CodeRunner language="python" timeoutMs={30000} code={`import random
 
 MAXS = 60
 cnt = [[0] * (MAXS + 1) for _ in range(10)]

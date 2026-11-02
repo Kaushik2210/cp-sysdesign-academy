@@ -103,7 +103,7 @@ In Python you would normally use `collections.OrderedDict` (`move_to_end`, `popi
 
 The experiment below replays 100,000 requests over 10,000 keys with Zipf popularity (exponent 1) and compares FIFO, LRU and a simple LFU whose counts persist after eviction (an idealised variant).
 
-<CodeRunner language="python" code={`import random
+<CodeRunner language="python" timeoutMs={30000} code={`import random
 from collections import OrderedDict, Counter
 
 def zipf_trace(n_keys, n_req, s=1.0, seed=3):

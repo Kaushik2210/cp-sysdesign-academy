@@ -61,7 +61,7 @@ The election timeout must be **much larger than the heartbeat interval and the n
 
 Five servers, a base timeout of 150 ms plus a random spread, and message delays of 5 to 15 ms. A server becomes a candidate if its timeout fires before any vote request reaches it; otherwise it votes for the request that reaches it first. The program measures how often the first round ends in a split vote, and how many rounds are needed on average until a leader exists.
 
-<CodeRunner language="python" code={`import random
+<CodeRunner language="python" timeoutMs={30000} code={`import random
 
 random.seed(12)
 
