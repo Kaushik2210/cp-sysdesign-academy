@@ -1,0 +1,161 @@
+---
+title: "Case Study: Social Graph and Friend Suggestions"
+track: sd
+module: case-studies
+order: 16
+difficulty: hard
+estMinutes: 45
+prerequisites: ["sd/case-studies/news-feed", "sd/databases-2/sharding-and-partitioning", "sd/databases-2/hot-keys-and-hot-partitions"]
+tags: [case-study, social-graph, graph, friend-suggestions, adjacency-list, sharding, caching, privacy]
+type: case-study
+furtherReading:
+  - title: Bronson et al. - TAO, Facebook's distributed data store for the social graph
+    url: https://www.usenix.org/conference/atc13/technical-sessions/presentation/bronson
+  - title: Ugander et al. - The anatomy of the Facebook social graph
+    url: https://arxiv.org/abs/1111.4503
+  - title: Gupta et al. - WTF, the Who To Follow service at Twitter
+    url: https://web.stanford.edu/~rezab/papers/wtf_overview.pdf
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Users **follow** or **friend** other users (directed or mutual edges); unfollow and block.
+- Queries: "does A follow B?", "list A's followers/following (paginated)", "count followers", "mutual friends of A and B".
+- **Suggestions**: "people you may know" / "who to follow".
+- Degrees of separation ("2nd connection") for a profile badge or search ranking.
+
+**Non-functional**
+- Edge reads are **extremely read-heavy** (every page load checks relationships and counts). Read p99 under about 10 ms.
+- Writes (follow/unfollow) are far less frequent but must be **durable**, and a follow should be visible to its owner immediately (read-your-writes).
+- **Privacy** is part of correctness: blocked and private-account relationships must be enforced everywhere, including suggestions and counts.
+- Assume 1 billion users, 200 edges on average per user, with a long-tail distribution (a few accounts have 100 million followers).
+
+## 2. Estimate
+
+- Edges: 1B × 200 = **200 billion** directed edges. Storing each as (from, to, timestamp) ≈ 24 B gives about **4.8 TB**; store both directions (following and followers) for ~**10 TB** before replication. Large but shardable; fits comfortably on a modest cluster of SSD nodes.
+- Reads: 1B daily users × 50 graph reads per session ≈ 50B reads/day ≈ **580,000/s** average, several million at peak, nearly all served from cache.
+- Writes: assume 100M follows per day ≈ **1,200/s**: trivial.
+- The challenge is the **skew**: average degree 200, maximum degree 100M. A design that works for the average falls over for celebrities.
+
+## 3. Data model: edges as first-class rows
+
+A relational or key-value layout, with the graph stored as **adjacency lists** in both directions:
+
+```
+following(user_id, followee_id, created_at)      PK (user_id, followee_id)
+followers(user_id, follower_id, created_at)      PK (user_id, follower_id)
+counts(user_id, following_count, follower_count)
+```
+
+Queries:
+
+- `is_following(a, b)`: point lookup on `following(a, b)`.
+- `list following(a)`: range scan of partition `a` (paginate with a cursor on the key).
+- `count`: read the denormalised counter instead of counting 100M rows.
+
+A graph database (Neo4j) handles deep traversals naturally but does not usually scale to billions of users with high QPS; large social networks build **purpose-built, sharded, cached graph stores** (Facebook's TAO is the canonical example: objects and **associations** with a write-through cache layer over MySQL).
+
+**A follow is two writes** (a row in each direction) plus counters. Keep them consistent with a transaction when both rows live on one shard, or with an idempotent, retried pair of writes through a log (outbox) when they live on different shards, because `following(a)` is sharded by `a` and `followers(b)` by `b`. Reconciliation jobs repair rare divergence.
+
+## 4. Sharding and caching
+
+- **Shard by user id** (hash). All of a user's outgoing edges live together, so "who does A follow" touches one shard. The reverse index is sharded by the target. Avoid range-partitioning by id (hotspots on new users).
+- **Cache edges and counts** in a large look-aside or write-through tier (Memcached/Redis). Hit rates above 99% are typical because the working set is popular users.
+- **Hot keys:** a celebrity's follower list and count are read constantly. Replicate hot entries across cache nodes, serve counts from a periodically refreshed or approximate counter, and never scan a 100M-row follower list online. Paginate with cursors; cap how deep a user can scroll.
+- **Counters:** `UPDATE counts SET followers = followers + 1` on one row serialises writes for a celebrity. Use **sharded counters** (N sub-counters summed on read), or batch increments through a stream and apply them in bulk. Exact real-time counts for huge accounts are rarely required; show "12.4M".
+- **Consistency:** the user who just followed must see it immediately (read-your-writes: write through the cache or read the primary briefly). Others can see it a second later.
+
+## 5. Mutual friends, suggestions and degrees of separation
+
+With adjacency lists these are set operations and graph traversals.
+
+```python
+from collections import deque
+
+follows = {"ann": {"bob", "cy", "dee"}, "bob": {"cy", "eve"}, "cy": {"eve", "fay"},
+           "dee": {"fay"}, "eve": set(), "fay": set()}
+
+def mutual(a, b): return follows[a] & follows[b]           # set intersection of adjacency lists
+
+def suggest(user, k=3):
+    """Friends-of-friends, ranked by how many of the user's followees follow them."""
+    seen = follows[user] | {user}
+    score = {}
+    for f in follows[user]:
+        for ff in follows[f]:
+            if ff not in seen: score[ff] = score.get(ff, 0) + 1
+    return sorted(score.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+
+def degrees(src, dst):
+    q, dist = deque([src]), {src: 0}
+    while q:                                               # breadth-first search
+        u = q.popleft()
+        if u == dst: return dist[u]
+        for v in follows[u]:
+            if v not in dist: dist[v] = dist[u] + 1; q.append(v)
+    return None
+
+print(mutual("ann", "bob"), suggest("ann"), degrees("ann", "fay"), degrees("eve", "ann"))
+# {'cy'} [('eve', 2), ('fay', 2)] 2 None
+```
+
+At real scale:
+
+- **Mutual friends** = intersect two sorted adjacency lists (`O(a + b)`, or `O(min · log max)` with binary search / bitmaps); cache results for hot pairs.
+- **Degrees of separation**: a full BFS is explosive (average 200 edges means 200² = 40,000 people at 2 hops, 8 million at 3). Use **bidirectional BFS** (meet in the middle, about 2 × 200^(d/2) work), limit depth to 3 or 4, and precompute for important cases.
+- **Suggestions are computed offline**, not per request. A batch or streaming job (MapReduce/Spark, or a graph engine) computes candidates (friends-of-friends, shared groups/workplaces/schools, contacts uploaded, co-engagement) and scores them with a model (number of mutual connections, recency, interaction strength, similarity of interests). Results are stored per user and served from a key-value store. Refresh daily, with fast incremental updates after major actions.
+- **Cap fan-out**: skip very high-degree nodes when expanding (they connect to everyone and add noise), sample neighbours, and use approximate methods (MinHash, random walks, embeddings) instead of exact counts for huge neighbourhoods.
+- **Feedback loop:** record impressions, dismissals and follows to train and evaluate the ranker; measure follow-through rate.
+
+<Diagram kind="flow" caption="Online edge store with cache on the read path; offline pipeline precomputes suggestions" nodes={[
+  { id: "api", label: "Graph API", x: 0, y: 90, role: "Serves is-following, lists, counts and mutual-friend queries; enforces blocks and privacy.", failureModes: ["Privacy bug exposes a private account's followers"], tradeoffs: ["Centralise privacy checks in the graph service, not in each caller"] },
+  { id: "cache", label: "Edge cache tier", x: 220, y: 20, role: "Look-aside or write-through cache of adjacency pages and counts.", failureModes: ["Hot celebrity keys", "Thundering herd after eviction"], tradeoffs: ["Replicate hot keys, request coalescing, short TTL on counts"] },
+  { id: "shards", label: "Edge store shards (SQL or KV)", x: 440, y: 20, role: "Following and followers adjacency lists, sharded by user id.", failureModes: ["Cross-shard follow writes diverge", "Hot shard"], tradeoffs: ["Idempotent paired writes via an outbox; reconciliation job"] },
+  { id: "log", label: "Change stream", x: 440, y: 160, role: "Follow/unfollow events for counters, feeds, suggestions and analytics.", failureModes: ["Lag makes counts stale"], tradeoffs: ["Eventual consistency for derived data"] },
+  { id: "batch", label: "Suggestion pipeline (batch + stream)", x: 660, y: 160, role: "Computes candidates and scores them offline; refreshes per-user lists.", failureModes: ["Stale or creepy suggestions", "Suggesting blocked users"], tradeoffs: ["Filter blocks and privacy at serve time too"] },
+  { id: "sug", label: "Suggestion store", x: 660, y: 90, role: "Per-user ranked candidate lists in a key-value store.", failureModes: ["Cold start for new users"], tradeoffs: ["Fallback to popular and contact-based suggestions"] }
+]} edges={[
+  { from: "api", to: "cache" }, { from: "cache", to: "shards", label: "miss" }, { from: "shards", to: "log", label: "CDC" }, { from: "log", to: "batch" }, { from: "batch", to: "sug" }, { from: "api", to: "sug", label: "suggestions" }
+]} />
+
+## 6. Deep dives
+
+- **Blocks and privacy:** a block removes edges in both directions and adds a block record that every read path (lists, counts, suggestions, search, mentions) must consult. Private accounts require an approved-follower check before returning lists. Never reveal that a block exists (return "not found").
+- **Unfollow and deletion:** soft-delete with tombstones if a feed or analytics system needs to observe it; a hard delete job removes data when an account is deleted (right to erasure), including from caches, derived tables and suggestions.
+- **Spam and abuse:** rate limit follows per account (follow/unfollow churn is a bot signal); detect follow rings; limit following counts.
+- **Consistency of counters:** counts are denormalised and can drift; recompute periodically from edges and expose slightly stale numbers. Do not block a follow on a counter update.
+- **Directed vs undirected:** friendships (mutual) store a pair of directed edges or a canonical (min id, max id) row with a state machine: `requested → accepted → blocked`.
+- **Graph analytics at scale:** connected components, PageRank, community detection run on a batch graph processing system over snapshots; results feed ranking and abuse detection.
+- **Multi-region:** home each user's edge rows in one region (writes), replicate for reads; read-your-writes via sticky routing or version tokens.
+- **Alternatives:** a graph database for small to mid-size or deep traversals (fraud, knowledge graphs); a wide-column store for simple adjacency lists; a relational database sharded by user for strong constraints.
+
+## 7. Trade-offs
+
+- **Precompute vs compute on demand:** precomputed suggestions are fast and cheap per request but go stale and cost batch compute; online computation is fresh but too expensive for high-degree neighbourhoods.
+- **Exact vs approximate:** exact mutual-friend counts for celebrities are not worth it; approximate or capped answers keep latency bounded.
+- **Two-way indexes:** doubling storage and writes buys fast reverse lookups ("who follows me").
+- **Strong vs eventual consistency:** strong on the writer's own view and on safety-critical facts (blocks); eventual on counts and recommendations.
+
+## Pitfalls
+
+- Counting followers with `COUNT(*)` on a hot account.
+- Scanning or unbounded-paginating a celebrity's list.
+- A single counter row for a viral account.
+- Computing suggestions or deep BFS in the request path.
+- Forgetting blocks and privacy in derived systems (search, suggestions, notifications).
+- Writing the two edge directions non-atomically with no repair.
+- Treating the graph as a general-purpose graph-database problem when it is a huge sharded key-value problem.
+
+## What would you choose and why?
+
+The product wants "people you may know" to include real-world signals (shared phone contacts, same workplace). What privacy constraints does that add, how do you avoid revealing that someone has your number or that you looked at their profile, and what would make you turn the feature off for a particular user or region?
+
+## Quiz
+
+<Quiz id="sd-m17-social-graph" tags={["case-study", "graph", "sharding"]} questions={[
+  { type: "mcq", q: "Why store both a following and a followers index?", options: ["To confuse attackers", "Each direction is needed for fast lookups; one table cannot serve both access patterns efficiently", "To save disk", "SQL requires it"], answer: 1, explain: "Reverse lookups would otherwise need a full scan across shards." },
+  { type: "mcq", q: "How should a celebrity's follower count be maintained?", options: ["COUNT(*) per request", "A single hot counter row", "A denormalised, sharded or batched counter shown approximately", "Not at all"], answer: 2, explain: "Counting millions of rows or serialising writes on one row does not scale; slight staleness is acceptable." },
+  { type: "multi", q: "Which are good practices for friend suggestions?", options: ["Compute candidates and scores offline and serve from a key-value store", "Filter blocks and privacy again at serve time", "Run an unbounded BFS per page view", "Cap or sample neighbours of very high-degree nodes"], answer: [0, 1, 3], explain: "Unbounded traversals explode at an average degree of 200." },
+  { type: "predict", q: "In the demo, ann follows bob, cy, dee. What does suggest('ann') return?", code: "suggest('ann')", options: ["[('eve', 2), ('fay', 2)]", "[('bob', 1)]", "[]", "[('fay', 3)]"], answer: 0, explain: "eve is followed by bob and cy; fay by cy and dee; neither is already followed by ann." }
+]} />

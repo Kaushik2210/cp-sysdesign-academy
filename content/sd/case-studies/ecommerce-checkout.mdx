@@ -1,0 +1,184 @@
+---
+title: "Case Study: E-commerce Catalog, Cart and Checkout"
+track: sd
+module: case-studies
+order: 17
+difficulty: hard
+estMinutes: 50
+prerequisites: ["sd/case-studies/ticket-booking", "sd/case-studies/payment-system", "sd/microservice-patterns/event-driven-cqrs-event-sourcing", "sd/search/distributed-search-architecture"]
+tags: [case-study, e-commerce, catalog, cart, checkout, inventory, orders, saga, pricing, peak-traffic]
+type: case-study
+furtherReading:
+  - title: Chris Richardson - Microservices patterns, the Saga pattern and the Create Order saga
+    url: https://microservices.io/patterns/data/saga.html
+  - title: Werner Vogels - Eventually Consistent (and Amazon's service-oriented architecture lessons)
+    url: https://www.allthingsdistributed.com/2008/12/eventually_consistent.html
+  - title: DeCandia et al. - Dynamo, Amazon's Highly Available Key-value Store (the shopping cart use case)
+    url: https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Browse and **search** a catalog of products (variants, images, reviews, prices).
+- A **cart** (guest and logged-in) that survives sessions and devices.
+- **Checkout**: address, shipping options, taxes, discounts, payment, order confirmation.
+- **Order management**: status, cancellation, returns, refunds, notifications.
+- Sellers or warehouses update inventory and prices.
+
+**Non-functional**
+- **Browsing and cart must be highly available** (an error loses a sale); the **order and payment** step must be **correct** (no oversell, no double charge).
+- Fast pages (product page p99 under about 300 ms), spiky traffic (Black Friday is 10 to 20 times normal).
+- Prices, stock and promotions change frequently but need not be perfectly fresh on listing pages.
+- Assume 50M daily visitors, 2M orders per day, 100M products.
+
+## 2. Estimate
+
+- Page views: 50M visitors × 20 pages = 1B/day ≈ **11,600/s** average, ~100,000/s at peak. Overwhelmingly reads, mostly cacheable.
+- Orders: 2M/day ≈ **23/s** average; peak events 20x = ~500/s. Writes are few, but each is a multi-step transaction.
+- Catalog: 100M × 5 KB = **500 GB** of structured data plus images in object storage/CDN (petabytes). Easy to shard and cache.
+- Carts: 50M daily visitors × 20% creating a cart × 1 KB = ~10 GB of active cart data: small.
+- Insight: **read path = caching and search at scale; write path = correctness and workflow**. Design them separately.
+
+## 3. Service decomposition
+
+Split along business capabilities, each owning its data (see the microservices lessons):
+
+| Service | Owns | Consistency need |
+| --- | --- | --- |
+| Catalog | Products, variants, descriptions, images | Eventual; cached heavily |
+| Search | Derived search index | Eventual (CQRS read model fed by catalog events) |
+| Pricing and promotions | Prices, discount rules, coupons | Authoritative at checkout, cached on listings |
+| Inventory | Stock levels per SKU and warehouse | **Strong at reserve time**, approximate on listings |
+| Cart | Per-user line items | High availability; mergeable |
+| Orders | Order records and state machine | Strong |
+| Payments | Authorisation and capture (see the payments lesson) | Strong, idempotent |
+| Fulfilment/shipping | Picking, packing, carrier labels, tracking | Eventual |
+| Notifications, reviews, recommendations | Their own stores | Eventual |
+
+## 4. Catalog and product pages (the read path)
+
+- Catalog data is read-mostly: **cache aggressively** at the CDN (static assets, images, even full product pages for anonymous users) and in a look-aside cache for product JSON. Invalidate on update via events.
+- **Personalised or volatile parts** (price, stock badge, delivery estimate, recommendations) are fetched separately by small API calls (or edge-side includes) so the heavy page shell stays cacheable.
+- **Search and browse** use the inverted-index design from the search module: catalog events (CDC/outbox) feed the indexer; facets (brand, price range) are aggregations; ranking mixes BM25 with popularity, conversion and availability signals.
+- Show **"in stock"** from a cached, approximate view. An approximate "Only 3 left" is fine; the authoritative check happens at reservation.
+
+## 5. Cart
+
+Requirements: always writable, merges guest and logged-in carts, tolerates concurrent edits from two devices.
+
+- Store `cart_id → lines` in a key-value store (Redis with persistence, DynamoDB/Cassandra) keyed by user id or an anonymous cookie id. The Dynamo paper's shopping cart is the famous example: prefer **availability and merge** over strict consistency.
+- Conflicts on concurrent edits: treat the cart as a set of lines with quantities and **merge** (union of items; max or latest quantity), accepting the occasional resurrected item over losing an add-to-cart.
+- A cart holds **no inventory reservation** and **no price guarantee**: prices and stock are re-validated at checkout. Show a clear "price changed" message.
+- Expire abandoned carts after a retention period; use them for reminder emails (respecting consent).
+
+## 6. Checkout and price calculation
+
+Pricing is deterministic arithmetic in **integer minor units**, computed by one authoritative service. Taxes, shipping and discounts all depend on address and cart contents, so recompute everything server-side at checkout; never trust prices from the client.
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Line:
+    sku: str; unit_cents: int; qty: int
+
+def total(lines, coupon_pct=0, free_ship_over=5000, ship=599, tax_bp=800):
+    sub = sum(l.unit_cents * l.qty for l in lines)
+    disc = sub * coupon_pct // 100
+    after = sub - disc
+    shipping = 0 if after >= free_ship_over else ship
+    tax = (after * tax_bp + 5000) // 10000            # basis points, rounded half up, on the discounted amount
+    return {"subtotal": sub, "discount": disc, "shipping": shipping, "tax": tax, "total": after + shipping + tax}
+
+print(total([Line("a", 1999, 2), Line("b", 500, 1)], coupon_pct=10))
+# {'subtotal': 4498, 'discount': 449, 'shipping': 599, 'tax': 324, 'total': 4972}
+```
+
+Rules worth stating: define rounding once (and who absorbs the cent), order of operations for stackable discounts, tax jurisdiction rules from a tax service, and store the **price breakdown on the order** so later refunds use exactly what was charged.
+
+## 7. Inventory reservation and the order saga
+
+Overselling is the cost of eventual consistency in the wrong place. At checkout, **reserve** stock atomically; **commit** it when payment succeeds; **release** it if payment fails or the reservation times out.
+
+```python
+class Stock:
+    def __init__(self, n): self.n, self.reserved = n, {}
+    def available(self): return self.n - sum(self.reserved.values())
+    def reserve(self, order, q):
+        if self.available() < q: return False        # atomic check-and-reserve (a conditional update in real life)
+        self.reserved[order] = q; return True
+    def commit(self, order): self.n -= self.reserved.pop(order)
+    def release(self, order): self.reserved.pop(order, None)
+
+s = Stock(3)
+print(s.reserve("o1", 2), s.reserve("o2", 2), s.reserve("o3", 1))   # True False True   (o2 cannot oversell)
+s.release("o1"); print(s.reserve("o2", 2))                          # True   (o1's reservation released)
+s.commit("o2"); print(s.n, s.available())                           # 1 0
+```
+
+In a database this is `UPDATE stock SET reserved = reserved + :q WHERE sku = :sku AND on_hand - reserved >= :q` with a check of affected rows, plus an expiry timestamp on the reservation row and a sweeper that releases expired ones (the same hold pattern as the ticket booking lesson). For very hot SKUs (a flash sale), split stock into several buckets or use a queue per SKU to serialise decrements.
+
+**Create-order saga (orchestrated):**
+
+1. Create the order in state `PENDING` (idempotency key = checkout session id).
+2. Reserve inventory (compensation: release).
+3. Authorise payment (compensation: void the authorisation).
+4. Mark the order `CONFIRMED`, emit `OrderPlaced` through the outbox.
+5. Fulfilment creates the shipment; payment is **captured** when the item ships (or at confirmation for digital goods).
+
+If any step fails, run compensations in reverse and mark the order `FAILED` with the reason shown to the user. Persist saga state after each step so a crash resumes or compensates (see the transactions lesson). Order states form a state machine: `PENDING → CONFIRMED → PACKED → SHIPPED → DELIVERED`, with `CANCELLED` and `RETURNED` branches; only valid transitions are accepted.
+
+<Diagram kind="flow" caption="Read path is cached and eventually consistent; the order path is an orchestrated saga with a strongly consistent core" nodes={[
+  { id: "cdn", label: "CDN + cached pages", x: 0, y: 20, role: "Serves product pages, images and listings.", failureModes: ["Stale price or stock shown"], tradeoffs: ["Short TTL and event-driven invalidation; volatile data fetched separately"] },
+  { id: "search", label: "Catalog + Search", x: 220, y: 20, role: "Catalog source of truth and a derived search index.", failureModes: ["Index lag shows removed products"], tradeoffs: ["Eventual consistency; recheck availability at checkout"] },
+  { id: "cart", label: "Cart service (KV)", x: 220, y: 100, role: "Always-writable carts with merge on conflict.", failureModes: ["Duplicate or resurrected items after merges"], tradeoffs: ["Availability over strict consistency; revalidate at checkout"] },
+  { id: "co", label: "Checkout / order orchestrator", x: 440, y: 100, role: "Recomputes prices, creates the order and runs the saga with idempotency keys.", failureModes: ["Crash mid-saga", "Duplicate submissions"], tradeoffs: ["Persisted saga state; compensations are idempotent"] },
+  { id: "inv", label: "Inventory", x: 660, y: 20, role: "Atomic reserve, commit and release with expiry.", failureModes: ["Hot SKU contention", "Orphaned reservations"], tradeoffs: ["Bucketed stock for hot items; sweeper releases expired holds"] },
+  { id: "pay", label: "Payments", x: 660, y: 100, role: "Authorise, capture, void and refund through a PSP.", failureModes: ["Unknown outcome on timeout"], tradeoffs: ["Idempotent calls and reconciliation (see the payments case study)"] },
+  { id: "bus", label: "Event bus + outbox", x: 660, y: 180, role: "Publishes OrderPlaced, Shipped and Refunded for downstream services.", failureModes: ["Duplicate events"], tradeoffs: ["At-least-once with idempotent consumers"] },
+  { id: "ful", label: "Fulfilment, notifications, analytics", x: 880, y: 100, role: "Warehouse picking and shipping, emails, reporting, recommendations.", failureModes: ["Consumer lag delays shipping"], tradeoffs: ["Asynchronous: customer sees a confirmed order even if downstream is slow"] }
+]} edges={[
+  { from: "cdn", to: "search" }, { from: "search", to: "cart", label: "add to cart" }, { from: "cart", to: "co", label: "checkout" }, { from: "co", to: "inv", label: "reserve" }, { from: "co", to: "pay", label: "authorise" }, { from: "co", to: "bus", label: "outbox" }, { from: "bus", to: "ful" }
+]} />
+
+## 8. Peak traffic and operational concerns
+
+- **Capacity and load shedding:** pre-scale before known events (Black Friday); serve a **degraded mode** (static pages, disable recommendations and reviews, queue non-critical work) rather than failing; protect checkout with bulkheads and a waiting room if inventory is scarce (as in the ticketing lesson).
+- **Idempotent checkout:** a user double-clicks or the browser retries after a timeout: one idempotency key per checkout session means one order.
+- **Promotions and flash deals:** precompute and cache eligible prices; limit coupon redemptions with an atomic counter; protect against coupon abuse and bots.
+- **Returns and refunds:** a return is its own workflow referencing the original order lines; refunds go back through payments with the original price breakdown; restock only after inspection.
+- **Multi-warehouse and delivery promise:** choose the fulfilment node by stock, distance and cost; compute delivery estimates from carrier and warehouse cut-off times; split shipments when needed.
+- **Data consistency checks:** reconcile orders vs payments vs shipments daily to find stuck sagas, charged-but-unshipped orders and stock drift; fix automatically where safe.
+- **Observability:** conversion funnel (view → cart → checkout → paid), checkout latency and error rate by step, payment decline rate, oversell/stock-adjustment counts, saga stuck age, search zero-result rate.
+- **Security and privacy:** PCI scope isolation (tokenised cards), fraud scoring on orders, account takeover defences, address and PII protection (see the security module).
+
+## Trade-offs to state aloud
+
+- Availability on browsing and carts vs correctness on inventory and payment: **different consistency per capability**, not one choice for the whole system.
+- Reserve at add-to-cart (feels fair, locks stock for abandoners) vs reserve at checkout (higher availability, a small chance of "sorry, sold out" late); most retailers reserve at checkout, and ticketing reserves at selection.
+- Monolithic order transaction vs saga: a single database transaction is simpler but couples teams; the saga scales organisationally at the cost of compensations and intermediate states.
+- Fresh price everywhere vs cached listing price with recheck at checkout.
+
+## Pitfalls
+
+- Trusting client-supplied prices or totals.
+- Reserving inventory at add-to-cart with no expiry.
+- Decrementing stock after payment (oversell window) or before payment with no release path.
+- Floats for money and inconsistent rounding between cart, order and refund.
+- Strong consistency on the product page path, which makes browsing fragile.
+- No idempotency on order creation.
+- Hard-coding one consistency model for all services.
+
+## What would you choose and why?
+
+A marketplace lets thousands of third-party sellers update stock through APIs and CSV uploads, often with stale data. How do you protect the customer from overselling, what do you do when a seller cancels after the order is confirmed, and how do you present availability honestly without scaring buyers?
+
+## Quiz
+
+<Quiz id="sd-m17-ecommerce-checkout" tags={["case-study", "e-commerce", "saga"]} questions={[
+  { type: "mcq", q: "Why separate the read path (catalog, search) from the order path in design?", options: ["They use different programming languages", "Reads need availability and caching with eventual consistency, while orders need strong consistency and workflow correctness", "Orders are read-heavy", "Search cannot be cached"], answer: 1, explain: "Different workloads and correctness needs justify different designs and consistency levels." },
+  { type: "mcq", q: "When should stock be atomically reserved in a typical retail flow?", options: ["On every product page view", "At checkout, with an expiry, then committed on payment success", "After shipping", "Never"], answer: 1, explain: "Reserving at checkout limits locked inventory while still preventing oversell." },
+  { type: "multi", q: "Which make order creation safe?", options: ["Idempotency key per checkout session", "Saga with compensations and persisted state", "Recomputing prices server-side", "Trusting the client's total to save work"], answer: [0, 1, 2], explain: "Client-supplied totals are an attack surface." },
+  { type: "predict", q: "In the demo, Stock(3): o1 reserves 2, o2 tries 2, o3 reserves 1. What are the three results?", code: "s.reserve('o1',2), s.reserve('o2',2), s.reserve('o3',1)", options: ["True True True", "True False True", "True True False", "False False False"], answer: 1, explain: "After o1 reserves 2, only 1 is available, so o2 fails but o3 can take the last unit." }
+]} />

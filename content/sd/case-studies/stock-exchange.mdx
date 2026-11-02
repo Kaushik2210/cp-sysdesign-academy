@@ -1,0 +1,156 @@
+---
+title: "Case Study: Stock Exchange and Order Matching"
+track: sd
+module: case-studies
+order: 15
+difficulty: expert
+estMinutes: 50
+prerequisites: ["sd/case-studies/payment-system", "sd/consensus/raft-leader-election-and-log-replication", "sd/case-studies/distributed-key-value-store"]
+tags: [case-study, exchange, order-book, matching-engine, low-latency, determinism, event-sourcing, market-data]
+type: case-study
+furtherReading:
+  - title: Martin Fowler - The LMAX Architecture
+    url: https://martinfowler.com/articles/lmax.html
+  - title: Thompson et al. - Disruptor, high performance alternative to bounded queues for exchanging data between concurrent threads (LMAX)
+    url: https://lmax-exchange.github.io/disruptor/disruptor.html
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 11, state machine replication and event sourcing
+    url: https://dataintensive.net/
+  - title: Nasdaq - ITCH and OUCH protocol specifications (market data and order entry)
+    url: https://www.nasdaq.com/solutions/nasdaq-totalview-itch
+---
+
+## 1. Clarify requirements
+
+**Functional**
+- Participants (brokers) submit **limit** and **market** orders to buy or sell instruments; they can cancel or amend orders.
+- The exchange **matches** buy and sell orders by **price-time priority** and reports executions.
+- It publishes **market data**: the order book depth, trades and quotes, to everyone fairly.
+- Pre-trade risk checks, trade reporting, end-of-day settlement hand-off.
+
+**Non-functional**
+- **Correctness and fairness first**: every order is processed exactly once, in a single agreed order. Two participants must never be matched on contradictory books.
+- **Very low and predictable latency** (tens to hundreds of microseconds in the matching path); jitter matters more than the average.
+- **Deterministic** and **fully auditable**: given the same input sequence, the same trades result. Regulators can ask for a replay.
+- **High availability** with no lost acknowledged orders; failover in seconds, ideally with no gap.
+- Assume 5,000 symbols, up to 1 million orders per second at peak across all symbols, with a heavy skew: a few symbols take a large share of the traffic.
+
+## 2. Estimate
+
+- 1M orders/s with ~100 B per message = **100 MB/s** of inbound data: tiny. Throughput is not the hard part; **latency and ordering** are.
+- Per symbol, a busy name might see 50,000 orders/s. One CPU core can process that if work per order is a few microseconds (a heap or tree operation on an in-memory book), so a **single thread per symbol** is feasible. LMAX reported millions of operations per second on one thread.
+- State is small: an order book of 100,000 resting orders × 64 B ≈ 6 MB per symbol; the entire market fits in memory on one machine. The audit log grows by about 100 MB/s × 6.5 hours ≈ 2 TB per trading day, archived to disk or object storage.
+
+## 3. The order book and matching rules
+
+For each symbol the book holds **bids** (buy orders, best = highest price) and **asks** (sell orders, best = lowest price). Matching uses **price-time priority**: the best price first; among equal prices, the earliest order first (FIFO). Trades execute at the **resting** order's price.
+
+An incoming order is matched against the opposite side while prices cross; any unfilled remainder of a limit order **rests** in the book.
+
+```python
+import heapq, itertools
+
+class OrderBook:
+    def __init__(self):
+        self.bids, self.asks, self.seq = [], [], itertools.count()   # heaps; seq gives time priority
+        self.trades = []
+    def submit(self, side, price, qty, oid):
+        """Limit order with price-time priority; trades execute at the resting order's price."""
+        while qty > 0:
+            book = self.asks if side == "buy" else self.bids
+            if not book: break
+            key, n, rid, rprice, rqty = book[0]
+            if (side == "buy" and rprice > price) or (side == "sell" and rprice < price): break
+            fill = min(qty, rqty)
+            self.trades.append((rid, oid, rprice, fill))
+            qty -= fill
+            if fill == rqty: heapq.heappop(book)
+            else: book[0] = (key, n, rid, rprice, rqty - fill)
+        if qty > 0:                                                    # rest the remainder
+            n = next(self.seq)
+            if side == "buy": heapq.heappush(self.bids, (-price, n, oid, price, qty))
+            else: heapq.heappush(self.asks, (price, n, oid, price, qty))
+        return qty
+
+ob = OrderBook()
+ob.submit("sell", 101, 5, "s1"); ob.submit("sell", 100, 3, "s2"); ob.submit("sell", 100, 4, "s3")
+rest = ob.submit("buy", 101, 10, "b1")
+print(ob.trades)   # [('s2','b1',100,3), ('s3','b1',100,4), ('s1','b1',101,3)]: best price first, then earliest
+print(rest, [(o[2], o[4]) for o in ob.asks], ob.bids)       # 0 [('s1', 2)] []
+ob.submit("buy", 99, 2, "b2"); ob.submit("sell", 99, 5, "s4")
+print(ob.trades[-1], [(o[2], o[4]) for o in ob.asks])         # ('b2','s4',99,2) [('s4', 3), ('s1', 2)]
+```
+
+Production books use price-level buckets (a sorted map of price → FIFO queue) with an index from order id to its position so **cancel** is O(1), and integer prices (ticks) rather than floats. The heap above is the idea, not the implementation.
+
+Order types and rules to mention: market, limit, IOC (immediate-or-cancel), FOK (fill-or-kill), post-only, stop orders, iceberg (hidden quantity), auctions (opening and closing crosses), circuit breakers (halts on extreme moves), self-trade prevention, tick size and lot size validation.
+
+## 4. Architecture: a deterministic, single-writer, replicated state machine
+
+The central idea (also in the LMAX architecture): **make the matching engine a deterministic state machine fed by one totally ordered log of inputs**. Then:
+
+- **Correctness**: one thread applies commands in sequence; no locks, no races, no two-phase anything.
+- **Replay and audit**: replaying the log reproduces the exact book and trades.
+- **High availability**: run replicas that consume the **same ordered log** and apply the same code; any of them can take over with identical state (state machine replication).
+- **Speed**: all state in memory, no database on the hot path, preallocated memory, no garbage-collector pauses (pinned cores, kernel-bypass networking, careful data layout).
+
+<Diagram kind="flow" caption="Gateway to sequencer to deterministic matching engines; replicas replay the same log; market data fans out" nodes={[
+  { id: "gw", label: "Order gateways", x: 0, y: 90, role: "Authenticate participants, validate fields, rate limit, translate protocol (FIX / binary).", failureModes: ["Malformed or abusive flow", "Participant disconnects mid-order"], tradeoffs: ["Keep gateways stateless; scale horizontally; cancel-on-disconnect option protects participants"] },
+  { id: "risk", label: "Pre-trade risk", x: 200, y: 90, role: "Check limits (position, buying power, price bands, fat-finger) before orders reach the book.", failureModes: ["Slow checks add latency", "Stale limits"], tradeoffs: ["In-memory limits updated asynchronously; conservative on doubt"] },
+  { id: "seq", label: "Sequencer (log)", x: 400, y: 90, role: "Assigns a global, gap-free sequence number to every command and replicates it durably before it is processed.", failureModes: ["Single point of ordering", "Disk or network stall"], tradeoffs: ["Replicated log (Raft or primary-backup with sync replication): a few extra microseconds buys durability and failover"] },
+  { id: "me", label: "Matching engines (sharded by symbol)", x: 620, y: 20, role: "Single-threaded, in-memory order books; apply commands in sequence; emit executions.", failureModes: ["Hot symbol saturates one core", "Non-deterministic code breaks replicas"], tradeoffs: ["Shard by symbol: no cross-symbol ordering is needed; give hot symbols a dedicated core"] },
+  { id: "rep", label: "Replica engines", x: 620, y: 160, role: "Consume the same log and keep identical state; hot standby.", failureModes: ["Divergence from non-deterministic behaviour (clock reads, hash-map order)"], tradeoffs: ["Determinism rules: no wall-clock reads in matching, timestamps come from the sequencer"] },
+  { id: "md", label: "Market data publisher", x: 840, y: 20, role: "Publishes book updates and trades to all subscribers via multicast with sequence numbers.", failureModes: ["Packet loss", "Unfair delivery to different participants"], tradeoffs: ["Gap detection and a retransmission channel; equal-length cables to give co-located clients equal latency"] },
+  { id: "post", label: "Trade capture + clearing hand-off", x: 840, y: 160, role: "Persist trades, send to clearing and settlement, feed surveillance and reporting.", failureModes: ["Lag behind the live book"], tradeoffs: ["Asynchronous: off the hot path, exactly-once via sequence numbers"] }
+]} edges={[
+  { from: "gw", to: "risk" }, { from: "risk", to: "seq" }, { from: "seq", to: "me", label: "ordered commands" }, { from: "seq", to: "rep", label: "same log" }, { from: "me", to: "md" }, { from: "me", to: "post" }
+]} />
+
+## 5. Deep dives
+
+**Sequencing and fairness.** The sequencer defines "who was first". It stamps arrival time at the network edge and orders strictly by sequence number. Fairness is a product property: equal latency for co-located participants, no privileged access to the book, and published rules for ties.
+
+**Idempotency and recovery.** Each participant message carries a client order id and a per-session sequence number. Gateways detect gaps and duplicates after reconnects and replay execution reports from the last acknowledged sequence. The engine never processes the same command twice because the sequencer's numbers are unique.
+
+**Failover.** The primary sequencer replicates each command to a quorum or synchronous backup before releasing it for matching. If the primary fails, a backup that has the full log becomes primary, replays any uncommitted tail, and resumes with the next sequence number. Clients reconnect and resync. Typical targets: failover measured in seconds, zero lost acknowledged orders.
+
+**Snapshots.** Periodically snapshot each book plus the sequence number; recovery = load snapshot + replay the log after it.
+
+**Market data.** Two feeds: a fast **incremental feed** (add, modify, delete, trade events with sequence numbers) over multicast, and a **snapshot** channel for late joiners. Consumers rebuild the book locally and detect gaps by sequence number, requesting retransmits. Level 1 (top of book) vs Level 2/3 (depth, order-by-order) tiers.
+
+**Latency engineering (the 99.999th percentile).** Pin threads to isolated cores, avoid allocation and locks in the hot path, use lock-free ring buffers between stages (the LMAX Disruptor), kernel-bypass networking (DPDK, RDMA), co-location, and measure tail latency with hardware timestamps. GC languages are possible with care, but many exchanges use C++, Java with off-heap structures, or Rust.
+
+**Risk and safety.** Pre-trade checks (price collars, maximum order size, position and credit limits), kill switches per participant, market-wide circuit breakers, self-trade prevention, and surveillance for manipulation (spoofing, wash trading).
+
+**Persistence and audit.** The sequenced log is the book of record. Write it durably (replicated NVMe or a replicated log), archive each day to object storage, and keep it for the regulatory retention period. Reconstruct any moment by replay.
+
+## 6. Trade-offs
+
+- **Single-threaded vs parallel engine:** parallelising within a symbol destroys determinism and needs locking; shard across symbols instead. A symbol that outgrows one core is a hard limit, mitigated by an efficient book and lean messages.
+- **Consensus on the hot path:** a replicated log adds microseconds but removes the data-loss risk. Alternatives: synchronous primary-backup (cheaper, needs care around split brain via fencing), or asynchronous replication (faster, can lose the last orders on failure: unacceptable for a primary exchange).
+- **Consistency over availability:** if the sequencer cannot reach a quorum, it halts trading rather than risk divergent books. Halting is visible and recoverable; a divergent market is not.
+- **Throughput vs latency:** batching improves throughput and hurts latency; exchanges favour tiny batches.
+- **Multi-asset and cross-symbol products** (spreads, baskets) need atomic matching across books; place related symbols on the same engine or add a coordinating layer.
+- **Observability:** per-stage latency histograms (gateway, risk, sequencer, match, publish), queue depths, sequence gaps, rejected-order reasons, and continuous replay checks comparing replicas.
+
+## Pitfalls
+
+- Floats for prices and quantities.
+- Using wall-clock time inside matching logic (breaks determinism and replay).
+- Locks or shared mutable state between symbols and threads in the hot path.
+- Asynchronous replication of the order log.
+- Acknowledging an order before it is durably sequenced.
+- Ignoring fairness and equal-access issues in market data.
+- Treating a database as the matching engine.
+
+## What would you choose and why?
+
+The exchange wants to add a crypto market that trades 24/7 with 10 times the order rate and no daily batch window for maintenance. How do you handle software upgrades, snapshots, log growth and failover drills without stopping the market, and which of your determinism rules make rolling upgrades risky?
+
+## Quiz
+
+<Quiz id="sd-m17-stock-exchange" tags={["case-study", "exchange", "matching-engine"]} questions={[
+  { type: "mcq", q: "Why is the matching engine built as a single-threaded deterministic state machine per symbol?", options: ["Threads are banned", "One ordered input stream gives correctness without locks, enables exact replay and lets replicas stay identical", "It uses less memory", "It is easier to scale to many symbols on one thread"], answer: 1, explain: "Determinism plus a total order lets replicas replay the same log and reach the same book." },
+  { type: "predict", q: "Book asks: 100x3 (s2), 100x4 (s3), 101x5 (s1). A buy for 10 at limit 101 arrives. What are the trades, in order?", code: "ob.submit('buy', 101, 10, 'b1')", options: ["s1 then s2 then s3", "s2 (3@100), s3 (4@100), s1 (3@101)", "s3 then s2 then s1", "One trade of 10 at 101"], answer: 1, explain: "Best price first, then time priority: the two 100s in arrival order, then 3 of the 5 at 101." },
+  { type: "multi", q: "Which practices help determinism and safe recovery?", options: ["Timestamps assigned by the sequencer, not the wall clock inside matching", "Snapshots plus replay of the log from the snapshot's sequence number", "Iterating a hash map whose order varies between processes to pick the next order", "Replicating the order log before processing it"], answer: [0, 1, 3], explain: "Anything that varies between replicas, such as unordered iteration or clock reads, breaks identical replay." },
+  { type: "mcq", q: "If the sequencer cannot reach its replication quorum, what should the exchange do?", options: ["Keep matching on the primary alone", "Halt trading rather than risk divergent or lost orders", "Switch to eventual consistency", "Match in both data centres independently"], answer: 1, explain: "A visible halt is recoverable; two divergent order books are not." }
+]} />
