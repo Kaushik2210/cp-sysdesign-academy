@@ -1,0 +1,345 @@
+---
+title: Centroid Decomposition
+track: cp
+module: trees
+order: 6
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/trees/heavy-light-decomposition, cp/trees/tree-dp-and-diameter]
+tags: [trees, centroid-decomposition, divide-and-conquer, distance-queries]
+type: lesson
+problems: [m15-nearest-flag]
+furtherReading:
+  - title: cp-algorithms, Centroid Decomposition of a tree
+    url: https://cp-algorithms.com/graph/centroid-decomposition.html
+  - title: CSES Problem Set, Fixed-Length Paths I
+    url: https://cses.fi/problemset/task/2080
+  - title: Codeforces 342E, Xenia and Tree
+    url: https://codeforces.com/problemset/problem/342/E
+---
+
+## Intuition
+
+Questions about **pairs of vertices** in a tree ("how many pairs are at distance exactly `K`?", "how far is the nearest special vertex?") are hard because paths go everywhere. The recipe that tames them is the same as divide and conquer on arrays: **split the problem at a middle point, handle everything that crosses the middle, then recurse on the halves.**
+
+In a tree the right "middle point" is the **centroid**: a vertex whose removal breaks the tree into components of at most half the original size. Every path between two vertices either
+
+- passes through the centroid, or
+- lies entirely inside one of the smaller components.
+
+So you can count or answer all *through-the-centroid* paths directly, delete the centroid, and recurse. Since each level at least halves the component sizes, the recursion has depth `O(log n)`, and every vertex takes part in only `O(log n)` subproblems.
+
+## The centroid
+
+For a tree with `s` vertices, a **centroid** is a vertex such that every component left after deleting it has at most `⌊s / 2⌋` vertices. One always exists.
+
+**Finding it:** root the (component of the) tree anywhere and compute subtree sizes. Start at the root and repeatedly step to a child whose subtree has more than `s / 2` vertices; stop when there is none. That vertex is a centroid (the part above it is also at most `s / 2` because we only stepped into big children).
+
+## The decomposition
+
+```text
+decompose(component):
+    c = centroid of the component
+    (handle all paths through c)
+    delete c
+    for each remaining component: decompose(component)
+```
+
+The result is the **centroid tree**: the first centroid is the root; the centroids of the components left after deleting it are its children, and so on. Its depth is at most `⌊log₂ n⌋ + 1`.
+
+## The key property
+
+For any two vertices `u` and `v`, let `c` be their **lowest common ancestor in the centroid tree**. Then the tree path from `u` to `v` passes through `c`, so
+
+```text
+dist(u, v) = dist(u, c) + dist(c, v)
+```
+
+For any *other* common centroid ancestor `c'`, the walk `u → c' → v` is a valid walk of at least that length. Therefore
+
+```text
+dist(u, v) = min over common centroid ancestors c of  dist(u, c) + dist(c, v)
+```
+
+Each vertex has only `O(log n)` centroid ancestors, so storing `dist(v, c)` for each costs `O(n log n)` memory and one BFS per component builds it in `O(n log n)` time overall.
+
+## Pattern 1: nearest marked vertex (with updates)
+
+Maintain `best[c]` = the distance from `c` to the nearest marked vertex **inside `c`'s component**.
+
+```text
+mark(v):    for each centroid ancestor c of v:  best[c] = min(best[c], dist(v, c))
+query(v):   min over centroid ancestors c of v:  best[c] + dist(v, c)
+```
+
+Both take `O(log n)`. (A query may count a marked vertex in the same child component whose path to `v` does not truly go through `c`; that gives a *longer* walk, never a shorter one, so the minimum is still exact.)
+
+## Pattern 2: counting paths with a property
+
+To count pairs of vertices whose path has length `K` (or sum `K`):
+
+1. For the centroid `c`, compute for every vertex in the component its distance `d` to `c`.
+2. Count pairs `(u, v)` with `d_u + d_v = K` using a count array indexed by distance.
+3. Subtract pairs that lie in the **same child subtree** of `c` (their path does not really pass through `c`): count them the same way inside each child subtree and subtract.
+4. Delete `c` and recurse.
+
+Each level touches every vertex once, so the total is `O(n log n)` (or `O(n log² n)` if sorting is needed).
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def centroid_decomposition(n, adj):               # vertices 1..n; returns anc[v] = [(centroid, dist), ...] top level first
+    removed = [False] * (n + 1)
+    anc = [[] for _ in range(n + 1)]
+    par = [0] * (n + 1)
+    size = [0] * (n + 1)
+    stack = [1]
+    while stack:                                  # explicit stack: a path graph is n deep
+        s = stack.pop()
+        comp = [s]; par[s] = 0
+        for v in comp:                            # BFS over the current component
+            for w in adj[v]:
+                if not removed[w] and w != par[v]:
+                    par[w] = v; comp.append(w)
+        total = len(comp)
+        for v in comp: size[v] = 1
+        for v in reversed(comp):
+            if par[v]: size[par[v]] += size[v]
+        c = s
+        while True:                               # walk to a child with more than half, until none is left
+            nxt = 0
+            for w in adj[c]:
+                if not removed[w] and w != par[c] and size[w] * 2 > total:
+                    nxt = w; break
+            if nxt == 0: break
+            c = nxt
+        dist = {c: 0}; bfs = [c]
+        for v in bfs:                             # distances from the centroid within the component
+            anc[v].append((c, dist[v]))
+            for w in adj[v]:
+                if not removed[w] and w not in dist:
+                    dist[w] = dist[v] + 1; bfs.append(w)
+        removed[c] = True
+        for w in adj[c]:
+            if not removed[w]: stack.append(w)
+    return anc
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<pair<int,int>>> centroidDecomposition(int n, const vector<vector<int>>& adj) {
+    vector<bool> removed(n + 1, false);
+    vector<int> par(n + 1, 0), sz(n + 1, 0), dist(n + 1, -1);
+    vector<vector<pair<int,int>>> anc(n + 1);
+    vector<int> stk{1};
+    while (!stk.empty()) {
+        int s = stk.back(); stk.pop_back();
+        vector<int> comp{s};
+        par[s] = 0;
+        for (size_t h = 0; h < comp.size(); h++)
+            for (int w : adj[comp[h]]) if (!removed[w] && w != par[comp[h]]) { par[w] = comp[h]; comp.push_back(w); }
+        int total = comp.size();
+        for (int v : comp) sz[v] = 1;
+        for (int i = total - 1; i >= 0; i--) if (par[comp[i]]) sz[par[comp[i]]] += sz[comp[i]];
+        int c = s;
+        while (true) {
+            int nxt = 0;
+            for (int w : adj[c]) if (!removed[w] && w != par[c] && sz[w] * 2 > total) { nxt = w; break; }
+            if (!nxt) break;
+            c = nxt;
+        }
+        vector<int> bfs{c};
+        dist[c] = 0;
+        for (size_t h = 0; h < bfs.size(); h++) {
+            int v = bfs[h];
+            anc[v].push_back({c, dist[v]});
+            for (int w : adj[v]) if (!removed[w] && dist[w] < 0) { dist[w] = dist[v] + 1; bfs.push_back(w); }
+        }
+        for (int v : bfs) dist[v] = -1;
+        removed[c] = true;
+        for (int w : adj[c]) if (!removed[w]) stk.push_back(w);
+    }
+    return anc;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static List<int[]>[] centroidDecomposition(int n, List<Integer>[] adj) {
+    boolean[] removed = new boolean[n + 1];
+    int[] par = new int[n + 1], size = new int[n + 1], dist = new int[n + 1], comp = new int[n];
+    Arrays.fill(dist, -1);
+    List<int[]>[] anc = new List[n + 1];
+    for (int i = 0; i <= n; i++) anc[i] = new ArrayList<>();
+    ArrayDeque<Integer> stack = new ArrayDeque<>();
+    stack.push(1);
+    while (!stack.isEmpty()) {
+        int s = stack.pop(), cs = 0;
+        comp[cs++] = s; par[s] = 0;
+        for (int h = 0; h < cs; h++)
+            for (int w : adj[comp[h]]) if (!removed[w] && w != par[comp[h]]) { par[w] = comp[h]; comp[cs++] = w; }
+        int total = cs;
+        for (int i = 0; i < cs; i++) size[comp[i]] = 1;
+        for (int i = cs - 1; i >= 0; i--) if (par[comp[i]] != 0) size[par[comp[i]]] += size[comp[i]];
+        int c = s;
+        while (true) {
+            int nxt = 0;
+            for (int w : adj[c]) if (!removed[w] && w != par[c] && size[w] * 2 > total) { nxt = w; break; }
+            if (nxt == 0) break;
+            c = nxt;
+        }
+        int[] bfs = new int[total];
+        int bs = 0;
+        bfs[bs++] = c; dist[c] = 0;
+        for (int h = 0; h < bs; h++) {
+            int v = bfs[h];
+            anc[v].add(new int[]{c, dist[v]});
+            for (int w : adj[v]) if (!removed[w] && dist[w] < 0) { dist[w] = dist[v] + 1; bfs[bs++] = w; }
+        }
+        for (int i = 0; i < bs; i++) dist[bfs[i]] = -1;
+        removed[c] = true;
+        for (int w : adj[c]) if (!removed[w]) stack.push(w);
+    }
+    return anc;
+}
+```
+
+</Tab>
+</Tabs>
+
+Check the key property against real distances, the depth bound, and the nearest-flag structure against a plain search:
+
+<CodeRunner language="python" code={`import math, random
+from collections import deque
+
+def centroid_decomposition(n, adj):
+    removed = [False] * (n + 1)
+    anc = [[] for _ in range(n + 1)]
+    par = [0] * (n + 1); size = [0] * (n + 1)
+    stack = [1]
+    while stack:
+        s = stack.pop()
+        comp = [s]; par[s] = 0
+        for v in comp:
+            for w in adj[v]:
+                if not removed[w] and w != par[v]:
+                    par[w] = v; comp.append(w)
+        total = len(comp)
+        for v in comp: size[v] = 1
+        for v in reversed(comp):
+            if par[v]: size[par[v]] += size[v]
+        c = s
+        while True:
+            nxt = 0
+            for w in adj[c]:
+                if not removed[w] and w != par[c] and size[w] * 2 > total:
+                    nxt = w; break
+            if nxt == 0: break
+            c = nxt
+        dist = {c: 0}; bfs = [c]
+        for v in bfs:
+            anc[v].append((c, dist[v]))
+            for w in adj[v]:
+                if not removed[w] and w not in dist:
+                    dist[w] = dist[v] + 1; bfs.append(w)
+        removed[c] = True
+        for w in adj[c]:
+            if not removed[w]: stack.append(w)
+    return anc
+
+def bfs_dist(n, adj, s):
+    d = [-1] * (n + 1); d[s] = 0; q = deque([s])
+    while q:
+        v = q.popleft()
+        for w in adj[v]:
+            if d[w] < 0: d[w] = d[v] + 1; q.append(w)
+    return d
+
+random.seed(5)
+for _ in range(200):
+    n = random.randint(1, 40)
+    adj = [[] for _ in range(n + 1)]
+    for i in range(2, n + 1):
+        p = random.randint(1, i - 1); adj[p].append(i); adj[i].append(p)
+    anc = centroid_decomposition(n, adj)
+    assert max(len(a) for a in anc[1:]) <= int(math.log2(n)) + 1, "centroid tree is too deep"
+    all_d = [None] + [bfs_dist(n, adj, s) for s in range(1, n + 1)]
+    for _ in range(30):
+        u, v = random.randint(1, n), random.randint(1, n)
+        du, dv = dict(anc[u]), dict(anc[v])
+        assert min(du[c] + dv[c] for c in du if c in dv) == all_d[u][v]      # the key property
+print("200 random trees: depth <= log2(n) + 1, and dist(u, v) = min over common centroid ancestors of dist(u, c) + dist(c, v)")
+
+# nearest flag, with updates
+n = 3000
+adj = [[] for _ in range(n + 1)]
+for i in range(2, n + 1):
+    p = random.randint(max(1, i - 3), i - 1); adj[p].append(i); adj[i].append(p)
+anc = centroid_decomposition(n, adj)
+INF = 10 ** 9
+best = [INF] * (n + 1)
+flags = []
+def paint(v):
+    flags.append(v)
+    for c, d in anc[v]:
+        best[c] = min(best[c], d)
+paint(1)
+for step in range(400):
+    if random.random() < 0.3:
+        paint(random.randint(1, n))
+    else:
+        v = random.randint(1, n)
+        got = min(best[c] + d for c, d in anc[v])
+        dv = bfs_dist(n, adj, v)
+        assert got == min(dv[f] for f in flags)
+print("nearest-flag queries on a tree of", n, "vertices agree with a full search from the query vertex")
+print("deepest centroid ancestor chain:", max(len(a) for a in anc[1:]), "levels (log2 n is about", round(math.log2(n), 1), ")")
+`} />
+
+## Centroid decomposition, HLD, or Euler tour?
+
+| task | tool |
+| --- | --- |
+| subtree sum with updates | [Euler tour](/cp/trees/euler-tour-subtree-queries/) + Fenwick tree |
+| path sum or max **with updates** between two given vertices | [heavy-light decomposition](/cp/trees/heavy-light-decomposition/) |
+| distance to the **nearest** special vertex, with updates | **centroid decomposition** |
+| count (or minimise over) **all pairs** with a path property (length `K`, sum `≤ K`) | **centroid decomposition** |
+| one answer for every vertex as the root | [rerooting](/cp/trees/rerooting/) |
+| LCA or distance between two given vertices | [binary lifting](/cp/trees/lowest-common-ancestor/) |
+
+## Pitfalls
+
+1. **Recursing on a deep tree.** A path graph is `n` deep; use an explicit stack and BFS orders, as above.
+2. **Wrong "centroid".** The centroid must be computed on the *current component* (size `total`), not the original tree; recompute sizes for each component.
+3. **Forgetting to subtract same-subtree pairs** when counting pairs through the centroid (pattern 2), which would count paths that do not pass through `c`.
+4. **Not clearing per-component scratch arrays.** Reset `dist` (or use a map) after each BFS so later components do not see stale values.
+5. **Memory.** The `O(n log n)` ancestor lists use about `20 n` entries for `n = 10^5`, fine, but not for `10^7`.
+6. **Assuming centroid ancestors are tree ancestors.** The centroid tree is a different tree from the original rooted tree; only distances (stored explicitly) connect them.
+7. **Using `best[c]` of the wrong component.** `best[c]` is measured from `c` over `c`'s own component; combining it with `dist(v, c)` for a centroid ancestor `c` of `v` is what makes the sum valid.
+
+## Practice
+
+<Problem id="m15-nearest-flag" />
+
+## Problem ladder
+
+- [Xenia and Tree](https://codeforces.com/problemset/problem/342/E) (Codeforces 342E, rating about 2400): exactly this lesson's problem.
+- [Fixed-Length Paths I](https://cses.fi/problemset/task/2080) (CSES): count paths of length `K`, pattern 2.
+- [Fixed-Length Paths II](https://cses.fi/problemset/task/2081) (CSES): count paths with length in a range, needing a Fenwick tree inside the decomposition.
+- [Ciel the Commander](https://codeforces.com/problemset/problem/321/C) (Codeforces 321C, rating about 2100): label vertices by their level in the centroid tree.
+
+## Quiz
+
+<Quiz id="cp-m15-centroid-decomposition" tags={["trees", "centroid-decomposition"]} questions={[
+  { type: "mcq", q: "What is a centroid of a tree?", options: ["A leaf", "A vertex whose removal leaves components of at most half the size", "The vertex with the largest degree", "The root"], answer: 1, explain: "Splitting at a centroid at least halves the problem size, which gives the logarithmic depth." },
+  { type: "mcq", q: "Why does every vertex belong to only O(log n) components in the decomposition?", options: ["Trees are small", "Each recursion level at least halves the component size", "Components are disjoint", "Each vertex is a centroid"], answer: 1, explain: "After about log2(n) halvings a component is a single vertex." },
+  { type: "predict", q: "A tree has 1000 vertices. About how many centroid ancestors can a vertex have at most?", code: "import math\nprint(int(math.log2(1000)) + 1)", options: ["5", "10", "100", "1000"], answer: 1, explain: "The centroid tree depth is at most floor(log2 n) + 1 = 10 for n = 1000." },
+  { type: "multi", q: "Which statements about the distance between u and v are true?", options: ["The path passes through their lowest common centroid ancestor", "Taking the minimum over all common centroid ancestors of dist(u, c) + dist(c, v) gives the exact distance", "The minimum can be smaller than the true distance", "Each vertex stores O(log n) distances"], answer: [0, 1, 3], explain: "Other ancestors give walks that are at least as long, so they never undercut the true distance." }
+]} />
