@@ -1,0 +1,231 @@
+---
+title: Manacher's Algorithm
+track: cp
+module: string-matching
+order: 3
+difficulty: hard
+estMinutes: 35
+prerequisites: [cp/string-matching/z-function]
+tags: [strings, palindromes, manacher, linear-time]
+type: lesson
+problems: [m14-mirror-count]
+furtherReading:
+  - title: cp-algorithms, Manacher's Algorithm - Finding all sub-palindromes in O(N)
+    url: https://cp-algorithms.com/string/manacher.html
+  - title: CSES Problem Set, Longest Palindrome
+    url: https://cses.fi/problemset/task/1111
+  - title: LeetCode 647, Palindromic Substrings
+    url: https://leetcode.com/problems/palindromic-substrings/
+---
+
+## Intuition
+
+A palindrome has a **centre**: the middle letter for odd lengths, the gap between two middle letters for even lengths. Around one centre, palindromes are **nested**: if `abcba` is a palindrome centred on `c`, so are `bcb` and `c`. So everything about the palindromes at a centre is captured by one number, the largest radius.
+
+The simple method expands around each of the `2n - 1` centres, which costs `O(n^2)` on a string like `aaaa...a`. Manacher's insight is that **neighbouring centres are related by mirror symmetry**. If you are inside a big palindrome, the part to the right of its centre is a reflection of the part to the left, so you already know a lot about the right half without comparing anything.
+
+## Definition
+
+For a string `s` of length `n`:
+
+- `d1[i]` = number of odd-length palindromes centred at `i` (equivalently the radius, counting the single letter).
+- `d2[i]` = number of even-length palindromes centred **between** `i - 1` and `i`.
+
+Each such palindrome corresponds to exactly one substring, so the total number of palindromic substrings is `sum(d1) + sum(d2)`, and the longest palindrome comes from the largest `2 * d1[i] - 1` or `2 * d2[i]`.
+
+**The mirror trick.** Maintain `[l, r]`, the palindrome found so far that reaches farthest to the right. For a new centre `i` with `i <= r`, its mirror image `j = l + r - i` lies inside the same palindrome, so the palindrome around `i` is at least as large as the one around `j`, **clipped at the border `r`**:
+
+```text
+k = min( d1[l + r - i], r - i + 1 )          # already verified, no comparisons needed
+while s[i - k] == s[i + k]:  k += 1          # only try to grow beyond what is known
+d1[i] = k
+if i + k - 1 > r:  l, r = i - k + 1, i + k - 1
+```
+
+If `i > r` start from `k = 1` (no information). Even lengths use the same idea with shifted indices.
+
+**Why linear.** The expansion loop only ever advances past `r`, and `r` never moves left, so across all centres the number of successful comparisons is at most `n`. The clipped starting value costs `O(1)`.
+
+## Example, step by step
+
+`s = abaab`. Odd palindromes: every single letter (5) and `aba`. Even palindromes: `aa` at the gap between positions 2 and 3, and `baab` around the same gap.
+
+| `i` | letter | `d1[i]` | what it covers |
+| --- | --- | --- | --- |
+| 0 | `a` | 1 | `a` |
+| 1 | `b` | 2 | `b`, `aba` |
+| 2 | `a` | 1 | `a` (neighbours `b` and `a` differ) |
+| 3 | `a` | 1 | `a` (neighbours `a` and `b` differ) |
+| 4 | `b` | 1 | `b` |
+
+`d1 = [1, 2, 1, 1, 1]`, sum 6.
+
+For even centres, `d2[i]` counts palindromes between `i - 1` and `i`. Only `i = 3` (between the two middle `a`s) works: `aa`, then `baab`, so `d2[3] = 2`. All other `d2` are 0, so `d2 = [0, 0, 0, 2, 0]`, sum 2.
+
+Total: `6 + 2 = 8` palindromic substrings: `a, b, a, a, b, aba, aa, baab`.
+
+A mirror step on `abacaba`: centre `3` (`c`) has `d1[3] = 4`, reaching `[0, 6]`. For centre `5`, the mirror is `l + r - i = 1`, where `d1[1] = 2`. Clipped by the border `r - i + 1 = 2`, so `k` starts at 2 and the loop needs no comparison that succeeds beyond the border: `d1[5] = 2` without re-checking the letters inside. The full array is `d1 = [1, 2, 1, 4, 1, 2, 1]`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+n = len(s)
+d1 = [0] * n
+d2 = [0] * n
+l, r = 0, -1
+for i in range(n):                                     # odd lengths
+    k = 1 if i > r else min(d1[l + r - i], r - i + 1)
+    while i - k >= 0 and i + k < n and s[i - k] == s[i + k]:
+        k += 1
+    d1[i] = k
+    if i + k - 1 > r:
+        l, r = i - k + 1, i + k - 1
+l, r = 0, -1
+for i in range(n):                                     # even lengths
+    k = 0 if i > r else min(d2[l + r - i + 1], r - i + 1)
+    while i - k - 1 >= 0 and i + k < n and s[i - k - 1] == s[i + k]:
+        k += 1
+    d2[i] = k
+    if i + k - 1 > r:
+        l, r = i - k, i + k - 1
+count = sum(d1) + sum(d2)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> d1(n), d2(n);
+for (int i = 0, l = 0, r = -1; i < n; i++) {           // odd lengths
+    int k = i > r ? 1 : min(d1[l + r - i], r - i + 1);
+    while (i - k >= 0 && i + k < n && s[i - k] == s[i + k]) k++;
+    d1[i] = k;
+    if (i + k - 1 > r) { l = i - k + 1; r = i + k - 1; }
+}
+for (int i = 0, l = 0, r = -1; i < n; i++) {           // even lengths
+    int k = i > r ? 0 : min(d2[l + r - i + 1], r - i + 1);
+    while (i - k - 1 >= 0 && i + k < n && s[i - k - 1] == s[i + k]) k++;
+    d2[i] = k;
+    if (i + k - 1 > r) { l = i - k; r = i + k - 1; }
+}
+long long count = 0;
+for (int i = 0; i < n; i++) count += d1[i] + d2[i];
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] d1 = new int[n], d2 = new int[n];
+int l = 0, r = -1;
+for (int i = 0; i < n; i++) {                          // odd lengths
+    int k = i > r ? 1 : Math.min(d1[l + r - i], r - i + 1);
+    while (i - k >= 0 && i + k < n && s.charAt(i - k) == s.charAt(i + k)) k++;
+    d1[i] = k;
+    if (i + k - 1 > r) { l = i - k + 1; r = i + k - 1; }
+}
+l = 0; r = -1;
+for (int i = 0; i < n; i++) {                          // even lengths
+    int k = i > r ? 0 : Math.min(d2[l + r - i + 1], r - i + 1);
+    while (i - k - 1 >= 0 && i + k < n && s.charAt(i - k - 1) == s.charAt(i + k)) k++;
+    d2[i] = k;
+    if (i + k - 1 > r) { l = i - k; r = i + k - 1; }
+}
+long count = 0;
+for (int i = 0; i < n; i++) count += d1[i] + d2[i];
+```
+
+</Tab>
+</Tabs>
+
+Run it, see the arrays for the examples, and compare with a brute force:
+
+<CodeRunner language="python" code={`import random
+
+def manacher(s):
+    n = len(s)
+    d1, d2 = [0] * n, [0] * n
+    l, r = 0, -1
+    for i in range(n):
+        k = 1 if i > r else min(d1[l + r - i], r - i + 1)
+        while i - k >= 0 and i + k < n and s[i - k] == s[i + k]:
+            k += 1
+        d1[i] = k
+        if i + k - 1 > r:
+            l, r = i - k + 1, i + k - 1
+    l, r = 0, -1
+    for i in range(n):
+        k = 0 if i > r else min(d2[l + r - i + 1], r - i + 1)
+        while i - k - 1 >= 0 and i + k < n and s[i - k - 1] == s[i + k]:
+            k += 1
+        d2[i] = k
+        if i + k - 1 > r:
+            l, r = i - k, i + k - 1
+    return d1, d2
+
+def brute_count(s):
+    return sum(1 for i in range(len(s)) for j in range(i, len(s)) if s[i:j + 1] == s[i:j + 1][::-1])
+
+d1, d2 = manacher("abaab")
+print("abaab  d1 =", d1, " d2 =", d2, " total =", sum(d1) + sum(d2))
+print("abacaba  d1 =", manacher("abacaba")[0])
+
+random.seed(1)
+for _ in range(500):
+    s = "".join(random.choice("ab") for _ in range(random.randint(1, 25)))
+    assert sum(map(sum, manacher(s))) == brute_count(s)
+print("500 random strings agree with the brute-force count")
+
+# Longest palindromic substring from the same arrays
+def longest(s):
+    d1, d2 = manacher(s)
+    best = (1, 0)
+    for i in range(len(s)):
+        best = max(best, (2 * d1[i] - 1, i - d1[i] + 1), (2 * d2[i], i - d2[i]))
+    return s[best[1]:best[1] + best[0]]
+print("longest palindrome in 'forgeeksskeegfor':", longest("forgeeksskeegfor"))
+`} />
+
+## Alternatives
+
+| method | time | when to use |
+| --- | --- | --- |
+| expand around every centre | `O(n^2)` worst case | `n` up to a few thousand, simplest code |
+| interval DP on `[i, j]` | `O(n^2)` time and memory | when you also need palindromic *partitions* |
+| string hashing plus binary search per centre | `O(n log n)` | when you already have rolling hashes; has collision risk |
+| **Manacher** | `O(n)` | the standard answer for counting or finding the longest palindrome |
+| palindromic tree (eertree) | `O(n)` | counting **distinct** palindromes, advanced |
+
+## Pitfalls
+
+1. **Counting palindromes versus distinct palindromes.** The sums `d1 + d2` count every occurrence at every position. For distinct palindromic substrings you need an eertree or hashing.
+2. **Wrong mirror index for even lengths.** For `d2` the mirror is `l + r - i + 1`, not `l + r - i`, because even centres sit between letters.
+3. **Forgetting to clip by `r - i + 1`.** Without the `min`, the mirrored radius may claim letters beyond the known palindrome.
+4. **Not updating `[l, r]`.** The window must move only when the expansion passes the old `r`; otherwise the linear bound is lost.
+5. **Overflow.** The count is up to `n(n+1)/2`, about `5·10^11` at `n = 10^6`: use 64-bit integers.
+6. **Reading the string.** The input is a single line; trailing newline or carriage return characters create phantom letters, so strip them.
+
+## Practice
+
+<Problem id="m14-mirror-count" />
+
+## Problem ladder
+
+- [Longest Palindrome](https://cses.fi/problemset/task/1111) (CSES): print the longest palindromic substring; the `d1`/`d2` arrays give it directly.
+- [Palindromic Substrings](https://leetcode.com/problems/palindromic-substrings/) (LeetCode 647, medium): exactly the counting task of the practice problem.
+- [Longest Palindromic Substring](https://leetcode.com/problems/longest-palindromic-substring/) (LeetCode 5): the same task in an interview format.
+- [Shortest Palindrome](https://leetcode.com/problems/shortest-palindrome/) (LeetCode 214, hard): prefix palindromes, solvable with the Z-function, KMP or Manacher.
+- [Palindromic Characteristics](https://codeforces.com/problemset/problem/835/D) (Codeforces 835D, rating about 1900): palindromes of increasing degree, combining a palindrome table with DP.
+
+## Quiz
+
+<Quiz id="cp-m14-manacher" tags={["strings", "palindromes", "manacher"]} questions={[
+  { type: "mcq", q: "What does d1[i] count?", options: ["The longest palindrome ending at i", "The number of odd-length palindromes centred at i", "The number of palindromes starting at i", "The number of distinct palindromes"], answer: 1, explain: "d1[i] is the radius including the centre letter, which equals the number of odd palindromes centred there." },
+  { type: "mcq", q: "Why is Manacher's algorithm linear?", options: ["It sorts the string first", "Expansion only advances past the rightmost known border, which never moves left", "It uses hashing", "It only checks half the centres"], answer: 1, explain: "Each successful comparison moves r to the right, and r moves right at most n times in total." },
+  { type: "predict", q: "How many palindromic substrings does 'aaa' have (counting each position pair)?", code: "n = 3\nprint(n * (n + 1) // 2)", options: ["3", "4", "6", "9"], answer: 2, explain: "Every substring of a run of equal letters is a palindrome, and there are n(n+1)/2 = 6 of them." },
+  { type: "multi", q: "Which statements are true?", options: ["d2 handles palindromes of even length", "The mirror of centre i inside [l, r] is l + r - i for odd centres", "sum(d1) + sum(d2) counts palindromic substrings by position", "Manacher counts distinct palindromic substrings"], answer: [0, 1, 2], explain: "Counting distinct palindromes needs a palindromic tree or hashing; Manacher counts occurrences." },
+  { type: "mcq", q: "What is the worst-case time of expanding around every centre without the mirror trick?", options: ["O(n)", "O(n log n)", "O(n^2)", "O(n^3)"], answer: 2, explain: "On a string of equal letters each of the 2n - 1 centres expands about n/2 times." }
+]} />

@@ -1,0 +1,248 @@
+---
+title: 2-SAT
+track: cp
+module: graphs
+order: 9
+difficulty: hard
+estMinutes: 35
+prerequisites: [cp/graphs/strongly-connected-components]
+tags: [graph, 2-sat, scc, implication-graph, logic]
+type: lesson
+problems: [m11-lamp-rules]
+furtherReading:
+  - title: cp-algorithms, 2-SAT
+    url: https://cp-algorithms.com/graph/2SAT.html
+  - title: CSES Problem Set, Giant Pizza
+    url: https://cses.fi/problemset/task/1684
+  - title: Wikipedia, 2-satisfiability
+    url: https://en.wikipedia.org/wiki/2-satisfiability
+---
+
+## Intuition
+
+You are setting `n` light switches. Each **rule** says "switch `a` is in this state **or** switch `b` is in that state": for example "lamp 3 is on, or lamp 5 is off". Is there a way to set every switch so that all rules hold?
+
+Trying all `2^n` settings is hopeless. But every rule involves only **two** statements, and that is enough to turn the puzzle into a graph. If a rule says "`a` or `b`", then whenever `a` is false, `b` is forced to be true, and the other way round. Follow such forced consequences and you either find a consistent setting or you find a lamp that is forced to be both on and off.
+
+## Definition
+
+A **2-SAT** formula is a list of clauses, each of the form `(x or y)` where `x` and `y` are **literals**: a variable or its negation. We ask whether some assignment makes every clause true.
+
+**Implication graph.** Make two vertices per variable, one for the literal being true and one for it being false. A clause `(x or y)` is the same as two implications:
+
+```text
+not x -> y        (if x is false, y must be true)
+not y -> x        (if y is false, x must be true)
+```
+
+Add both edges for every clause. Note the symmetry: if there is a path `p -> q`, there is also a path `not q -> not p`.
+
+**Theorem.** The formula is satisfiable **if and only if** no variable lies in the same strongly connected component as its negation.
+
+- If `x` and `not x` are in one component, then `x` implies `not x` and `not x` implies `x`, which is a contradiction either way.
+- Otherwise a satisfying assignment exists. Compute SCCs with Kosaraju's algorithm (components are numbered in **topological order** of the condensation), and set each variable true exactly when the component of `x` comes **later** than the component of `not x`. Choosing the later one means everything implied by a true literal is also true.
+
+The whole algorithm is linear: `2n` vertices, `2m` edges, `O(n + m)`.
+
+## Example, step by step
+
+Three lamps, three rules:
+
+```text
+(1 or 2)     (not 1 or 3)     (not 2 or not 3)
+```
+
+Implications for each clause (`~x` means "x is off"):
+
+| clause | edges |
+| --- | --- |
+| `1 or 2` | `~1 -> 2`, `~2 -> 1` |
+| `~1 or 3` | `1 -> 3`, `~3 -> ~1` |
+| `~2 or ~3` | `2 -> ~3`, `3 -> ~2` |
+
+No lamp shares a component with its negation: lamp 1 can force `3` and then `~2`, but nothing leads back to `~1`. So the answer is `YES`. One valid setting, found by the later-component rule: lamp 1 on, lamp 2 off, lamp 3 on. Check the rules: `1 or 2` holds because 1 is on, `~1 or 3` holds because 3 is on, `~2 or ~3` holds because 2 is off. ✓.
+
+Now the impossible case, two lamps and all four combinations forbidden:
+
+```text
+(1 or 2)   (1 or ~2)   (~1 or 2)   (~1 or ~2)
+```
+
+Edges: `~1 -> 2`, `~2 -> 1`, `~1 -> ~2`, `2 -> 1`, `1 -> 2`, `~2 -> ~1`, `1 -> ~2`, `2 -> ~1`. Follow `1 -> 2` (from the third clause) and then `2 -> ~1` (from the fourth): lamp 1 on forces lamp 1 off. And `~1 -> 2 -> 1` gives the opposite direction. So `1` and `~1` are in one component, and the answer is `NO`.
+
+## Code
+
+Number the literals `2i` (variable `i` true) and `2i + 1` (false), so that negation is `x ^ 1`.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+node = lambda x: 2 * (x - 1) if x > 0 else 2 * (-x - 1) + 1      # literal +x or -x -> vertex id
+adj = [[] for _ in range(2 * n)]
+radj = [[] for _ in range(2 * n)]
+for a, b in clauses:                       # clause (a or b)
+    a, b = node(a), node(b)
+    for u, v in ((a ^ 1, b), (b ^ 1, a)):  # not a -> b  and  not b -> a
+        adj[u].append(v)
+        radj[v].append(u)
+
+# Kosaraju (see the SCC lesson): comp[v] is numbered in topological order of the condensation
+# ... compute comp ...
+
+if any(comp[2 * i] == comp[2 * i + 1] for i in range(n)):
+    print("NO")
+else:
+    assignment = [comp[2 * i] > comp[2 * i + 1] for i in range(n)]   # True = variable on
+    print("YES")
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+auto node = [](int x) { return x > 0 ? 2 * (x - 1) : 2 * (-x - 1) + 1; };
+vector<vector<int>> adj(2 * n), radj(2 * n);
+for (auto [x, y] : clauses) {              // clause (x or y)
+    int a = node(x), b = node(y);
+    adj[a ^ 1].push_back(b);  radj[b].push_back(a ^ 1);
+    adj[b ^ 1].push_back(a);  radj[a].push_back(b ^ 1);
+}
+// Kosaraju: comp[v] numbered in topological order of the condensation
+bool ok = true;
+for (int i = 0; i < n; i++) if (comp[2 * i] == comp[2 * i + 1]) ok = false;
+// assignment: x_i = comp[2 * i] > comp[2 * i + 1]
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static int node(int x) { return x > 0 ? 2 * (x - 1) : 2 * (-x - 1) + 1; }
+
+// for each clause (x or y):
+int a = node(x), b = node(y);
+adj[a ^ 1].add(b);  radj[b].add(a ^ 1);
+adj[b ^ 1].add(a);  radj[a].add(b ^ 1);
+
+// Kosaraju: comp[v] numbered in topological order of the condensation
+boolean ok = true;
+for (int i = 0; i < n; i++) if (comp[2 * i] == comp[2 * i + 1]) ok = false;
+// assignment: x_i = comp[2 * i] > comp[2 * i + 1]
+```
+
+</Tab>
+</Tabs>
+
+Run it end to end: the verdict is compared with brute force, and every `YES` comes with an assignment that is checked against all clauses.
+
+<CodeRunner language="python" code={`import random
+
+def two_sat(n, clauses):
+    N = 2 * n
+    node = lambda x: 2 * (x - 1) if x > 0 else 2 * (-x - 1) + 1
+    adj = [[] for _ in range(N)]
+    radj = [[] for _ in range(N)]
+    for a, b in clauses:
+        a, b = node(a), node(b)
+        for u, v in ((a ^ 1, b), (b ^ 1, a)):
+            adj[u].append(v)
+            radj[v].append(u)
+    seen = [False] * N
+    order = []
+
+    def dfs1(v):
+        seen[v] = True
+        for to in adj[v]:
+            if not seen[to]:
+                dfs1(to)
+        order.append(v)
+
+    for s in range(N):
+        if not seen[s]:
+            dfs1(s)
+    comp = [-1] * N
+
+    def dfs2(v, c):
+        comp[v] = c
+        for to in radj[v]:
+            if comp[to] == -1:
+                dfs2(to, c)
+
+    c = 0
+    for s in reversed(order):
+        if comp[s] == -1:
+            dfs2(s, c)
+            c += 1
+    if any(comp[2 * i] == comp[2 * i + 1] for i in range(n)):
+        return None
+    return [comp[2 * i] > comp[2 * i + 1] for i in range(n)]
+
+def brute(n, clauses):
+    for mask in range(1 << n):
+        val = lambda x: ((mask >> (abs(x) - 1)) & 1) == (1 if x > 0 else 0)
+        if all(val(a) or val(b) for a, b in clauses):
+            return True
+    return False
+
+print("lesson example:", two_sat(3, [(1, 2), (-1, 3), (-2, -3)]))
+print("all four combinations forbidden:", two_sat(2, [(1, 2), (1, -2), (-1, 2), (-1, -2)]))
+
+random.seed(3)
+for _ in range(400):
+    n = random.randint(1, 8)
+    cl = [(random.choice([-1, 1]) * random.randint(1, n), random.choice([-1, 1]) * random.randint(1, n))
+          for _ in range(random.randint(0, 14))]
+    res = two_sat(n, cl)
+    assert (res is not None) == brute(n, cl)
+    if res is not None:
+        v = lambda x: res[abs(x) - 1] == (x > 0)
+        assert all(v(a) or v(b) for a, b in cl)
+print("400 random formulas: verdicts match brute force and every YES assignment is valid")
+`} />
+
+## Modelling with 2-SAT
+
+The hard part in contests is **recognising** it. Signals: every item has exactly two choices (in or out, left or right, team A or B), and every restriction involves at most two items.
+
+| restriction | clause(s) |
+| --- | --- |
+| `a` and `b` cannot both be on | `(~a or ~b)` |
+| if `a` is on then `b` is on | `(~a or b)` |
+| `a` and `b` are equal | `(~a or b)` and `(a or ~b)` |
+| `a` and `b` differ | `(a or b)` and `(~a or ~b)` |
+| `a` must be on | `(a or a)` |
+| at most one of three | pairwise `(~a or ~b)`, `(~a or ~c)`, `(~b or ~c)` |
+
+"At most one of `k`" costs `k^2` clauses done naively; there is a prefix-variable trick that does it in `O(k)`. A restriction on **three** variables at a time ("at least one of `a, b, c`") is 3-SAT, which is NP-hard: no known linear algorithm, so 2-SAT cannot absorb it.
+
+## Pitfalls
+
+1. **Adding only one implication per clause.** Both `not a -> b` and `not b -> a` are needed; with one edge the graph is not symmetric and the theorem fails.
+2. **Wrong literal numbering.** With `2i` and `2i + 1`, negation is `x ^ 1`. Mixing 0-based and 1-based lamp numbers when decoding `+x` / `-x` is the usual bug.
+3. **Wrong direction for the assignment.** True when the component of `x` comes **later** in topological order than the component of `not x`. If your SCC numbering is reversed (as in Tarjan's, which numbers sinks first), flip the comparison.
+4. **Forced literals.** A single fact `a` is the clause `(a or a)`, giving the edge `~a -> a`.
+5. **Recursion depth.** `2n` vertices can form a chain of length `2n`; use an explicit stack in Python and Java for large inputs.
+6. **Using it for three-variable clauses.** That is 3-SAT; re-model or use a different technique.
+
+## Practice
+
+<Problem id="m11-lamp-rules" />
+
+## Problem ladder
+
+- [Giant Pizza](https://cses.fi/problemset/task/1684) (CSES): 2-SAT with an assignment to print; exactly this lesson.
+- [Building Teams](https://cses.fi/problemset/task/1668) (CSES): the pure "differ" constraint, solvable by 2-colouring, a good contrast.
+- [The Door Problem](https://codeforces.com/problemset/problem/776/D) (Codeforces 776D, rating about 2100): equal and differ constraints as clauses.
+- [New Language](https://codeforces.com/problemset/problem/568/C) (Codeforces 568C, rating about 2600): a harder modelling exercise that asks for the lexicographically smallest valid answer.
+- [2-SAT](https://judge.yosupo.jp/problem/two_sat) (Library Checker): the large-input benchmark with an assignment.
+
+## Quiz
+
+<Quiz id="cp-m11-two-sat" tags={["graph", "2-sat", "scc"]} questions={[
+  { type: "mcq", q: "What two implications does the clause (a or b) produce?", options: ["a -> b and b -> a", "not a -> b and not b -> a", "a -> not b and b -> not a", "not a -> not b"], answer: 1, explain: "If a is false, b must be true to satisfy the clause, and symmetrically for b." },
+  { type: "mcq", q: "When is a 2-SAT formula unsatisfiable?", options: ["When some variable and its negation are in the same SCC", "When there are more clauses than variables", "When the implication graph has a cycle", "When some variable appears twice"], answer: 0, explain: "Then the variable implies its own negation and vice versa. Cycles that do not contain both a literal and its negation are harmless." },
+  { type: "predict", q: "Clause (a or a) is added for a variable a. Which single edge does it create?", code: "# (a or a): not a -> a, listed twice\nprint('not a -> a')", options: ["a -> not a", "not a -> a", "a -> a", "no edge"], answer: 1, explain: "If a were false the clause would be violated, so not a implies a, which forces a to be true." },
+  { type: "multi", q: "Which restrictions can be written as 2-SAT clauses?", options: ["a and b cannot both be on", "a and b must be equal", "at least one of a, b, c is on", "if a is on then b is on"], answer: [0, 1, 3], explain: "Three-literal clauses are 3-SAT, which is NP-hard." },
+  { type: "mcq", q: "What is the running time of the SCC-based 2-SAT algorithm?", options: ["O(n + m)", "O(2^n)", "O(n^2)", "O(n m)"], answer: 0, explain: "The implication graph has 2n vertices and 2m edges, and Kosaraju's algorithm is linear." }
+]} />

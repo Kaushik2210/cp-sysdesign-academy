@@ -727,7 +727,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("124");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("127");
   });
 });
 
@@ -740,7 +740,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 74 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 77 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -845,6 +845,9 @@ test.describe("visualizer lessons", () => {
     ["/cp/graphs/strongly-connected-components/", "Strongly Connected Components", "Mutual Reach"],
     ["/cp/dynamic-programming/digit-dp/", "Digit DP", "Digit Hunt"],
     ["/cp/trees/rerooting/", "Rerooting DP", "Distance Sums"],
+    ["/cp/graphs/two-sat/", "2-SAT", "Lamp Rules"],
+    ["/cp/graphs/maximum-flow/", "Maximum Flow and Dinic's Algorithm", "Pipe Network"],
+    ["/cp/string-matching/manacher/", "Manacher's Algorithm", "Mirror Count"],
   ];
   for (const [path, title, problem] of LESSONS) {
     test(`${title} has a practice problem and its visualizer where one exists`, async ({ page }) => {
@@ -852,7 +855,7 @@ test.describe("visualizer lessons", () => {
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
       await expect(page.getByRole("region", { name: `Problem: ${problem}` })).toBeVisible();
       // Only the first five lessons embed a visualizer; the rest have none yet.
-      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Bridges and Low-Link", "Strongly Connected Components", "Digit DP", "Rerooting DP"].includes(title)) {
+      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Bridges and Low-Link", "Strongly Connected Components", "Digit DP", "Rerooting DP", "2-SAT", "Maximum Flow and Dinic's Algorithm", "Manacher's Algorithm"].includes(title)) {
         await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
       }
     });

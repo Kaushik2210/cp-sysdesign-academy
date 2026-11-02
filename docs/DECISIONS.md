@@ -19,3 +19,4 @@ Format: date — decision — why.
 - 2026-11-01 — `Spotlight` no longer takes a `tilt` prop; the pointer-glow e2e test was replaced by a test that the arrow button fills on hover.
 - 2026-11-01 — Problem `complexity` fields are a closed enum (`O(n)`, `O(n log n)`, ...), so linear-in-edges and `O((n + q) log n)` solutions are labelled `O(n)` and `O(n log n)`; the editorial states the precise bound.
 - 2026-11-02 — Problem `m13-digit-hunt` caps `R` at 10^15 in the browser version so the JavaScript reference solution stays exact with `Number` (2^53 is about 9·10^15); the lesson and editorial say the idea scales to 10^18 with 64-bit integers.
+- 2026-11-02 — `m11-lamp-rules` outputs only YES or NO, not an assignment, because many valid assignments exist and the judge compares exact output; the lesson shows how to extract one. `m11-pipe-network` uses Dinic's algorithm with recursion limited by the level depth (at most 200 vertices in the browser version).
