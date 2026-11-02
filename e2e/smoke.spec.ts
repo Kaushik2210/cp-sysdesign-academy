@@ -711,7 +711,7 @@ test.describe("interactive, maximalist UI", () => {
   });
 });
 
-test.describe("distributed systems, consensus and microservice lessons", () => {
+test.describe("distributed systems, consensus, microservice and search lessons", () => {
   const SD_LESSONS: [string, string][] = [
     ["/sd/distributed-theory/time-clocks-and-ordering/", "Time, Clocks and Ordering"],
     ["/sd/distributed-theory/consistency-models-and-quorums/", "Consistency Models and Quorums"],
@@ -722,6 +722,9 @@ test.describe("distributed systems, consensus and microservice lessons", () => {
     ["/sd/microservice-patterns/service-boundaries-and-communication/", "Service Boundaries and Communication"],
     ["/sd/microservice-patterns/sagas-and-the-transactional-outbox/", "Sagas and the Transactional Outbox"],
     ["/sd/microservice-patterns/event-sourcing-and-cqrs/", "Event Sourcing and CQRS"],
+    ["/sd/search-systems/inverted-indexes-and-text-analysis/", "Inverted Indexes and Text Analysis"],
+    ["/sd/search-systems/ranking-tf-idf-and-bm25/", "Ranking with TF-IDF and BM25"],
+    ["/sd/search-systems/distributed-search-architecture/", "Distributed Search Architecture"],
   ];
   for (const [path, title] of SD_LESSONS) {
     test(`${title} shows its simulation, trade-offs table and quiz`, async ({ page }) => {
@@ -749,7 +752,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("148");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("151");
   });
 });
 
