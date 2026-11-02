@@ -1,0 +1,1 @@
+{ "title": "Security for System Design", "level": "Level 2: Intermediate", "order": 15, "summary": "Authentication, sessions, tokens and OAuth; authorization and multi-tenancy; secrets, encryption and TLS; and the web attacks every design must defend against." }

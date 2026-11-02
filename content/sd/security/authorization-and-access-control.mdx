@@ -1,0 +1,134 @@
+---
+title: Authorization and Access Control
+track: sd
+module: security
+order: 2
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/security/authentication-sessions-tokens-and-oauth"]
+tags: [security, authorization, rbac, abac, idor, least-privilege, multi-tenancy, zero-trust]
+type: lesson
+furtherReading:
+  - title: OWASP Top 10 - A01 Broken Access Control
+    url: https://owasp.org/Top10/A01_2021-Broken_Access_Control/
+  - title: NIST - Guide to Attribute Based Access Control (SP 800-162)
+    url: https://csrc.nist.gov/pubs/sp/800/162/upd2/final
+  - title: Google - Zanzibar, Google's consistent global authorization system
+    url: https://research.google/pubs/zanzibar-googles-consistent-global-authorization-system/
+  - title: NIST - Zero Trust Architecture (SP 800-207)
+    url: https://csrc.nist.gov/pubs/sp/800/207/final
+---
+
+## Intuition
+
+Authentication tells you the caller is Alice. Authorization decides whether Alice may read **this** invoice, edit **that** document or delete **those** users. Broken access control is the most common serious web vulnerability (number one in the OWASP Top 10) because it is easy to forget on one endpoint in a hundred. The only reliable approach is to make authorization **central, default-deny and checked on the server for every request and every object**.
+
+## Core principles
+
+- **Least privilege:** grant only the access needed, for only as long as needed.
+- **Default deny:** if no rule allows it, refuse.
+- **Enforce on the server:** hiding a button in the UI is not security.
+- **Check at the object level, not just the endpoint:** `GET /invoices/123` must verify this user may see invoice 123.
+- **Separation of duties:** the person who requests a payment cannot also approve it.
+- **Defence in depth:** gateway checks, service checks and database-level controls (row-level security) back each other up.
+
+## Models
+
+### RBAC: role-based
+
+Users have **roles**; roles have **permissions**. Simple, auditable, widely used (`admin`, `editor`, `viewer`). Weakness: *role explosion* when rules depend on context ("manager of the department that owns this project").
+
+### ABAC: attribute-based
+
+Decisions are evaluated from **attributes** of the subject (department, clearance), the resource (owner, classification, tenant) and the context (time, device, location): "managers may approve expenses under 5,000 in their own department during business hours". Very expressive; harder to reason about and audit. Policy engines such as OPA (Rego) or Cedar centralise it.
+
+### ReBAC: relationship-based
+
+Permissions follow a graph of relationships: "Alice is an *editor* of folder F; F contains document D; so Alice can edit D." This is how Google Drive and Google's Zanzibar model sharing; open-source relatives include SpiceDB, OpenFGA. Ideal for hierarchical and social sharing.
+
+### ACLs
+
+Per-object lists of who may do what. Simple for few objects; hard to manage at scale.
+
+| Model | Strength | Weakness | Fits |
+| --- | --- | --- | --- |
+| RBAC | Simple, auditable | Role explosion | Internal tools, admin consoles |
+| ABAC | Fine-grained, contextual | Complex policies | Regulated, rule-heavy domains |
+| ReBAC | Natural sharing hierarchies | Needs a graph store and consistency care | Documents, workspaces, social apps |
+| ACL | Direct and explicit | Does not scale to many objects | Files, small resource sets |
+
+## The classic bug: IDOR
+
+**Insecure Direct Object Reference** (broken object-level authorization): the endpoint authenticates the user but trusts the id in the URL.
+
+```python
+INVOICES = {1: {"owner": "alice", "total": 100}, 2: {"owner": "bob", "total": 250}}
+
+def get_invoice_bad(user, invoice_id):
+    return INVOICES[invoice_id]                     # alice can read bob's invoice by changing the id
+
+def can_read(user, invoice):
+    return invoice["owner"] == user["name"] or "admin" in user["roles"]
+
+def get_invoice(user, invoice_id):
+    inv = INVOICES.get(invoice_id)
+    if inv is None or not can_read(user, inv):
+        raise PermissionError("not found")          # same error for missing and forbidden: no enumeration
+    return inv
+
+alice = {"name": "alice", "roles": []}
+print(get_invoice_bad(alice, 2))                    # leaks bob's invoice
+print(get_invoice(alice, 1))
+try: get_invoice(alice, 2)
+except PermissionError as e: print("blocked:", e)
+```
+
+Defences: always load the object **scoped to the caller** (`WHERE id = ? AND owner_id = ?`), use a central authorization function rather than ad hoc checks, use unpredictable ids as an extra layer (never as the only defence), and write tests that try cross-user access on every endpoint.
+
+Related bugs: **mass assignment** (a client sends `{"role": "admin"}` in a profile update that blindly copies fields), **privilege escalation** through unvalidated role changes, and **function-level** authorization gaps (a regular user calls an admin endpoint).
+
+## Multi-tenancy
+
+For SaaS, one tenant must never see another's data.
+
+- Put a **tenant id on every row** and every query, set from the authenticated identity (never from request parameters).
+- Enforce in depth: ORM scopes **and** database **row-level security** policies.
+- Isolation levels: shared database + tenant column (cheap, riskiest), schema per tenant, database per tenant (strongest isolation, higher cost, good for large or regulated customers).
+- Cache keys, search indexes, queues and file paths need the tenant id too. Leaks often happen in the cache, not the database.
+- Limit noisy neighbours with per-tenant rate limits and quotas.
+
+## Authorization in a distributed system
+
+- Where to enforce: the **gateway** for coarse checks (is the token valid, right audience and scope), each **service** for object-level checks (only it knows its data).
+- Pass identity downstream explicitly (a signed token or mTLS-verified identity plus the user context). Avoid the **confused deputy** problem where a privileged service performs an action for a user who lacked permission.
+- **Scopes** in OAuth limit what a token can do (`invoices:read`), independent of the user's own rights: effective permission is the intersection.
+- Centralised decision services (OPA, SpiceDB) give consistency and auditing but add a network hop and a critical dependency: cache decisions briefly, fail closed for sensitive actions.
+- **Zero trust:** do not trust a request because it came from inside the network; authenticate and authorize every call.
+- **Audit logs**: record who did what to which resource and the decision, in an append-only store, for investigation and compliance.
+
+## Worked example
+
+A project-management SaaS has workspaces, projects and tasks. Roles per workspace (owner, member, guest) are RBAC; guests can be granted access to individual projects (ReBAC-like relationship); a policy forbids exporting data from outside the corporate network for enterprise tenants (ABAC context). Every query includes `workspace_id` taken from the token, enforced again by Postgres row-level security. The authorization library exposes one function, `can(user, action, resource)`, used by all endpoints and covered by a generated test matrix: every endpoint × role × owned/not-owned resource.
+
+## Pitfalls
+
+- Authorization only in the front end or only at the gateway.
+- Trusting ids, roles or tenant ids supplied by the client.
+- Different error messages for "forbidden" and "does not exist", enabling enumeration.
+- Role explosion with no review; permissions that only ever grow.
+- Forgotten admin endpoints and internal APIs exposed publicly.
+- Caching authorization decisions too long, so revocations are slow.
+- No audit trail.
+
+## What would you choose and why?
+
+Design sharing for a document app: owners, editors, commenters, viewers, link sharing ("anyone with the link can view"), folders that inherit permissions, and revocation that must take effect within seconds. Would you use RBAC, ReBAC or both, and how do you check "can Alice edit document D" quickly at scale?
+
+## Quiz
+
+<Quiz id="sd-m15-authz" tags={["security", "authorization", "idor"]} questions={[
+  { type: "mcq", q: "A user changes /invoices/2 to /invoices/3 and sees another customer's invoice. What is the flaw?", options: ["Weak password hashing", "Broken object-level authorization (IDOR)", "CSRF", "Missing HTTPS"], answer: 1, explain: "The endpoint authenticated the user but did not verify ownership of the specific object." },
+  { type: "mcq", q: "Which model best fits hierarchical sharing like folders containing documents?", options: ["RBAC only", "Relationship-based (ReBAC)", "No model is needed", "Hashing"], answer: 1, explain: "Permissions follow relationships through the resource hierarchy." },
+  { type: "multi", q: "Which help prevent cross-tenant data leaks?", options: ["Tenant id taken from the authenticated identity", "Database row-level security", "Tenant id included in cache keys", "Accepting tenant id from a query parameter"], answer: [0, 1, 2], explain: "Never trust a client-supplied tenant id; enforce at several layers." },
+  { type: "mcq", q: "Why return the same error for 'not found' and 'forbidden' on private objects?", options: ["It is shorter", "It stops attackers enumerating which ids exist", "HTTP requires it", "It speeds up queries"], answer: 1, explain: "Different responses reveal the existence of resources the caller cannot access." }
+]} />

