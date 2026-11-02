@@ -1,0 +1,330 @@
+---
+title: Maximum Flow and Dinic's Algorithm
+track: cp
+module: graphs
+order: 10
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/stacks-and-queues/queues-deques-bfs, cp/graphs/dijkstra-shortest-paths]
+tags: [graph, max-flow, dinic, residual-graph, min-cut, bfs, dfs]
+type: lesson
+problems: [m11-pipe-network]
+furtherReading:
+  - title: cp-algorithms, Maximum flow, Dinic's algorithm
+    url: https://cp-algorithms.com/graph/dinic.html
+  - title: cp-algorithms, Maximum flow, Ford-Fulkerson and Edmonds-Karp
+    url: https://cp-algorithms.com/graph/edmonds_karp.html
+  - title: CSES Problem Set, Download Speed
+    url: https://cses.fi/problemset/task/1694
+---
+
+## Intuition
+
+Water enters a network of pipes at one junction and must leave at another. Each pipe has a **capacity**: the most it can carry per second. What is the largest amount per second that can get through?
+
+A natural idea: find a path from source to sink, push as much as the narrowest pipe on it allows, repeat. This fails: an early choice can block a better combination. The fix is a small idea with big consequences: let the algorithm **take back** water it already sent. Pushing flow along a pipe also creates a **reverse pipe** carrying the same amount, and sending flow down the reverse pipe means "cancel what we sent".
+
+## Definition
+
+A **flow network** has directed edges with capacities `c(u, v) >= 0`, a source `s` and a sink `t`. A **flow** `f` assigns each edge a value `0 <= f(e) <= c(e)` so that at every vertex other than `s` and `t`, inflow equals outflow. Its **value** is the net amount leaving `s`.
+
+**Residual graph.** For every edge `e = (u, v)` keep a twin edge `(v, u)` with capacity `0`. Define `residual(e) = capacity(e) - flow(e)`. Sending `d` along `e` does
+
+```text
+cap[e]     -= d        # less room forward
+cap[e ^ 1] += d        # more room to cancel it later
+```
+
+(store each edge and its twin at indices `2k` and `2k + 1`, so the twin of `e` is `e ^ 1`).
+
+**Augmenting path.** A path from `s` to `t` along edges with positive residual capacity. Pushing its bottleneck increases the flow.
+
+**Max-flow min-cut theorem.** The flow is maximum **exactly when** the residual graph has no augmenting path. At that moment, the set of vertices reachable from `s` forms a **minimum cut**, and its capacity equals the flow value. So max flow also solves "cheapest set of edges to remove to disconnect `s` from `t`".
+
+## From Ford-Fulkerson to Dinic
+
+| algorithm | how it picks paths | worst-case time |
+| --- | --- | --- |
+| Ford-Fulkerson with DFS | any path | `O(E * maxflow)`, can be terrible with large capacities |
+| Edmonds-Karp | shortest path by BFS | `O(V E^2)` |
+| **Dinic** | all shortest paths per phase | `O(V^2 E)`; `O(E sqrt(V))` for unit capacities |
+
+**Dinic's algorithm** runs in **phases**:
+
+1. **BFS** from `s` over edges with positive residual capacity, giving each vertex a `level` (distance from `s`).
+2. **DFS** from `s` that only follows edges `u -> v` with `level[v] == level[u] + 1` and residual `> 0`. This is the *blocking flow* search. A per-vertex pointer `it[v]` remembers which edge to try next, so an edge that led nowhere is never tried twice in the same phase.
+3. When the DFS can push no more, start a new phase. When BFS cannot reach `t`, stop.
+
+The shortest-path distance to `t` strictly increases every phase, so there are at most `V` phases.
+
+## Example, step by step
+
+Five pipes, each of capacity 1: `1->2`, `1->3`, `2->3`, `2->4`, `3->4`, source 1, sink 4.
+
+The greedy first path `1 -> 2 -> 3 -> 4` pushes 1 unit. Now `1->2`, `2->3` and `3->4` are full, and the residual twins `2->1`, `3->2`, `4->3` each have capacity 1.
+
+Is there an augmenting path left? Yes: `1 -> 3` (capacity 1), then `3 -> 2` along the **twin** of `2->3` (this cancels the earlier flow through `2->3`), then `2 -> 4` (capacity 1). Pushing 1 unit gives total flow **2**:
+
+```text
+final flow:   1->2->4  and  1->3->4
+```
+
+A purely greedy method without reverse edges would have stopped at 1. Dinic avoids the trap in a second way too: its BFS levels are `1:0, 2:1, 3:1, 4:2`, and it only follows edges that go exactly one level deeper. The edge `2->3` stays on the same level, so it is never used in phase 1. Phase 1 sends 1 unit along `1-2-4` and 1 unit along `1-3-4`, total 2, and phase 2's BFS can no longer reach vertex 4.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from collections import deque
+import sys
+sys.setrecursionlimit(10000)
+
+graph = [[] for _ in range(n + 1)]
+to, cap = [], []
+def add_edge(u, v, c):
+    graph[u].append(len(to)); to.append(v); cap.append(c)      # edge e
+    graph[v].append(len(to)); to.append(u); cap.append(0)      # its twin e ^ 1
+
+def bfs():
+    for i in range(n + 1):
+        level[i] = -1
+    level[S] = 0
+    q = deque([S])
+    while q:
+        v = q.popleft()
+        for e in graph[v]:
+            if cap[e] > 0 and level[to[e]] < 0:
+                level[to[e]] = level[v] + 1
+                q.append(to[e])
+    return level[T] >= 0
+
+def dfs(v, f):
+    if v == T:
+        return f
+    while it[v] < len(graph[v]):
+        e = graph[v][it[v]]
+        if cap[e] > 0 and level[to[e]] == level[v] + 1:
+            d = dfs(to[e], min(f, cap[e]))
+            if d > 0:
+                cap[e] -= d
+                cap[e ^ 1] += d
+                return d
+        it[v] += 1
+    return 0
+
+flow = 0
+while bfs():
+    it = [0] * (n + 1)
+    while (f := dfs(S, float("inf"))) > 0:
+        flow += f
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<vector<int>> graph(n + 1);
+vector<int> to, level(n + 1), it(n + 1);
+vector<long long> cap;
+void addEdge(int u, int v, long long c) {
+    graph[u].push_back(to.size()); to.push_back(v); cap.push_back(c);
+    graph[v].push_back(to.size()); to.push_back(u); cap.push_back(0);
+}
+bool bfs() {
+    fill(level.begin(), level.end(), -1);
+    level[S] = 0;
+    queue<int> q; q.push(S);
+    while (!q.empty()) {
+        int v = q.front(); q.pop();
+        for (int e : graph[v]) if (cap[e] > 0 && level[to[e]] < 0) { level[to[e]] = level[v] + 1; q.push(to[e]); }
+    }
+    return level[T] >= 0;
+}
+long long dfs(int v, long long f) {
+    if (v == T) return f;
+    for (int& i = it[v]; i < (int)graph[v].size(); i++) {
+        int e = graph[v][i];
+        if (cap[e] > 0 && level[to[e]] == level[v] + 1) {
+            long long d = dfs(to[e], min(f, cap[e]));
+            if (d > 0) { cap[e] -= d; cap[e ^ 1] += d; return d; }
+        }
+    }
+    return 0;
+}
+// long long flow = 0;
+// while (bfs()) { fill(it.begin(), it.end(), 0); while (long long f = dfs(S, LLONG_MAX)) flow += f; }
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static List<Integer>[] graph;
+static int[] to, level, it;
+static long[] cap;
+
+static boolean bfs() {
+    Arrays.fill(level, -1);
+    level[S] = 0;
+    ArrayDeque<Integer> q = new ArrayDeque<>();
+    q.add(S);
+    while (!q.isEmpty()) {
+        int v = q.poll();
+        for (int e : graph[v]) if (cap[e] > 0 && level[to[e]] < 0) { level[to[e]] = level[v] + 1; q.add(to[e]); }
+    }
+    return level[T] >= 0;
+}
+static long dfs(int v, long f) {
+    if (v == T) return f;
+    while (it[v] < graph[v].size()) {
+        int e = graph[v].get(it[v]);
+        if (cap[e] > 0 && level[to[e]] == level[v] + 1) {
+            long d = dfs(to[e], Math.min(f, cap[e]));
+            if (d > 0) { cap[e] -= d; cap[e ^ 1] += d; return d; }
+        }
+        it[v]++;
+    }
+    return 0;
+}
+// long flow = 0;
+// while (bfs()) { Arrays.fill(it, 0); long f; while ((f = dfs(S, Long.MAX_VALUE)) > 0) flow += f; }
+```
+
+</Tab>
+</Tabs>
+
+Run it and compare with a slower, independent method (Edmonds-Karp on a capacity matrix) on random networks:
+
+<CodeRunner language="python" code={`import random
+from collections import deque
+
+def dinic(n, edges):
+    graph = [[] for _ in range(n + 1)]
+    to, cap = [], []
+    for u, v, c in edges:
+        graph[u].append(len(to)); to.append(v); cap.append(c)
+        graph[v].append(len(to)); to.append(u); cap.append(0)
+    S, T = 1, n
+    flow = 0
+    while True:
+        level = [-1] * (n + 1)
+        level[S] = 0
+        q = deque([S])
+        while q:
+            v = q.popleft()
+            for e in graph[v]:
+                if cap[e] > 0 and level[to[e]] < 0:
+                    level[to[e]] = level[v] + 1
+                    q.append(to[e])
+        if level[T] < 0:
+            return flow
+        it = [0] * (n + 1)
+
+        def dfs(v, f):
+            if v == T:
+                return f
+            while it[v] < len(graph[v]):
+                e = graph[v][it[v]]
+                if cap[e] > 0 and level[to[e]] == level[v] + 1:
+                    d = dfs(to[e], min(f, cap[e]))
+                    if d:
+                        cap[e] -= d
+                        cap[e ^ 1] += d
+                        return d
+                it[v] += 1
+            return 0
+
+        while True:
+            f = dfs(S, float("inf"))
+            if not f:
+                break
+            flow += f
+
+def edmonds_karp(n, edges):
+    cap = [[0] * (n + 1) for _ in range(n + 1)]
+    for u, v, c in edges:
+        cap[u][v] += c
+    flow = 0
+    while True:
+        par = [0] * (n + 1)
+        par[1] = -1
+        q = deque([1])
+        while q and not par[n]:
+            v = q.popleft()
+            for w in range(1, n + 1):
+                if not par[w] and cap[v][w] > 0:
+                    par[w] = v
+                    q.append(w)
+        if not par[n]:
+            return flow
+        b, w = float("inf"), n
+        while w != 1:
+            b = min(b, cap[par[w]][w])
+            w = par[w]
+        w = n
+        while w != 1:
+            cap[par[w]][w] -= b
+            cap[w][par[w]] += b
+            w = par[w]
+        flow += b
+
+print("lesson network:", dinic(4, [(1, 2, 1), (1, 3, 1), (2, 3, 1), (2, 4, 1), (3, 4, 1)]))
+
+random.seed(3)
+for _ in range(300):
+    n = random.randint(2, 9)
+    es = []
+    for _ in range(random.randint(0, 20)):
+        u, v = random.randint(1, n), random.randint(1, n)
+        if u != v:
+            es.append((u, v, random.randint(1, 9)))
+    assert dinic(n, es) == edmonds_karp(n, es)
+print("300 random networks: Dinic equals Edmonds-Karp")
+`} />
+
+## What flow can model
+
+Max flow is a **modelling** tool: many problems that do not mention water are flow problems in disguise.
+
+| problem | graph |
+| --- | --- |
+| **Bipartite matching** | source to each left vertex (cap 1), left to right along allowed pairs (cap 1), each right vertex to sink (cap 1). Max flow = maximum matching. |
+| **Edge-disjoint paths** | every edge capacity 1; max flow = number of edge-disjoint paths from `s` to `t`. |
+| **Vertex-disjoint paths** | split every vertex `v` into `v_in -> v_out` with capacity 1. |
+| **Minimum cut** | after max flow, the vertices reachable from `s` in the residual graph form the source side. |
+| **Assignment with capacities** | people to jobs with limits on both sides, as in matching but with capacities above 1. |
+| **Project selection** | profits and dependencies as a min cut (advanced). |
+
+## Pitfalls
+
+1. **Forgetting the reverse edges.** Without twins with capacity 0 the algorithm is just greedy path packing and gives wrong answers on cross-linked networks.
+2. **Updating the twin in the wrong direction.** `cap[e] -= d` and `cap[e ^ 1] += d`. Reversing the signs inflates the flow forever.
+3. **Parallel and antiparallel edges.** Both are fine in the edge-list representation; a capacity matrix must **add** capacities instead of overwriting them.
+4. **Not resetting `it[]` per phase.** The pointer array must be zeroed before every phase.
+5. **Overflow.** Flow values can reach `m * 10^9`: use 64-bit integers, and start the DFS with an infinity that fits (`LLONG_MAX`).
+6. **Recursion depth.** The DFS depth is at most the longest level path, up to `V`. For `V` around `10^5` use an iterative DFS or a big thread stack.
+7. **Using DFS-only Ford-Fulkerson with big capacities.** Its running time depends on the flow value, so a single unlucky path choice can cost billions of steps.
+
+## Practice
+
+<Problem id="m11-pipe-network" />
+
+## Problem ladder
+
+- [Download Speed](https://cses.fi/problemset/task/1694) (CSES): exactly this lesson on a larger graph.
+- [Police Chase](https://cses.fi/problemset/task/1695) (CSES): after the max flow, list the edges of a minimum cut.
+- [School Dance](https://cses.fi/problemset/task/1696) (CSES): bipartite matching as flow.
+- [Distinct Routes](https://cses.fi/problemset/task/1711) (CSES): edge-disjoint paths, with the paths printed.
+- [Bipartite Matching](https://judge.yosupo.jp/problem/bipartitematching) (Library Checker): a large-input benchmark where Dinic on a unit-capacity network runs in `O(E sqrt(V))`.
+
+## Quiz
+
+<Quiz id="cp-m11-max-flow" tags={["graph", "max-flow", "dinic"]} questions={[
+  { type: "mcq", q: "Why does every edge get a reverse edge with capacity 0 in the residual graph?", options: ["To make the graph undirected", "So flow already sent can be cancelled by pushing flow along the reverse edge", "To store edge weights", "To speed up BFS"], answer: 1, explain: "Sending d along an edge adds d to its twin, and using the twin later means undoing part of the earlier decision." },
+  { type: "mcq", q: "When is a flow maximum?", options: ["When every edge is saturated", "When the residual graph has no path from source to sink", "When the source has no outgoing edges", "After exactly V phases"], answer: 1, explain: "No augmenting path means no way to increase the value; by the max-flow min-cut theorem it equals the capacity of a minimum cut." },
+  { type: "predict", q: "In Dinic's DFS, an edge u -> v is used only if level[v] equals what?", code: "level_u = 3\nprint(level_u + 1)", options: ["2", "3", "4", "any"], answer: 2, explain: "Only edges that go exactly one BFS level deeper are used, so every path found in a phase is a shortest path." },
+  { type: "multi", q: "Which problems reduce to maximum flow?", options: ["Bipartite matching", "Edge-disjoint paths", "Minimum cut between two vertices", "Shortest path with negative cycles"], answer: [0, 1, 2], explain: "Shortest paths are a different problem (Bellman-Ford); flow handles matching, disjoint paths and cuts." },
+  { type: "mcq", q: "How many phases can Dinic's algorithm have at most?", options: ["1", "V", "E", "The flow value"], answer: 1, explain: "The distance from source to sink increases every phase, and it is at most V - 1." }
+]} />

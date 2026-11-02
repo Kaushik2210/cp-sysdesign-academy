@@ -1,0 +1,75 @@
+{
+  "id": "m13-digit-hunt",
+  "title": "Digit Hunt",
+  "source": {
+    "name": "Original exercise; classic technique (digit DP, compare Codeforces Gym digit-sum counting and LeetCode 902/1012)"
+  },
+  "rating": 2000,
+  "tags": [
+    "dp",
+    "digit-dp",
+    "counting",
+    "math"
+  ],
+  "statement": "For each question `L R S`, count the integers `x` with `L ≤ x ≤ R` whose **decimal digits add up to exactly `S`**. For example, `1 100 10` asks for numbers up to 100 with digit sum 10: `19, 28, 37, 46, 55, 64, 73, 82, 91`, and none else, so the answer is 9.\n\n**Input.** First line: the number of questions `t`. Then `t` lines `L R S`.\n\n**Output.** For every question, the count on its own line.",
+  "constraints": [
+    "1 ≤ t ≤ 100 in this browser version",
+    "1 ≤ L ≤ R ≤ 10^15 in this browser version (the idea scales to 10^18)",
+    "0 ≤ S ≤ 150"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "3\n1 100 10\n1 9 5\n10 99 1\n",
+      "output": "9\n1\n1\n",
+      "hidden": false
+    },
+    {
+      "input": "1\n1 1 1\n",
+      "output": "1\n",
+      "hidden": false
+    },
+    {
+      "input": "4\n5 5 4\n5 5 5\n1 10 1\n1 10 0\n",
+      "output": "0\n1\n2\n0\n",
+      "hidden": true
+    },
+    {
+      "input": "25\n2961 4863 14\n6431 6645 24\n4915 5864 5\n9919 11975 27\n2611 3410 14\n6022 6862 26\n9894 10590 19\n2901 4253 0\n11523 11961 26\n15466 16737 20\n17714 19197 39\n12627 13458 15\n12711 14627 11\n16499 17171 14\n13296 14561 35\n10428 11091 28\n14054 14911 19\n17505 20111 8\n1330 4188 26\n8430 10353 37\n1345 3813 6\n7557 9192 5\n16809 17850 3\n477 3347 16\n18690 19911 20\n",
+      "output": "130\n12\n1\n14\n58\n24\n22\n0\n6\n104\n0\n61\n65\n19\n0\n1\n70\n8\n31\n0\n28\n0\n0\n219\n75\n",
+      "hidden": true
+    },
+    {
+      "input": "25\n4586 4680 30\n4287 6753 34\n3446 5337 6\n3070 3624 21\n2093 6793 13\n184 4875 13\n446 5213 35\n1121 4272 1\n1275 4432 15\n1529 2298 12\n4577 6368 28\n1514 4667 8\n520 2277 33\n1479 3036 11\n1107 5609 31\n2959 3001 2\n4779 7802 0\n4653 4660 33\n4543 5350 31\n3155 6100 30\n3046 4633 32\n3807 8311 31\n361 2096 11\n2815 6645 9\n79 1644 19\n",
+      "output": "0\n0\n9\n21\n260\n323\n0\n0\n247\n50\n25\n68\n0\n79\n1\n0\n0\n0\n1\n10\n0\n20\n109\n74\n67\n",
+      "hidden": true
+    },
+    {
+      "input": "66\n168809754987488 241296993081537 106\n548130154919571 607999241503171 17\n200018983459087 395177990542291 31\n314771248012699 352850227423779 108\n715615314943047 764489304180422 70\n818443113419394 999607692843610 90\n40020521963731 571298930650227 90\n550465342691559 851867150432591 83\n456634606192698 697651007710418 68\n207143041696120 651807288358494 53\n327012133151264 489646730593181 125\n54211013781130 891197444424225 25\n204772248338900 668316923544104 122\n464383326545960 823389364094633 31\n115778848386469 321128206594537 131\n249110788573822 900607794492165 120\n690495346051305 737372321054045 52\n408202393854894 578896515585301 112\n99812575665451 205004533349642 109\n488711415761685 543960242980516 83\n122316959341524 163308145706819 37\n150829607660751 202005580979195 14\n803604786748578 990529922134092 69\n483579167391088 509592572889648 17\n272531716134318 708358159285705 5\n41837625862191 602281415870651 91\n15662963663625 866155287229797 104\n293222676349114 905099286114194 38\n788339594261676 945548370971467 73\n610676778457120 680780679187905 16\n25316904231132 634063710029799 81\n29770999508953 236854682429762 10\n81000084795389 886837825914921 59\n270896869846128 294226644637010 114\n53707176834482 131148194788549 16\n446347979623187 716601793504145 8\n81235501376117 937099507320302 15\n117203527481832 735423513590831 121\n240416342586844 929580737690758 101\n26301766682460 130926893155737 36\n413160748988930 479039365863829 89\n18669232152821 134104093308476 67\n596032325353883 631449479138642 85\n704649937279899 857137996136094 12\n960275715400101 991560332628966 83\n330546125564083 438600001748110 67\n112532378178041 638454488376466 89\n128592311210449 968579201679542 24\n252466800786468 468178057692830 97\n193389464312554 725379550722691 104\n907096224343534 940963648306071 65\n102807693125568 979578957426156 132\n61963568755328 848815649378986 95\n414621495242384 559557217753851 120\n135064719450985 469732524315456 61\n266130633922932 325810271627325 131\n622568685938303 670519096293119 4\n443566893980321 939525904951052 130\n8247406440013 795797531153302 79\n50278071465619 550675214388817 36\n1 1000000000000000 1\n1 1000000000000000 0\n1 1000000000000000 135\n1000000000000000 1000000000000000 1\n1 1000000000000000 144\n999999999999999 999999999999999 135\n",
+      "output": "801445953\n1428882\n35272804971\n62577801\n1856189058335\n1662922818749\n1494442442356\n5133034771125\n8884060787226\n7505315505678\n3396\n9286925506\n838881\n17382078733\n0\n39957284\n580564374414\n294177331\n216844965\n630858420301\n60461485873\n2275432\n6753346028163\n2704806\n120\n1395674999582\n72135335376\n410186803857\n5659730667635\n329511\n8452499381068\n776049\n21950375085349\n8021497\n35184619\n679\n40087144\n4454038\n242448299578\n142639341341\n261312135305\n3982546301875\n308927107037\n4761\n856366067437\n4004222228920\n2077880474860\n4170114579\n108772601213\n41808302142\n1174568140702\n122\n1034082973841\n1189799\n11344076833155\n0\n0\n3060\n15170209935895\n401010829091\n16\n0\n1\n1\n0\n1\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Looping from L to R is far too slow for 10^15. Use f(N) = how many x in [0, N] have digit sum S, and answer f(R) - f(L - 1).",
+    "Walk the digits of N from the left. At each position, count the numbers that copy N's prefix so far and then place a SMALLER digit here; the digits to the right are completely free.",
+    "The number of free strings of length k with digit sum s does not depend on N: cnt[k][s] = sum of cnt[k-1][s-d] for d in 0..9. Precompute it once, then each f is just a loop over digits and choices (about 10 * digits steps)."
+  ],
+  "editorial": "Count `f(N)`, the integers in `[0, N]` with digit sum `S`, and answer `f(R) - f(L-1)`. Precompute `cnt[k][s]`, the number of length-`k` digit strings (leading zeros allowed) with digit sum `s`: `cnt[0][0] = 1`, `cnt[k][s] = sum over d in 0..9 of cnt[k-1][s-d]`. Now walk the digits of `N` from the most significant one, keeping `pre`, the digit sum of the prefix of `N` read so far. A number `x <= N` either equals `N` or **first differs** from `N` at some position `i` with a smaller digit `c < N[i]`; its remaining `len-i-1` digits are free, so there are `cnt[len-i-1][S - pre - c]` of them. Sum over all positions and all smaller digits, and add 1 if `N` itself has digit sum `S`. This is digit DP in its walk-the-prefix form: the implicit state is (position, sum so far, still tight), where 'tight' means 'equal to N so far'. Per question the cost is `O(digits * 10)`; the table is `O(digits * S * 10)`. The answer reaches `10^15`, so use 64-bit integers in compiled languages.",
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(n)"
+  },
+  "starter": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nt = int(data[0])\n# question i (0-based): L, R, S = data[1 + 3*i], data[2 + 3*i], data[3 + 3*i]\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst t = tok[0];\n// question i (0-based): tok[1 + 3*i], tok[2 + 3*i], tok[3 + 3*i] = L, R, S\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        // read t, then t questions L R S (use long)\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    // read t, then t questions L R S (use long)\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\ndata = sys.stdin.read().split()\nt = int(data[0])\nMAXS = 160\n# cnt[k][s] = number of k-digit strings (leading zeros allowed) whose digits sum to s\ncnt = [[0] * (MAXS + 1) for _ in range(18)]\ncnt[0][0] = 1\nfor k in range(1, 18):\n    for s in range(MAXS + 1):\n        cnt[k][s] = sum(cnt[k - 1][s - d] for d in range(10) if s - d >= 0)\n\n\ndef f(n, S):\n    \"\"\"How many x in [0, n] have digit sum S.\"\"\"\n    if n < 0:\n        return 0\n    digs = [int(c) for c in str(n)]\n    L = len(digs)\n    pre = 0\n    total = 0\n    for i, d in enumerate(digs):\n        rem = L - i - 1\n        for c in range(d):                       # x leaves n's prefix here with a smaller digit c, the rest is free\n            need = S - pre - c\n            if 0 <= need <= MAXS:\n                total += cnt[rem][need]\n        pre += d                                 # x keeps following n\n    if pre == S:\n        total += 1                               # x == n itself\n    return total\n\n\nout = []\nfor i in range(t):\n    l, r, s = int(data[1 + 3 * i]), int(data[2 + 3 * i]), int(data[3 + 3 * i])\n    out.append(f(r, s) - f(l - 1, s))\nprint(\"\\n\".join(map(str, out)))\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst t = tok[0];\nconst MAXS = 160;\nconst cnt = Array.from({ length: 18 }, () => new Array(MAXS + 1).fill(0));\ncnt[0][0] = 1;\nfor (let k = 1; k < 18; k++)\n  for (let s = 0; s <= MAXS; s++) {\n    let v = 0;\n    for (let d = 0; d < 10 && s - d >= 0; d++) v += cnt[k - 1][s - d];\n    cnt[k][s] = v;\n  }\nfunction f(n, S) {\n  if (n < 0) return 0;\n  const digs = String(n).split(\"\").map(Number);\n  const L = digs.length;\n  let pre = 0, total = 0;\n  for (let i = 0; i < L; i++) {\n    const rem = L - i - 1;\n    for (let c = 0; c < digs[i]; c++) {\n      const need = S - pre - c;\n      if (need >= 0 && need <= MAXS) total += cnt[rem][need];\n    }\n    pre += digs[i];\n  }\n  if (pre === S) total += 1;\n  return total;\n}\nconst out = [];\nfor (let i = 0; i < t; i++) {\n  const l = tok[1 + 3 * i], r = tok[2 + 3 * i], s = tok[3 + 3 * i];\n  out.push(f(r, s) - f(l - 1, s));\n}\nconsole.log(out.join(\"\\n\"));\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    static final int MAXS = 160;\n    static long[][] cnt = new long[18][MAXS + 1];\n\n    static long f(long n, int S) {\n        if (n < 0) return 0;\n        String str = Long.toString(n);\n        int L = str.length(), pre = 0;\n        long total = 0;\n        for (int i = 0; i < L; i++) {\n            int d = str.charAt(i) - '0', rem = L - i - 1;\n            for (int c = 0; c < d; c++) {\n                int need = S - pre - c;\n                if (need >= 0 && need <= MAXS) total += cnt[rem][need];\n            }\n            pre += d;\n        }\n        if (pre == S) total++;\n        return total;\n    }\n\n    public static void main(String[] args) throws IOException {\n        cnt[0][0] = 1;\n        for (int k = 1; k < 18; k++)\n            for (int s = 0; s <= MAXS; s++)\n                for (int d = 0; d < 10 && s - d >= 0; d++) cnt[k][s] += cnt[k - 1][s - d];\n        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));\n        StringTokenizer st = new StringTokenizer(br.readLine());\n        int t = Integer.parseInt(st.nextToken());\n        StringBuilder out = new StringBuilder();\n        for (int i = 0; i < t; i++) {\n            st = new StringTokenizer(br.readLine());\n            long l = Long.parseLong(st.nextToken()), r = Long.parseLong(st.nextToken());\n            int s = Integer.parseInt(st.nextToken());\n            out.append(f(r, s) - f(l - 1, s)).append('\\n');\n        }\n        System.out.print(out);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\n\nconst int MAXS = 160;\nlong long cnt[18][MAXS + 1];\n\nlong long f(long long n, int S) {\n    if (n < 0) return 0;\n    string str = to_string(n);\n    int L = str.size(), pre = 0;\n    long long total = 0;\n    for (int i = 0; i < L; i++) {\n        int d = str[i] - '0', rem = L - i - 1;\n        for (int c = 0; c < d; c++) {\n            int need = S - pre - c;\n            if (need >= 0 && need <= MAXS) total += cnt[rem][need];\n        }\n        pre += d;\n    }\n    if (pre == S) total++;\n    return total;\n}\n\nint main() {\n    cnt[0][0] = 1;\n    for (int k = 1; k < 18; k++)\n        for (int s = 0; s <= MAXS; s++)\n            for (int d = 0; d < 10 && s - d >= 0; d++) cnt[k][s] += cnt[k - 1][s - d];\n    int t;\n    scanf(\"%d\", &t);\n    while (t--) {\n        long long l, r;\n        int s;\n        scanf(\"%lld %lld %d\", &l, &r, &s);\n        printf(\"%lld\\n\", f(r, s) - f(l - 1, s));\n    }\n    return 0;\n}\n"
+  }
+}

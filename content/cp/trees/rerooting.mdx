@@ -1,0 +1,276 @@
+---
+title: Rerooting DP
+track: cp
+module: trees
+order: 4
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/trees/tree-dp-and-diameter]
+tags: [trees, rerooting, tree-dp, dp, subtree-size]
+type: lesson
+problems: [m15-distance-sums]
+furtherReading:
+  - title: CSES Problem Set, Tree Distances II
+    url: https://cses.fi/problemset/task/1133
+  - title: CSES Problem Set, Tree Distances I
+    url: https://cses.fi/problemset/task/1132
+  - title: USACO Guide, DP on Trees
+    url: https://usaco.guide/gold/dp-trees
+---
+
+## Intuition
+
+[Tree DP](/cp/trees/tree-dp-and-diameter/) answers a question **for the root**: you compute something for each subtree and combine children upward. But many problems want the answer **for every vertex as if it were the root**: "for each house, the total distance to all the others", "for each city, how far is the farthest city".
+
+Running the tree DP once per vertex costs `O(n^2)`. The trick is to notice that **moving the root across one edge changes very little**. If you already know the answer for the parent `p`, the answer for its child `v` differs only by what happens on the single edge `p-v`: the vertices on `v`'s side get one step closer, the vertices on `p`'s side get one step farther. So: solve once for a fixed root bottom-up, then **push answers down** from the root, fixing each child with an `O(1)` correction.
+
+## Definition
+
+Root the tree at vertex 1 and fix an order where every parent comes before its children (BFS order works and avoids recursion).
+
+**Pass 1, bottom-up** (reverse BFS order): for every vertex `v` compute
+
+```text
+size[v]  = number of vertices in the subtree of v
+down[v]  = sum of distances from v to the vertices inside its own subtree
+         = sum over children c of ( down[c] + size[c] )        # each vertex of c's subtree is 1 farther from v than from c
+```
+
+Then `ans[root] = down[root]`.
+
+**Pass 2, top-down** (BFS order): moving the root from `p` to its child `v`:
+
+```text
+ans[v] = ans[p] - size[v] + (n - size[v])
+```
+
+The `size[v]` vertices of `v`'s subtree each get 1 closer, and the other `n - size[v]` vertices each get 1 farther.
+
+Both passes are linear, so everything is `O(n)`.
+
+## Example, step by step
+
+Tree with 5 vertices, edges `1-2, 1-3, 3-4, 3-5`, rooted at 1.
+
+```text
+      1
+     / \
+    2   3
+       / \
+      4   5
+```
+
+**Bottom-up:**
+
+| vertex | `size` | `down` | why |
+| --- | --- | --- | --- |
+| 2 | 1 | 0 | leaf |
+| 4 | 1 | 0 | leaf |
+| 5 | 1 | 0 | leaf |
+| 3 | 3 | 2 | children 4 and 5: `(0 + 1) + (0 + 1)` |
+| 1 | 5 | 6 | child 2: `0 + 1`; child 3: `2 + 3` |
+
+So `ans[1] = 6`: distances `1 + 1 + 2 + 2`.
+
+**Top-down**, `n = 5`:
+
+| vertex | formula | `ans` |
+| --- | --- | --- |
+| 1 | `down[1]` | 6 |
+| 2 | `6 - 1 + (5 - 1)` | 9 |
+| 3 | `6 - 3 + (5 - 3)` | 5 |
+| 4 | `ans[3] - 1 + (5 - 1) = 5 - 1 + 4` | 8 |
+| 5 | `ans[3] - 1 + 4` | 8 |
+
+Check vertex 3 by hand: distances to 1, 2, 4, 5 are `1, 2, 1, 1`, total 5. ✓.
+
+## The general pattern
+
+Not every answer reroots as neatly as a sum. The recipe for a general reroot:
+
+1. Define what a vertex needs from each **neighbour direction** (a "message"): for a child it is the answer for that child's subtree, for the parent it is the answer for *everything else*, the part of the tree above.
+2. Compute the **down** messages bottom-up as in ordinary tree DP.
+3. Compute the **up** message for child `v` of `p` by combining `p`'s own up message with the down messages of all of `p`'s **other** children. For sums and counts you can subtract `v`'s contribution; for **max** and **min** you need *prefix and suffix* combinations (or keep the best two values per vertex), because you cannot subtract a maximum.
+4. The answer for `v` combines its up message and all its down messages.
+
+Typical problems: the farthest vertex from each vertex (keep the top two down depths), the number of valid colourings with each vertex as the root, the best centre of the tree.
+
+<Callout type="tip" title="A shortcut for one special case">
+For "distance to the farthest vertex" there is a shortcut: the farthest vertex from any vertex is one of the two diameter endpoints. Rerooting is the technique that keeps working when the quantity is not a distance.
+</Callout>
+
+## Code
+
+BFS order keeps it iterative, so a path of `2·10^5` vertices is safe.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+parent = [0] * (n + 1)
+seen = [False] * (n + 1)
+order = [1]
+seen[1] = True
+for v in order:                      # BFS order: parents before children
+    for to in adj[v]:
+        if not seen[to]:
+            seen[to] = True
+            parent[to] = v
+            order.append(to)
+
+size = [1] * (n + 1)
+down = [0] * (n + 1)
+for v in reversed(order):            # bottom-up
+    p = parent[v]
+    if p:
+        size[p] += size[v]
+        down[p] += down[v] + size[v]
+
+ans = [0] * (n + 1)
+ans[1] = down[1]
+for v in order[1:]:                  # top-down
+    ans[v] = ans[parent[v]] - size[v] + (n - size[v])
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> parent(n + 1, 0), order = {1};
+vector<bool> seen(n + 1, false);
+seen[1] = true;
+for (size_t i = 0; i < order.size(); i++)
+    for (int to : adj[order[i]])
+        if (!seen[to]) { seen[to] = true; parent[to] = order[i]; order.push_back(to); }
+
+vector<long long> size(n + 1, 1), down(n + 1, 0), ans(n + 1, 0);
+for (int i = n - 1; i >= 0; i--) {   // bottom-up
+    int v = order[i], p = parent[v];
+    if (p) { size[p] += size[v]; down[p] += down[v] + size[v]; }
+}
+ans[1] = down[1];
+for (int i = 1; i < n; i++) {        // top-down
+    int v = order[i];
+    ans[v] = ans[parent[v]] - size[v] + (n - size[v]);
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] parent = new int[n + 1], order = new int[n];
+boolean[] seen = new boolean[n + 1];
+int head = 0, tail = 0;
+order[tail++] = 1;
+seen[1] = true;
+while (head < tail) {
+    int v = order[head++];
+    for (int to : adj[v]) if (!seen[to]) { seen[to] = true; parent[to] = v; order[tail++] = to; }
+}
+long[] size = new long[n + 1], down = new long[n + 1], ans = new long[n + 1];
+Arrays.fill(size, 1);
+for (int i = n - 1; i >= 0; i--) {   // bottom-up
+    int v = order[i], p = parent[v];
+    if (p != 0) { size[p] += size[v]; down[p] += down[v] + size[v]; }
+}
+ans[1] = down[1];
+for (int i = 1; i < n; i++) {        // top-down
+    int v = order[i];
+    ans[v] = ans[parent[v]] - size[v] + (n - size[v]);
+}
+```
+
+</Tab>
+</Tabs>
+
+Run it, and compare with a BFS from every vertex:
+
+<CodeRunner language="python" code={`import random
+
+def distance_sums(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        adj[u].append(v)
+        adj[v].append(u)
+    parent = [0] * (n + 1)
+    seen = [False] * (n + 1)
+    order = [1]
+    seen[1] = True
+    for v in order:
+        for to in adj[v]:
+            if not seen[to]:
+                seen[to] = True
+                parent[to] = v
+                order.append(to)
+    size = [1] * (n + 1)
+    down = [0] * (n + 1)
+    for v in reversed(order):
+        p = parent[v]
+        if p:
+            size[p] += size[v]
+            down[p] += down[v] + size[v]
+    ans = [0] * (n + 1)
+    ans[1] = down[1]
+    for v in order[1:]:
+        ans[v] = ans[parent[v]] - size[v] + (n - size[v])
+    return ans[1:]
+
+def brute(n, edges):
+    adj = [[] for _ in range(n + 1)]
+    for u, v in edges:
+        adj[u].append(v)
+        adj[v].append(u)
+    res = []
+    for s in range(1, n + 1):
+        dist = {s: 0}
+        q = [s]
+        for v in q:
+            for to in adj[v]:
+                if to not in dist:
+                    dist[to] = dist[v] + 1
+                    q.append(to)
+        res.append(sum(dist.values()))
+    return res
+
+edges = [(1, 2), (1, 3), (3, 4), (3, 5)]
+print("distance sums:", distance_sums(5, edges))
+
+random.seed(8)
+for _ in range(300):
+    n = random.randint(1, 30)
+    es = [(random.randint(1, v - 1), v) for v in range(2, n + 1)]
+    assert distance_sums(n, es) == brute(n, es)
+print("300 random trees agree with BFS from every vertex")
+`} />
+
+## Pitfalls
+
+1. **Subtracting a maximum.** The `- size[v] + (n - size[v])` trick works because sums are invertible. For max, min or gcd you need prefix/suffix aggregates or the best two child values.
+2. **Wrong order.** The top-down pass needs `ans[parent]` first, so use BFS order (or DFS preorder), never an arbitrary order.
+3. **Mixing `size` and `n - size`.** On a move `p -> v`, the vertices on `v`'s side are `size[v]`, the others are `n - size[v]`; swapping them gives answers off by a lot, yet still plausible-looking on small trees.
+4. **Recursion depth.** A path graph has depth `n`; recursive DFS overflows the stack in Python and in Java's default stack. Use BFS order as above.
+5. **Overflow.** Distance sums reach about `n^2 / 2`, which is `2·10^10` for `n = 2·10^5`: use 64-bit integers.
+6. **Forgetting the root's answer.** `ans[root] = down[root]` is the seed; everything else is derived from it.
+
+## Practice
+
+<Problem id="m15-distance-sums" />
+
+## Problem ladder
+
+- [Tree Distances II](https://cses.fi/problemset/task/1133) (CSES): exactly this lesson at full scale.
+- [Tree Distances I](https://cses.fi/problemset/task/1132) (CSES): farthest vertex from each vertex; solvable by the diameter endpoints or by rerooting with two best depths.
+- [Sum of Distances in Tree](https://leetcode.com/problems/sum-of-distances-in-tree/) (LeetCode 834, hard): the same formulas.
+- [Subtree Sizes](https://cses.fi/problemset/task/1674) (CSES): warm-up for the bottom-up pass.
+- [Subtree](https://atcoder.jp/contests/dp/tasks/dp_v) (AtCoder DP Contest, Problem V): rerooting with a product modulo `M`, which is not invertible, so prefix and suffix products are needed.
+
+## Quiz
+
+<Quiz id="cp-m15-rerooting" tags={["trees", "rerooting"]} questions={[
+  { type: "mcq", q: "What is the main idea of rerooting?", options: ["Run the tree DP once per vertex", "Solve for one root, then derive each neighbour's answer from it with an O(1) correction", "Sort the vertices by degree", "Use binary lifting"], answer: 1, explain: "Moving the root across one edge changes only the contribution of that edge, so the answer can be updated in constant time per vertex." },
+  { type: "predict", q: "In a tree with n = 5 where vertex v has size[v] = 3, how does the distance sum change when the root moves from v's parent to v?", code: "n, size_v = 5, 3\nprint(-size_v + (n - size_v))", options: ["-1", "0", "1", "2"], answer: 0, explain: "3 vertices get 1 closer and 2 get 1 farther, so the total changes by -3 + 2 = -1." },
+  { type: "mcq", q: "Why are prefix and suffix aggregates needed for 'maximum' rerooting problems?", options: ["Maximum is slow", "You cannot subtract a child's maximum from the parent's total", "Trees are unordered", "They save memory"], answer: 1, explain: "A sum can subtract the child's share; a maximum cannot, so the up message combines all other children explicitly." },
+  { type: "multi", q: "Which are valid orders for the top-down pass?", options: ["BFS order from the root", "DFS preorder from the root", "Reverse BFS order", "Increasing vertex number"], answer: [0, 1], explain: "Both put every parent before its children, so ans[parent] is ready." },
+  { type: "mcq", q: "What is the total time of the distance-sum rerooting?", options: ["O(n)", "O(n log n)", "O(n^2)", "O(n * depth)"], answer: 0, explain: "One bottom-up and one top-down pass, each doing constant work per vertex." }
+]} />

@@ -1,0 +1,237 @@
+---
+title: Digit DP
+track: cp
+module: dynamic-programming
+order: 8
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/knapsack, cp/dynamic-programming/grid-paths]
+tags: [dp, digit-dp, counting, math, prefix-counting]
+type: lesson
+problems: [m13-digit-hunt]
+furtherReading:
+  - title: USACO Guide, Digit DP
+    url: https://usaco.guide/adv/digit-dp
+  - title: LeetCode 902, Numbers At Most N Given Digit Set
+    url: https://leetcode.com/problems/numbers-at-most-n-given-digit-set/
+  - title: LeetCode 1012, Numbers With Repeated Digits
+    url: https://leetcode.com/problems/numbers-with-repeated-digits/
+---
+
+## Intuition
+
+"How many integers between `L` and `R` have digit sum 10?" With `R` up to `10^15` you cannot loop. But the answer has structure: a number is built **digit by digit**, and what matters about the digits chosen so far is tiny (their sum), not the digits themselves.
+
+Two tricks combine. First, count in a **prefix**: let `f(N)` be the count for `0..N`; then the answer is `f(R) - f(L-1)`. Second, count `f(N)` by asking **where a number first differs from `N`**. A number `x <= N` either equals `N`, or agrees with `N` for a while and then has a **smaller digit** at some position. After that position its remaining digits are completely unconstrained, so we only need to know *how many free strings of a given length have a given digit sum*, and that is a small table.
+
+## Definition
+
+Let `cnt[k][s]` be the number of strings of `k` digits (leading zeros allowed) whose digits sum to `s`:
+
+```text
+cnt[0][0] = 1
+cnt[k][s] = sum over d in 0..9 of cnt[k-1][s-d]          # choose the first digit d
+```
+
+Write `N` as digits `N[0..L-1]`. Let `pre` be the digit sum of the part of `N` already read. For each position `i` and each digit `c < N[i]`, the numbers that copy `N[0..i-1]`, place `c` at `i` and then fill the other `L-i-1` positions freely number
+
+```text
+cnt[ L-i-1 ][ S - pre - c ]          (zero if the index is negative)
+```
+
+Add them all up, then add 1 if `N` itself has digit sum `S`.
+
+```text
+f(N, S):
+    pre = 0; total = 0
+    for i in 0..L-1:
+        for c in 0..N[i]-1:
+            total += cnt[L-i-1][S - pre - c]
+        pre += N[i]
+    total += (pre == S)
+```
+
+Per query this is about `10 * L` steps. The table costs `O(L * S * 10)` once.
+
+This is **digit DP** in its "walk the prefix" form. The general form is a memoised recursion over the state `(position, remembered info, tight)`, where *tight* means "the prefix equals `N` so far, so the next digit is bounded by `N[i]`". Walking the prefix is the same thing with the tight branch unrolled into a loop.
+
+## Example, step by step
+
+Count `x` in `[0, 234]` with digit sum `S = 5`. Digits of `N`: `2, 3, 4`.
+
+| position `i` | digit | smaller digits `c` | free length | counted | running total |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 2 | `c = 0`: `cnt[2][5] = 6`; `c = 1`: `cnt[2][4] = 5` | 2 | 11 | 11 |
+| 1 | 3 (`pre = 2`) | `c = 0, 1, 2` need 3, 2, 1: each `cnt[1][·] = 1` | 1 | 3 | 14 |
+| 2 | 4 (`pre = 5`) | `c = 0` needs 0: `cnt[0][0] = 1`; `c = 1..3` need negative sums | 0 | 1 | 15 |
+| end | `N` has digit sum 9 | not 5, so +0 | | | **15** |
+
+For `c = 0` in the first row, the six free suffixes are `05, 14, 23, 32, 41, 50`, which are the numbers 5, 14, 23, 32, 41 and 50 (all below 200, so they first differ from `234` at the hundreds digit). Every other row reads the same way. The brute-force check below confirms 15.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+MAXS = 160
+cnt = [[0] * (MAXS + 1) for _ in range(18)]
+cnt[0][0] = 1
+for k in range(1, 18):
+    for s in range(MAXS + 1):
+        cnt[k][s] = sum(cnt[k - 1][s - d] for d in range(10) if s - d >= 0)
+
+def f(n, S):                         # how many x in [0, n] have digit sum S
+    if n < 0:
+        return 0
+    digs = [int(ch) for ch in str(n)]
+    pre = total = 0
+    for i, d in enumerate(digs):
+        rem = len(digs) - i - 1
+        for c in range(d):
+            need = S - pre - c
+            if 0 <= need <= MAXS:
+                total += cnt[rem][need]
+        pre += d
+    return total + (1 if pre == S else 0)
+
+# answer for [L, R]:  f(R, S) - f(L - 1, S)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+const int MAXS = 160;
+long long cnt[18][MAXS + 1];
+
+long long f(long long n, int S) {    // how many x in [0, n] have digit sum S
+    if (n < 0) return 0;
+    string str = to_string(n);
+    int L = str.size(), pre = 0;
+    long long total = 0;
+    for (int i = 0; i < L; i++) {
+        int d = str[i] - '0', rem = L - i - 1;
+        for (int c = 0; c < d; c++) {
+            int need = S - pre - c;
+            if (need >= 0 && need <= MAXS) total += cnt[rem][need];
+        }
+        pre += d;
+    }
+    return total + (pre == S);
+}
+// init: cnt[0][0] = 1; cnt[k][s] += cnt[k-1][s-d] for d in 0..9
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static final int MAXS = 160;
+static long[][] cnt = new long[18][MAXS + 1];
+
+static long f(long n, int S) {       // how many x in [0, n] have digit sum S
+    if (n < 0) return 0;
+    String str = Long.toString(n);
+    int L = str.length(), pre = 0;
+    long total = 0;
+    for (int i = 0; i < L; i++) {
+        int d = str.charAt(i) - '0', rem = L - i - 1;
+        for (int c = 0; c < d; c++) {
+            int need = S - pre - c;
+            if (need >= 0 && need <= MAXS) total += cnt[rem][need];
+        }
+        pre += d;
+    }
+    return total + (pre == S ? 1 : 0);
+}
+```
+
+</Tab>
+</Tabs>
+
+Check the counts against brute force on random inputs, and reproduce the table above:
+
+<CodeRunner language="python" code={`import random
+
+MAXS = 60
+cnt = [[0] * (MAXS + 1) for _ in range(10)]
+cnt[0][0] = 1
+for k in range(1, 10):
+    for s in range(MAXS + 1):
+        cnt[k][s] = sum(cnt[k - 1][s - d] for d in range(10) if s - d >= 0)
+
+def f(n, S):
+    if n < 0:
+        return 0
+    digs = [int(ch) for ch in str(n)]
+    pre = total = 0
+    for i, d in enumerate(digs):
+        rem = len(digs) - i - 1
+        for c in range(d):
+            need = S - pre - c
+            if 0 <= need <= MAXS:
+                total += cnt[rem][need]
+        pre += d
+    return total + (1 if pre == S else 0)
+
+def brute(n, S):
+    return sum(1 for x in range(n + 1) if sum(map(int, str(x))) == S)
+
+print("f(234, 5) =", f(234, 5), "(brute force:", brute(234, 5), ")")
+print("numbers in 1..100 with digit sum 10:", f(100, 10) - f(0, 10))
+
+random.seed(2)
+for _ in range(500):
+    n = random.randint(0, 20000)
+    S = random.randint(0, 40)
+    assert f(n, S) == brute(n, S)
+print("500 random (N, S) pairs agree with brute force")
+`} />
+
+## When the state needs more than a sum
+
+Replace "digit sum so far" by whatever the constraint needs, and keep the same skeleton:
+
+| question | state to remember | free-part table |
+| --- | --- | --- |
+| digit sum equals or is a multiple of `S` | sum (or sum mod `S`) | `cnt[k][s]` |
+| no two adjacent equal digits | last digit | `cnt[k][last]` |
+| count of a particular digit (say 7) | how many so far | `cnt[k][c]` |
+| number divisible by `m` | value mod `m` | `cnt[k][r]` |
+| numbers whose digits are all from a set | nothing | `|set|^k` |
+
+For constraints involving the **leading zeros** (for example "no repeated digit" must ignore padding), add a state bit "has the number started yet".
+
+When a table is awkward, write the recursion `go(pos, state, tight, started)` with memoisation only for `tight = false` states: the tight path is a single chain, so only the non-tight states repeat.
+
+## Pitfalls
+
+1. **Forgetting `L - 1`.** The prefix trick needs `f(R) - f(L-1)`. With `L = 1` that is `f(0)`, which must handle `N = 0` (one digit, the number zero).
+2. **Counting `N` itself.** The loop only counts numbers that are *strictly smaller* at some position; add 1 separately if `N` qualifies.
+3. **Leading zeros.** `cnt[k][s]` counts strings with leading zeros, which is right for digit sums (zeros add nothing) but wrong for "no repeated digit" or "number of digits".
+4. **Negative indexes.** `S - pre - c` can go below zero; guard it, or the table lookup wraps around in Python or reads garbage in C++.
+5. **Overflow and parsing.** Counts reach about `10^15` to `10^18`, so use 64-bit integers; in JavaScript use `BigInt` beyond `2^53`.
+6. **Table size.** `cnt` needs one more row than the number of digits of the biggest `N` you will see (for `10^18` that is 19 digits).
+
+## Practice
+
+<Problem id="m13-digit-hunt" />
+
+## Problem ladder
+
+- [Numbers At Most N Given Digit Set](https://leetcode.com/problems/numbers-at-most-n-given-digit-set/) (LeetCode 902, hard): the walk-the-prefix idea with a restricted alphabet.
+- [Numbers With Repeated Digits](https://leetcode.com/problems/numbers-with-repeated-digits/) (LeetCode 1012, hard): state is the set of used digits, plus the leading-zero care.
+- [Digit Queries](https://cses.fi/problemset/task/2431) (CSES): find the k-th digit of `123456789101112...`, a counting-by-length warm-up.
+- [Counting Numbers](https://cses.fi/problemset/task/2220) (CSES): count numbers in `[a, b]` with no two adjacent equal digits, exactly this pattern.
+- [Digit Sum](https://atcoder.jp/contests/dp/tasks/dp_s) (AtCoder DP Contest, Problem S): count numbers up to `K` whose digit sum is divisible by `D`.
+
+## Quiz
+
+<Quiz id="cp-m13-digit-dp" tags={["dp", "digit-dp"]} questions={[
+  { type: "mcq", q: "How do you count the numbers in [L, R] with some digit property?", options: ["Loop from L to R", "Compute f(R) - f(L - 1) where f(N) counts 0..N", "Sort the digits", "Use a segment tree"], answer: 1, explain: "Prefix counting turns a two-sided range into two calls of the same one-sided function." },
+  { type: "mcq", q: "What does the 'tight' flag mean in digit DP?", options: ["The number is small", "The digits chosen so far equal the prefix of N, so the next digit is bounded by N's digit", "The sum is exactly S", "Leading zeros are forbidden"], answer: 1, explain: "While tight, the next digit cannot exceed N's digit; once a smaller digit is placed, the rest is free." },
+  { type: "predict", q: "How many 2-digit strings (leading zeros allowed) have digit sum 1?", code: "print(len([s for s in ['01', '10']]))", options: ["1", "2", "9", "10"], answer: 1, explain: "Only 01 and 10: cnt[2][1] = 2." },
+  { type: "multi", q: "Which constraints fit digit DP naturally?", options: ["digit sum divisible by 7", "no two adjacent digits equal", "number divisible by 13", "number is a perfect square"], answer: [0, 1, 2], explain: "Sum mod, last digit and value mod are small states. 'Perfect square' needs the whole value, not a small summary." },
+  { type: "mcq", q: "Why add 1 at the end of f(N)?", options: ["To include N itself when it qualifies", "To count zero", "To avoid division by zero", "Because the table is off by one"], answer: 0, explain: "The loop counts numbers strictly below N at their first differing digit, so N must be tested separately." }
+]} />
