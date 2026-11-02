@@ -1,0 +1,266 @@
+---
+title: Knuth's Optimization
+track: cp
+module: dynamic-programming
+order: 11
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/dynamic-programming/interval-dp, cp/dynamic-programming/divide-and-conquer-dp]
+tags: [dp, interval-dp, knuth-optimization, optimal-bst, quadrangle-inequality]
+type: lesson
+problems: [m13-index-tree]
+furtherReading:
+  - title: cp-algorithms, Knuth's Optimization
+    url: https://cp-algorithms.com/dynamic_programming/knuth-optimization.html
+  - title: Wikipedia, Optimal binary search tree
+    url: https://en.wikipedia.org/wiki/Optimal_binary_search_tree
+---
+
+## Intuition
+
+In the [interval DP](/cp/dynamic-programming/interval-dp/) lesson you saw recurrences like
+
+```text
+dp[i][j] = min over k in [i, j) of ( dp[i][k] + dp[k+1][j] ) + cost(i, j)
+```
+
+There are `O(n²)` intervals and `O(n)` split points each: `O(n³)`. For `n = 1000` that is a billion steps.
+
+The [divide and conquer DP](/cp/dynamic-programming/divide-and-conquer-dp/) lesson exploited a *monotone best split*: as the right end moves right, the best split never moves left. Intervals have two ends, so there is an even stronger statement. The best split for `[i, j]` sits **between** the best splits of the two neighbouring intervals that are one element shorter:
+
+```text
+opt[i][j-1]  <=  opt[i][j]  <=  opt[i+1][j]
+```
+
+Shrinking the interval from the right (`[i, j-1]`) or from the left (`[i+1, j]`) can only pull the best split towards the smaller side. So when computing `dp[i][j]` you only need to try splits in that narrow window. Remarkably, the windows are so small on average that the **total work becomes `O(n²)`**. This is **Knuth's optimization**.
+
+## The classic example: optimal binary search tree
+
+Keys `1..n` are looked up with frequencies `f[i]`. Choose the tree shape minimising `Σ f[i] · depth(i)`. If key `r` is the root of the range `[i, j]`, the left subtree covers `i..r−1` and the right subtree `r+1..j`, and every key in the range sits one level deeper than inside its subtree:
+
+```text
+dp[i][j] = min over r in [i, j] of ( dp[i][r-1] + dp[r+1][j] ) + (f[i] + ... + f[j])
+```
+
+Naively `O(n³)`. With `opt[i][j]` the best root, Knuth's bounds let you loop `r` only from `opt[i][j-1]` to `opt[i+1][j]`.
+
+## When does it apply?
+
+Write the recurrence as `dp[i][j] = min_k ( dp[i][k] + dp[k+1][j] ) + w(i, j)` (the root version is the same with the split index shifted). Knuth's optimization is valid when the extra cost `w` satisfies two conditions for all `a ≤ b ≤ c ≤ d`:
+
+| condition | statement |
+| --- | --- |
+| **quadrangle inequality** | `w(a, c) + w(b, d) ≤ w(a, d) + w(b, c)` |
+| **monotone on inclusion** | `w(b, c) ≤ w(a, d)` (a sub-interval is never more expensive than an interval containing it) |
+
+A range-sum cost `w(i, j) = pre[j] − pre[i−1]` with non-negative entries satisfies both with equality in the first, which is why it works for optimal BSTs, for merging piles, and for cutting a stick (cost = length of the stick being cut). Intuitively: the cost of an interval grows smoothly and "nests", so nothing can pull the best split in the wrong direction.
+
+If you cannot prove the conditions, **test**: compare against the `O(n³)` DP on random small inputs, as in the demo below.
+
+## Why is the total O(n²)?
+
+Process intervals by increasing length `L = j − i + 1`. For a fixed `L`, the work for interval `[i, j]` is `opt[i+1][j] − opt[i][j−1] + 1`. Summing over `i` (with `j = i + L − 1`):
+
+```text
+Σ_i ( opt[i+1][i+L-1] - opt[i][i+L-2] + 1 )
+```
+
+Consecutive terms **telescope**: the upper bound of one interval cancels the lower bound of the next, leaving about `n + L`. Over all lengths the total is `O(n²)`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def optimal_bst(f):                              # f[0..n-1]; returns the minimum total cost
+    n = len(f)
+    pre = [0] * (n + 1)
+    for i in range(1, n + 1): pre[i] = pre[i - 1] + f[i - 1]
+    INF = 1 << 60
+    dp = [[0] * (n + 2) for _ in range(n + 2)]   # dp[i][j] on keys i..j (1-based); empty range = 0
+    opt = [[0] * (n + 2) for _ in range(n + 2)]
+    for i in range(1, n + 1):
+        dp[i][i] = f[i - 1]; opt[i][i] = i
+    for length in range(2, n + 1):
+        for i in range(1, n - length + 2):
+            j = i + length - 1
+            best, bk = INF, i
+            for r in range(opt[i][j - 1], opt[i + 1][j] + 1):     # Knuth's window
+                v = dp[i][r - 1] + dp[r + 1][j]
+                if v < best: best, bk = v, r
+            dp[i][j] = best + pre[j] - pre[i - 1]
+            opt[i][j] = bk
+    return dp[1][n]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+ll optimalBST(const vector<ll>& f) {             // f[1..n]
+    int n = f.size() - 1;
+    vector<ll> pre(n + 1, 0);
+    for (int i = 1; i <= n; i++) pre[i] = pre[i - 1] + f[i];
+    vector<vector<ll>> dp(n + 2, vector<ll>(n + 2, 0));
+    vector<vector<int>> opt(n + 2, vector<int>(n + 2, 0));
+    for (int i = 1; i <= n; i++) { dp[i][i] = f[i]; opt[i][i] = i; }
+    for (int len = 2; len <= n; len++)
+        for (int i = 1; i + len - 1 <= n; i++) {
+            int j = i + len - 1;
+            ll best = LLONG_MAX; int bk = i;
+            for (int r = opt[i][j - 1]; r <= opt[i + 1][j]; r++) {   // Knuth's window
+                ll v = dp[i][r - 1] + dp[r + 1][j];
+                if (v < best) { best = v; bk = r; }
+            }
+            dp[i][j] = best + pre[j] - pre[i - 1];
+            opt[i][j] = bk;
+        }
+    return dp[1][n];
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long optimalBST(long[] f) {               // f[1..n]
+    int n = f.length - 1;
+    long[] pre = new long[n + 1];
+    for (int i = 1; i <= n; i++) pre[i] = pre[i - 1] + f[i];
+    long[][] dp = new long[n + 2][n + 2];
+    int[][] opt = new int[n + 2][n + 2];
+    for (int i = 1; i <= n; i++) { dp[i][i] = f[i]; opt[i][i] = i; }
+    for (int len = 2; len <= n; len++)
+        for (int i = 1; i + len - 1 <= n; i++) {
+            int j = i + len - 1;
+            long best = Long.MAX_VALUE; int bk = i;
+            for (int r = opt[i][j - 1]; r <= opt[i + 1][j]; r++) {   // Knuth's window
+                long v = dp[i][r - 1] + dp[r + 1][j];
+                if (v < best) { best = v; bk = r; }
+            }
+            dp[i][j] = best + pre[j] - pre[i - 1];
+            opt[i][j] = bk;
+        }
+    return dp[1][n];
+}
+```
+
+</Tab>
+</Tabs>
+
+Check it against the plain `O(n³)` DP, and count how many split candidates each version examines. The demo also applies the same idea to the "merge the piles" recurrence from the previous lesson:
+
+<CodeRunner language="python" code={`import random
+
+def bst_cubic(f):
+    n = len(f); pre = [0]
+    for x in f: pre.append(pre[-1] + x)
+    dp = [[0] * (n + 2) for _ in range(n + 2)]
+    looked = 0
+    for L in range(1, n + 1):
+        for i in range(1, n - L + 2):
+            j = i + L - 1
+            best = 1 << 60
+            for r in range(i, j + 1):
+                looked += 1
+                best = min(best, dp[i][r - 1] + dp[r + 1][j])
+            dp[i][j] = best + pre[j] - pre[i - 1]
+    return dp[1][n], looked
+
+def bst_knuth(f):
+    n = len(f); pre = [0]
+    for x in f: pre.append(pre[-1] + x)
+    dp = [[0] * (n + 2) for _ in range(n + 2)]; opt = [[0] * (n + 2) for _ in range(n + 2)]
+    looked = 0
+    for i in range(1, n + 1): dp[i][i] = f[i - 1]; opt[i][i] = i
+    for L in range(2, n + 1):
+        for i in range(1, n - L + 2):
+            j = i + L - 1; best = 1 << 60; bk = i
+            for r in range(opt[i][j - 1], opt[i + 1][j] + 1):
+                looked += 1
+                v = dp[i][r - 1] + dp[r + 1][j]
+                if v < best: best = v; bk = r
+            dp[i][j] = best + pre[j] - pre[i - 1]; opt[i][j] = bk
+    return dp[1][n], looked
+
+def merge_cubic(w):
+    n = len(w); pre = [0]
+    for x in w: pre.append(pre[-1] + x)
+    dp = [[0] * n for _ in range(n)]
+    for L in range(2, n + 1):
+        for i in range(n - L + 1):
+            j = i + L - 1
+            dp[i][j] = min(dp[i][k] + dp[k + 1][j] for k in range(i, j)) + pre[j + 1] - pre[i]
+    return dp[0][n - 1]
+
+def merge_knuth(w):
+    n = len(w); pre = [0]
+    for x in w: pre.append(pre[-1] + x)
+    dp = [[0] * n for _ in range(n)]; opt = [[0] * n for _ in range(n)]
+    for i in range(n): opt[i][i] = i
+    for L in range(2, n + 1):
+        for i in range(n - L + 1):
+            j = i + L - 1; best = 1 << 60; bk = i
+            for k in range(opt[i][j - 1], min(opt[i + 1][j], j - 1) + 1):
+                v = dp[i][k] + dp[k + 1][j]
+                if v < best: best = v; bk = k
+            dp[i][j] = best + pre[j + 1] - pre[i]; opt[i][j] = bk
+    return dp[0][n - 1]
+
+print("keys with frequencies [34, 8, 50]:", bst_knuth([34, 8, 50])[0], "(cubic:", bst_cubic([34, 8, 50])[0], ")")
+
+random.seed(41)
+for _ in range(500):
+    f = [random.randint(1, 30) for _ in range(random.randint(1, 12))]
+    assert bst_knuth(f)[0] == bst_cubic(f)[0], f
+    w = [random.randint(1, 30) for _ in range(random.randint(1, 12))]
+    assert merge_knuth(w) == merge_cubic(w), w
+print("500 random cases: Knuth's version matches the cubic DP for both the search tree and merging piles")
+
+f = [random.randint(1, 1000) for _ in range(250)]
+(a, cubic_steps), (b, knuth_steps) = bst_cubic(f), bst_knuth(f)
+print("n = 250: same answer?", a == b, "| split candidates: cubic", cubic_steps, " Knuth", knuth_steps, " (about", round(cubic_steps / knuth_steps), "times fewer)")
+`} />
+
+## Knuth, divide and conquer, or convex hull?
+
+| technique | recurrence shape | requirement | total time |
+| --- | --- | --- | --- |
+| **Knuth** | interval: `dp[i][j]` from `dp[i][k]`, `dp[k+1][j]` | quadrangle inequality + monotone cost | `O(n²)` instead of `O(n³)` |
+| **Divide and conquer** | layered: `dp[g][i]` from `dp[g-1][j]` | monotone `opt` (e.g. quadrangle inequality) | `O(k n log n)` |
+| **Convex hull trick** | `dp[i] = min_j (m_j x_i + c_j)` | cost splits into a product of an `i`-part and a `j`-part | `O(n)` or `O(n log n)` |
+| **Aliens trick** | answer convex in the number of groups `k` | convexity | one cheaper DP per penalty guess |
+
+Knuth also has a layered form (`opt[g−1][i] ≤ opt[g][i] ≤ opt[g][i+1]`) that gives `O(n²)` for splitting into `k` groups, instead of `O(k n²)`.
+
+## Pitfalls
+
+1. **Applying it without the conditions.** If the cost does not satisfy the quadrangle inequality, the narrowed window can miss the true optimum and the DP is silently wrong. Always cross-check on small random inputs.
+2. **Window bounds.** Use `opt[i][j-1]` as the lower and `opt[i+1][j]` as the upper bound, and make sure both are already computed: process intervals by **increasing length**.
+3. **Mixing the two conventions.** The root form (`r` in `[i, j]`, empty ranges cost 0) and the split form (`k` in `[i, j-1]`, two non-empty parts) have different window clamps; for the split form clamp the upper end to `j − 1`.
+4. **Initialising `opt` for length 1.** Set `opt[i][i] = i`; otherwise the first lengths use garbage windows.
+5. **Ties.** Choose the smallest (or largest) best split consistently, using strict `<`, so the monotonicity argument holds.
+6. **Memory.** `dp` and `opt` are both `n²` tables; for `n = 5000` that is 25 million entries each, so use 32-bit `opt` and compact `dp` where possible.
+7. **Overflow.** Costs reach about `n² · max f`; use 64-bit integers.
+
+## Practice
+
+<Problem id="m13-index-tree" />
+
+## Problem ladder
+
+- *Optimal Binary Search Tree* (UVa 10304): the textbook case, this lesson exactly. Search for it by name on the UVa Online Judge or on vjudge.
+- *Cutting Sticks* (UVa 10003): cut cost equals the stick length; an interval DP that Knuth speeds up. Search by name as well.
+- [Minimum Cost to Merge Stones](https://leetcode.com/problems/minimum-cost-to-merge-stones/) (LeetCode, hard): merge exactly `k` at a time, a harder cousin; solve the plain `O(n³)` version first.
+- [Knuth's Optimization](https://cp-algorithms.com/dynamic_programming/knuth-optimization.html) (cp-algorithms): the reference article with a proof sketch.
+
+## Quiz
+
+<Quiz id="cp-m13-knuth-optimization" tags={["dp", "knuth-optimization"]} questions={[
+  { type: "mcq", q: "What bound does Knuth's optimization use for the best split opt[i][j]?", options: ["opt[i][j] = j", "opt[i][j-1] <= opt[i][j] <= opt[i+1][j]", "opt[i][j] <= i", "opt[i][j] = opt[i+1][j+1]"], answer: 1, explain: "The best split of an interval lies between the best splits of the two intervals one element shorter." },
+  { type: "mcq", q: "Why does the total work become O(n^2)?", options: ["There are only n intervals", "For a fixed length the window sizes telescope to about n + L, and summing over all lengths gives O(n^2)", "Each window has size 1", "The DP is memoised"], answer: 1, explain: "The upper bound of one interval cancels the lower bound of the next." },
+  { type: "predict", q: "A range-sum cost w(i, j) = pre[j] - pre[i - 1] with non-negative entries. Is w(1, 3) <= w(1, 5)?", code: "f = [4, 1, 2, 7, 3]\npre = [0]\nfor x in f: pre.append(pre[-1] + x)\nprint(pre[3] - pre[0] <= pre[5] - pre[0])", options: ["True", "False", "Only if sorted", "Undefined"], answer: 0, explain: "Extending a range can only add non-negative frequencies, so the cost is monotone on inclusion." },
+  { type: "multi", q: "Which are true about Knuth's optimization?", options: ["It needs the cost to satisfy the quadrangle inequality", "It is used for interval DPs", "It works for any cost function", "Intervals must be processed by increasing length"], answer: [0, 1, 3], explain: "Without the conditions the narrowed window can miss the optimum." }
+]} />
