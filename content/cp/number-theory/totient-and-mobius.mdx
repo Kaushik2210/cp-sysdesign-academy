@@ -1,0 +1,351 @@
+---
+title: Euler's Totient and the Moebius Function
+track: cp
+module: number-theory
+order: 2
+difficulty: hard
+estMinutes: 55
+prerequisites: [cp/math-basics/primes-and-sieve, cp/math-basics/gcd-and-lcm, cp/math-basics/fast-exponentiation]
+tags: [number-theory, totient, mobius, inclusion-exclusion, sieve, multiplicative-functions, gcd]
+type: lesson
+problems: [m17-coprime-pairs]
+furtherReading:
+  - title: cp-algorithms, Euler's totient function
+    url: https://cp-algorithms.com/algebra/phi-function.html
+  - title: CSES Problem Set, Counting Coprime Pairs
+    url: https://cses.fi/problemset/task/2417
+  - title: Project Euler, Problem 72 (Counting Fractions)
+    url: https://projecteuler.net/problem=72
+---
+
+## Intuition
+
+Many counting questions ask about numbers that **do not share a factor**: how many fractions are in lowest terms, how many pairs are coprime, how many numbers below `n` have a certain gcd with `n`. The same two tools answer them:
+
+- **Euler's totient** `phi(n)`: how many integers in `1..n` are coprime to `n`.
+- **The Moebius function** `mu(n)`: the signs that make inclusion and exclusion over prime factors work, in a form you can sum over all divisors at once.
+
+Both are **multiplicative** (they respect coprime factorisation), so one **sieve** computes them for every number up to `N` in `O(N)`.
+
+## Euler's totient
+
+`phi(n)` counts the integers `1 <= k <= n` with `gcd(k, n) = 1`. Examples: `phi(12) = 4` (1, 5, 7, 11), `phi(13) = 12`, `phi(1) = 1`.
+
+- For a prime `p`: `phi(p) = p - 1`. For a prime power: `phi(p^k) = p^k - p^(k-1) = p^(k-1) (p - 1)` (remove the multiples of `p`).
+- **Multiplicative:** if `gcd(a, b) = 1`, then `phi(a b) = phi(a) phi(b)`.
+- Hence, from the factorisation `n = p1^e1 ... pk^ek`:
+
+```text
+phi(n) = n * (1 - 1/p1) * (1 - 1/p2) * ... * (1 - 1/pk)
+```
+
+Compute it as `result = n; for each prime p | n: result -= result / p` (do the division before the multiplication to avoid fractions).
+
+**Euler's theorem.** If `gcd(a, n) = 1`, then `a^phi(n) = 1 (mod n)`. Fermat's little theorem is the case `n = p`. Consequences:
+
+- The inverse of `a` modulo `n` is `a^(phi(n) - 1)`, an alternative to extended Euclid.
+- Huge exponents shrink: for `gcd(a, n) = 1`, `a^b = a^(b mod phi(n)) (mod n)`.
+- Without coprimality, for `b >= log2(n)`: `a^b = a^(b mod phi(n) + phi(n)) (mod n)` (the generalised Euler theorem).
+
+**Gauss's identity.** `sum of phi(d) over all divisors d of n = n`. (Each of the fractions `k/n` reduces to a unique `a/d` with `d | n` and `gcd(a, d) = 1`.)
+
+**Where it appears.**
+
+- Reduced proper fractions with denominator up to `n`: `phi(2) + ... + phi(n)` (Farey sequence length minus a constant).
+- Coprime ordered pairs in `[1, n]^2`: `2 (phi(1) + ... + phi(n)) - 1`.
+- `sum over i of gcd(i, n) = sum over d | n of d * phi(n / d)`.
+
+## The Moebius function
+
+```text
+mu(1) = 1
+mu(n) = (-1)^k   if n is a product of k distinct primes
+mu(n) = 0        if some prime square divides n
+```
+
+Its defining property: `sum of mu(d) over d | n` equals `1` when `n = 1` and `0` otherwise. This is inclusion-exclusion in disguise: to test "no common prime factor", add the subsets of primes with alternating signs; squares never appear in the subsets, so they get `0`.
+
+**Moebius inversion.** If `F(n) = sum of f(d) over d | n` for all `n`, then
+
+```text
+f(n) = sum over d | n of mu(n / d) * F(d)
+```
+
+For gcd counting: let `F(k)` be the number of pairs where `k` divides both numbers (easy: `floor(n/k) * floor(m/k)`), and `f(k)` the number with gcd exactly `k`. Then `F(k) = sum of f(j k)` over multiples, and inversion gives
+
+```text
+f(1) = number of coprime pairs (a <= n, b <= m) = sum over d >= 1 of mu(d) * floor(n/d) * floor(m/d)
+```
+
+## Floor-division blocks
+
+The sum has `min(n, m)` terms, but `floor(n/d)` takes only about `2 sqrt(n)` distinct values. For fixed `l`, the values `floor(n/d)` and `floor(m/d)` are both constant until `r = min(n / floor(n/l), m / floor(m/l))`. With prefix sums `M(x) = mu(1) + ... + mu(x)`:
+
+```text
+l = 1
+while l <= min(n, m):
+    a = n / l;  b = m / l
+    r = min(n / a, m / b)
+    total += (M(r) - M(l - 1)) * a * b
+    l = r + 1
+```
+
+That answers one query in `O(sqrt n)` after an `O(N)` sieve, so thousands of queries are fine.
+
+## Example, step by step
+
+Count coprime pairs with `n = m = 4`.
+
+- `mu(1) = 1`, `mu(2) = -1`, `mu(3) = -1`, `mu(4) = 0`.
+- `d = 1`: `+ 4 * 4 = 16`. `d = 2`: `- 2 * 2 = -4`. `d = 3`: `- 1 * 1 = -1`. `d = 4`: `0`.
+- Total `16 - 4 - 1 = 11`. By the totient formula: `2 (phi(1) + phi(2) + phi(3) + phi(4)) - 1 = 2 (1 + 1 + 2 + 2) - 1 = 11`.
+
+## The linear sieve
+
+One pass computes the smallest prime factors and, with them, `phi` and `mu` for everything up to `N`. Each composite `i * p` is generated exactly once, by its smallest prime `p`:
+
+- If `p` does **not** divide `i`: `phi(i p) = phi(i) (p - 1)`, `mu(i p) = -mu(i)`.
+- If `p` **divides** `i`: `phi(i p) = phi(i) p`, `mu(i p) = 0`, and the inner loop stops.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+phi = [0] * (N + 1)
+mu = [0] * (N + 1)
+phi[1] = mu[1] = 1
+comp = [False] * (N + 1)
+primes = []
+for i in range(2, N + 1):
+    if not comp[i]:
+        primes.append(i)
+        phi[i], mu[i] = i - 1, -1
+    for p in primes:
+        if i * p > N:
+            break
+        comp[i * p] = True
+        if i % p == 0:
+            phi[i * p] = phi[i] * p
+            mu[i * p] = 0
+            break
+        phi[i * p] = phi[i] * (p - 1)
+        mu[i * p] = -mu[i]
+
+def phi_single(n):                       # one number, by trial division
+    result, x, p = n, n, 2
+    while p * p <= x:
+        if x % p == 0:
+            while x % p == 0:
+                x //= p
+            result -= result // p
+        p += 1
+    if x > 1:
+        result -= result // x
+    return result
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<int> phi(N + 1), mu(N + 1), primes;
+vector<bool> comp(N + 1, false);
+phi[1] = mu[1] = 1;
+for (int i = 2; i <= N; i++) {
+    if (!comp[i]) { primes.push_back(i); phi[i] = i - 1; mu[i] = -1; }
+    for (int p : primes) {
+        if ((long long)i * p > N) break;
+        comp[i * p] = true;
+        if (i % p == 0) { phi[i * p] = phi[i] * p; mu[i * p] = 0; break; }
+        phi[i * p] = phi[i] * (p - 1);
+        mu[i * p] = -mu[i];
+    }
+}
+
+long long phi_single(long long n) {         // one number, by trial division
+    long long result = n;
+    for (long long p = 2; p * p <= n; p++) {
+        if (n % p == 0) {
+            while (n % p == 0) n /= p;
+            result -= result / p;
+        }
+    }
+    if (n > 1) result -= result / n;
+    return result;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] phi = new int[N + 1], mu = new int[N + 1], primes = new int[N + 1];
+boolean[] comp = new boolean[N + 1];
+int cnt = 0;
+phi[1] = mu[1] = 1;
+for (int i = 2; i <= N; i++) {
+    if (!comp[i]) { primes[cnt++] = i; phi[i] = i - 1; mu[i] = -1; }
+    for (int j = 0; j < cnt; j++) {
+        int p = primes[j];
+        if ((long) i * p > N) break;
+        comp[i * p] = true;
+        if (i % p == 0) { phi[i * p] = phi[i] * p; mu[i * p] = 0; break; }
+        phi[i * p] = phi[i] * (p - 1);
+        mu[i * p] = -mu[i];
+    }
+}
+
+static long phiSingle(long n) {              // one number, by trial division
+    long result = n;
+    for (long p = 2; p * p <= n; p++) {
+        if (n % p == 0) {
+            while (n % p == 0) n /= p;
+            result -= result / p;
+        }
+    }
+    if (n > 1) result -= result / n;
+    return result;
+}
+```
+
+</Tab>
+</Tabs>
+
+The demo verifies the sieve against definitions, Gauss's identity, Euler's theorem, the three ways to count coprime pairs, the number of distinct block values, reduced fractions and a gcd sum:
+
+<CodeRunner language="python" code={`import math, random
+
+def sieve(N):
+    """Linear sieve: smallest prime factor, Euler's phi and the Moebius mu for 1..N in O(N)."""
+    phi = [0] * (N + 1)
+    mu = [0] * (N + 1)
+    phi[1] = mu[1] = 1
+    comp = [False] * (N + 1)
+    primes = []
+    for i in range(2, N + 1):
+        if not comp[i]:
+            primes.append(i)
+            phi[i], mu[i] = i - 1, -1
+        for p in primes:
+            if i * p > N:
+                break
+            comp[i * p] = True
+            if i % p == 0:
+                phi[i * p] = phi[i] * p          # p already divides i: multiply by p only
+                mu[i * p] = 0                    # p^2 divides i*p
+                break
+            phi[i * p] = phi[i] * (p - 1)        # p is new: multiply by p - 1
+            mu[i * p] = -mu[i]
+    return phi, mu
+
+N = 2000
+phi, mu = sieve(N)
+assert all(phi[n] == sum(1 for k in range(1, n + 1) if math.gcd(k, n) == 1) for n in range(1, 300))
+print("phi(12) =", phi[12], "| phi(13) =", phi[13], "| phi(36) =", phi[36])
+
+# Gauss: the divisors d of n satisfy  sum of phi(d) = n
+for n in range(1, 400):
+    assert sum(phi[d] for d in range(1, n + 1) if n % d == 0) == n
+print("sum of phi(d) over d | n equals n, for every n up to 400")
+
+# Moebius: the sum of mu(d) over d | n is 1 for n = 1 and 0 otherwise
+for n in range(1, 400):
+    assert sum(mu[d] for d in range(1, n + 1) if n % d == 0) == (1 if n == 1 else 0)
+print("sum of mu(d) over d | n is [n == 1] for every n up to 400")
+
+# Euler's theorem: a^phi(n) = 1 (mod n) when gcd(a, n) = 1
+for n in range(2, 300):
+    for a in range(1, n):
+        if math.gcd(a, n) == 1:
+            assert pow(a, phi[n], n) == 1
+print("Euler's theorem a^phi(n) = 1 (mod n) holds for all coprime pairs below 300")
+
+# Counting coprime pairs two ways
+def coprime_pairs_mobius(n, m):
+    return sum(mu[d] * (n // d) * (m // d) for d in range(1, min(n, m) + 1))
+def coprime_pairs_phi(n):                        # for n = m: 2 * (phi(1) + ... + phi(n)) - 1
+    return 2 * sum(phi[1:n + 1]) - 1
+def coprime_pairs_brute(n, m):
+    return sum(1 for a in range(1, n + 1) for b in range(1, m + 1) if math.gcd(a, b) == 1)
+assert coprime_pairs_mobius(10, 10) == coprime_pairs_phi(10) == coprime_pairs_brute(10, 10) == 63
+for _ in range(100):
+    n, m = random.randint(1, 60), random.randint(1, 60)
+    assert coprime_pairs_mobius(n, m) == coprime_pairs_brute(n, m)
+print("coprime pairs up to 10 x 10:", coprime_pairs_mobius(10, 10), "| for 100 x 100 via phi:", coprime_pairs_phi(100))
+
+# The same sum with floor-division blocks: only about 2*sqrt(n) distinct values of n // d
+prefix = [0] * (N + 1)
+for i in range(1, N + 1):
+    prefix[i] = prefix[i - 1] + mu[i]
+def coprime_pairs_blocks(n, m):
+    total, l = 0, 1
+    while l <= min(n, m):
+        a, b = n // l, m // l
+        r = min(n // a, m // b)
+        total += (prefix[r] - prefix[l - 1]) * a * b
+        l = r + 1
+    return total
+for _ in range(300):
+    n, m = random.randint(1, N), random.randint(1, N)
+    assert coprime_pairs_blocks(n, m) == coprime_pairs_mobius(n, m)
+distinct = len({1000000 // d for d in range(1, 1000001)})
+print("distinct values of 1000000 // d:", distinct, "(about 2*sqrt(n) =", 2 * 1000, ")")
+
+# Other classic uses of phi
+def reduced_fractions(n):                        # fractions a/b in (0, 1] with b <= n, in lowest terms
+    return sum(phi[1:n + 1])
+brute = len({(a // math.gcd(a, b), b // math.gcd(a, b)) for b in range(1, 31) for a in range(1, b + 1)})
+print("reduced fractions in (0, 1] with denominator <= 30:", reduced_fractions(30), "(brute:", brute, ")")
+def gcd_sum(n):                                  # sum of gcd(i, n) for i = 1..n, using sum over d | n of d * phi(n / d)
+    return sum(d * phi[n // d] for d in range(1, n + 1) if n % d == 0)
+assert all(gcd_sum(n) == sum(math.gcd(i, n) for i in range(1, n + 1)) for n in range(1, 300))
+print("sum of gcd(i, 12) for i = 1..12:", gcd_sum(12))
+`} />
+
+## Which tool
+
+| question | formula |
+| --- | --- |
+| numbers up to `n` coprime to `n` | `phi(n)` |
+| inverse of `a` modulo `n`, coprime | `a^(phi(n) - 1) mod n` (or extended Euclid) |
+| `a^b mod n` with a huge `b` | reduce `b` modulo `phi(n)` (add `phi(n)` back if not coprime and `b` is large) |
+| reduced fractions with denominator `<= n` | `phi(2) + ... + phi(n)` |
+| coprime pairs in `[1,n] x [1,m]` | `sum of mu(d) floor(n/d) floor(m/d)` |
+| pairs with gcd exactly `k` | coprime pairs in `[1, n/k] x [1, m/k]` |
+| `sum of gcd(i, n)` | `sum over the divisors d of n of d * phi(n/d)` |
+| triples or tuples with gcd 1 | `sum of mu(d) floor(n/d)^t` |
+| recover `f` from divisor sums `F` | Moebius inversion |
+
+## Pitfalls
+
+1. **Computing `phi` with floating point** (`n * (1 - 1/p)`). Use integer `result -= result / p`.
+2. **Not removing repeated primes.** In trial division, divide `x` by `p` until it no longer divides, then apply the factor once.
+3. **The leftover factor.** After the loop, if `x > 1` it is a prime above `sqrt(n)`; apply it.
+4. **Using Euler's reduction when `gcd(a, n) > 1`** without the correction term `+ phi(n)`.
+5. **Block boundaries.** `r = min(n / (n / l), m / (m / l))`; dividing by zero when `l > n` happens if you forget the `l <= min(n, m)` condition.
+6. **Overflow.** `floor(n/d) * floor(m/d)` is up to `10^14` for `n = m = 10^7`, and the sum is bigger: use 64-bit integers.
+7. **Sieve bounds.** The sieve must reach `max(n, m)` over all queries, not just the first.
+8. **Off-by-one in the sum** for pairs: `d` goes up to `min(n, m)`, not `n`.
+
+## Practice
+
+<Problem id="m17-coprime-pairs" />
+
+## Problem ladder
+
+- [Counting Coprime Pairs](https://cses.fi/problemset/task/2417) (CSES): count coprime pairs in an array with Moebius.
+- [Sum of gcd of Tuples (Hard)](https://atcoder.jp/contests/abc162/tasks/abc162_e) (AtCoder ABC 162 E): count tuples by exact gcd, a direct use of inversion.
+- [Counting Fractions](https://projecteuler.net/problem=72) (Project Euler 72): the sum of `phi` up to `10^6`.
+- [Exponentiation II](https://cses.fi/problemset/task/1712) (CSES): exponent reduction modulo `p - 1` for `a^(b^c)`.
+
+## Quiz
+
+<Quiz id="cp-m17-totient-mobius" tags={["number-theory", "totient", "mobius"]} questions={[
+  { type: "mcq", q: "What is phi(12)?", options: ["3", "4", "6", "12"], answer: 1, explain: "The numbers coprime to 12 in 1..12 are 1, 5, 7 and 11." },
+  { type: "mcq", q: "Which statement defines the Moebius function mu(n) correctly for n = 30 = 2*3*5?", options: ["1", "-1", "0", "3"], answer: 1, explain: "30 is a product of three distinct primes, so mu(30) = (-1)^3 = -1." },
+  { type: "predict", q: "Using mu(1) = 1, mu(2) = -1, mu(3) = -1, mu(4) = 0, how many ordered coprime pairs (a, b) are there with 1 <= a, b <= 4?", code: "total = 1*4*4 + (-1)*2*2 + (-1)*1*1 + 0", options: ["9", "11", "12", "16"], answer: 1, explain: "16 - 4 - 1 + 0 = 11." },
+  { type: "mcq", q: "Why can the sum over d of mu(d) floor(n/d) floor(m/d) be evaluated in O(sqrt n) per query?", options: ["mu is zero for most d", "floor(n/d) takes only about 2 sqrt(n) distinct values, so d can be processed in blocks using prefix sums of mu", "The sum telescopes", "Because n and m are small"], answer: 1, explain: "Within a block both floors are constant, so only the prefix sum of mu over the block is needed." },
+  { type: "multi", q: "Which are true?", options: ["phi is multiplicative on coprime arguments", "The sum of phi(d) over divisors d of n equals n", "a^phi(n) = 1 (mod n) whenever gcd(a, n) = 1", "phi(p^k) = p^k - 1 for a prime p"], answer: [0, 1, 2], explain: "phi(p^k) = p^k - p^(k-1), since only multiples of p are removed." }
+]} />
