@@ -1,0 +1,371 @@
+---
+title: Convex Hull Trick and Li Chao Trees
+track: cp
+module: dynamic-programming
+order: 10
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/dynamic-programming/divide-and-conquer-dp, cp/range-queries/segment-trees]
+tags: [dp, convex-hull-trick, li-chao-tree, optimization, lines]
+type: lesson
+problems: [m13-tower-climb]
+furtherReading:
+  - title: cp-algorithms, Convex Hull Trick and Li Chao Tree
+    url: https://cp-algorithms.com/geometry/convex_hull_trick.html
+  - title: cp-algorithms, Li Chao Tree
+    url: https://cp-algorithms.com/geometry/li_chao_tree.html
+  - title: CSES Problem Set, Monster Game I
+    url: https://cses.fi/problemset/task/2084
+---
+
+## Intuition
+
+Some DP transitions look like
+
+```text
+dp[i] = min over j < i of  ( dp[j] + b[j] * a[i] )
+```
+
+Notice that for a fixed `j`, the term `b[j] * a[i] + dp[j]` is a **straight line** in the variable `a[i]`: slope `b[j]`, intercept `dp[j]`. Each earlier index `j` contributes one line, and `dp[i]` is the **lowest of all those lines at the point `x = a[i]`**.
+
+So the DP turns into a geometry question: maintain a set of lines, support "add a line" and "what is the minimum value at `x`?". Trying every line costs `O(n)` per query, `O(n²)` overall. But most lines are never the lowest anywhere. Only the **lower envelope** matters, and a few clever structures keep just that.
+
+## Lines and the lower envelope
+
+Plot all lines `y = m·x + c`. The pointwise **minimum** of all of them is a piecewise-linear *concave* curve: the lower envelope. Each line that appears on it is minimal on one contiguous interval of `x`, and as `x` moves right, the minimal line has smaller and smaller slopes.
+
+```text
+y
+|         ________          the lower envelope: an arch, steep lines on the left,
+|       /          \         flatter ones in the middle, falling lines on the right
+|     /              \
+|   /                  \
++------------------------- x
+```
+
+If you keep only the lines on the envelope in order of slope, then:
+
+- a **query** at `x` is the line that is minimal at `x`: found by binary search over the envelope, or by a moving pointer when queries come in sorted order;
+- an **insertion** of a new line may make some envelope lines useless and removes them.
+
+## Monotone version: a deque in O(n)
+
+When **slopes arrive sorted** (say strictly decreasing, for a minimum) **and queries are sorted** (increasing `x`), you need no search at all:
+
+```text
+add(line l3):
+    while the deque has two lines l1, l2 at its back and l2 is useless given l3:   pop l2
+    push l3 to the back
+
+query(x):
+    while the front line is not better than the next one at x:   advance the front
+    return value of the front line at x
+```
+
+A line `l2` between `l1` and `l3` (slopes `m1 > m2 > m3`) is **useless** when the intersection of `l1` and `l3` is to the left of the intersection of `l1` and `l2`:
+
+```text
+(c3 - c1) * (m1 - m2)  <=  (c2 - c1) * (m1 - m3)
+```
+
+Each line is pushed once and popped once, so the total is amortised `O(n)`. **Caution: overflow.** That cross-multiplication can be about `(value) × (value)`; with `10^5`-sized slopes and `10^13`-sized intercepts it exceeds 64 bits. Use 128-bit integers (`__int128` in C++), Python's big integers, or avoid the comparison altogether with a Li Chao tree.
+
+## Li Chao tree: any order, O(log n)
+
+A **Li Chao tree** stores one line per node over a range of `x` values and needs no monotonicity at all.
+
+- **Insert** a line `L` at a node covering `[lo, hi]`: compare `L` with the node's line at the midpoint; keep the better one in the node. The *loser* can only be better on one side (two lines cross at most once), so push it down to **that one** child, or drop it if it wins nowhere.
+- **Query** at `x`: walk from the root to the leaf for `x`, evaluating the line at each node, and take the minimum.
+
+Both walk one root-to-leaf path: `O(log n)`. Build the tree over the **sorted distinct query points** (coordinate compression) so the range is small; if queries are online with huge `x`, use a dynamic tree over the full range. Only line *evaluations* are needed, so there is no cross-multiplication and values stay within `k·x + c`.
+
+```text
+insert(line):
+    at the node for [lo, hi]: keep whichever line is lower at mid
+    the other line is lower, if anywhere, only left of mid or only right of mid
+    go to that child and continue
+```
+
+## Code (Li Chao tree)
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import bisect
+
+class LiChao:                                  # minimum of lines at the points xs (sorted, distinct)
+    def __init__(self, xs):
+        self.xs = xs
+        self.m = len(xs)
+        self.K = [0] * (4 * self.m)
+        self.C = [None] * (4 * self.m)
+
+    def add(self, k, c):
+        xs, K, C = self.xs, self.K, self.C
+        node, lo, hi = 1, 0, self.m - 1
+        while True:
+            if C[node] is None:
+                K[node], C[node] = k, c
+                return
+            mid = (lo + hi) // 2
+            if k * xs[mid] + c < K[node] * xs[mid] + C[node]:     # keep the better line at mid
+                K[node], k = k, K[node]
+                C[node], c = c, C[node]
+            if lo == hi:
+                return
+            if k * xs[lo] + c < K[node] * xs[lo] + C[node]:        # the loser may win on the left only...
+                node, hi = 2 * node, mid
+            elif k * xs[hi] + c < K[node] * xs[hi] + C[node]:      # ...or on the right only
+                node, lo = 2 * node + 1, mid + 1
+            else:
+                return
+
+    def query(self, x):
+        i = bisect.bisect_left(self.xs, x)
+        node, lo, hi = 1, 0, self.m - 1
+        best = None
+        while True:
+            if self.C[node] is not None:
+                v = self.K[node] * x + self.C[node]
+                if best is None or v < best:
+                    best = v
+            if lo == hi:
+                return best
+            mid = (lo + hi) // 2
+            if i <= mid:
+                node, hi = 2 * node, mid
+            else:
+                node, lo = 2 * node + 1, mid + 1
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+struct LiChao {                                // minimum of lines at the points xs (sorted, distinct)
+    vector<ll> xs, K, C;
+    vector<bool> has;
+    int m;
+    LiChao(vector<ll> pts) : xs(move(pts)), m(xs.size()), K(4 * xs.size(), 0), C(4 * xs.size(), 0), has(4 * xs.size(), false) {}
+    void add(ll k, ll c) {
+        int node = 1, lo = 0, hi = m - 1;
+        while (true) {
+            if (!has[node]) { has[node] = true; K[node] = k; C[node] = c; return; }
+            int mid = (lo + hi) / 2;
+            if (k * xs[mid] + c < K[node] * xs[mid] + C[node]) { swap(K[node], k); swap(C[node], c); }
+            if (lo == hi) return;
+            if (k * xs[lo] + c < K[node] * xs[lo] + C[node]) { node = 2 * node; hi = mid; }
+            else if (k * xs[hi] + c < K[node] * xs[hi] + C[node]) { node = 2 * node + 1; lo = mid + 1; }
+            else return;
+        }
+    }
+    ll query(ll x) {
+        int i = lower_bound(xs.begin(), xs.end(), x) - xs.begin();
+        ll best = LLONG_MAX;
+        int node = 1, lo = 0, hi = m - 1;
+        while (true) {
+            if (has[node]) best = min(best, K[node] * x + C[node]);
+            if (lo == hi) return best;
+            int mid = (lo + hi) / 2;
+            if (i <= mid) { node = 2 * node; hi = mid; } else { node = 2 * node + 1; lo = mid + 1; }
+        }
+    }
+};
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long[] xs, K;
+static Long[] C;
+static int m;
+
+static void add(long k, long c) {
+    int node = 1, lo = 0, hi = m - 1;
+    while (true) {
+        if (C[node] == null) { K[node] = k; C[node] = c; return; }
+        int mid = (lo + hi) / 2;
+        if (k * xs[mid] + c < K[node] * xs[mid] + C[node]) {
+            long t = K[node]; K[node] = k; k = t;
+            t = C[node]; C[node] = c; c = t;
+        }
+        if (lo == hi) return;
+        if (k * xs[lo] + c < K[node] * xs[lo] + C[node]) { node = 2 * node; hi = mid; }
+        else if (k * xs[hi] + c < K[node] * xs[hi] + C[node]) { node = 2 * node + 1; lo = mid + 1; }
+        else return;
+    }
+}
+static long query(long x) {
+    int i = Arrays.binarySearch(xs, x);            // x must be one of the points
+    long best = Long.MAX_VALUE;
+    int node = 1, lo = 0, hi = m - 1;
+    while (true) {
+        if (C[node] != null) best = Math.min(best, K[node] * x + C[node]);
+        if (lo == hi) return best;
+        int mid = (lo + hi) / 2;
+        if (i <= mid) { node = 2 * node; hi = mid; } else { node = 2 * node + 1; lo = mid + 1; }
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+Run both structures against a brute force on the tower DP, and on arbitrary lines queried in random order:
+
+<CodeRunner language="python" code={`import bisect, random
+
+class LiChao:
+    def __init__(self, xs):
+        self.xs = xs; self.m = len(xs)
+        self.K = [0] * (4 * self.m); self.C = [None] * (4 * self.m)
+    def add(self, k, c):
+        xs, K, C = self.xs, self.K, self.C
+        node, lo, hi = 1, 0, self.m - 1
+        while True:
+            if C[node] is None:
+                K[node], C[node] = k, c
+                return
+            mid = (lo + hi) // 2
+            if k * xs[mid] + c < K[node] * xs[mid] + C[node]:
+                K[node], k = k, K[node]
+                C[node], c = c, C[node]
+            if lo == hi:
+                return
+            if k * xs[lo] + c < K[node] * xs[lo] + C[node]:
+                node, hi = 2 * node, mid
+            elif k * xs[hi] + c < K[node] * xs[hi] + C[node]:
+                node, lo = 2 * node + 1, mid + 1
+            else:
+                return
+    def query(self, x):
+        i = bisect.bisect_left(self.xs, x)
+        node, lo, hi = 1, 0, self.m - 1
+        best = None
+        while True:
+            if self.C[node] is not None:
+                v = self.K[node] * x + self.C[node]
+                if best is None or v < best:
+                    best = v
+            if lo == hi:
+                return best
+            mid = (lo + hi) // 2
+            if i <= mid:
+                node, hi = 2 * node, mid
+            else:
+                node, lo = 2 * node + 1, mid + 1
+
+class MonotoneHull:
+    # slopes added in strictly decreasing order, queries asked at increasing x, minimum wanted
+    def __init__(self):
+        self.lines = []; self.ptr = 0
+    def add(self, m, c):
+        L = self.lines
+        while len(L) >= 2:
+            (m1, c1), (m2, c2) = L[-2], L[-1]
+            if (c - c1) * (m1 - m2) <= (c2 - c1) * (m1 - m):   # the middle line is never the lowest
+                L.pop()
+            else:
+                break
+        L.append((m, c))
+        self.ptr = min(self.ptr, len(L) - 1)
+    def query(self, x):
+        L = self.lines
+        while self.ptr + 1 < len(L) and L[self.ptr + 1][0] * x + L[self.ptr + 1][1] <= L[self.ptr][0] * x + L[self.ptr][1]:
+            self.ptr += 1
+        return L[self.ptr][0] * x + L[self.ptr][1]
+
+def tower_brute(a, b):
+    n = len(a); dp = [0] * n
+    for i in range(1, n):
+        dp[i] = min(dp[j] + b[j] * a[i] for j in range(i))
+    return dp[-1]
+
+def tower_hull(a, b):
+    h = MonotoneHull(); h.add(b[0], 0); dp = 0
+    for i in range(1, len(a)):
+        dp = h.query(a[i]); h.add(b[i], dp)
+    return dp
+
+def tower_lichao(a, b):
+    t = LiChao(sorted(set(a))); t.add(b[0], 0); dp = 0
+    for i in range(1, len(a)):
+        dp = t.query(a[i]); t.add(b[i], dp)
+    return dp
+
+print("towers 1..5, rates 5..1:", tower_brute([1, 2, 3, 4, 5], [5, 4, 3, 2, 1]), tower_hull([1, 2, 3, 4, 5], [5, 4, 3, 2, 1]), tower_lichao([1, 2, 3, 4, 5], [5, 4, 3, 2, 1]))
+
+random.seed(17)
+for _ in range(400):
+    n = random.randint(1, 14)
+    a = sorted(random.sample(range(1, 80), n)); b = sorted(random.sample(range(1, 80), n), reverse=True)
+    r = tower_brute(a, b)
+    assert r == tower_hull(a, b) == tower_lichao(a, b), (a, b)
+print("400 random cases: brute force, monotone hull and Li Chao tree all agree")
+
+# Li Chao needs no ordering: arbitrary slopes and arbitrary query order
+for _ in range(300):
+    pts = sorted(random.sample(range(-30, 30), random.randint(1, 12)))
+    lines = [(random.randint(-9, 9), random.randint(-50, 50)) for _ in range(random.randint(1, 10))]
+    t = LiChao(pts)
+    for k, c in lines: t.add(k, c)
+    for x in random.sample(pts, len(pts)):
+        assert t.query(x) == min(k * x + c for k, c in lines)
+print("300 random line sets: the Li Chao tree answers every query correctly in any order")
+`} />
+
+## Turning a recurrence into lines
+
+The art is rewriting `dp[i] = min_j ( ... )` so that the part depending on `j` and the part depending on `i` multiply:
+
+| recurrence | rewrite | lines |
+| --- | --- | --- |
+| `dp[j] + b[j] · a[i]` | already a line | slope `b[j]`, intercept `dp[j]`, query `x = a[i]` |
+| `dp[j] + (S[i] − S[j])² + C` | expand: `S[i]² − 2 S[i] S[j] + S[j]² + dp[j] + C` | slope `−2 S[j]`, intercept `dp[j] + S[j]²`; add `S[i]² + C` after the query |
+| `dp[j] + (i − j) · h[j]` | `i · h[j] + (dp[j] − j · h[j])` | slope `h[j]`, intercept `dp[j] − j h[j]` |
+| maximisation | negate everything, or flip the comparisons | upper envelope |
+
+The second row is the same "split into batches" cost as the [divide and conquer DP](/cp/dynamic-programming/divide-and-conquer-dp/) lesson, now with an extra fixed fee per batch. When both techniques apply, the hull is `O(n)`, divide and conquer is `O(n log n)` but simpler to code.
+
+## Choosing a structure
+
+| situation | use |
+| --- | --- |
+| slopes sorted **and** queries sorted | deque with a pointer, `O(n)` |
+| slopes sorted, queries arbitrary | deque with **binary search** on the hull, `O(log n)` per query |
+| anything else, or you fear overflow | **Li Chao tree**, `O(log n)` |
+| cost is not a product of an `i` part and a `j` part | divide and conquer DP or Knuth, if monotone |
+| the answer is convex in the number of groups | the "Aliens trick" (a binary search on a penalty) |
+
+## Pitfalls
+
+1. **Overflow in the intersection test.** The cross-multiplication can exceed 64 bits. Use `__int128`, big integers, or a Li Chao tree that only evaluates lines.
+2. **Wrong direction for maximum.** For a maximum the upper envelope has *increasing* slopes as `x` grows; the useless-line test flips its inequality.
+3. **Equal slopes.** Two lines with the same slope: keep only the one with the better intercept, or the division-free test can misbehave.
+4. **Pointer past the end.** After popping lines from the back, make sure the query pointer is not beyond the last line.
+5. **Querying outside the compressed points.** A Li Chao tree built on a point set can only answer at those points; compress *all* query coordinates first.
+6. **Adding a line before its `dp` is known.** Compute `dp[i]` with a query first, then insert the line for `i`.
+7. **Assuming monotonicity that is not there.** If slopes or queries are not sorted, the simple deque gives wrong answers silently; check, or use the Li Chao tree.
+
+## Practice
+
+<Problem id="m13-tower-climb" />
+
+## Problem ladder
+
+- [Monster Game I](https://cses.fi/problemset/task/2084) (CSES): a hull-friendly DP with sorted input, the standard first CHT exercise.
+- [Monster Game II](https://cses.fi/problemset/task/2085) (CSES): the same idea where the sorted order is not given.
+- [Kalila and Dimna in the Logging Industry](https://codeforces.com/problemset/problem/319/C) (Codeforces 319C, rating about 2100): exactly the recurrence of this lesson's problem.
+- [Line Add Get Min](https://judge.yosupo.jp/problem/line_add_get_min) (Library Checker): the raw data-structure problem, to test your Li Chao tree.
+
+## Quiz
+
+<Quiz id="cp-m13-convex-hull-trick" tags={["dp", "convex-hull-trick"]} questions={[
+  { type: "mcq", q: "How does dp[i] = min over j of (dp[j] + b[j] * a[i]) become a geometry problem?", options: ["Each j is a point to sort", "Each j is a line y = b[j]*x + dp[j], and dp[i] is the lowest line at x = a[i]", "Each j is a circle", "It does not"], answer: 1, explain: "For fixed j the expression is linear in a[i]: slope b[j], intercept dp[j]." },
+  { type: "mcq", q: "When do slopes and queries both being sorted let you use a simple deque with a pointer?", options: ["Never", "Always, no matter the order", "When slopes arrive in monotone order and the query points are monotone too", "Only for maximum"], answer: 2, explain: "Monotone slopes let you pop useless lines from the back; monotone queries let a pointer only move forward, so the total work is amortised O(n)." },
+  { type: "predict", q: "Two lines are y = 3x + 1 and y = x + 5. Which is lower at x = 1, and what is its value?", code: "x = 1\nprint(min(3 * x + 1, 1 * x + 5))", options: ["3 * x + 1 = 4", "x + 5 = 6", "2", "5"], answer: 0, explain: "At x = 1 the first line gives 4 and the second 6, so the minimum is 4." },
+  { type: "multi", q: "Which are advantages of a Li Chao tree over the simple monotone deque?", options: ["It does not need sorted slopes or sorted queries", "It only evaluates lines, so there is no intersection cross-multiplication to overflow", "It is O(1) per operation", "It handles lines inserted in any order"], answer: [0, 1, 3], explain: "Each operation walks one root-to-leaf path, so it costs O(log n), not O(1)." }
+]} />
