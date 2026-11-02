@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 188 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 191 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -67,7 +67,8 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 11 Distributed systems theory | Partial (3 lessons: time, clocks and ordering; consistency models and quorums; failure detection, leases and fencing; all demos are executed and their output quoted; no consensus yet, which is module 12) | 3 |
 | 12 Consensus and coordination | Partial (3 lessons: Consensus and Raft; Paxos and Multi-Paxos; two-phase commit and coordination services; simulations are executed and their output quoted; no membership-change or Byzantine-fault lesson yet) | 3 |
 | 13 Microservice patterns | Partial (3 lessons: service boundaries and communication; sagas and the transactional outbox; event sourcing and CQRS; simulations are executed and their output quoted; no service mesh, API versioning or testing-strategy lesson yet) | 3 |
-| 14-28 (Levels 2-4, case studies, LLD) | Planned | 0 |
+| 14 Search systems | Partial (3 lessons: inverted indexes and text analysis; ranking with TF-IDF and BM25; distributed search architecture; simulations are executed and their output quoted; no vector-search internals or query-understanding lesson yet) | 3 |
+| 15-28 (Levels 2-4, case studies, LLD) | Planned | 0 |
 
 ## Known gaps and caveats
 

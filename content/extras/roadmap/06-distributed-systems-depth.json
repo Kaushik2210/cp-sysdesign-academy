@@ -19,6 +19,9 @@
     { "kind": "lesson", "ref": "sd/microservice-patterns/service-boundaries-and-communication" },
     { "kind": "lesson", "ref": "sd/microservice-patterns/sagas-and-the-transactional-outbox" },
     { "kind": "lesson", "ref": "sd/microservice-patterns/event-sourcing-and-cqrs" },
+    { "kind": "lesson", "ref": "sd/search-systems/inverted-indexes-and-text-analysis" },
+    { "kind": "lesson", "ref": "sd/search-systems/ranking-tf-idf-and-bm25" },
+    { "kind": "lesson", "ref": "sd/search-systems/distributed-search-architecture" },
     { "kind": "lesson", "ref": "sd/databases-2/read-replicas-and-failover" },
     { "kind": "lesson", "ref": "sd/databases-2/hot-keys-and-hot-partitions" },
     { "kind": "lesson", "ref": "sd/queues-and-streaming/kafka-rabbitmq-sqs" },
@@ -27,7 +30,7 @@
     { "kind": "lesson", "ref": "sd/scalability/load-shedding-and-bulkheads" },
     { "kind": "page", "title": "Glossary: consensus, quorum, split brain, fencing token", "href": "/glossary/", "note": "Search these terms and follow the related links." },
     { "kind": "project", "title": "A replicated key-value store that survives failures", "brief": "Implement a leader-based replicated store (the MIT labs are a good scaffold). Add a test harness that kills nodes, delays and drops messages, and checks that acknowledged writes are never lost and reads are linearizable where you promise it.", "deliverable": "A repository with the store, a fault-injection test suite and a short document explaining which guarantees you provide and which you do not." },
-    { "kind": "planned", "title": "Search, security and observability modules", "note": "SD modules 11 to 13 (time, consistency, failure detection, consensus, atomic commit and microservice patterns) are written; modules 14 to 16 (search, security and observability) are not yet. The papers and course above cover the same ground in the meantime." }
+    { "kind": "planned", "title": "Security and observability modules", "note": "SD modules 11 to 14 (time, consistency, failure detection, consensus, atomic commit, microservice patterns and search) are written; modules 15 and 16 (security and observability) are not yet. The papers and course above cover the same ground in the meantime." }
   ],
   "exit": [
     "You can explain how Raft elects a leader and why a committed entry cannot be lost.",
