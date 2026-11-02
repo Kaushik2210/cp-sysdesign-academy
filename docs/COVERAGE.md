@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 176 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 179 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -47,7 +47,8 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 13 Dynamic programming | Partial (11 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths, bitmask DP, interval DP, digit DP, divide and conquer DP, convex hull trick and Li Chao trees, Knuth's optimisation; no Aliens trick yet) | 11 |
 | 14 String matching | Partial (4 lessons: KMP, Z-function, tries and Aho-Corasick, suffix arrays and LCP; no suffix automata yet) | 4 |
 | 15 Trees and ancestors | Partial (6 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter, rerooting, heavy-light decomposition, centroid decomposition; no virtual trees or link-cut trees yet) | 6 |
-| 16-26 (Levels 2-3) | Planned | 0 |
+| 16 Computational geometry | Partial (3 lessons: cross product and polygons, convex hull, closest pair and sweep lines; no half-plane intersection, circles or rotating calipers lesson yet) | 3 |
+| 17-26 (Levels 2-3) | Planned | 0 |
 
 ## Track 2: System Design
 
