@@ -1,0 +1,225 @@
+---
+title: Interval DP
+track: cp
+module: dynamic-programming
+order: 7
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/dynamic-programming/edit-distance-and-lcs, cp/arrays-and-windows/prefix-sums]
+tags: [dp, interval-dp, optimal-merge, matrix-chain, prefix-sums, knuth-optimization]
+type: lesson
+problems: [m13-merge-crates]
+furtherReading:
+  - title: cp-algorithms, Knuth's Optimization
+    url: https://cp-algorithms.com/dynamic_programming/knuth-optimization.html
+  - title: CSES Problem Set, Removal Game
+    url: https://cses.fi/problemset/task/1097
+  - title: AtCoder Educational DP Contest, Slimes
+    url: https://atcoder.jp/contests/dp/tasks/dp_n
+---
+
+## Intuition
+
+Some problems cannot be solved by walking left to right keeping a small state, because the best decision about the *middle* of a segment affects what is allowed on both sides. Take the question "in what order should I merge a row of piles to pay the least?" The first merge you do tells you almost nothing. The **last** merge is far more informative: it must join a left part and a right part, and those two parts were each built independently, in their own best way.
+
+This is the shape of an **interval DP**: the state is a **segment** `[i, j]`, and the answer for a segment is assembled from answers for smaller segments inside it. Instead of asking "what do I do first?", ask **"what happens last?"** (or "which element is special?", e.g. the last balloon you pop). That choice splits the segment into two independent smaller problems.
+
+## Definition
+
+Let `dp[i][j]` be the best value for the segment `a[i..j]`. Typical form:
+
+```text
+dp[i][i]  = base case (often 0)
+dp[i][j]  = best over k in [i, j-1] of  ( dp[i][k] + dp[k+1][j] + cost(i, j, k) )
+answer    = dp[0][n-1]
+```
+
+- There are `O(n^2)` segments and `O(n)` split points each, so **`O(n^3)` time and `O(n^2)` memory**.
+- The loops go by **increasing length**, never by `i` then `j`: a segment depends on strictly shorter ones, and iterating by length guarantees they are computed.
+- `cost(i, j, k)` is cheap to evaluate, usually with a **prefix-sum** array for "total weight of `i..j`".
+
+```text
+for length in 2..n:
+    for i in 0..n-length:
+        j = i + length - 1
+        dp[i][j] = best over k of ...
+```
+
+## Example, step by step
+
+The merge-the-crates problem: weigh `4 1 1 4`; welding two neighbours costs the weight of the result.
+
+- Single crates cost 0.
+- `dp[1][2]` (the two 1s) is `0 + 0 + (1 + 1) = 2`.
+- `dp[0][1]` (4 and 1) is `5`, and `dp[2][3]` is `5`.
+- `dp[0][2]` (4, 1, 1, total 6): split after 0 gives `0 + dp[1][2] + 6 = 8`; split after 1 gives `dp[0][1] + 0 + 6 = 11`; best `8`.
+- `dp[1][3]` (1, 1, 4, total 6): similarly `8`.
+- `dp[0][3]` (total 10): split after 0: `0 + dp[1][3] + 10 = 18`; after 1: `dp[0][1] + dp[2][3] + 10 = 5 + 5 + 10 = 20`; after 2: `dp[0][2] + 0 + 10 = 18`. The minimum is **18**.
+
+Notice how the cost of the last weld, the total weight of the segment, does not depend on `k`: only the two sub-answers do.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+n = len(w)
+pre = [0] * (n + 1)
+for i in range(n):
+    pre[i + 1] = pre[i] + w[i]
+
+INF = float("inf")
+dp = [[0] * n for _ in range(n)]
+for length in range(2, n + 1):
+    for i in range(n - length + 1):
+        j = i + length - 1
+        best = INF
+        for k in range(i, j):
+            c = dp[i][k] + dp[k + 1][j]
+            if c < best:
+                best = c
+        dp[i][j] = best + pre[j + 1] - pre[i]
+print(dp[0][n - 1])
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> pre(n + 1, 0);
+for (int i = 0; i < n; i++) pre[i + 1] = pre[i] + w[i];
+
+vector<vector<long long>> dp(n, vector<long long>(n, 0));
+for (int len = 2; len <= n; len++) {
+    for (int i = 0; i + len <= n; i++) {
+        int j = i + len - 1;
+        long long best = LLONG_MAX;
+        for (int k = i; k < j; k++)
+            best = min(best, dp[i][k] + dp[k + 1][j]);
+        dp[i][j] = best + pre[j + 1] - pre[i];
+    }
+}
+cout << dp[0][n - 1] << "\n";
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] pre = new long[n + 1];
+for (int i = 0; i < n; i++) pre[i + 1] = pre[i] + w[i];
+
+long[][] dp = new long[n][n];
+for (int len = 2; len <= n; len++) {
+    for (int i = 0; i + len <= n; i++) {
+        int j = i + len - 1;
+        long best = Long.MAX_VALUE;
+        for (int k = i; k < j; k++)
+            best = Math.min(best, dp[i][k] + dp[k + 1][j]);
+        dp[i][j] = best + pre[j + 1] - pre[i];
+    }
+}
+System.out.println(dp[0][n - 1]);
+```
+
+</Tab>
+</Tabs>
+
+Verify it against exhaustive search, then solve a second classic that shares the same skeleton, **matrix chain multiplication**:
+
+<CodeRunner language="python" code={`import functools, random
+
+def merge_cost(w):
+    n = len(w)
+    pre = [0]
+    for x in w:
+        pre.append(pre[-1] + x)
+    dp = [[0] * n for _ in range(n)]
+    for length in range(2, n + 1):
+        for i in range(n - length + 1):
+            j = i + length - 1
+            dp[i][j] = min(dp[i][k] + dp[k + 1][j] for k in range(i, j)) + pre[j + 1] - pre[i]
+    return dp[0][n - 1]
+
+@functools.lru_cache(None)
+def brute(t):
+    if len(t) == 1:
+        return 0
+    return min(brute(t[:i] + (t[i] + t[i + 1],) + t[i + 2:]) + t[i] + t[i + 1] for i in range(len(t) - 1))
+
+print("4 1 1 4 ->", merge_cost([4, 1, 1, 4]))
+random.seed(1)
+for _ in range(200):
+    w = [random.randint(1, 20) for _ in range(random.randint(1, 7))]
+    assert merge_cost(w) == brute(tuple(w)), w
+print("200 random rows agree with exhaustive search")
+
+# Matrix chain: dims d[0..n]; matrix i is d[i] x d[i+1]. Multiplying i..k by k+1..j costs d[i]*d[k+1]*d[j+1].
+def matrix_chain(d):
+    n = len(d) - 1
+    dp = [[0] * n for _ in range(n)]
+    for length in range(2, n + 1):
+        for i in range(n - length + 1):
+            j = i + length - 1
+            dp[i][j] = min(dp[i][k] + dp[k + 1][j] + d[i] * d[k + 1] * d[j + 1] for k in range(i, j))
+    return dp[0][n - 1]
+
+print("matrix chain 10x30, 30x5, 5x60 ->", matrix_chain([10, 30, 5, 60]))   # (AB)C = 1500 + 3000 = 4500
+`} />
+
+## The family of interval DPs
+
+All of these have the same skeleton with a different "what happens last" and a different `cost`.
+
+| problem | state `dp[i][j]` | the choice `k` | cost term |
+| --- | --- | --- | --- |
+| merge adjacent piles (this lesson) | cheapest way to merge `i..j` into one | where the last merge splits | total weight of `i..j` |
+| matrix chain multiplication | cheapest way to multiply matrices `i..j` | where the last product splits | `d[i] * d[k+1] * d[j+1]` |
+| burst balloons | most coins from balloons strictly between `i` and `j` | which balloon bursts **last** | `a[i] * a[k] * a[j]` |
+| longest palindromic subsequence | longest palindrome inside `s[i..j]` | no `k`: look at the two ends | `dp[i+1][j-1] + 2` if `s[i] == s[j]`, else the max of dropping an end |
+| optimal binary search tree | cheapest tree for keys `i..j` | which key is the root | total access frequency of `i..j` |
+| two-player removal game | best score difference for the player to move on `i..j` | take the left or the right end | `a[i] - dp[i+1][j]` or `a[j] - dp[i][j-1]` |
+
+Two shapes appear: "split at `k`" (the first three and the BST) and "peel an end" (the last two) which is only `O(n^2)` because there is no inner loop.
+
+**Why "last" and not "first"?** In burst balloons, bursting a balloon changes who its neighbours are, so subproblems after "first burst" are not independent. If you decide which balloon bursts **last** in `(i, j)`, its neighbours at that moment are exactly `i` and `j`, and the two sides are independent. Choosing the right "special" element is the whole trick.
+
+## Speeding it up
+
+- **Knuth's optimisation:** when the cost satisfies the quadrangle inequality (true for merge cost and optimal BST), the best split point `opt[i][j]` is monotone: `opt[i][j-1] <= opt[i][j] <= opt[i+1][j]`. Restrict the inner loop to that range and the total work falls from `O(n^3)` to `O(n^2)`.
+- **Divide-and-conquer optimisation** and **Hu-Tucker / Garsia-Wachs** for even better special cases.
+- Use `n^2` memory carefully: `n = 5000` needs 25 million entries, so a rolling array over length sometimes helps.
+
+## Pitfalls
+
+1. **Wrong iteration order.** A row-by-row `for i, for j` fills `dp[i][j]` before `dp[k+1][j]`. Loop by **length** (or `i` from `n-1` down to `0`, `j` upward).
+2. **Off-by-one in the split.** With `dp[i][k] + dp[k+1][j]`, `k` runs from `i` to `j-1`, so both halves are non-empty.
+3. **Forgetting the base case.** Single elements usually cost 0; some problems need `dp[i][i-1] = 0` for empty segments.
+4. **Overflow.** Costs multiply or sum large weights: use 64-bit integers.
+5. **Choosing "first" instead of "last"** when subproblems are not independent (burst balloons).
+6. **Using `float("inf")` additions blindly.** `inf + x` is fine in Python but sentinel values like `INT_MAX` overflow in C++ and Java.
+7. **Circular rows.** Duplicate the array (`a + a`) and take the best window of length `n`, or fix a cut point.
+
+## Practice
+
+<Problem id="m13-merge-crates" />
+
+## Problem ladder
+
+- [Removal Game](https://cses.fi/problemset/task/1097) (CSES): the "peel an end" interval DP with a two-player twist.
+- [Slimes](https://atcoder.jp/contests/dp/tasks/dp_n) (AtCoder Educational DP N): exactly merge-adjacent with a sum cost; try Knuth's optimisation.
+- [Burst Balloons](https://leetcode.com/problems/burst-balloons/) (LeetCode 312, hard): choose the balloon that bursts last.
+- [Minimum Score Triangulation of Polygon](https://leetcode.com/problems/minimum-score-triangulation-of-polygon/) (LeetCode 1039): split on the apex vertex of the triangle on the edge `(i, j)`.
+- [Zuma](https://codeforces.com/problemset/problem/607/B) (Codeforces 607B, rating about 1900): minimum seconds to remove palindromic runs.
+- [Clear the String](https://codeforces.com/problemset/problem/1132/F) (Codeforces 1132F, rating about 2000): interval DP on a string with merging equal characters.
+
+## Quiz
+
+<Quiz id="cp-m13-interval-dp" tags={["dp", "interval-dp"]} questions={[
+  { type: "mcq", q: "In which order should the table `dp[i][j]` be filled for an interval DP that splits at `k`?", options: ["By i, then by j, in increasing order", "By increasing segment length", "In random order", "By decreasing segment length"], answer: 1, explain: "A segment depends on strictly shorter segments inside it, so shorter lengths must be done first." },
+  { type: "mcq", q: "Why does merge-the-crates look at the LAST weld rather than the first?", options: ["The last weld has a constant cost", "The last weld splits the row into two independent sub-rows that were each welded on their own", "It is faster to code", "The first weld is always the cheapest"], answer: 1, explain: "After fixing the last weld, the two sides do not interact, which is what makes the subproblems independent." },
+  { type: "predict", q: "For three crates weighing 1, 2, 3, what is the minimum energy to weld them into one?", code: "w = [1, 2, 3]\n# weld 1+2 -> 3 (cost 3), then 3+3 -> 6 (cost 6)", options: ["9", "10", "11", "12"], answer: 0, explain: "Welding 1 and 2 first costs 3, then 3 and 3 costs 6: total 9. The other order costs 5 + 6 = 11." },
+  { type: "mcq", q: "What are the time and memory of the plain interval DP with a split loop?", options: ["O(n) and O(n)", "O(n^2) and O(n)", "O(n^3) and O(n^2)", "O(2^n) and O(n)"], answer: 2, explain: "O(n^2) segments, each with O(n) split points; the table holds O(n^2) values." },
+  { type: "multi", q: "Which statements about interval DP are true?", options: ["Knuth's optimisation can bring merge-cost to O(n^2)", "For burst balloons you choose which balloon is popped last in the segment", "Single-element segments usually have cost 0", "Rows are always filled one row at a time, left to right"], answer: [0, 1, 2], explain: "The iteration order is by length, not row by row." }
+]} />
