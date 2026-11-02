@@ -1,0 +1,1 @@
+{ "title": "Search Systems", "level": "Level 2: Distributed Systems", "order": 14, "summary": "How search engines find and rank documents: inverted indexes and text analysis, scoring with TF-IDF and BM25, and distributing an index across shards with scatter-gather queries." }

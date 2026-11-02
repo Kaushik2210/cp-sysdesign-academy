@@ -1,0 +1,254 @@
+---
+title: Inverted Indexes and Text Analysis
+track: sd
+module: search-systems
+order: 1
+difficulty: medium
+estMinutes: 45
+prerequisites: ["sd/databases-1/indexes-and-query-plans", "sd/microservice-patterns/event-sourcing-and-cqrs"]
+tags: [search, inverted-index, postings, tokenization, stemming, analyzers, lucene, compression, roaring-bitmaps]
+type: lesson
+furtherReading:
+  - title: Manning, Raghavan and Schutze, Introduction to Information Retrieval (free online book)
+    url: https://nlp.stanford.edu/IR-book/
+  - title: Apache Lucene, the library underneath Elasticsearch, Solr and OpenSearch
+    url: https://lucene.apache.org/
+  - title: Elastic, Elasticsearch Guide
+    url: https://www.elastic.co/guide/index.html
+  - title: Roaring bitmaps, compressed bitmap indexes
+    url: https://roaringbitmap.org/
+---
+
+## Intuition
+
+A user types `cheap laptop with good battery` into a search box over 50 million product descriptions and expects an answer in a few tens of milliseconds. The obvious SQL, `WHERE description LIKE '%laptop%' AND description LIKE '%battery%'`, has to read every row. Even at a generous gigabyte per second that is far too slow, and it cannot rank results or tolerate typos.
+
+Search engines solve this with the same trick as the index at the back of a book. A book does not make you read every page to find "photosynthesis"; it lists the pages where each word appears. A search engine builds that list for every word in every document **ahead of time**, so a query becomes a few list lookups and a merge instead of a scan. That structure is the **inverted index**, and it is the data structure behind Lucene, Elasticsearch, OpenSearch, Solr and the full-text features of most databases.
+
+## The inverted index
+
+Take three tiny documents:
+
+```text
+doc 1: "the quick brown fox"
+doc 2: "the lazy brown dog"
+doc 3: "the quick dog"
+```
+
+A normal (forward) index maps each document to its words. An **inverted** index maps each **term** to the documents that contain it:
+
+```text
+brown -> [1, 2]
+dog   -> [2, 3]
+fox   -> [1]
+lazy  -> [2]
+quick -> [1, 3]
+the   -> [1, 2, 3]
+```
+
+Two parts:
+
+- The **term dictionary**: a sorted set of all distinct terms, stored so you can look one up fast (a hash table, a sorted array with binary search, or a compact finite-state transducer that also supports prefix search).
+- The **postings lists**: for each term, a **sorted list of document ids**. Real systems add to each posting the **term frequency** (how often the term occurs in that document, used for ranking) and optionally the **positions** (where in the document, needed for phrase queries like `"quick brown"`).
+
+A query `quick AND dog` fetches the two postings lists `[1, 3]` and `[2, 3]` and **intersects** them to get `[3]`. The cost depends on the lengths of the lists, not on the size of the corpus.
+
+## Text analysis: from raw text to terms
+
+The terms are not the raw words. Before indexing (and identically before querying) text goes through an **analyzer**, a pipeline of steps:
+
+1. **Character filtering:** strip HTML, normalise Unicode, fold accents (`café` to `cafe`).
+2. **Tokenization:** split into tokens, usually on whitespace and punctuation, with rules for things like `e-mail`, URLs and `C++`.
+3. **Lowercasing:** so `Laptop` matches `laptop`.
+4. **Stop-word removal** (optional): drop extremely common words such as `the` and `of`. Modern engines often keep them because they matter for phrases and cost little once compressed.
+5. **Stemming or lemmatization:** reduce words to a root so `running`, `runs` and `ran` can match. A stemmer (Porter, Snowball) chops suffixes by rule: fast but crude (`university` and `universe` can collide). A lemmatizer uses a dictionary and part of speech: more accurate and slower.
+6. **Synonyms and expansion:** `tv` and `television`, `nyc` and `new york`.
+
+**The same analyzer must run at index time and query time**, otherwise the query's terms will not match the stored ones. Changing an analyzer means **reindexing**, because the stored terms are baked in. Different fields get different analyzers: a product `sku` should be indexed as one exact token, a description with stemming, an autocomplete field with edge n-grams (`lap`, `lapt`, `lapto`, `laptop`) so prefixes match.
+
+Language matters: English stemming does nothing for Chinese or Japanese, which have no spaces between words and need dictionary or n-gram tokenizers; German compounds need decompounding.
+
+<Diagram kind="mermaid" caption="Indexing and querying use the same analysis pipeline, so their terms line up" code={`flowchart LR
+  D[Document text] --> A1[Analyzer: tokenize, lowercase, stem]
+  A1 --> I[(Inverted index: term to postings)]
+  Q[Query text] --> A2[Same analyzer]
+  A2 --> L[Look up each term's postings]
+  I --> L
+  L --> M[Merge: AND, OR, NOT, phrase]
+  M --> R[Ranked results]`} />
+
+## What queries become
+
+- **Single term:** read one postings list.
+- **AND:** intersect lists. **OR:** union. **NOT:** subtract.
+- **Phrase** (`"quick brown"`): intersect, then check that the **positions** are adjacent.
+- **Prefix and wildcard:** walk the sorted term dictionary (`lap*` is a range) or use n-gram fields.
+- **Fuzzy** (`laptpo`): find dictionary terms within a small edit distance, typically with a Levenshtein automaton, then union their postings.
+- **Filters** (`price under 500`, `in stock`): usually separate structures such as sorted numeric columns or bitmaps that are combined with the text result.
+
+### Intersecting postings lists
+
+Merging two sorted lists is linear in their combined length. Two refinements matter when lists are very different in size:
+
+- **Start with the shortest list.** For `rare AND common`, take each document of the rare list and **look it up** in the long one with binary search (or galloping search) instead of walking the whole long list.
+- **Skip pointers / skip lists:** every few hundred postings keep a pointer so you can jump forward.
+
+But binary-searching is not always better: for two lists of **similar** length a plain merge is cheaper, because each lookup costs `log(n)` steps instead of one. The simulation below measures both on a synthetic corpus, and also measures how much gap encoding saves.
+
+## Compressing postings
+
+Postings dominate index size, so they are compressed hard:
+
+- **Delta (gap) encoding:** the ids are sorted, so store the **difference** from the previous id. A common term's gaps are tiny.
+- **Variable-byte encoding:** write each gap in as few bytes as it needs (7 bits of data per byte). Small gaps take one byte instead of four.
+- **Bit packing in blocks (frame of reference, PForDelta):** pack a block of 128 gaps using just enough bits for the largest, with exceptions handled separately; decodes very fast with SIMD.
+- **Roaring bitmaps:** represent a dense postings list or a filter as a compressed bitmap, so AND and OR become fast bitwise operations.
+
+<CodeRunner language="python" code={`import random, math
+from bisect import bisect_left
+
+rng = random.Random(8)
+DOCS, VOCAB, LEN = 20000, 5000, 50
+
+# a synthetic corpus: word ranks follow a Zipf-like law, so a few words are very common and most are rare
+weights = [1.0 / (r + 1) for r in range(VOCAB)]
+total = sum(weights)
+cum = []
+acc = 0.0
+for w in weights:
+    acc += w / total
+    cum.append(acc)
+
+def draw():
+    return min(bisect_left(cum, rng.random()), VOCAB - 1)
+
+index = {}                                     # term id -> sorted list of document ids
+for d in range(DOCS):
+    for t in {draw() for _ in range(LEN)}:
+        index.setdefault(t, []).append(d)
+sizes = sorted(len(v) for v in index.values())
+print("synthetic corpus:", DOCS, "documents,", len(index), "distinct terms,", sum(sizes), "postings in total")
+print("  posting list length: most common term", sizes[-1], "| median term", sizes[len(sizes) // 2], "| rarest term", sizes[0])
+
+# --- intersecting two posting lists: linear merge versus binary-searching the longer list ---
+def merge_cost(a, b):
+    i = j = steps = hits = 0
+    while i < len(a) and j < len(b):
+        steps += 1
+        if a[i] == b[j]:
+            hits += 1; i += 1; j += 1
+        elif a[i] < b[j]:
+            i += 1
+        else:
+            j += 1
+    return hits, steps
+
+def search_cost(short, long):
+    hits = steps = 0
+    lo = 0
+    for x in short:
+        l, h = lo, len(long)
+        while l < h:                           # a binary search; every probe counts as one step
+            steps += 1
+            m = (l + h) // 2
+            if long[m] < x: l = m + 1
+            else: h = m
+        lo = l
+        if l < len(long) and long[l] == x: hits += 1
+    return hits, steps
+
+by_len = sorted(index, key=lambda t: len(index[t]))
+rare = index[by_len[len(by_len) // 10]]        # a rare-ish term (10th percentile)
+common = index[by_len[-1]]
+mid = index[by_len[len(by_len) * 9 // 10]]
+print()
+print("AND query: rare term (", len(rare), "docs) with the most common term (", len(common), "docs )")
+h1, s1 = merge_cost(rare, common)
+h2, s2 = search_cost(rare, common)
+print("  linear merge steps:", s1, "| binary search per rare posting:", s2, "| same", h1, "results:", h1 == h2)
+print("AND query: two mid-frequency terms (", len(mid), "and", len(index[by_len[len(by_len) * 8 // 10]]), "docs )")
+h1, s1 = merge_cost(mid, index[by_len[len(by_len) * 8 // 10]])
+h2, s2 = search_cost(mid, index[by_len[len(by_len) * 8 // 10]])
+print("  linear merge steps:", s1, "| binary search per posting of the shorter list:", s2, "| same results:", h1 == h2)
+
+# --- storing a posting list: raw 4-byte ids versus delta encoding with variable-length integers ---
+def varint_bytes(x):
+    n = 1
+    while x >= 128:
+        x >>= 7
+        n += 1
+    return n
+
+def compressed_size(plist):
+    prev, total_bytes = 0, 0
+    for d in plist:
+        total_bytes += varint_bytes(d - prev)  # store the gap to the previous id, not the id itself
+        prev = d
+    return total_bytes
+
+print()
+print("posting list storage: raw 32-bit ids versus gap + variable-byte encoding")
+print("  list                 postings   raw bytes   encoded bytes   encoded / raw")
+for name, pl in (("most common term", common), ("mid-frequency term", mid), ("rare term", rare)):
+    raw = 4 * len(pl)
+    enc = compressed_size(pl)
+    print(f"  {name:<19}  {len(pl):>8}   {raw:>9}   {enc:>13}   {enc / raw:>12.2f}")
+all_raw = 4 * sum(sizes)
+all_enc = sum(compressed_size(v) for v in index.values())
+print(f"  whole index          {sum(sizes):>8}   {all_raw:>9}   {all_enc:>13}   {all_enc / all_raw:>12.2f}")
+`} />
+
+A local run on a synthetic corpus of 20,000 documents (Zipf-like word frequencies, 787,038 postings) printed: the most common term appeared in **19,946** documents, the median term in 44 and the rarest in 9. For a query joining a **rare term (23 documents) with the most common term (19,946)**, a linear merge took **19,303** steps while binary-searching each rare posting took **298**, with identical results. For two **mid-frequency terms (219 and 110 documents)** it was the other way around: the linear merge took **327** steps and binary search **1,300**. Storing postings as gaps with variable-byte encoding used **25%** of the raw 32-bit size for the most common term, 31% for a mid-frequency term, 47% for a rare term and **30% (953,439 bytes against 3,148,152) for the whole index**. Skewed lists want lookup-style intersection, balanced lists want merging, and compression is large and nearly free.
+
+<Diagram kind="flow" caption="Choosing how to support text search" nodes={[
+  { id: "need", label: "What does the user need?", x: 0, y: 80, role: "Exact filters, simple keyword match, or ranked relevance with typo tolerance?", failureModes: ["Using LIKE on a large table and discovering the cost in production"], tradeoffs: ["More relevance features cost more infrastructure"] },
+  { id: "like", label: "Small data, simple match", x: 220, y: 10, role: "A database index or LIKE on a small table is fine.", failureModes: ["Leading wildcards cannot use a normal index", "No ranking"], tradeoffs: ["No new system to run; does not scale or rank"] },
+  { id: "dbft", label: "Database full-text search", x: 220, y: 80, role: "Postgres tsvector or MySQL FULLTEXT: an inverted index inside the database.", failureModes: ["Limited analyzers, ranking and scaling"], tradeoffs: ["One system and transactional consistency; modest features"] },
+  { id: "engine", label: "Dedicated search engine", x: 220, y: 150, role: "Elasticsearch, OpenSearch, Solr: rich analyzers, ranking, faceting and horizontal scaling.", failureModes: ["A second copy of the data that must be kept in sync", "Operational complexity"], tradeoffs: ["Best relevance and scale; eventual consistency with the source database"] }
+]} edges={[
+  { from: "need", to: "like" }, { from: "need", to: "dbft" }, { from: "need", to: "engine" }
+]} />
+
+## Trade-offs
+
+<TradeOffs caption="Text search approaches and analysis choices" rows={[
+  { option: "SQL LIKE scan", pros: "Nothing to build; always consistent", cons: "Reads every row for a leading wildcard; no ranking; no typo tolerance", chooseWhen: "Small tables and rare, simple lookups" },
+  { option: "Database full-text index", pros: "One system; transactional with the data", cons: "Fewer analyzers and ranking options; scaling limits", chooseWhen: "Moderate corpora where good-enough search is acceptable" },
+  { option: "Dedicated search engine", pros: "Rich analysis, ranking, facets, near-linear horizontal scale", cons: "Separate cluster; indexing lag; reindexing on analyzer changes", chooseWhen: "Product or site search as a core feature" },
+  { option: "Stemming", pros: "Matches word variants; smaller dictionary", cons: "Over-stemming merges unrelated words; language specific", chooseWhen: "Natural-language text in a known language" },
+  { option: "Edge n-grams", pros: "Fast prefix and autocomplete matching", cons: "Larger index; noisy matches", chooseWhen: "Search-as-you-type fields" },
+  { option: "Positions in postings", pros: "Enables phrase and proximity queries", cons: "Larger index; slower indexing", chooseWhen: "Phrases matter (titles, quotes, names)" }
+]} />
+
+## Failure modes
+
+- **Analyzer mismatch:** the query is analysed differently from the indexed text, so obvious matches are missed.
+- **Analyzer change without reindex:** old documents keep their old terms and silently stop matching.
+- **Index lag:** a new document is not searchable for a second or more; users who just posted something cannot find it.
+- **Hot terms:** a term in nearly every document produces a huge postings list that is expensive to merge.
+- **Out-of-sync copy:** the search index drifts from the database because an update event was lost.
+- **Over-stemming or synonym explosion:** irrelevant documents appear.
+- **Mapping explosion:** dynamic fields create thousands of terms or fields and bloat memory.
+
+## Pitfalls
+
+- Treating the search index as the source of truth instead of a derived, rebuildable copy.
+- Forgetting that language and field type determine the right analyzer.
+- Running leading-wildcard queries (`*phone`) on a large index.
+- Indexing every field "just in case"; each indexed field costs space and indexing time.
+- Not planning reindexing (use aliases and build a new index beside the old one).
+- Expecting exactly-current results; search is near real time.
+
+## What would you choose and why?
+
+An online bookstore with 8 million titles wants search with typo tolerance ("hary poter"), instant suggestions as the user types, and filters for price and format. List which analyzers and field types you would configure for the title field, how you would handle suggestions, and how you would keep the search index in sync with the catalogue database (recall the outbox and change-data-capture ideas from the previous module).
+
+## Quiz
+
+<Quiz id="sd-m14-inverted-index" tags={["search", "inverted-index", "analyzers", "postings"]} questions={[
+  { type: "mcq", q: "What does an inverted index map?", options: ["Documents to their words", "Each term to the sorted list of documents containing it", "Queries to results", "Users to documents"], answer: 1, explain: "Inverting the document-to-words mapping lets a query read a few lists instead of scanning every document." },
+  { type: "mcq", q: "Why must the same analyzer be used at index time and query time?", options: ["For speed only", "Otherwise the query terms will not match the terms stored in the index", "To save memory", "Because analyzers are required by law"], answer: 1, explain: "The index stores analysed terms; a differently analysed query looks up terms that were never stored." },
+  { type: "mcq", q: "When is binary-searching the longer list better than a linear merge when intersecting postings?", options: ["Always", "When one list is much shorter than the other", "When the lists have equal length", "Never"], answer: 1, explain: "In the simulation the rare-versus-common query took 298 steps by lookup versus 19,303 by merging, while two similar-sized lists favoured merging." },
+  { type: "multi", q: "Which techniques make postings lists smaller?", options: ["Storing gaps between sorted ids", "Variable-byte encoding", "Bit packing in blocks", "Storing the full text in each posting"], answer: [0, 1, 2], explain: "Sorted ids have small gaps that compress well; the simulation shrank the whole index to about 30% of its raw size." },
+  { type: "mcq", q: "What happens if you change a field's analyzer?", options: ["Nothing", "Existing documents keep their old terms, so you must reindex to apply the change", "The index updates itself instantly", "Queries fail"], answer: 1, explain: "Terms are baked into the index at write time." }
+]} />
