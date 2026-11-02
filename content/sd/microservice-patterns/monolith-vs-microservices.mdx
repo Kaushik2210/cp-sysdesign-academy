@@ -1,0 +1,114 @@
+---
+title: Monolith vs Microservices and Service Boundaries
+track: sd
+module: microservice-patterns
+order: 1
+difficulty: medium
+estMinutes: 30
+prerequisites: ["sd/load-balancing/reverse-proxies-and-api-gateways", "sd/databases-1/relational-vs-nosql"]
+tags: [microservices, monolith, modular-monolith, bounded-context, conway, service-boundaries, data-ownership]
+type: lesson
+furtherReading:
+  - title: Martin Fowler - Microservices (the original article by Lewis and Fowler)
+    url: https://martinfowler.com/articles/microservices.html
+  - title: Martin Fowler - MonolithFirst
+    url: https://martinfowler.com/bliki/MonolithFirst.html
+  - title: Eric Evans - Domain-Driven Design Reference (bounded contexts)
+    url: https://www.domainlanguage.com/ddd/reference/
+  - title: Sam Newman - Building Microservices
+    url: https://samnewman.io/books/building_microservices_2nd_edition/
+---
+
+## Intuition
+
+A **monolith** is deployed as one unit: one codebase, one process (or many identical copies), usually one database. **Microservices** split the system into small services, each deployed independently and owning its own data. Microservices do not make code better. They trade **in-process complexity** (tangled code) for **distributed-systems complexity** (network calls, partial failure, data consistency). The trade only pays off when the organisation, not just the code, has outgrown a single deployable.
+
+## What you gain and what you pay
+
+| | Monolith | Microservices |
+| --- | --- | --- |
+| Deploy | One artifact; a bug anywhere blocks everyone's release | Each team ships its service alone, on its own cadence |
+| Scale | Scale the whole thing, even if only checkout is hot | Scale the hot service only |
+| Tech choice | One stack | Right tool per service (at the cost of more stacks to operate) |
+| Fault isolation | One memory leak can take everything down | A failing service can be isolated (if you built the resilience) |
+| Calls | In-process function call: nanoseconds, cannot fail independently | Network call: milliseconds, can time out, can be duplicated |
+| Transactions | One ACID database transaction | Sagas and eventual consistency (previous module) |
+| Debugging | One stack trace | Distributed tracing needed |
+| Operations | Simple | Needs CI/CD, service discovery, observability, on-call per service |
+| Data queries | A join | An API call or a replicated read model |
+
+<Callout type="warning" title="The fallacies">
+Treating a network call like a function call ignores the fallacies of distributed computing: the network is not reliable, latency is not zero, bandwidth is not infinite. Every new service boundary adds a failure mode you must design for.
+</Callout>
+
+## The sensible path: modular monolith first
+
+Most successful microservice systems started as monoliths whose owners learned where the real seams are. A **modular monolith** has strong internal boundaries (separate modules with explicit interfaces, no reaching into another module's tables) inside one deployable. It gives most of the design benefit with none of the network cost, and the modules can later become services along lines you already enforce.
+
+Signals that it is time to split a piece out:
+
+- Teams block each other's releases or merge conflicts dominate.
+- One part has very different **scaling**, **availability** or **security** needs (payments, media processing, search).
+- A component needs a different runtime or release cadence.
+- Part of the domain has clear, stable interfaces and a team that owns it end to end.
+
+Signals you should not split: a team of 5 to 10 engineers, unclear domain boundaries, no automated deployment, no observability, or "everyone is doing it".
+
+## Finding service boundaries
+
+Draw boundaries around **business capabilities** and **bounded contexts** (from domain-driven design): a context is an area where a term has one consistent meaning. "Customer" in billing (a payer with a tax id) is not "Customer" in support (a person with tickets). Each context gets its own model and its own data.
+
+Good boundaries have:
+
+- **High cohesion** inside: things that change together live together.
+- **Low coupling** across: a feature change usually touches one service.
+- **Data ownership**: exactly one service writes each piece of data. Others ask via its API or consume its events. **Never share a database** between services; it is a distributed monolith (changes to a table break unknown services).
+
+**Conway's law:** a system's structure mirrors the communication structure of the organisation that builds it. Design teams and services together: a service should be owned by one team that can run it (you build it, you run it).
+
+## Smells of a bad split
+
+- A single user request fans out to 10 synchronous service calls (high latency, low availability).
+- Services that must always deploy together (a distributed monolith).
+- Chatty services making many tiny calls to each other.
+- Shared libraries that embed business logic and force lockstep upgrades.
+- Services split by technical layer (a "database service", a "validation service") instead of capability.
+
+## Availability arithmetic
+
+If a request needs `n` services in sequence and each is 99.9% available, the request is available about `0.999^n`. For 10 services that is `0.990`, roughly 99.0%, so about 87 hours of downtime a year instead of 8.8 for one service. Synchronous chains multiply failure; that is why resilience and asynchronous designs matter.
+
+```python
+def chain_availability(per_service: float, n: int) -> float:
+    return per_service ** n
+for n in (1, 3, 10, 30):
+    a = chain_availability(0.999, n)
+    print(n, round(a * 100, 3), "% ->", round((1 - a) * 365 * 24, 1), "hours/year down")
+```
+
+Output: 1 service ≈ 8.8 h/year, 3 ≈ 26 h, 10 ≈ 87 h, 30 ≈ 259 h. Reduce dependencies, make non-critical calls optional (degrade gracefully), and use async messaging.
+
+## Worked example
+
+An e-commerce monolith has teams on catalogue, checkout, payments and recommendations. Payments needs PCI isolation and strict change control; recommendations needs GPUs and daily model deploys. They are extracted first. Catalogue and checkout stay in a modular monolith for now: they change together and share transactions around inventory. The split follows risk and pace of change, not enthusiasm.
+
+## Pitfalls
+
+- Starting with 30 microservices for a product that has not found its market.
+- Shared database "just for reporting" that becomes an integration point.
+- Splitting before you have CI/CD, monitoring and on-call.
+- Distributed transactions pretending to be local ones.
+- Services too fine-grained ("nanoservices") so the overhead exceeds the logic.
+
+## What would you choose and why?
+
+A 12-person startup with one Rails app wants microservices because "Netflix does". Their real pain is a slow test suite and a risky weekly deploy. What would you do instead, in what order, and what would make you revisit the question in 18 months?
+
+## Quiz
+
+<Quiz id="sd-m13-monolith-vs-micro" tags={["microservices", "architecture"]} questions={[
+  { type: "mcq", q: "Which is the strongest reason to extract a service?", options: ["It is fashionable", "A part has distinct scaling, security or team-ownership needs and stable interfaces", "To use a new language", "The codebase is large"], answer: 1, explain: "Splits should follow real differences in scale, risk or ownership, not size alone." },
+  { type: "mcq", q: "Ten services in a synchronous chain each have 99.9% availability. Roughly what is the chain's availability?", options: ["99.9%", "99.0%", "90%", "50%"], answer: 1, explain: "0.999 to the power of 10 is about 0.990." },
+  { type: "multi", q: "Which are signs of a distributed monolith?", options: ["Services share one database and its tables", "Services must be deployed together", "Each service owns its data and releases independently", "One request makes a long synchronous chain of calls"], answer: [0, 1, 3], explain: "You have the costs of distribution without independence." },
+  { type: "mcq", q: "What does Conway's law imply for service design?", options: ["Services should mirror database tables", "Architecture tends to mirror team communication structure, so align service ownership with teams", "Teams should be as large as possible", "It limits services to ten"], answer: 1, explain: "Design teams and boundaries together; a service should have an owning team." }
+]} />

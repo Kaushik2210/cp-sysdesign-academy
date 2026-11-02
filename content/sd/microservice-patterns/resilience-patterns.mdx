@@ -1,0 +1,156 @@
+---
+title: "Resilience Patterns: Timeouts, Retries and Circuit Breakers"
+track: sd
+module: microservice-patterns
+order: 2
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/microservice-patterns/monolith-vs-microservices", "sd/queues-and-streaming/backpressure-retries-and-dlq", "sd/scalability/load-shedding-and-bulkheads"]
+tags: [resilience, timeout, retry, backoff, jitter, circuit-breaker, bulkhead, hedging, cascading-failure]
+type: lesson
+furtherReading:
+  - title: AWS Builders' Library - Timeouts, retries and backoff with jitter
+    url: https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/
+  - title: Martin Fowler - CircuitBreaker
+    url: https://martinfowler.com/bliki/CircuitBreaker.html
+  - title: Michael Nygard - Release It! (stability patterns)
+    url: https://pragprog.com/titles/mnee2/release-it-second-edition/
+  - title: Google SRE Book - Addressing cascading failures
+    url: https://sre.google/sre-book/addressing-cascading-failures/
+---
+
+## Intuition
+
+In a system of many services, something is **always** slow or failing. Resilience is about making sure one sick dependency does not make everything sick. The enemy is the **cascading failure**: a slow service holds callers' threads, callers run out of capacity, their callers time out and retry, and the retries add load to the already struggling service.
+
+The toolkit has five parts: **timeouts**, **bounded retries with backoff and jitter**, **circuit breakers**, **bulkheads**, and **fallbacks**. Each one fixes a failure the others create.
+
+## Timeouts: never wait forever
+
+A call without a timeout is a thread, connection or memory held hostage. Set timeouts on **every** network call, with these rules:
+
+- Choose from measured latency: slightly above p99 or p99.9 of the dependency, not a round guess.
+- Use a **deadline** for the whole request that propagates downward ("you have 800 ms left"), so deep call chains do not each spend the full budget. gRPC propagates deadlines; in HTTP you pass a header.
+- The timeout at each level must be **shorter than the caller's**, or the caller gives up while the callee keeps working for nobody.
+- Separate connect timeout from read timeout.
+
+## Retries: powerful and dangerous
+
+Retries fix transient faults (a dropped packet, a restarted pod). Done naively they cause a **retry storm**: if each of 3 layers retries 3 times, one user request becomes up to 27 calls on the bottom service during an outage.
+
+Rules:
+
+1. Retry only **idempotent** operations, or ones protected by an idempotency key.
+2. Retry only on retryable errors (timeouts, 503, connection reset), never on 4xx client errors.
+3. Use **exponential backoff with jitter**: wait `random(0, min(cap, base * 2^attempt))` ("full jitter"). Jitter breaks up synchronised retries from many clients.
+4. Cap attempts (2 or 3) and add a **retry budget**: retries may be at most about 10% of normal request volume, so retries cannot multiply load.
+5. Retry at **one layer** only (usually the edge or the client closest to the user).
+
+```python
+import random
+
+def backoff_full_jitter(attempt, base=0.1, cap=5.0, rng=random):
+    return rng.uniform(0, min(cap, base * 2 ** attempt))
+
+random.seed(1)
+print([round(backoff_full_jitter(a), 2) for a in range(6)])   # delays vary; ceilings 0.1, 0.2, 0.4, 0.8, 1.6, 3.2
+
+# Why jitter matters: 1000 clients retrying after a failure at t=0
+def spread(jitter):
+    rng = random.Random(7)
+    times = [(rng.uniform(0, 0.4) if jitter else 0.4) for _ in range(1000)]    # second attempt
+    buckets = {}
+    for t in times: buckets[int(t * 100)] = buckets.get(int(t * 100), 0) + 1
+    return max(buckets.values())
+print(spread(False), spread(True))     # 1000 retries at once vs about 30 to 35 in the busiest 10 ms bucket
+```
+
+## Circuit breaker
+
+Wrap calls to a dependency in a state machine:
+
+- **Closed**: calls pass through; failures are counted.
+- **Open**: after the failure rate crosses a threshold, calls **fail immediately** (no network). This gives the dependency room to recover and protects the caller's resources.
+- **Half-open**: after a cool-down, allow a few trial calls. If they succeed, close; if not, open again.
+
+```python
+class CircuitBreaker:
+    def __init__(self, max_failures=3, reset_after=30.0, clock=None):
+        self.max_failures, self.reset_after = max_failures, reset_after
+        self.clock = clock
+        self.failures, self.state, self.opened_at = 0, "closed", 0.0
+    def call(self, fn):
+        if self.state == "open":
+            if self.clock() - self.opened_at >= self.reset_after:
+                self.state = "half_open"                 # allow one trial call
+            else:
+                raise RuntimeError("circuit open: failing fast")
+        try:
+            result = fn()
+        except Exception:
+            self.failures += 1
+            if self.state == "half_open" or self.failures >= self.max_failures:
+                self.state, self.opened_at = "open", self.clock()
+            raise
+        self.failures, self.state = 0, "closed"          # success resets
+        return result
+
+t = [0.0]
+cb = CircuitBreaker(max_failures=2, reset_after=10, clock=lambda: t[0])
+def bad(): raise IOError("down")
+def good(): return "ok"
+for _ in range(2):
+    try: cb.call(bad)
+    except IOError: pass
+print(cb.state)                        # open
+try: cb.call(good)
+except RuntimeError as e: print(e)     # circuit open: failing fast
+t[0] = 11
+print(cb.call(good), cb.state)         # ok closed   (half-open trial succeeded)
+```
+
+Tuning: use a **failure rate over a sliding window** with a minimum number of calls (not a single error), count slow calls as failures, and use one breaker per dependency (or per endpoint). Libraries: Resilience4j, Polly, Envoy/Istio outlier detection.
+
+## Bulkheads and fallbacks
+
+- **Bulkhead**: isolate resources per dependency (separate thread or connection pools, concurrency limits) so one slow dependency cannot consume everything. Named after ship compartments. See the load-shedding lesson.
+- **Fallback**: what to do when the call fails. Options: cached or stale data, a default value, a reduced feature ("recommendations unavailable"), a queued retry for later. Decide per feature what degraded behaviour is acceptable, because a fallback that is wrong (a stale price at checkout) is worse than an error.
+- **Load shedding and rate limiting** protect the callee; **hedged requests** (send a second copy after a p95 delay, take the first answer) cut tail latency for idempotent reads at the cost of extra load.
+
+<Diagram kind="flow" caption="Layers of protection around one outbound call" nodes={[
+  { id: "caller", label: "Calling service", x: 0, y: 90, role: "Has a request deadline and a limited worker pool.", failureModes: ["Threads blocked on a slow dependency", "Retry amplification"], tradeoffs: ["Budgeted deadlines bound the total time a request may take"] },
+  { id: "bulk", label: "Bulkhead (concurrency limit)", x: 200, y: 90, role: "Caps in-flight calls to this dependency.", failureModes: ["Limit too low rejects healthy traffic"], tradeoffs: ["Protects other features when one dependency is slow"] },
+  { id: "cb", label: "Circuit breaker", x: 400, y: 90, role: "Fails fast when the dependency looks unhealthy.", failureModes: ["Flapping if thresholds are twitchy"], tradeoffs: ["Trades some false rejections for recovery time and saved resources"] },
+  { id: "retry", label: "Timeout + retry (budgeted, jittered)", x: 600, y: 90, role: "Short timeout, at most 2 retries with full jitter, only for idempotent calls.", failureModes: ["Retry storms if unbudgeted"], tradeoffs: ["Hides transient faults at the price of extra load"] },
+  { id: "dep", label: "Dependency", x: 800, y: 90, role: "The service or database being called.", failureModes: ["Slow or erroring"], tradeoffs: ["Returns 429/503 with Retry-After when shedding load"] },
+  { id: "fb", label: "Fallback", x: 400, y: 200, role: "Cached data, default or reduced feature when the call fails.", failureModes: ["Stale or wrong data presented as fresh"], tradeoffs: ["Choose per feature; some paths should error instead"] }
+]} edges={[
+  { from: "caller", to: "bulk" }, { from: "bulk", to: "cb" }, { from: "cb", to: "retry" }, { from: "retry", to: "dep" }, { from: "cb", to: "fb", label: "open or failed" }
+]} />
+
+## Worked example
+
+Checkout calls Recommendations to show "you may also like". Recommendations starts responding in 8 seconds instead of 80 ms. Without protection, checkout threads pile up waiting, checkout stalls, and users cannot pay. With a 150 ms timeout, a bulkhead of 20 concurrent calls, a breaker that opens after 50% failures in 20 calls, and a fallback of an empty widget, checkout continues at normal speed and the widget disappears for a few minutes. The business decision "recommendations are optional, payment is not" is encoded in the design.
+
+## Pitfalls
+
+- Default (infinite or 30 s) timeouts.
+- Retries at every layer.
+- Retrying non-idempotent operations.
+- Constant backoff with no jitter.
+- A circuit breaker shared across unrelated endpoints, so one bad endpoint trips all.
+- Fallbacks that hide errors with wrong data.
+- Never testing failures: use fault injection (latency, errors) in staging.
+
+## What would you choose and why?
+
+Service A calls B calls C. C starts failing 30% of requests. A has 3 retries, B has 3 retries, and traffic is 1000 requests/s. How much load can C see, and which single change would you make first to stop the amplification?
+
+## Quiz
+
+<Quiz id="sd-m13-resilience" tags={["resilience", "circuit-breaker"]} questions={[
+  { type: "mcq", q: "A calls B calls C, each retrying 3 times (4 attempts total) on failure. During a total outage of C, how many calls can one request to A cause to C?", options: ["4", "12", "16", "64"], answer: 2, explain: "A makes up to 4 attempts to B, each of which makes up to 4 attempts to C: 4 x 4 = 16." },
+  { type: "mcq", q: "What does jitter add to exponential backoff?", options: ["Longer delays always", "Randomisation so many clients do not retry in lockstep", "Encryption", "Idempotency"], answer: 1, explain: "Synchronised retries create load spikes; jitter spreads them out." },
+  { type: "multi", q: "Which are properties of a good circuit breaker setup?", options: ["Opens on failure rate over a window with a minimum call count", "Fails fast while open, then half-opens to probe", "A single global breaker for all dependencies", "Counts slow calls as failures"], answer: [0, 1, 3], explain: "One breaker per dependency isolates failures; a global one couples them." },
+  { type: "predict", q: "A breaker has max_failures=2 and reset_after=10. After two failures it is open. A good call is made at t=11. What are the result and state?", code: "cb.call(good); cb.state  # at t=11", options: ["error, open", "ok, closed", "ok, half_open", "error, closed"], answer: 1, explain: "After the cool-down the breaker allows a trial call; success closes it." }
+]} />

@@ -1,0 +1,146 @@
+---
+title: Event-Driven Architecture, CQRS and Event Sourcing
+track: sd
+module: microservice-patterns
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/microservice-patterns/monolith-vs-microservices", "sd/distributed-theory/distributed-transactions-2pc-and-sagas", "sd/queues-and-streaming/kafka-rabbitmq-sqs"]
+tags: [event-driven, cqrs, event-sourcing, projections, read-models, outbox, eventual-consistency]
+type: lesson
+furtherReading:
+  - title: Martin Fowler - Event Sourcing
+    url: https://martinfowler.com/eaaDev/EventSourcing.html
+  - title: Martin Fowler - CQRS
+    url: https://martinfowler.com/bliki/CQRS.html
+  - title: Greg Young - CQRS Documents
+    url: https://cqrs.files.wordpress.com/2010/11/cqrs_documents.pdf
+  - title: Designing Data-Intensive Applications (Kleppmann), chapter 11 (Stream processing and event sourcing)
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+In a request/response design, service A **tells** service B what to do ("reserve stock"). In an **event-driven** design, A **announces what happened** ("OrderPlaced") and any interested service reacts. A does not know or wait for them. This decouples services in time (consumers can be down and catch up) and in knowledge (new consumers need no change to A), at the price of eventual consistency and harder end-to-end reasoning.
+
+## Commands, events, queries
+
+- **Command**: a request to do something; may be rejected. `PlaceOrder`.
+- **Event**: a fact that already happened, immutable, named in the past tense. `OrderPlaced`.
+- **Query**: a read that changes nothing.
+
+Name events for **business facts**, not table changes. `OrderShipped` is useful to everyone; `OrderTableRowUpdated` leaks your schema.
+
+## Event notification vs event-carried state
+
+- **Notification**: the event says "order 7 changed". Consumers call back for details. Small events, but coupling and load return to the producer.
+- **Event-carried state transfer**: the event contains the data consumers need. Consumers keep local copies, so they run even when the producer is down, but must tolerate duplicates, ordering issues and schema evolution.
+
+Use a schema registry and **backward-compatible changes** (add optional fields, never repurpose them) so old consumers keep working.
+
+## Reliable publishing: the outbox again
+
+The producer must save its state and publish its event atomically. Write the event to an `outbox` table in the same database transaction as the state change; a relay or change-data-capture publishes it to the broker. Consumers handle **at-least-once** delivery with idempotent processing (dedupe by event id). Order is guaranteed only within a partition, so partition by the entity id (all events for one order go to the same partition).
+
+## CQRS: separate the write model and the read model
+
+**Command Query Responsibility Segregation** uses different models for changing and for reading data. Writes validate business rules against a consistent, normalised model. Reads are served from one or more **denormalised read models** (projections) shaped exactly for the screens or APIs that need them: a search index, a Redis hash per user, a wide-column table per query.
+
+The write side publishes events; **projectors** consume them and update read models.
+
+<Diagram kind="flow" caption="CQRS: commands update the write model; events feed read models optimised per query" nodes={[
+  { id: "cmd", label: "Command API", x: 0, y: 90, role: "Validates and handles commands (PlaceOrder, CancelOrder).", failureModes: ["Rejected commands must return clear errors"], tradeoffs: ["Strong consistency inside one aggregate"] },
+  { id: "write", label: "Write model (DB)", x: 200, y: 90, role: "Source of truth; enforces invariants; writes events to the outbox in the same transaction.", failureModes: ["Write contention on hot aggregates"], tradeoffs: ["Simple model, optimised for correctness not queries"] },
+  { id: "bus", label: "Event stream", x: 400, y: 90, role: "Durable log of domain events, partitioned by aggregate id.", failureModes: ["Consumer lag", "Duplicate delivery"], tradeoffs: ["Replayable: new read models can be built from history"] },
+  { id: "proj", label: "Projectors", x: 600, y: 20, role: "Consume events and update read models idempotently.", failureModes: ["Projection bugs corrupt the read model (rebuild from the stream)"], tradeoffs: ["Eventual consistency: the read side lags by milliseconds to seconds"] },
+  { id: "read", label: "Read models (search, cache, SQL views)", x: 800, y: 20, role: "Query-shaped, denormalised stores.", failureModes: ["Stale reads right after a write"], tradeoffs: ["Scale reads independently; read-your-writes needs extra work"] },
+  { id: "qry", label: "Query API", x: 600, y: 160, role: "Serves reads from read models only.", failureModes: ["Users do not see their change immediately"], tradeoffs: ["Return the new version from the command, or read from the write model for that user briefly"] }
+]} edges={[
+  { from: "cmd", to: "write" }, { from: "write", to: "bus", label: "outbox events" }, { from: "bus", to: "proj" }, { from: "proj", to: "read" }, { from: "qry", to: "read" }
+]} />
+
+When to use: very different read and write shapes or loads (read-heavy dashboards, search), multiple views of the same data, or complex domains. When not to: simple CRUD. CQRS adds moving parts and eventual consistency to every feature that touches it.
+
+## Event sourcing
+
+Instead of storing the **current state**, store the **sequence of events** that produced it. State is derived by replaying events. A bank account is the classic example: store `Deposited(50)`, `Withdrew(20)`, not just `balance = 30`.
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Event:
+    kind: str
+    amount: int
+
+def apply(balance, e):
+    if e.kind == "deposited": return balance + e.amount
+    if e.kind == "withdrew": return balance - e.amount
+    raise ValueError(e.kind)
+
+def replay(events, upto=None):
+    bal = 0
+    for e in events[:upto]:
+        bal = apply(bal, e)
+    return bal
+
+class Account:
+    def __init__(self): self.events = []
+    def deposit(self, n):
+        self.events.append(Event("deposited", n))
+    def withdraw(self, n):
+        if replay(self.events) < n:                      # command validated against current state
+            raise ValueError("insufficient funds")
+        self.events.append(Event("withdrew", n))
+
+a = Account()
+a.deposit(50); a.withdraw(20)
+print(replay(a.events), replay(a.events, upto=1))        # 30 50  (state now, and state at an earlier point)
+try: a.withdraw(100)
+except ValueError as e: print(e)                         # insufficient funds
+```
+
+Benefits: a perfect **audit log**, **time travel** (state at any past moment), the ability to build new read models by replaying history, and natural fit with event-driven systems.
+
+Costs and rules:
+
+- Events are **immutable**; fix mistakes with compensating events, not edits.
+- Replay gets slow for long histories: take periodic **snapshots** and replay only the tail.
+- **Schema evolution** is hard because old events live forever; use versioned events and upcasters that translate old shapes when reading.
+- Queries over current state need projections (hence the pairing with CQRS).
+- Concurrency: use **optimistic concurrency** (append only if the stream version equals what you read), retrying on conflict.
+- Privacy and deletion rights (GDPR) conflict with immutability; keep personal data outside events or encrypt it with a per-person key you can destroy ("crypto-shredding").
+
+<Callout type="warning" title="Do not adopt it casually">
+Event sourcing is a big commitment. Many teams that want an audit trail are better served by an ordinary database plus an append-only audit table, or change-data-capture. Reserve true event sourcing for domains where history is the product: ledgers, orders with complex lifecycles, collaborative systems.
+</Callout>
+
+## Orchestration vs choreography (recap)
+
+Choreography (services react to each other's events) avoids a central brain but hides the overall flow. Orchestration (a coordinator emits commands, as in the saga lesson) is easier to follow and monitor. In practice: choreography for loosely coupled side effects (send email, update search), orchestration for business transactions that must be tracked to completion.
+
+## Worked example
+
+A marketplace publishes `OrderPlaced`. Inventory reserves stock; Payments authorises; Notifications emails; Analytics counts; Search updates a "popular items" index. Adding a Fraud service later means subscribing to the stream, with no change to Orders. The order page, however, reads from a projection that may lag by a second. To avoid showing a confusing blank page right after checkout, the command response returns the new order id and the page polls or subscribes until the projection catches up.
+
+## Pitfalls
+
+- Treating events as RPCs in disguise (events that demand a specific reaction).
+- Missing idempotency, ordering assumptions across partitions, and unversioned schemas.
+- Putting giant payloads or secrets in events.
+- Unmonitored consumer lag, so read models silently go stale.
+- Event sourcing used where simple CRUD would do.
+- No way to rebuild projections (so a bug becomes permanent).
+
+## What would you choose and why?
+
+Support wants "what did this customer's cart look like last Tuesday?", the finance team wants an immutable ledger, and the product team wants fast search over orders. Which parts need event sourcing, which need only CQRS projections, and which can stay as ordinary tables?
+
+## Quiz
+
+<Quiz id="sd-m13-event-driven-cqrs" tags={["event-driven", "cqrs", "event-sourcing"]} questions={[
+  { type: "mcq", q: "In event sourcing, how is the current account balance obtained?", options: ["Read a balance column that is updated in place", "Replay the stored events (optionally from a snapshot)", "Ask the user", "Query the message broker for the latest message"], answer: 1, explain: "Events are the source of truth; state is derived by folding them." },
+  { type: "mcq", q: "What is the main cost CQRS imposes?", options: ["Reads become slower", "Read models are eventually consistent with the write model", "It forbids databases", "Commands cannot be validated"], answer: 1, explain: "The read side updates asynchronously and may lag." },
+  { type: "multi", q: "Which practices make event consumers safe?", options: ["Idempotent processing keyed by event id", "Partition by aggregate id to keep per-entity ordering", "Assuming events arrive exactly once", "Backward-compatible schema changes"], answer: [0, 1, 3], explain: "Brokers deliver at-least-once; exactly-once is not a safe assumption." },
+  { type: "predict", q: "Events: deposited 50, withdrew 20. What do replay(events) and replay(events, upto=1) return?", code: "replay(a.events), replay(a.events, upto=1)", options: ["30 and 50", "50 and 30", "30 and 30", "70 and 50"], answer: 0, explain: "Full replay gives 30; replaying only the first event gives the earlier state, 50." }
+]} />

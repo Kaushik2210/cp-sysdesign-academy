@@ -1,0 +1,1 @@
+{ "title": "Microservice Patterns", "level": "Level 2: Intermediate", "order": 13, "summary": "When to split a system, how services talk and fail, and the event-driven patterns (CQRS, event sourcing) that follow from owning your own data." }
