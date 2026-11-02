@@ -1,0 +1,180 @@
+---
+title: Scatter-Gather Search and Tail Latency
+track: sd
+module: search-systems
+order: 3
+difficulty: hard
+estMinutes: 35
+prerequisites: ["sd/search-systems/inverted-indexes-and-text-analysis", "sd/databases-2/sharding-and-partitioning", "sd/scalability/load-shedding-and-bulkheads"]
+tags: [search, sharding, scatter-gather, tail-latency, hedged-requests, replicas, pagination]
+type: lesson
+furtherReading:
+  - title: "Dean and Barroso, The Tail at Scale (Communications of the ACM, 2013)"
+    url: https://research.google/pubs/the-tail-at-scale/
+  - title: "Elasticsearch Guide, Search shard routing and paginating results"
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/paginate-search-results.html
+  - title: "Elasticsearch Guide, Adaptive replica selection"
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/search-shard-routing.html
+  - title: "Designing Data-Intensive Applications (Kleppmann), chapter 1 (describing performance: tail latencies)"
+    url: https://dataintensive.net/
+---
+
+## Intuition
+
+One machine cannot hold a billion documents, so the index is split into **shards**. A search then has to ask **every shard** (any of them may hold matching documents), collect their partial results and merge them: a **scatter-gather**. That design has a built-in weakness: the query is only as fast as its **slowest** shard.
+
+If one call in a hundred is slow (a garbage collection, a merge in progress, a cold cache) then a query to 100 shards almost certainly hits at least one slow shard. A rare event on one machine becomes the **typical** experience at scale. This is the heart of the *tail at scale* problem: latency percentiles that look fine per machine become the median for the system.
+
+## How a distributed search runs
+
+Documents are **partitioned by document** (each shard has a full index over its own subset of documents). A search request goes to a coordinating node:
+
+1. **Query phase (scatter):** the coordinator sends the query to one copy (primary or replica) of every shard. Each shard finds its top `from + size` matches by score and returns only their ids and scores.
+2. **Merge (gather):** the coordinator merges these lists into the global top `size`.
+3. **Fetch phase:** it asks the shards that own the winners for the stored fields of the documents it will actually return.
+
+Facts that follow:
+
+- **Cost grows with `from + size`.** Asking for page 1000 (`from = 10,000`) makes every shard return 10,010 candidates. **Deep pagination** is expensive; use `search_after` (a cursor on the sort values) or scroll for exports.
+- **Per-shard statistics** (such as IDF) differ slightly between shards.
+- **Replicas** serve reads as well as providing durability, so query load can be spread across copies.
+- **Over-sharding** adds fan-out cost to every query; too few shards limits parallelism and size. Pick shard counts from data volume (tens of GB per shard is a common guideline) and query patterns.
+- **Routing:** if a query can be restricted to one tenant or key, route it to a single shard instead of all of them.
+
+## The mathematics of the tail
+
+If each shard call is slow with probability `p`, a query that must wait for all `n` shards is slow with probability
+
+```text
+P(at least one slow shard) = 1 - (1 - p)^n
+```
+
+For `p = 1%`: with 1 shard, 1%; with 10 shards, 9.6%; with 50, 39.5%; with 100, **63.4%**. At 100 shards the *median* query is a slow one.
+
+## Defences
+
+- **Hedged (backup) requests:** if a shard has not answered within a threshold (say, near the 95th percentile of its latency), send the same request to another replica and use whichever replies first. This costs a few percent of extra load and removes most of the tail.
+- **Partial results with a deadline:** wait up to a timeout, then return what you have and flag the response as incomplete (`timed_out`, `_shards.failed`). Acceptable for search; not for a bank balance.
+- **Adaptive replica selection:** prefer replicas that have been answering fast and have short queues.
+- **Replicas for read scaling and for escaping slow nodes.**
+- **Fewer, bigger shards** or caching hot results.
+- **Capacity headroom and load shedding** so queues do not build (see the earlier lessons).
+- **Good-enough answers:** an early-termination or "top-k" budget per shard for expensive queries.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Coordinator
+  participant S1 as Shard 1 (replica A)
+  participant S2 as Shard 2 (replica A)
+  participant S2b as Shard 2 (replica B)
+  C->>S1: query
+  C->>S2: query
+  S1-->>C: top results (20 ms)
+  Note over C,S2: no answer from shard 2 after 40 ms
+  C->>S2b: hedged copy of the query
+  S2b-->>C: top results (22 ms later)
+  Note over C: merge and respond, ignore the late reply from replica A`} caption="A hedged request: the second copy goes to another replica after a delay, and the first reply wins" />
+
+## Code: waiting for the slowest shard
+
+Each shard answers in about 20 ms (lognormal), but 1% of calls are slow (+100 to 400 ms). For 1, 10, 50 and 100 shards the program measures the query latency (the slowest shard) under three strategies: wait for all; **hedge** a second request after 40 ms and take the faster; and **partial results** with a 60 ms deadline (shards that miss the deadline are dropped).
+
+<CodeRunner language="python" timeoutMs={30000} code={`import math, random
+
+random.seed(17)
+
+def shard_latency():
+    t = random.lognormvariate(math.log(20), 0.35)
+    if random.random() < 0.01:
+        t += random.uniform(100, 400)
+    return t
+
+def pct(values, p):
+    values = sorted(values)
+    return values[min(len(values) - 1, int(p / 100 * len(values)))]
+
+def query(n, mode, hedge_after=40.0, timeout=60.0):
+    times = [shard_latency() for _ in range(n)]
+    if mode == "wait for all":
+        return max(times), n
+    if mode == "hedged request":
+        times = [min(t, hedge_after + shard_latency()) if t > hedge_after else t for t in times]
+        return max(times), n
+    if mode == "partial results":
+        answered = [t for t in times if t <= timeout]
+        return min(max(times), timeout), len(answered)
+
+N_QUERIES = 5000
+print("each shard: about 20 ms, 1% of calls slow (+100 to 400 ms); a query waits for the shards it needs")
+print(" shards  strategy              p50 ms   p99 ms   average shards answered")
+for n in (1, 10, 50, 100):
+    for mode in ("wait for all", "hedged request", "partial results"):
+        runs = [query(n, mode) for _ in range(N_QUERIES)]
+        lat = [r[0] for r in runs]
+        answered = sum(r[1] for r in runs) / N_QUERIES
+        print(f" {n:6d}  {mode:20s} {pct(lat, 50):7.1f}  {pct(lat, 99):7.1f}   {answered:6.1f} of {n}")
+`} />
+
+### Measured results
+
+Running this exact program with Python 3.13 produced:
+
+| shards | strategy | p50 ms | p99 ms | shards answered |
+| --- | --- | --- | --- | --- |
+| 1 | wait for all | 20.1 | 167.0 | 1.0 of 1 |
+| 1 | hedged request | 20.2 | 57.2 | 1.0 of 1 |
+| 1 | partial results | 20.3 | 59.9 | 1.0 of 1 |
+| 10 | wait for all | 34.8 | 383.9 | 10.0 of 10 |
+| 10 | hedged request | 34.9 | 72.4 | 10.0 of 10 |
+| 10 | partial results | 34.6 | 60.0 | 9.9 of 10 |
+| 50 | wait for all | 50.8 | 414.6 | 50.0 of 50 |
+| 50 | hedged request | 50.3 | 82.5 | 50.0 of 50 |
+| 50 | partial results | 50.1 | 60.0 | 49.5 of 50 |
+| 100 | wait for all | **213.0** | 423.3 | 100.0 of 100 |
+| 100 | hedged request | **58.3** | 148.9 | 100.0 of 100 |
+| 100 | partial results | 60.0 | 60.0 | 98.9 of 100 |
+
+Three observations.
+
+1. **The median itself degrades with fan-out.** Waiting for all 100 shards gave a **median of 213 ms**, more than ten times the 20 ms of a single shard, because 63% of queries hit a slow shard (the formula above) and a slow call adds 100 to 400 ms. The median of the *system* became the 99th percentile of a *shard*.
+2. **Hedging recovers most of it** at no loss of completeness: the median at 100 shards fell from 213 ms to 58 ms and the p99 from 423 ms to 149 ms, while every shard still answered. The price is the extra requests (every call slower than 40 ms triggers a second one; here that is only a few percent of calls).
+3. **Partial results cap latency at the deadline** (60 ms) and lost on average 1.1 of 100 shards (98.9 answered): fast and bounded, but about 1% of the index was missing from the answer. Whether that is acceptable is a product decision.
+
+The single-shard p99 (116 to 167 ms across runs) sits right at the edge of the slow 1% of calls, so that one number is noisy; the contrast between strategies is what matters. The model is simple (independent shards, one kind of slowness); real tails are correlated (a node-level problem slows all its shards).
+
+<Callout type="note" title="Hedging needs idempotent, cheap-to-repeat requests">
+Search queries are read-only, so duplicating them is safe. For writes, hedging needs idempotency keys; for expensive queries, hedge later (a higher percentile) or only after the first request was clearly delayed, so the system does not double its own load during an overload.
+</Callout>
+
+## Trade-offs
+
+<TradeOffs caption="Handling the slowest shard" rows={[
+  { option: "Wait for all shards", pros: "Complete and consistent answers", cons: "Latency is the maximum of all shards; tail grows with fan-out", chooseWhen: "Few shards, or when completeness is mandatory" },
+  { option: "Hedged requests to replicas", pros: "Cuts the tail without dropping results", cons: "Extra load (a few percent); needs replicas and idempotent reads", chooseWhen: "Many shards with replicas; interactive latency goals" },
+  { option: "Partial results with a deadline", pros: "Hard latency bound", cons: "Some documents silently missing; must tell the client", chooseWhen: "Search and recommendations where approximate is fine" },
+  { option: "Fewer, larger shards", pros: "Lower fan-out and tail", cons: "Bigger shards are slower to recover and rebalance", chooseWhen: "Moderate data volumes" },
+  { option: "Route to one shard (tenant or key)", pros: "No fan-out", cons: "Only works when the query constrains the routing key; hot tenants", chooseWhen: "Multi-tenant search" }
+]} />
+
+## Pitfalls
+
+- Allowing deep pagination (`from + size` in the tens of thousands) on a public API.
+- Monitoring only the average or p50 of each shard while users experience the maximum.
+- Treating `timed_out` or failed shards as success without telling the user.
+- Hedging every request immediately, which doubles load.
+- Too many tiny shards, so each query pays fan-out and coordination overhead.
+- Putting all replicas of a shard on one node or rack.
+- Ignoring skew: one shard with more data or hotter documents becomes the permanent straggler.
+
+## What would you choose and why?
+
+Your product search has 80 shards, a latency goal of 200 ms at p99, and each shard has two replicas. During a sale, p99 jumps to 900 ms. Which of the defences above would you try first, in what order, and how would you check that hedging is not making the overload worse? What do you show the user if you drop slow shards?
+
+## Quiz
+
+<Quiz id="sd-m14-scatter-gather" tags={["search", "tail-latency", "sharding"]} questions={[
+  { type: "predict", q: "Each shard call is slow with probability 1%. What is the probability that a query to 100 shards hits at least one slow shard?", code: "print(round(1 - 0.99 ** 100, 3))", options: ["1%", "10%", "63%", "99%"], answer: 2, explain: "1 - 0.99^100 = 0.634, so the slow case is the typical case at 100 shards." },
+  { type: "mcq", q: "Why is deep pagination expensive in a sharded search?", options: ["Documents are large", "Each shard must return from + size candidates for the coordinator to merge", "It disables caches", "Replicas refuse it"], answer: 1, explain: "To find the global page at offset 10,000 each shard has to produce at least its top 10,010; search_after avoids this." },
+  { type: "mcq", q: "What does a hedged request do?", options: ["Retries after an error only", "Sends a second copy to another replica after a delay and uses whichever answer arrives first", "Caches the response", "Cancels the query"], answer: 1, explain: "It removes most of the tail at a small cost in extra requests." },
+  { type: "multi", q: "Which statements match the lesson's measurements?", options: ["Waiting for all 100 shards gave a median of about 213 ms", "Hedging reduced the p99 and still waited for every shard", "Partial results never lose any shard", "A single shard's median was about 20 ms"], answer: [0, 1, 3], explain: "Partial results drop shards that miss the deadline (about 1.1 of 100 on average here)." },
+  { type: "mcq", q: "When is returning partial results most acceptable?", options: ["Bank balance queries", "Search and recommendations, if the response is flagged as incomplete", "Payment authorisation", "Inventory reservation"], answer: 1, explain: "A search result missing 1% of the index is usually tolerable; a missing ledger entry is not." }
+]} />

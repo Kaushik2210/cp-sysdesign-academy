@@ -1,0 +1,1 @@
+{ "title": "Search Systems", "level": "Level 2: Intermediate Systems", "order": 14, "summary": "How full-text search works: inverted indexes and text analysis, ranking with TF-IDF and BM25, scatter-gather over shards and its tail latency, and approximate vector search." }
