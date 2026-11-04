@@ -1,0 +1,414 @@
+---
+title: The FFT and the Number-Theoretic Transform
+track: cp
+module: number-theory
+order: 4
+difficulty: expert
+estMinutes: 60
+prerequisites: [cp/number-theory/extended-euclid-and-crt, cp/math-basics/fast-exponentiation, cp/math-basics/modular-arithmetic]
+tags: [number-theory, fft, ntt, convolution, polynomial-multiplication, roots-of-unity]
+type: lesson
+problems: [m17-two-urns]
+furtherReading:
+  - title: cp-algorithms, Fast Fourier transform
+    url: https://cp-algorithms.com/algebra/fft.html
+  - title: AtCoder Library Practice Contest, F - Convolution
+    url: https://atcoder.jp/contests/practice2/tasks/practice2_f
+  - title: Cooley and Tukey, An algorithm for the machine calculation of complex Fourier series (1965)
+    url: https://www.ams.org/journals/mcom/1965-19-090/S0025-5718-1965-0178586-1/
+---
+
+## Intuition
+
+Multiplying two polynomials of length `n` the way you learned at school takes `n^2` steps, because every coefficient of one meets every coefficient of the other. Counting problems hide this operation constantly: "in how many ways can one item from each of two groups add up to `s`?" is exactly the coefficient of `x^s` in the product of two polynomials. With `n = 10^5` you cannot afford `10^10` steps.
+
+The trick is a change of viewpoint. A polynomial of degree `< n` can be described in two ways:
+
+1. by its **coefficients** `a0, a1, ..., a(n-1)`;
+2. by its **values** at `n` different points.
+
+In the second form, **multiplication is trivial**: the product's value at a point is just the product of the two values at that point. The cost is converting between the forms. The **fast Fourier transform (FFT)** does that conversion in `O(n log n)` by evaluating at very special points: the complex **roots of unity**. The **number-theoretic transform (NTT)** does exactly the same thing with integers modulo a prime, so the answer is exact.
+
+## Definition
+
+**Multiplication in value form.** Evaluate `A(x)` and `B(x)` at `N` points with `N > deg(A) + deg(B)`. Multiply pointwise to get `C(x_k) = A(x_k) B(x_k)`. The `N` values determine the product `C` uniquely.
+
+**The DFT.** Choose `N` a power of two and `w` a primitive `N`-th root of unity, that is `w^N = 1` and `w^k != 1` for `0 < k < N` (over the complex numbers, `w = e^(2 pi i / N)`). The **discrete Fourier transform** of `a = (a0, ..., a(N-1))` is
+
+```text
+A_hat[j] = sum over i of a[i] * w^(i j)        j = 0, ..., N - 1
+```
+
+which is the polynomial `A(x)` evaluated at the points `w^0, w^1, ..., w^(N-1)`. The **inverse DFT** uses `w^(-1)` and divides by `N`:
+
+```text
+a[i] = (1 / N) * sum over j of A_hat[j] * w^(-i j)
+```
+
+**Convolution theorem.** The coefficients of `A * B` are the inverse DFT of the pointwise product of the DFTs (after zero-padding both to length `N >= len(A) + len(B) - 1`).
+
+**Why it is fast: divide and conquer.** Split `A(x) = A_even(x^2) + x * A_odd(x^2)`. The values at `w^k` and `w^(k + N/2) = -w^k` share the same `x^2`, so two half-size transforms give all `N` values with `N/2` "butterflies":
+
+```text
+A_hat[k]         = E_hat[k] + w^k * O_hat[k]
+A_hat[k + N/2]   = E_hat[k] - w^k * O_hat[k]          k = 0, ..., N/2 - 1
+```
+
+`T(N) = 2 T(N / 2) + O(N)` gives `O(N log N)`.
+
+**Iterative form.** The recursion can be unrolled: first permute the array into **bit-reversed order**, then for `length = 2, 4, 8, ..., N` combine neighbouring blocks with butterflies. No recursion, no extra arrays.
+
+## The number-theoretic transform
+
+Complex numbers need rounding. For counting problems modulo a prime you want exact integer arithmetic, and a finite field has roots of unity too:
+
+- Let `p` be a prime of the form `p = c * 2^k + 1` and `g` a primitive root modulo `p`. Then `w = g^((p - 1) / N)` has multiplicative order exactly `N` for every power of two `N <= 2^k`.
+- Run the same butterflies with `w`, with all arithmetic modulo `p`.
+
+The standard modulus is `998244353 = 119 * 2^23 + 1` with primitive root `3`, which supports lengths up to `2^23` (about 8 million).
+
+| modulus `p` | form | primitive root | largest NTT length |
+| --- | --- | --- | --- |
+| `998244353` | `119 * 2^23 + 1` | `3` | `2^23` |
+| `167772161` | `5 * 2^25 + 1` | `3` | `2^25` |
+| `469762049` | `7 * 2^26 + 1` | `3` | `2^26` |
+| `1000000007` | `p - 1 = 2 * 500000003` | n/a | **not NTT-friendly** |
+
+**Other moduli.** For `10^9 + 7` or an arbitrary modulus: compute the convolution with **two or three NTT primes** and combine with the Chinese remainder theorem (the previous lessons), or split each coefficient into 15-bit halves and use a complex FFT with care.
+
+**FFT versus NTT.** The complex FFT needs no special modulus but works in `double`: with coefficients around `10^9` and length `10^5` the rounding error exceeds `0.5` and the result is wrong. Use the FFT only when the true coefficients are small (below about `10^14` total) or split them into smaller pieces; use the NTT when the answer is wanted modulo a friendly prime.
+
+## Example, step by step
+
+Multiply `A(x) = 1 + 2x` and `B(x) = 3 + x`. The product has degree 2, so use `N = 4` points, the 4th roots of unity `1, i, -1, -i`.
+
+| point | `A` | `B` | `A * B` |
+| --- | --- | --- | --- |
+| `1` | `3` | `4` | `12` |
+| `i` | `1 + 2i` | `3 + i` | `(1 + 2i)(3 + i) = 3 + i + 6i + 2i^2 = 1 + 7i` |
+| `-1` | `-1` | `2` | `-2` |
+| `-i` | `1 - 2i` | `3 - i` | `1 - 7i` |
+
+The values `12, 1 + 7i, -2, 1 - 7i` determine the product. Interpolating back gives `3 + 7x + 2x^2`; indeed at `x = 1` it equals `12`, at `x = -1` it equals `3 - 7 + 2 = -2`, and at `x = i` it equals `3 + 7i - 2 = 1 + 7i`. Direct multiplication confirms `(1 + 2x)(3 + x) = 3 + 7x + 2x^2`.
+
+For the practice problem: the two urns are polynomials `A(x) = sum cntA[v] x^v` and `B(x) = sum cntB[v] x^v`; the number of ways to reach sum `s` is the coefficient of `x^s` in `A(x) B(x)`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+MOD = 998244353
+
+def ntt(a, invert):
+    n = len(a)
+    j = 0
+    for i in range(1, n):                   # bit-reversal permutation
+        bit = n >> 1
+        while j & bit:
+            j ^= bit
+            bit >>= 1
+        j ^= bit
+        if i < j:
+            a[i], a[j] = a[j], a[i]
+    length = 2
+    while length <= n:
+        w = pow(3, (MOD - 1) // length, MOD)
+        if invert:
+            w = pow(w, MOD - 2, MOD)
+        half = length // 2
+        ws = [1] * half
+        for k in range(1, half):
+            ws[k] = ws[k - 1] * w % MOD
+        for start in range(0, n, length):
+            for k in range(half):
+                u = a[start + k]
+                v = a[start + k + half] * ws[k] % MOD
+                a[start + k] = (u + v) % MOD
+                a[start + k + half] = (u - v) % MOD
+        length *= 2
+    if invert:
+        inv_n = pow(n, MOD - 2, MOD)
+        for i in range(n):
+            a[i] = a[i] * inv_n % MOD
+
+def multiply(p, q):
+    need = len(p) + len(q) - 1
+    size = 1
+    while size < need:
+        size *= 2
+    fp = p + [0] * (size - len(p))
+    fq = q + [0] * (size - len(q))
+    ntt(fp, False); ntt(fq, False)
+    for i in range(size):
+        fp[i] = fp[i] * fq[i] % MOD
+    ntt(fp, True)
+    return fp[:need]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef long long ll;
+const ll MOD = 998244353;
+ll power(ll b, ll e) {
+    ll r = 1; b %= MOD;
+    while (e > 0) { if (e & 1) r = r * b % MOD; b = b * b % MOD; e >>= 1; }
+    return r;
+}
+void ntt(vector<ll>& a, bool invert) {
+    int n = a.size();
+    for (int i = 1, j = 0; i < n; i++) {
+        int bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) swap(a[i], a[j]);
+    }
+    for (int length = 2; length <= n; length <<= 1) {
+        ll w = power(3, (MOD - 1) / length);
+        if (invert) w = power(w, MOD - 2);
+        int half = length / 2;
+        vector<ll> ws(half, 1);
+        for (int k = 1; k < half; k++) ws[k] = ws[k - 1] * w % MOD;
+        for (int start = 0; start < n; start += length)
+            for (int k = 0; k < half; k++) {
+                ll u = a[start + k], v = a[start + k + half] * ws[k] % MOD;
+                a[start + k] = (u + v) % MOD;
+                a[start + k + half] = (u - v + MOD) % MOD;
+            }
+    }
+    if (invert) {
+        ll inv_n = power(n, MOD - 2);
+        for (ll& x : a) x = x * inv_n % MOD;
+    }
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static final long MOD = 998244353L;
+static long power(long b, long e) {
+    long r = 1; b %= MOD;
+    while (e > 0) { if ((e & 1) == 1) r = r * b % MOD; b = b * b % MOD; e >>= 1; }
+    return r;
+}
+static void ntt(long[] a, boolean invert) {
+    int n = a.length;
+    for (int i = 1, j = 0; i < n; i++) {
+        int bit = n >> 1;
+        for (; (j & bit) != 0; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) { long t = a[i]; a[i] = a[j]; a[j] = t; }
+    }
+    for (int length = 2; length <= n; length <<= 1) {
+        long w = power(3, (MOD - 1) / length);
+        if (invert) w = power(w, MOD - 2);
+        int half = length / 2;
+        long[] ws = new long[half];
+        ws[0] = 1;
+        for (int k = 1; k < half; k++) ws[k] = ws[k - 1] * w % MOD;
+        for (int start = 0; start < n; start += length)
+            for (int k = 0; k < half; k++) {
+                long u = a[start + k], v = a[start + k + half] * ws[k] % MOD;
+                a[start + k] = (u + v) % MOD;
+                a[start + k + half] = (u - v + MOD) % MOD;
+            }
+    }
+    if (invert) {
+        long invN = power(n, MOD - 2);
+        for (int i = 0; i < n; i++) a[i] = a[i] * invN % MOD;
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+The demo checks the NTT against schoolbook multiplication, verifies the root-of-unity orders, multiplies 300-digit integers digit by digit, runs the complex FFT, and shows where floating point stops being exact:
+
+<CodeRunner language="python" code={`import cmath, math, random
+
+MOD = 998244353          # 119 * 2^23 + 1, a prime; 3 is a primitive root
+
+def ntt(a, invert=False):
+    """In-place iterative number-theoretic transform; the length of a must be a power of two (at most 2^23)."""
+    n = len(a)
+    j = 0
+    for i in range(1, n):                       # reorder so that the butterflies can work in place
+        bit = n >> 1
+        while j & bit:
+            j ^= bit
+            bit >>= 1
+        j ^= bit
+        if i < j:
+            a[i], a[j] = a[j], a[i]
+    length = 2
+    while length <= n:
+        w = pow(3, (MOD - 1) // length, MOD)    # an element of multiplicative order exactly length
+        if invert:
+            w = pow(w, MOD - 2, MOD)
+        half = length // 2
+        ws = [1] * half
+        for k in range(1, half):
+            ws[k] = ws[k - 1] * w % MOD
+        for start in range(0, n, length):
+            for k in range(half):
+                u = a[start + k]
+                v = a[start + k + half] * ws[k] % MOD
+                a[start + k] = (u + v) % MOD
+                a[start + k + half] = (u - v) % MOD
+        length *= 2
+    if invert:
+        inv_n = pow(n, MOD - 2, MOD)
+        for i in range(n):
+            a[i] = a[i] * inv_n % MOD
+
+def multiply(p, q):
+    """Coefficients of the product of two polynomials (lists, lowest degree first), modulo 998244353."""
+    need = len(p) + len(q) - 1
+    size = 1
+    while size < need:
+        size *= 2
+    fp = p + [0] * (size - len(p))
+    fq = q + [0] * (size - len(q))
+    ntt(fp); ntt(fq)
+    for i in range(size):
+        fp[i] = fp[i] * fq[i] % MOD
+    ntt(fp, True)
+    return fp[:need]
+
+def multiply_naive(p, q):
+    out = [0] * (len(p) + len(q) - 1)
+    for i, x in enumerate(p):
+        for j, y in enumerate(q):
+            out[i + j] = (out[i + j] + x * y) % MOD
+    return out
+
+random.seed(14)
+for _ in range(300):
+    p = [random.randrange(MOD) for _ in range(random.randint(1, 40))]
+    q = [random.randrange(MOD) for _ in range(random.randint(1, 40))]
+    assert multiply(p, q) == multiply_naive(p, q)
+print("NTT multiplication matches the O(n^2) schoolbook product on 300 random polynomials")
+print("(1 + 2x + 3x^2) * (4 + 5x) =", multiply([1, 2, 3], [4, 5]), "-> 4 + 13x + 22x^2 + 15x^3")
+
+# Roots of unity modulo the prime: w = 3^((p-1)/N) has order exactly N
+for N in (2, 4, 8, 1024, 2 ** 20):
+    w = pow(3, (MOD - 1) // N, MOD)
+    assert pow(w, N, MOD) == 1 and pow(w, N // 2, MOD) != 1
+print("3^((p-1)/N) has multiplicative order exactly N for N = 2, 4, 8, 1024, 2^20")
+print("p - 1 =", MOD - 1, "= 119 * 2^23, so transforms up to length", 2 ** 23, "exist")
+
+# Multiplying huge integers: the digits are the coefficients, then carry
+def multiply_big(x, y):
+    a = [int(c) for c in str(x)[::-1]]
+    b = [int(c) for c in str(y)[::-1]]
+    coeffs = multiply(a, b)                     # each coefficient is at most 81 * length: far below the modulus
+    carry, digits = 0, []
+    for c in coeffs:
+        carry += c
+        digits.append(carry % 10)
+        carry //= 10
+    while carry:
+        digits.append(carry % 10)
+        carry //= 10
+    while len(digits) > 1 and digits[-1] == 0:
+        digits.pop()
+    return int("".join(map(str, digits[::-1])))
+
+for _ in range(50):
+    x, y = random.randrange(10 ** random.randint(1, 300)), random.randrange(10 ** random.randint(1, 300))
+    assert multiply_big(x, y) == x * y
+print("multiplying 300-digit numbers digit by digit with the NTT matches Python's own big integers")
+
+# The complex FFT does the same with floating point, and rounds at the end
+def fft(a, invert=False):
+    n = len(a)
+    if n == 1:
+        return a
+    even, odd = fft(a[0::2], invert), fft(a[1::2], invert)
+    sign = -1 if invert else 1
+    out = [0] * n
+    for k in range(n // 2):
+        t = cmath.exp(sign * 2j * math.pi * k / n) * odd[k]
+        out[k] = even[k] + t
+        out[k + n // 2] = even[k] - t
+    return out
+
+def multiply_fft(p, q):
+    need = len(p) + len(q) - 1
+    size = 1
+    while size < need:
+        size *= 2
+    fp = fft([complex(x) for x in p] + [0] * (size - len(p)))
+    fq = fft([complex(x) for x in q] + [0] * (size - len(q)))
+    prod = fft([x * y for x, y in zip(fp, fq)], True)
+    return [round(x.real / size) for x in prod[:need]]
+
+p = [random.randint(0, 100) for _ in range(50)]
+q = [random.randint(0, 100) for _ in range(50)]
+exact = [sum(p[i] * q[k - i] for i in range(len(p)) if 0 <= k - i < len(q)) for k in range(len(p) + len(q) - 1)]
+assert multiply_fft(p, q) == exact
+print("the floating-point FFT, rounded, gives the exact integer product for small values")
+
+# ...but the rounding breaks when the true coefficients get large relative to the precision of a double
+random.seed(5)
+big_p = [random.randint(0, 10 ** 9) for _ in range(512)]
+big_q = [random.randint(0, 10 ** 9) for _ in range(512)]
+exact_big = [sum(big_p[i] * big_q[k - i] for i in range(len(big_p)) if 0 <= k - i < len(big_q)) for k in range(1023)]
+fft_big = multiply_fft(big_p, big_q)
+worst = max(abs(x - y) for x, y in zip(fft_big, exact_big))
+print("values up to 10^9, length 512: true coefficients reach about", max(exact_big), "; the largest FFT error is", worst, "(a double keeps only ~16 digits)")
+ntt_big = multiply([x % MOD for x in big_p], [x % MOD for x in big_q])
+print("the NTT result is exact modulo p:", all(a == b % MOD for a, b in zip(ntt_big, exact_big)))
+`} />
+
+## What convolution gives you
+
+| problem | encoding |
+| --- | --- |
+| number of ways to get sum `s` from one item of each of two groups | polynomials of counts, coefficient of `x^s` |
+| multiply two huge integers | digits as coefficients, then carry (about `10^6` digits per second) |
+| count pairs `(i, j)` with `a_i + b_j = s` for all `s` | histograms of values, one convolution |
+| count pairs with `a_j - a_i = d` | convolve with a reversed array: `x^(M - a_i)` |
+| string matching with wildcards, or counting mismatches | sum over positions of `(p_i - t_j)^2 p_i t_j` expands into three convolutions |
+| subset-sum counting with small values | repeated multiplication `(1 + x^{v})`, or divide and conquer with FFT |
+| DP of the form `dp[i] = sum of dp[j] * f(i - j)` (online) | CDQ divide and conquer with an FFT at each level |
+| polynomial inverse, exp, log, power series | Newton's method built on fast multiplication |
+| bitwise convolution (AND, OR, XOR) | the Walsh-Hadamard transform, the same butterfly idea with `+` and `-` |
+
+## Pitfalls
+
+1. **Padding too short.** The length must be at least `len(A) + len(B) - 1`; otherwise the high coefficients wrap around and corrupt the low ones.
+2. **Length not a power of two.** The iterative algorithm needs it; round up.
+3. **Using the NTT with a non-friendly modulus** such as `10^9 + 7`. There is no root of unity of the required order; use three NTT primes with CRT, or the splitting FFT.
+4. **Overflow in the modular product.** `a * b` needs 64 bits for 30-bit values; in JavaScript split one factor into 15-bit halves, in 32-bit languages use `long`.
+5. **Forgetting the inverse scaling.** The inverse transform needs the factor `N^(-1) mod p`.
+6. **Floating-point FFT with large coefficients.** Errors grow with the magnitude of the result; with values around `10^9` and long arrays the rounding is wrong. Reduce the values, split them, or use the NTT.
+7. **Reading counts that exceed the modulus.** NTT results are modulo `p`: if the true count can be larger than `p` and you need it exactly, use a second prime and CRT.
+8. **Recomputing roots of unity inside the inner loop** with `pow`. Precompute the powers of `w` per level, as above.
+
+## Practice
+
+<Problem id="m17-two-urns" />
+
+## Problem ladder
+
+- [Convolution](https://atcoder.jp/contests/practice2/tasks/practice2_f) (AtCoder Library Practice Contest F): the library-grade NTT benchmark, lengths up to `5 * 10^5`.
+- [Convolution (mod 998244353)](https://judge.yosupo.jp/problem/convolution_mod) (Library Checker): the same, also a fast-implementation test.
+- [Fast Multiplication](https://www.spoj.com/problems/MUL/) (SPOJ MUL): multiply big integers with many digits.
+- [Nikita and Order Statistics](https://codeforces.com/problemset/problem/993/E) (Codeforces 993E, rating about 2900): counting subarrays by the number of elements below a threshold, a convolution in disguise.
+
+## Quiz
+
+<Quiz id="cp-m17-fft-ntt" tags={["number-theory", "fft", "ntt", "convolution"]} questions={[
+  { type: "mcq", q: "Why is it easy to multiply polynomials in value form?", options: ["Values are always small", "The product's value at a point is the product of the two values at that point", "Values do not need modular arithmetic", "There is no degree limit"], answer: 1, explain: "C(x) = A(x) B(x), so evaluating at the same points gives pointwise multiplication; the transform converts between the forms." },
+  { type: "mcq", q: "What makes 998244353 a good NTT modulus?", options: ["It is close to 10^9", "It equals 119 * 2^23 + 1, so it has roots of unity of every power-of-two order up to 2^23", "It is a Mersenne prime", "It is even"], answer: 1, explain: "The multiplicative group has order p - 1 = 119 * 2^23, so elements of order 2^k exist for k up to 23." },
+  { type: "predict", q: "What is (1 + 2x) * (3 + x) as a polynomial?", code: "# coefficients of the product, lowest degree first", options: ["3 + 5x + 2x^2", "3 + 7x + 2x^2", "4 + 7x + 2x^2", "3 + 7x + x^2"], answer: 1, explain: "3 + x + 6x + 2x^2 = 3 + 7x + 2x^2." },
+  { type: "mcq", q: "What is the time complexity of FFT-based multiplication of two polynomials of length n?", options: ["O(n^2)", "O(n log n)", "O(n)", "O(n log^2 n) at best"], answer: 1, explain: "Two forward transforms, a pointwise product and one inverse transform, each O(n log n) or O(n)." },
+  { type: "multi", q: "Which are true?", options: ["The padded length must be at least len(A) + len(B) - 1", "The inverse transform needs the factor N^(-1) mod p", "Floating-point FFT is always exact for any integer coefficients", "10^9 + 7 supports a direct NTT of any power-of-two length"], answer: [0, 1], explain: "Floating-point FFT loses precision when coefficients are large, and 10^9 + 7 is not NTT-friendly." }
+]} />
