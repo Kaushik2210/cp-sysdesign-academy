@@ -1,0 +1,359 @@
+---
+title: Nim and the Sprague-Grundy Theorem
+track: cp
+module: game-theory
+order: 1
+difficulty: hard
+estMinutes: 55
+prerequisites: [cp/recursion-and-bitmasks/bit-manipulation-basics, cp/graphs/topological-sort]
+tags: [game-theory, nim, sprague-grundy, mex, impartial-games, xor]
+type: lesson
+problems: [m24-token-duel]
+furtherReading:
+  - title: cp-algorithms, Sprague-Grundy theorem. Nim
+    url: https://cp-algorithms.com/game_theory/sprague-grundy-nim.html
+  - title: CSES Problem Set, Nim Game I
+    url: https://cses.fi/problemset/task/1730
+  - title: Bouton, Nim, a game with a complete mathematical theory (1901)
+    url: https://www.jstor.org/stable/1967631
+---
+
+## Intuition
+
+Two players alternate moves in a game with no chance and no hidden information. The one who cannot move loses. Who wins with perfect play? For small games you can search the whole game tree. For large ones, a few beautiful facts let you answer instantly:
+
+- Every position is either **winning for the player to move** or **losing for the player to move** (this is a *normal-play impartial* game: both players have the same moves available).
+- A position is **losing** exactly when **every** move leads to a winning position for the opponent (including the case of no moves). A position is **winning** when **some** move leads to a losing position.
+- A pile game called **Nim** has a complete solution: XOR the pile sizes.
+- **Every** impartial game behaves exactly like a Nim pile whose size is a number called its **Grundy value**. So many independent games played together reduce to one Nim position: XOR their Grundy values.
+
+## Definitions
+
+An **impartial game** has positions, a set of moves from each position (the same for both players) and ends when the player to move has no move; that player **loses** (normal play).
+
+- **P-position** (previous player wins): the player to move loses with optimal play.
+- **N-position** (next player wins): the player to move wins.
+
+Recursion: a position is a P-position iff all its moves lead to N-positions; an N-position iff at least one move leads to a P-position. Terminal positions are P-positions. For a game on a directed acyclic graph this is a DP in reverse topological order.
+
+### Nim
+
+Several piles of stones. A move removes any positive number of stones from one pile. The last player to take a stone wins.
+
+**Bouton's theorem.** A Nim position with pile sizes `a1, ..., ak` is a P-position **if and only if** `a1 xor a2 xor ... xor ak = 0`.
+
+Why: (1) the terminal position (all piles empty) has XOR `0`. (2) From any position with XOR `0`, every move changes exactly one pile, so the XOR becomes non-zero: P positions only lead to N positions. (3) From any position with XOR `X != 0`, take the highest set bit of `X`; some pile `a` has that bit set; replace `a` by `a xor X`, which is smaller than `a`, and the total XOR becomes `0`: an N position always has a move to a P position.
+
+**Winning move.** Compute `X`; pick a pile `a` with `a xor X < a`; reduce it to `a xor X`.
+
+### Mex and Grundy numbers
+
+For a set `S` of non-negative integers, `mex(S)` is the **minimum excluded value**: the smallest non-negative integer not in `S`. The **Grundy value** (nimber) of a position `p` is
+
+```text
+g(p) = mex { g(q) : q is reachable from p by one move }
+```
+
+A position with no moves has `g = 0`. Grundy value `0` means P-position; non-zero means N-position.
+
+### Sprague-Grundy theorem
+
+> Every position of an impartial game is equivalent to a Nim pile of size `g(p)`.
+> The **sum** of games (a player chooses one component and makes one move there) has Grundy value `g(p1) xor g(p2) xor ... xor g(pk)`.
+
+So for several independent games you compute each game's Grundy value separately and XOR them. The first player wins the sum exactly when the XOR is non-zero. The Nim pile of size `n` has `g = n` (its options are piles `0..n-1`, whose mex is `n`), which is how Bouton's theorem becomes a special case.
+
+## Example, step by step
+
+**A subtraction game.** One pile of `n` stones; a move removes 1, 3 or 4 stones. Grundy values:
+
+- `g(0) = 0`. `g(1)`: options `g(0) = 0`, so `mex {0} = 1`. `g(2)`: options `g(1) = 1`, so `mex {1} = 0`.
+- `g(3)`: options `g(2) = 0`, `g(0) = 0`: `mex {0} = 1`. `g(4)`: options `g(3) = 1`, `g(1) = 1`, `g(0) = 0`: `mex {0, 1} = 2`.
+- `g(5)`: options `g(4) = 2`, `g(2) = 0`, `g(1) = 1`: `mex {0, 1, 2} = 3`. `g(6)`: options `g(5) = 3`, `g(3) = 1`, `g(2) = 0`: `mex {0, 1, 3} = 2`.
+- The sequence is `0, 1, 0, 1, 2, 3, 2, 0, 1, 0, 1, 2, 3, 2, ...`, **periodic with period 7**.
+
+Now a sum: three piles of sizes `5, 6, 9` in this game. `g(5) = 3`, `g(6) = 2`, `g(9) = 0`; the XOR is `3 xor 2 xor 0 = 1 != 0`: the first player wins. A winning move changes one pile so that the XOR becomes 0, for example change the pile `5` (Grundy `3`) to a position with Grundy `3 xor 1 = 2`: reachable by removing 1 stone (`g(4) = 2`).
+
+**A game that splits (Kayles).** A row of `n` pins; a move knocks down 1 pin or 2 adjacent pins. The row splits into two independent rows (a sum). So `g(n) = mex of { g(a) xor g(b) : a + b = n - 1 or n - 2 }`, and the values begin `0, 1, 2, 3, 1, 4, 3, 2, 1, 4, 2, 6, ...`.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def mex(values):
+    s = set(values)
+    g = 0
+    while g in s:
+        g += 1
+    return g
+
+# a game on a DAG: succ[v] lists the positions reachable from v
+# process in reverse topological order so every successor already has its value
+grundy = [0] * n
+for u in reversed(order):
+    grundy[u] = mex(grundy[v] for v in succ[u])
+
+# one pile with allowed removals `moves`
+def pile_grundy(limit, moves):
+    g = [0] * (limit + 1)
+    for n in range(1, limit + 1):
+        g[n] = mex(g[n - k] for k in moves if k <= n)
+    return g
+
+# the first player wins a sum of games iff the XOR of the Grundy values is non-zero
+x = 0
+for position in tokens:
+    x ^= grundy[position]
+print("First" if x else "Second")
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int mex(const vector<int>& values) {
+    set<int> s(values.begin(), values.end());
+    int g = 0;
+    while (s.count(g)) g++;
+    return g;
+}
+
+vector<int> grundy(n, 0);
+for (int i = (int)order.size() - 1; i >= 0; i--) {     // reverse topological order
+    int u = order[i];
+    vector<int> opts;
+    for (int v : succ[u]) opts.push_back(grundy[v]);
+    grundy[u] = mex(opts);
+}
+
+int x = 0;
+for (int position : tokens) x ^= grundy[position];
+puts(x ? "First" : "Second");
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static int mex(Collection<Integer> values) {
+    HashSet<Integer> s = new HashSet<>(values);
+    int g = 0;
+    while (s.contains(g)) g++;
+    return g;
+}
+
+int[] grundy = new int[n];
+for (int i = cnt - 1; i >= 0; i--) {                   // reverse topological order
+    int u = order[i];
+    ArrayList<Integer> opts = new ArrayList<>();
+    for (int v : succ[u]) opts.add(grundy[v]);
+    grundy[u] = mex(opts);
+}
+
+int x = 0;
+for (int position : tokens) x ^= grundy[position];
+System.out.println(x != 0 ? "First" : "Second");
+```
+
+</Tab>
+</Tabs>
+
+The demo verifies the XOR rule for Nim against full game-tree search, computes Grundy values of a subtraction game, checks the sum rule, solves Kayles (a game that splits), and tests the misère rule:
+
+<CodeRunner language="python" code={`import itertools, random
+from functools import lru_cache
+
+# ------------------------------------------------------------------ Nim: the XOR rule
+def nim_first_wins(piles):
+    x = 0
+    for p in piles:
+        x ^= p
+    return x != 0
+
+@lru_cache(maxsize=None)
+def nim_brute(piles):
+    """Full game-tree search: the player to move wins if some move leaves a losing position."""
+    for i, p in enumerate(piles):
+        for take in range(1, p + 1):
+            nxt = tuple(sorted(piles[:i] + (p - take,) + piles[i + 1:]))
+            if not nim_brute(nxt):
+                return True
+    return False
+
+for piles in itertools.product(range(5), repeat=3):
+    assert nim_first_wins(piles) == nim_brute(tuple(sorted(piles))), piles
+print("Nim: the first player wins exactly when the XOR of the heaps is non-zero (checked for all heaps up to 4)")
+x = 3 ^ 4 ^ 5
+heap = next(h for h in (3, 4, 5) if h ^ x < h)               # a heap that can be reduced to (itself XOR the total)
+print("heaps 3, 4, 5 -> XOR =", x, "-> first player wins; winning move: reduce the heap of", heap, "to", heap ^ x, "so the XOR becomes 0")
+
+# ------------------------------------------------------------------ mex and Grundy numbers
+def mex(values):
+    s = set(values)
+    g = 0
+    while g in s:
+        g += 1
+    return g
+
+def grundy_subtraction(limit, moves):
+    """One heap; a move removes some number of stones from moves. g[n] = mex of g[n - move]."""
+    g = [0] * (limit + 1)
+    for n in range(1, limit + 1):
+        g[n] = mex(g[n - k] for k in moves if k <= n)
+    return g
+
+g = grundy_subtraction(20, (1, 3, 4))
+print("Grundy values of the subtraction game {1, 3, 4}:", g)
+
+# ------------------------------------------------------------------ sums of games: XOR of the Grundy values
+@lru_cache(maxsize=None)
+def sum_brute(state, moves):
+    """state = tuple of heap sizes in games where each move subtracts an amount from moves; one heap moves per turn."""
+    for i, h in enumerate(state):
+        for k in moves:
+            if k <= h:
+                nxt = tuple(sorted(state[:i] + (h - k,) + state[i + 1:]))
+                if not sum_brute(nxt, moves):
+                    return True
+    return False
+
+moves = (1, 3, 4)
+gr = grundy_subtraction(12, moves)
+for state in itertools.product(range(10), repeat=3):
+    x = 0
+    for h in state:
+        x ^= gr[h]
+    assert (x != 0) == sum_brute(tuple(sorted(state)), moves), state
+print("a sum of three subtraction games is decided by the XOR of the Grundy values: verified for every heap triple below 10")
+
+# ------------------------------------------------------------------ Kayles: moves that split a game into two
+def kayles_grundy(limit):
+    """A row of n pins; knock down one pin or two adjacent pins. The row splits into two independent rows."""
+    g = [0] * (limit + 1)
+    for n in range(1, limit + 1):
+        options = set()
+        for removed in (1, 2):
+            if removed <= n:
+                for left in range(0, n - removed + 1):
+                    right = n - removed - left
+                    options.add(g[left] ^ g[right])            # two separate games form a sum
+        g[n] = mex(options)
+    return g
+
+@lru_cache(maxsize=None)
+def kayles_brute(rows):
+    """rows: a sorted tuple of row lengths. Win if some move leaves a losing position."""
+    for i, r in enumerate(rows):
+        for removed in (1, 2):
+            for left in range(0, r - removed + 1):
+                right = r - removed - left
+                nxt = tuple(sorted(x for x in rows[:i] + (left, right) + rows[i + 1:] if x > 0))
+                if not kayles_brute(nxt):
+                    return True
+    return False
+
+kg = kayles_grundy(30)
+print("Kayles Grundy values for rows of 0..20 pins:", kg[:21])
+for n in range(1, 13):
+    assert (kg[n] != 0) == kayles_brute((n,)), n
+print("a row of n pins is a first-player win iff its Grundy value is non-zero (checked for n up to 12)")
+
+@lru_cache(maxsize=None)
+def kayles_nimvalue(rows):
+    """The exact nim-value of a position (a set of rows): the mex over all moves of the nim-values of the results."""
+    options = set()
+    for i, r in enumerate(rows):
+        for removed in (1, 2):
+            for left in range(0, r - removed + 1):
+                right = r - removed - left
+                options.add(kayles_nimvalue(tuple(sorted(x for x in rows[:i] + (left, right) + rows[i + 1:] if x > 0))))
+    g = 0
+    while g in options:
+        g += 1
+    return g
+
+assert all(kayles_nimvalue((n,)) == kg[n] for n in range(1, 11))
+assert kayles_nimvalue((3, 4)) == kg[3] ^ kg[4] and kayles_nimvalue((2, 2, 5)) == kg[2] ^ kg[2] ^ kg[5]
+print("the exact nim-values of rows (and of sums of rows) from the full game tree equal the split-and-XOR recurrence")
+
+# ------------------------------------------------------------------ misere Nim (the last player to move LOSES)
+@lru_cache(maxsize=None)
+def misere_brute(piles):
+    if sum(piles) == 0:
+        return True                                       # the previous player took the last stone and lost: we win
+    for i, p in enumerate(piles):
+        for take in range(1, p + 1):
+            nxt = tuple(sorted(piles[:i] + (p - take,) + piles[i + 1:]))
+            if not misere_brute(nxt):
+                return True
+    return False
+
+def misere_first_wins(piles):
+    if all(p <= 1 for p in piles):
+        return sum(piles) % 2 == 0                        # only 0/1 heaps: the first player wants an even count
+    x = 0
+    for p in piles:
+        x ^= p
+    return x != 0                                         # otherwise play exactly like normal Nim
+
+for piles in itertools.product(range(5), repeat=3):
+    assert misere_first_wins(piles) == misere_brute(tuple(sorted(piles))), piles
+print("misere Nim: play as in normal Nim unless every heap has at most 1 stone, then the parity flips (verified)")
+`} />
+
+## Common games and their Grundy values
+
+| game | rule | Grundy value or result |
+| --- | --- | --- |
+| Nim | remove any number from one pile | `g(n) = n` |
+| subtraction game `S` | remove `k` in `S` from one pile | mex recurrence; usually periodic |
+| take 1 to `k` stones | `S = {1, ..., k}` | `g(n) = n mod (k + 1)` |
+| staircase Nim | move coins down a staircase | Nim on the **odd** steps only |
+| Kayles | knock 1 or 2 adjacent pins; the row splits | `g(n) = mex of g(a) xor g(b)`; eventually periodic with period 12 (after a prefix of about 70 values) |
+| misère Nim | the **last** player to move **loses** | as normal Nim, except when all piles have at most 1 stone: then the first player wins iff the number of non-empty piles is **even** |
+| Wythoff's game | remove from one pile, or equal amounts from both | P-positions are Beatty-sequence pairs `(floor(k phi), floor(k phi^2))`, not a nim-sum |
+| cycle (loopy) games | positions can repeat | need draw handling and retrograde analysis, outside Sprague-Grundy |
+
+## How to approach a game problem
+
+1. **Check it is impartial** (both players have the same moves) and ends in finite time. If the players have different moves (partizan), or can cycle, other tools apply.
+2. **Decide the winning condition**: normal play (cannot move loses) vs misère.
+3. **Brute force small cases** by memoised search; print the P-positions and Grundy values; look for a pattern (periodicity, `n mod (k + 1)`, binary structure).
+4. **Decompose into independent components** (piles, rows after a split, tokens on separate graphs) and use `xor` of Grundy values.
+5. **Compute Grundy values** by mex DP. If the state space is huge, find the period or a closed form.
+6. **Verify** the formula against a brute force on small inputs before trusting it.
+
+## Pitfalls
+
+1. **Using win/lose labels for sums.** A sum of two N-positions can be N or P; only Grundy values combine correctly.
+2. **Wrong mex**: it is the smallest non-negative integer **missing** from the set, not the maximum plus 1. `mex {0, 2} = 1`.
+3. **Mixing normal and misère play.** The XOR rule is for normal play; misère needs the special case for piles of size at most 1.
+4. **Forgetting that a move changes only one component** of a sum. If a move can affect two components at once (as in Wythoff), the XOR rule fails.
+5. **Treating components as independent when they are not**, for example when a move on one pile depends on another.
+6. **Processing positions in the wrong order**: compute Grundy values after all successors, in reverse topological order.
+7. **Cycles.** Sprague-Grundy needs a finite game (a DAG). With repeating positions, use retrograde analysis with draws.
+8. **Huge heaps without a pattern.** If values are not periodic, you cannot tabulate; look for structure instead of brute force.
+
+## Practice
+
+<Problem id="m24-token-duel" />
+
+## Problem ladder
+
+- [Nim Game I](https://cses.fi/problemset/task/1730) (CSES): pure Bouton's theorem.
+- [Nim Game II](https://cses.fi/problemset/task/1098) (CSES): the same with a bounded move size, a mod-4 twist.
+- [Stair Game](https://cses.fi/problemset/task/1099) (CSES): staircase Nim.
+- [Stick Game](https://cses.fi/problemset/task/1729) (CSES): a subtraction game with a given move set, solved by the win/lose DP and then by Grundy values.
+- [Game on Graph / Token games](https://cp-algorithms.com/game_theory/sprague-grundy-nim.html) (cp-algorithms): worked examples and further problems on the same page.
+
+## Quiz
+
+<Quiz id="cp-m24-sprague-grundy" tags={["game-theory", "nim", "sprague-grundy"]} questions={[
+  { type: "mcq", q: "Nim with heaps 3, 4, 5. Who wins with optimal play?", options: ["The second player, because the XOR is 0", "The first player, because 3 xor 4 xor 5 = 2, which is non-zero", "It depends on who moves", "A draw"], answer: 1, explain: "A non-zero XOR is an N-position: the player to move wins." },
+  { type: "predict", q: "What is mex of the set {0, 1, 3}?", code: "s = {0, 1, 3}\ng = 0\nwhile g in s:\n    g += 1\nprint(g)", options: ["1", "2", "3", "4"], answer: 1, explain: "The smallest non-negative integer not in the set is 2." },
+  { type: "mcq", q: "The Sprague-Grundy theorem says that a sum of impartial games has Grundy value equal to:", options: ["The sum of the components' Grundy values", "The maximum of the components' Grundy values", "The XOR of the components' Grundy values", "The product of the components' Grundy values"], answer: 2, explain: "Every game acts like a Nim heap of its Grundy size, and Nim sums combine by XOR." },
+  { type: "mcq", q: "A position of a game on a DAG has no moves. What is its Grundy value?", options: ["0, it is a P-position", "1", "Undefined", "Infinity"], answer: 0, explain: "The mex of the empty set is 0, and the player to move loses." },
+  { type: "multi", q: "Which statements are true?", options: ["A position is a P-position iff all its moves lead to N-positions", "In misère Nim with all heaps of size at most 1, the XOR rule is reversed (the parity flips)", "Win/lose labels are enough to solve any sum of games", "Grundy values on a DAG are computed in reverse topological order"], answer: [0, 1, 3], explain: "Win/lose labels do not combine for sums; Grundy values do." }
+]} />
