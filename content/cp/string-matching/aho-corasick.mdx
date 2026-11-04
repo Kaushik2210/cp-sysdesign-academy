@@ -1,0 +1,371 @@
+---
+title: Aho-Corasick and Multi-Pattern Matching
+track: cp
+module: string-matching
+order: 4
+difficulty: expert
+estMinutes: 55
+prerequisites: [cp/string-matching/kmp, cp/graphs/topological-sort]
+tags: [strings, aho-corasick, trie, automaton, failure-links, pattern-matching, dp-on-automaton]
+type: lesson
+problems: [m14-banned-words]
+furtherReading:
+  - title: cp-algorithms, Aho-Corasick algorithm
+    url: https://cp-algorithms.com/string/aho_corasick.html
+  - title: CSES Problem Set, Finding Patterns
+    url: https://cses.fi/problemset/task/2102
+  - title: Aho and Corasick, Efficient string matching, an aid to bibliographic search (1975)
+    url: https://dl.acm.org/doi/10.1145/360825.360855
+---
+
+## Intuition
+
+[KMP](/cp/string-matching/kmp/) finds **one** pattern in a text in `O(n + m)`. Now imagine a spam filter with ten thousand banned words, or a DNA tool searching a genome for thousands of motifs. Running KMP once per word costs `k` full passes over the text. **Aho-Corasick** reads the text **once** and finds every occurrence of every pattern simultaneously.
+
+The idea combines two things you already know:
+
+- A **trie** stores all the patterns as paths of letters from a common root, sharing common prefixes.
+- KMP's **failure function** says "if the next letter does not extend my match, fall back to the longest shorter match that is still alive". Do exactly that, but **over the trie**.
+
+The result is a finite automaton: after reading each letter you are in one state, and that state tells you the longest suffix of the text so far that is a prefix of some pattern.
+
+## Definition
+
+1. **Trie.** Insert each pattern. Each node `v` stands for the string `str(v)` spelled by the path from the root. Mark nodes where a pattern ends (count duplicates).
+2. **Failure link.** `fail[v]` is the node for the **longest proper suffix of `str(v)` that is also a node of the trie** (the root if none). For children of the root, `fail` is the root.
+3. **Transition function** `go(v, c)`: from state `v` reading `c`:
+   - if `v` has a child `u` by `c`, move to `u`;
+   - otherwise follow failure links until some node has a child by `c` (or you reach the root and stay).
+4. **Match reporting.** If you are in node `v`, then every pattern that ends at the current position is a node on the chain `v, fail[v], fail[fail[v]], ...` that is marked as a word end. Define
+
+```text
+total[v] = ends[v] + total[fail[v]]
+```
+
+so that `total[state]` is **the number of patterns ending at the current position**, found with one array lookup.
+
+**Building with a BFS.** Process nodes in order of depth (so `fail[v]`, which is shallower, is already done):
+
+```text
+for each child u of v by letter c:  fail[u] = go(fail[v], c)
+for each letter c with no child:    go(v, c) = go(fail[v], c)         # complete the table
+```
+
+Filling in the missing transitions turns the automaton into a **complete DFA** (one transition per letter for every state), so scanning the text needs no loops: `state = go[state][c]`.
+
+**Complexity.** Building costs `O(L * sigma)` where `L` is the total pattern length and `sigma` the alphabet size (or `O(L)` with a map and amortised failure-chain walking); scanning costs `O(n)`. Reporting each occurrence separately costs `O(n + z)` where `z` is the number of occurrences.
+
+## Example, step by step
+
+Patterns `he`, `she`, `his`, `hers`; text `ushers`.
+
+Trie nodes: `h`, `he` (word), `her`, `hers` (word), `hi`, `his` (word), `s`, `sh`, `she` (word).
+
+Failure links: `h`, `s`, `hi`, `her` point to the root; `he -> root`; `sh -> h`; `she -> he` (suffix `he` of `she` is a pattern node); `his -> s`; `hers -> s`.
+
+Scan:
+
+| letter | state | patterns ending here (via the failure chain) |
+| --- | --- | --- |
+| `u` | root | none |
+| `s` | `s` | none |
+| `h` | `sh` | none |
+| `e` | `she` | `she`, and through `fail`, `he` |
+| `r` | `her` | none |
+| `s` | `hers` | `hers` (and `fail = s` is not a word) |
+
+Total: `she`, `he`, `hers`: **3** occurrences. The two matches at the fourth letter come from walking the failure chain `she -> he`, which `total[she] = ends[she] + total[he] = 1 + 1 = 2` captures in one step.
+
+## Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+from collections import deque
+
+child = [[-1] * 26]
+ends = [0]
+for pat in patterns:
+    v = 0
+    for ch in pat:
+        c = ord(ch) - 97
+        if child[v][c] == -1:
+            child[v][c] = len(child)
+            child.append([-1] * 26)
+            ends.append(0)
+        v = child[v][c]
+    ends[v] += 1
+
+fail = [0] * len(child)
+total = ends[:]
+q = deque()
+for c in range(26):
+    u = child[0][c]
+    if u == -1:
+        child[0][c] = 0
+    else:
+        fail[u] = 0
+        q.append(u)
+while q:
+    v = q.popleft()
+    total[v] += total[fail[v]]               # fail[v] is shallower, so it is already final
+    for c in range(26):
+        u = child[v][c]
+        if u == -1:
+            child[v][c] = child[fail[v]][c]  # complete the automaton
+        else:
+            fail[u] = child[fail[v]][c]
+            q.append(u)
+
+state = answer = 0
+for ch in text:
+    state = child[state][ord(ch) - 97]
+    answer += total[state]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<array<int, 26>> child(1);
+child[0].fill(-1);
+vector<long long> total(1, 0);              // starts as "words ending here"
+for (const string& pat : patterns) {
+    int v = 0;
+    for (char ch : pat) {
+        int c = ch - 'a';
+        if (child[v][c] == -1) {
+            child[v][c] = child.size();
+            child.emplace_back();
+            child.back().fill(-1);
+            total.push_back(0);
+        }
+        v = child[v][c];
+    }
+    total[v]++;
+}
+vector<int> fail(child.size(), 0);
+queue<int> q;
+for (int c = 0; c < 26; c++) {
+    int u = child[0][c];
+    if (u == -1) child[0][c] = 0;
+    else { fail[u] = 0; q.push(u); }
+}
+while (!q.empty()) {
+    int v = q.front(); q.pop();
+    total[v] += total[fail[v]];
+    for (int c = 0; c < 26; c++) {
+        int u = child[v][c];
+        if (u == -1) child[v][c] = child[fail[v]][c];
+        else { fail[u] = child[fail[v]][c]; q.push(u); }
+    }
+}
+int state = 0; long long answer = 0;
+for (char ch : text) { state = child[state][ch - 'a']; answer += total[state]; }
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int[] child = new int[totalLen * 26];
+Arrays.fill(child, -1);
+long[] total = new long[totalLen];
+int nodes = 1;
+for (String pat : patterns) {
+    int v = 0;
+    for (int i = 0; i < pat.length(); i++) {
+        int c = pat.charAt(i) - 'a';
+        if (child[v * 26 + c] == -1) child[v * 26 + c] = nodes++;
+        v = child[v * 26 + c];
+    }
+    total[v]++;
+}
+int[] fail = new int[nodes], queue = new int[nodes];
+int head = 0, tail = 0;
+for (int c = 0; c < 26; c++) {
+    int u = child[c];
+    if (u == -1) child[c] = 0;
+    else { fail[u] = 0; queue[tail++] = u; }
+}
+while (head < tail) {
+    int v = queue[head++];
+    total[v] += total[fail[v]];
+    for (int c = 0; c < 26; c++) {
+        int u = child[v * 26 + c];
+        if (u == -1) child[v * 26 + c] = child[fail[v] * 26 + c];
+        else { fail[u] = child[fail[v] * 26 + c]; queue[tail++] = u; }
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+The demo builds the automaton, prints the failure links of the classic example, reports every match with its position, compares with a naive count, and uses the automaton to **count strings that avoid banned words**:
+
+<CodeRunner language="python" code={`import itertools, random
+from collections import deque
+
+class AhoCorasick:
+    def __init__(self, patterns, alphabet="abcdefghijklmnopqrstuvwxyz"):
+        self.alpha = alphabet
+        self.next = [{}]              # next[v][ch] = child, filled completely after build()
+        self.ends = [0]               # how many patterns end exactly here
+        self.word = [[]]              # which patterns end exactly here (for reporting matches)
+        for idx, pat in enumerate(patterns):
+            v = 0
+            for ch in pat:
+                if ch not in self.next[v]:
+                    self.next[v][ch] = len(self.next)
+                    self.next.append({}); self.ends.append(0); self.word.append([])
+                v = self.next[v][ch]
+            self.ends[v] += 1
+            self.word[v].append(idx)
+        self.fail = [0] * len(self.next)
+        self.total = self.ends[:]
+        self.build()
+
+    def build(self):
+        q = deque()
+        for ch in self.alpha:
+            u = self.next[0].get(ch)
+            if u is None:
+                self.next[0][ch] = 0          # missing edge at the root: stay at the root
+            else:
+                self.fail[u] = 0
+                q.append(u)
+        while q:
+            v = q.popleft()
+            self.total[v] += self.total[self.fail[v]]
+            for ch in self.alpha:
+                u = self.next[v].get(ch)
+                if u is None:
+                    self.next[v][ch] = self.next[self.fail[v]][ch]     # follow the failure link implicitly
+                else:
+                    self.fail[u] = self.next[self.fail[v]][ch]
+                    q.append(u)
+
+    def count_matches(self, text):
+        state, answer = 0, 0
+        for ch in text:
+            state = self.next[state][ch]
+            answer += self.total[state]
+        return answer
+
+    def find_all(self, text, patterns):
+        """Report (start position, pattern) for every occurrence, walking the failure chain."""
+        state, found = 0, []
+        for i, ch in enumerate(text):
+            state = self.next[state][ch]
+            v = state
+            while v:
+                for idx in self.word[v]:
+                    found.append((i - len(patterns[idx]) + 1, patterns[idx]))
+                v = self.fail[v]
+        return sorted(found)
+
+words = ["he", "she", "his", "hers"]
+ac = AhoCorasick(words)
+print("occurrences of he, she, his, hers in 'ushers':", ac.count_matches("ushers"), "->", ac.find_all("ushers", words))
+
+# the failure links of the classic example, written as strings
+# recover each node's string from the trie edges (an edge to a larger node index is a tree edge)
+strings = {0: ""}
+for v in range(len(ac.next)):
+    for ch, u in ac.next[v].items():
+        if u > v and u not in strings:
+            strings[u] = strings[v] + ch
+print("failure links:", {strings[v] or "(root)": strings[ac.fail[v]] or "(root)" for v in range(1, len(ac.next))})
+
+def naive(text, patterns):
+    return sum(sum(1 for i in range(len(text)) if text.startswith(p, i)) for p in patterns)
+
+random.seed(8)
+for _ in range(500):
+    alpha = random.choice(["ab", "abc"])
+    pats = ["".join(random.choice(alpha) for _ in range(random.randint(1, 4))) for _ in range(random.randint(1, 5))]
+    text = "".join(random.choice(alpha) for _ in range(random.randint(1, 30)))
+    assert AhoCorasick(pats, alpha).count_matches(text) == naive(text, pats), (text, pats)
+print("the automaton matches a naive count on 500 random inputs, with overlapping occurrences and duplicate words")
+
+def count_avoiding(n, banned, alphabet):
+    """How many strings of length n over the alphabet contain no banned word? DP over the automaton states."""
+    ac = AhoCorasick(banned, alphabet)
+    safe = [ac.total[v] == 0 for v in range(len(ac.next))]            # a state is unsafe if a banned word ends at it or at a suffix
+    ways = {0: 1}
+    for _ in range(n):
+        nxt = {}
+        for v, w in ways.items():
+            for ch in alphabet:
+                u = ac.next[v][ch]
+                if safe[u]:
+                    nxt[u] = nxt.get(u, 0) + w
+        ways = nxt
+    return sum(ways.values())
+
+def avoiding_brute(n, banned, alphabet):
+    return sum(1 for t in itertools.product(alphabet, repeat=n) if not any(b in "".join(t) for b in banned))
+
+for _ in range(100):
+    alpha = "ab"
+    banned = ["".join(random.choice(alpha) for _ in range(random.randint(1, 3))) for _ in range(random.randint(1, 3))]
+    n = random.randint(1, 10)
+    assert count_avoiding(n, banned, alpha) == avoiding_brute(n, banned, alpha), (n, banned)
+print("strings of length 10 over {a, b} avoiding 'aba' and 'bb':", count_avoiding(10, ["aba", "bb"], "ab"), "(counted by DP over automaton states)")
+print("strings of length 100 over {a, b, c} avoiding 'abc':", count_avoiding(100, ["abc"], "abc"))
+`} />
+
+## Applications
+
+| problem | how the automaton helps |
+| --- | --- |
+| count all occurrences of many patterns | scan once, add `total[state]` per letter |
+| does any banned word occur | stop at the first state with `total[state] > 0` |
+| report which patterns occur, and where | follow the failure chain (or **dictionary links** that skip to the next word-end node) at each position |
+| count strings of length `n` avoiding (or containing) patterns | DP over `(length, automaton state)`: `dp[i + 1][go[v][c]] += dp[i][v]`, skipping unsafe states |
+| shortest string containing all patterns (shortest superstring) | bitmask DP over the set of patterns, with automaton states |
+| longest or shortest match ending at each position | store `depth` of the nearest word-end node on the failure chain |
+| online filters on a stream of characters | the state is all you keep between characters |
+
+## Compared with other multi-pattern tools
+
+| tool | time | notes |
+| --- | --- | --- |
+| KMP per pattern | `O(k n + L)` | too slow for many patterns |
+| hashing every length | `O(n * distinct lengths)` | at most `O(sqrt L)` distinct lengths, probabilistic |
+| suffix array / automaton of the text | `O(n log n)` build, `O(m)` per pattern | good when the text is fixed and patterns arrive online |
+| **Aho-Corasick** | `O(n + L + z)` | patterns fixed, text streamed |
+
+## Pitfalls
+
+1. **Forgetting to propagate the word counts along failure links.** Without `total[v] += total[fail[v]]`, nested patterns such as `he` inside `she` are missed.
+2. **Processing nodes in the wrong order.** `fail[v]` must be final before it is used: use a BFS (by depth), not a DFS.
+3. **Not completing the transitions.** A missing child must be copied from the failure node, otherwise the scan needs a failure-chain loop (still correct, but harder to reason about and slower in the worst case).
+4. **Failure link of a root child** must be the root, not itself.
+5. **Counting duplicate patterns once.** Keep a multiplicity (counter) at word-end nodes if the list may repeat words.
+6. **Memory.** `nodes * 26` integers; for large alphabets use a map per node or a compressed transition table.
+7. **Overflow of the total** on repetitive texts: `n * k` can pass `2^31`.
+8. **Case, separators and alphabet.** Map characters to `0..sigma-1` consistently in both the build and the scan.
+
+## Practice
+
+<Problem id="m14-banned-words" />
+
+## Problem ladder
+
+- [Finding Patterns](https://cses.fi/problemset/task/2102) (CSES): for each pattern, does it occur in the text.
+- [Counting Patterns](https://cses.fi/problemset/task/2103) (CSES): the number of occurrences of each pattern, using failure-link subtree sums.
+- [Stream of Characters](https://leetcode.com/problems/stream-of-characters/) (LeetCode 1032, hard): the online filter use.
+- [Aho-Corasick practice list](https://cp-algorithms.com/string/aho_corasick.html) (cp-algorithms): the page ends with additional problems, including DP over the automaton.
+
+## Quiz
+
+<Quiz id="cp-m14-aho-corasick" tags={["strings", "aho-corasick"]} questions={[
+  { type: "mcq", q: "What does the failure link of a trie node v point to?", options: ["Its parent", "The node of the longest proper suffix of str(v) that is also a node of the trie", "The root always", "The deepest leaf below v"], answer: 1, explain: "It is the longest shorter match that is still alive after the next letter fails to extend v, like KMP's failure function over a trie." },
+  { type: "mcq", q: "Why is total[v] = ends[v] + total[fail[v]] enough to count all patterns ending at the current position?", options: ["Every pattern ending here is a word node on the failure chain of the current state", "Patterns cannot overlap", "The trie has no duplicates", "It only counts the longest pattern"], answer: 0, explain: "Each shorter pattern that is a suffix of the current match appears on the failure chain; accumulating along the chain in BFS order counts them all." },
+  { type: "predict", q: "With patterns he, she, his, hers and the text ushers, how many occurrences are there?", code: "# she, he and hers", options: ["2", "3", "4", "6"], answer: 1, explain: "she and he end at the fourth letter, hers at the sixth: 3." },
+  { type: "mcq", q: "What is the time complexity of scanning a text of length n once the automaton is built?", options: ["O(n k)", "O(n)", "O(n log n)", "O(n sigma)"], answer: 1, explain: "A complete automaton makes one array lookup per letter, plus one addition." },
+  { type: "multi", q: "Which are valid applications?", options: ["Counting strings of length n that avoid banned words by DP over the automaton states", "Online filtering of a stream of characters", "Finding the shortest path in a weighted graph", "Detecting whether any banned word occurs"], answer: [0, 1, 3], explain: "Shortest weighted paths need Dijkstra or Bellman-Ford, not a string automaton." }
+]} />
