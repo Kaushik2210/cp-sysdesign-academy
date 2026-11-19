@@ -187,9 +187,12 @@ test("roadmap shows ten phases, tracks progress and syncs with lesson completion
   const overall = page.getByRole("progressbar", { name: "Overall roadmap progress" });
   const before = Number(await overall.getAttribute("aria-valuenow"));
 
-  // A self-reported step persists across reloads and moves overall progress.
+  // Self-reported steps persist across reloads and move overall progress. The bar shows whole percents and the roadmap
+  // has over 200 steps, so tick three of them to move it by at least one percent.
   const first = page.locator("#foundations").getByRole("checkbox").first();
   await first.check();
+  await page.locator("#foundations").getByRole("checkbox").nth(1).check();
+  await page.locator("#foundations").getByRole("checkbox").nth(2).check();
   await expect(first).toBeChecked();
   await page.reload();
   await page.waitForLoadState("networkidle");
