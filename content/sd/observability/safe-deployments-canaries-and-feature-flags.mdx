@@ -1,0 +1,221 @@
+---
+title: Safe Deployments, Canaries and Feature Flags
+track: sd
+module: observability
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/observability/slos-error-budgets-and-alerting", "sd/microservice-patterns/evolving-apis-and-events", "sd/load-balancing/load-balancer-basics"]
+tags: [deployments, canary, blue-green, rolling, feature-flags, rollback, migrations, progressive-delivery]
+type: lesson
+furtherReading:
+  - title: "Google SRE Workbook, Canarying Releases"
+    url: https://sre.google/workbook/canarying-releases/
+  - title: "Martin Fowler, Feature Toggles"
+    url: https://martinfowler.com/articles/feature-toggles.html
+  - title: "Martin Fowler, Parallel Change (expand and contract)"
+    url: https://martinfowler.com/bliki/ParallelChange.html
+  - title: "DORA, the four key software delivery metrics"
+    url: https://dora.dev/guides/dora-metrics-four-keys/
+---
+
+## Intuition
+
+Most outages begin with a **change**: a deploy, a config edit, a migration, a feature switched on. So the most effective reliability work is making change **small, gradual, observable and reversible**.
+
+Two ideas make that possible:
+
+1. **Deployment is not release.** Putting new code on servers (deploy) and exposing it to users (release) are separate decisions. Separate them and a release becomes a switch you can flip back.
+2. **Expose change to a few users first**, compare it to the version you already run, and widen only if it behaves.
+
+## Deployment strategies
+
+| strategy | how it works | strengths | weaknesses |
+| --- | --- | --- | --- |
+| **recreate** | stop the old version, start the new one | simplest; no version mixing | downtime |
+| **rolling** | replace instances a few at a time | no extra capacity; no downtime | two versions serve at once; rollback is another rolling update |
+| **blue/green** | run a full second environment (green), switch traffic from blue at once | instant switch and instant switch back | double capacity; the database is still shared; all-or-nothing exposure |
+| **canary** | send a small share of real traffic (1%, 5%) to the new version, compare, then widen | limits blast radius; uses real traffic | needs good metrics and automation |
+| **shadow / mirror** | copy real requests to the new version and discard its responses | tests under real load with no user impact | cannot be used for writes with side effects without care; costs capacity |
+| **feature flag** (dark launch) | code is deployed switched off, enabled gradually by rules | release without a deploy; instant kill switch | flag debt; more code paths to test |
+
+Mature setups combine them: a **canary deploy** of the code, with **feature flags** controlling which users see the new behaviour.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  D["Deploy new version<br/>(0% of users)"] --> C1["Canary 1%<br/>compare to baseline"]
+  C1 -->|healthy 10 min| C2["5%"]
+  C2 -->|healthy| C3["25%"]
+  C3 -->|healthy| C4["100%"]
+  C1 -->|worse than baseline| R["Automatic rollback"]
+  C2 -->|worse than baseline| R
+  C3 -->|worse than baseline| R`} caption="A progressive rollout: each step must pass an automated check, and a failed check rolls back without a human" />
+
+## Canary analysis: comparing against the right thing
+
+The key design choices:
+
+- **Compare the canary with a concurrent baseline** (the current version running **right now** on similar traffic), not with yesterday's numbers, which differ by time of day and traffic mix.
+- Compare the **SLIs that matter** (error rate, latency percentiles, saturation) plus business signals (checkouts) when they are available.
+- **Wait for enough data.** Few requests means noisy rates; the canary at 1% of traffic gets few samples, so a decision rule must account for sampling noise.
+- **Decide with statistics, not eyeballing**, and beware **peeking**: checking the same running experiment every minute and acting on the first scary number inflates false alarms.
+
+The simulation below runs thousands of imaginary rollouts. The current version fails 1% of requests; the canary gets 5% of 6,000 requests a minute for up to 30 minutes. Two rules are compared: a **naive rule** (roll back if the canary looks 50% worse) and a **significance test** (a two-proportion z-test with z above 3, and at least 500 canary requests). It then measures how often each rule wrongly rolls back a **healthy** canary, and how fast it catches a **bad** one.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import math, random, hashlib
+
+random.seed(21)
+
+def binom(n, p):
+    """Number of successes in n Bernoulli(p) trials, by skipping over the failures (exact and fast for small p)."""
+    if p <= 0:
+        return 0
+    k, i, lg = 0, 0, math.log(1 - p)
+    while True:
+        i += int(math.log(1 - random.random()) / lg) + 1
+        if i > n:
+            return k
+        k += 1
+
+BASE_ERR = 0.01                    # the current version fails 1% of requests
+PER_MIN_CANARY, PER_MIN_BASE = 300, 5700        # 5% of 6,000 requests a minute go to the canary
+MINUTES, MIN_CANARY_REQUESTS = 30, 500
+
+def naive_rule(c_err, c_n, b_err, b_n):
+    return c_n >= 100 and c_err / c_n > 1.5 * (b_err / b_n)       # "canary looks 50% worse"
+
+def ztest_rule(c_err, c_n, b_err, b_n):
+    if c_n < MIN_CANARY_REQUESTS:
+        return False
+    pooled = (c_err + b_err) / (c_n + b_n)
+    se = math.sqrt(pooled * (1 - pooled) * (1 / c_n + 1 / b_n))
+    return se > 0 and (c_err / c_n - b_err / b_n) / se > 3.0       # a clearly significant increase
+
+def trial(canary_err, rule):
+    c_err = c_n = b_err = b_n = 0
+    for minute in range(1, MINUTES + 1):
+        c_err += binom(PER_MIN_CANARY, canary_err); c_n += PER_MIN_CANARY
+        b_err += binom(PER_MIN_BASE, BASE_ERR); b_n += PER_MIN_BASE
+        if rule(c_err, c_n, b_err, b_n):
+            return minute                                          # rolled back at this minute
+    return None
+
+def run(canary_err, rule, trials=600):
+    results = [trial(canary_err, rule) for _ in range(trials)]
+    hits = [m for m in results if m is not None]
+    median = sorted(hits)[len(hits) // 2] if hits else None
+    return len(hits) / trials, median
+
+print(f"baseline error rate {BASE_ERR:.0%}; canary gets {PER_MIN_CANARY} of {PER_MIN_CANARY + PER_MIN_BASE} requests per minute; up to {MINUTES} minutes\\n")
+for label, rule in (("naive (canary > 1.5x baseline)", naive_rule), ("z-test (z > 3, min 500 requests)", ztest_rule)):
+    good_rb, _ = run(BASE_ERR, rule)
+    bad_rb, bad_median = run(0.02, rule)
+    worse_rb, worse_median = run(0.05, rule)
+    print(label)
+    print(f"  healthy canary (1%):  rolled back in {good_rb:.1%} of rollouts   <- false alarms")
+    print(f"  bad canary (2%)    :  caught in {bad_rb:.1%}, median {bad_median} min")
+    print(f"  broken canary (5%) :  caught in {worse_rb:.1%}, median {worse_median} min")
+`} />
+
+On a run of 600 rollouts per case:
+
+- The **naive rule rolled back a healthy canary 27.5% of the time**. Early in a rollout the canary has served only a few hundred requests, so its error rate swings widely, and a rule that checks every minute is bound to see a scary number sooner or later.
+- The **z-test with a minimum sample** wrongly rolled back only **1.5%** of healthy canaries, yet still caught a canary with **double** the error rate in all 600 rollouts, with a **median of 4 minutes**, and a badly broken one (5%) in a median of **2 minutes**.
+- Two lessons: a decision rule needs both **statistical care and a minimum amount of evidence**, and the cost of caution is **time**, so size the canary's traffic share so a bad version is detected quickly. A canary at 0.1% would need far longer to gather the same evidence.
+
+Real systems extend this to several metrics at once, which multiplies the chance of a false alarm, so thresholds are set per metric with the whole decision in mind.
+
+## Feature flags: release without deploying
+
+A **feature flag** wraps new behaviour in a conditional that is evaluated at run time, controlled from a configuration service:
+
+```python
+if flags.is_enabled("new-checkout", user=user):
+    return new_checkout(user)
+return old_checkout(user)
+```
+
+What flags give you:
+
+- **Gradual rollout** by percentage, region, plan or user group, and **instant kill switches** when something goes wrong, with no deploy.
+- **Dark launches**: ship code to production disabled, then turn it on for staff, then 1%, then everyone.
+- **Experiments** (A/B tests) on top of the same mechanism.
+
+For a percentage rollout, a user must get **the same answer every time**, and raising the percentage must only **add** users, never flip existing ones back and forth. The standard method is to **hash** the flag name and user id into a bucket from 0 to 99 and enable the flag when `bucket < percentage`. Salting with the flag name keeps different flags independent, so the same 10% of users do not get every experiment.
+
+<CodeRunner language="python" code={`import hashlib
+
+def bucket(flag, user_id):
+    return int(hashlib.sha256(f"{flag}:{user_id}".encode()).hexdigest(), 16) % 100
+
+users = [f"user-{i}" for i in range(20000)]
+previous = set()
+for pct in (1, 5, 25, 50, 100):
+    enabled = {u for u in users if bucket("new-checkout", u) < pct}
+    print(f"rollout {pct:3d}%: {len(enabled):6d} users enabled ({100 * len(enabled) / len(users):5.1f}%)   everyone from the previous step is still enabled: {previous <= enabled}")
+    previous = enabled
+
+both = sum(bucket("new-checkout", u) < 10 and bucket("dark-mode", u) < 10 for u in users)
+print("users in both a 10% group of one flag and a 10% group of another:", both, "(independent flags would give about", int(len(users) * 0.01), ")")
+`} />
+
+The rollout is **monotonic** (each step keeps everyone from the previous step), and two flags overlap about as much as chance predicts.
+
+**Flag hygiene matters.** Every flag doubles the number of code paths to test and reason about. Give each flag an **owner and an expiry**, remove it once the rollout finishes, keep kill switches separate from experiments, and make the code **fail safe** (a sensible default when the flag service is unreachable). Flag evaluation sits on the hot path, so cache and evaluate locally.
+
+## Database changes: expand and contract
+
+The hardest part of rollback is the **database**: old and new code run against the same schema during any gradual rollout. The safe method is **parallel change**, done in separate, individually reversible steps:
+
+1. **Expand**: add the new column or table, nullable and unused. Old code ignores it.
+2. **Dual write**: deploy code that writes both the old and the new place.
+3. **Backfill** existing rows in small batches.
+4. **Switch reads** to the new place (behind a flag if you can).
+5. **Stop writing** the old place.
+6. **Contract**: drop the old column, only after nothing reads it and you are past the point where you might need to roll back.
+
+Rules: never ship code and a **schema change that breaks the previous version** in one release; every step must work with both the version before and the version after; make migrations **online** (no long table locks) and test them on production-sized data.
+
+## Rolling back, and rolling forward
+
+- Keep the previous artifact available and make rollback **a single, practised command**, ideally automatic when the canary fails. A rollback that has never been rehearsed fails when it is needed.
+- Prefer **immutable builds** and treat **config and flag changes as deployments** (reviewed, versioned, staged), because they cause as many incidents as code.
+- Sometimes **rolling forward** (a fast fix) is better than rolling back, for example when a data migration has already run. Decide quickly using the SLO and the error budget.
+- **Observe after every deploy**: a bake time, a dashboard, an annotation on graphs, and a person or system looking at it.
+- Measure your delivery health with the four **DORA metrics**: deployment frequency, lead time for changes, change failure rate and time to restore. **Small, frequent deployments** have lower failure rates and faster recovery than rare, large ones, which is the opposite of the intuition that "deploying less is safer".
+
+## Trade-offs
+
+<TradeOffs caption="Choosing a release strategy" rows={[
+  { option: "Rolling update", pros: "No spare capacity; the default in most orchestrators", cons: "Versions mix; slow to roll back; no traffic-level comparison", chooseWhen: "Low-risk changes on stateless services" },
+  { option: "Blue/green", pros: "Instant cut-over and instant rollback", cons: "Double capacity; shared database remains a risk", chooseWhen: "Major releases where you want a clean switch" },
+  { option: "Canary with automated analysis", pros: "Small blast radius; real traffic; automatic rollback", cons: "Needs solid metrics, enough traffic and tooling", chooseWhen: "Services with many users and good SLIs" },
+  { option: "Feature flags", pros: "Decouple release from deploy; kill switch; targeted rollout", cons: "Flag debt, test matrix growth, flag service dependency", chooseWhen: "Risky or user-visible features" },
+  { option: "Shadow traffic", pros: "Tests real load without user impact", cons: "Side effects and cost; no real user feedback", chooseWhen: "Rewrites and new backends that must match old behaviour" },
+  { option: "Big-bang release on a schedule", pros: "Few release events", cons: "Large, hard-to-diagnose changes; high failure impact", chooseWhen: "Rarely; only where regulations or hardware force it" }
+]} />
+
+## Pitfalls
+
+- A canary compared with yesterday's metrics, or with too little data to mean anything.
+- Rolling back code while the new schema is incompatible with the old code.
+- Treating config changes and flag flips as safe because "no code changed".
+- Flags that live forever, with no owner, and combinations nobody tests.
+- A kill switch that depends on the system that is failing.
+- Peeking and acting on the first alarming number, or never actually looking at the canary.
+- Skipping rollback drills, so the first real rollback is also the first attempt.
+- Rolling out to every region at once instead of one region at a time.
+
+## What would you choose and why?
+
+You are launching a new payment flow that changes the database schema and calls a new provider. It must not double-charge. Describe the release plan: which strategy for the code, how flags are used, how the schema is changed in steps, what the canary compares and what triggers an automatic rollback, what is dark-launched with mirrored traffic first, and what you do if you discover a bug after the migration has run.
+
+## Quiz
+
+<Quiz id="sd-m16-safe-deployments" tags={["deployments", "canary", "feature-flags", "migrations"]} questions={[
+  { type: "mcq", q: "What does 'deployment is not release' mean?", options: ["Deploys never happen in production", "Code can be on servers switched off, and exposing it to users is a separate, reversible decision", "Releases happen before deploys", "Only flags are deployed"], answer: 1, explain: "Feature flags let you deploy dark and then release gradually, with an instant kill switch." },
+  { type: "mcq", q: "What should a canary be compared against?", options: ["Yesterday's numbers", "A concurrent baseline: the current version serving similar traffic at the same time", "A fixed constant", "The staging environment"], answer: 1, explain: "Concurrent comparison cancels out time-of-day and traffic effects." },
+  { type: "multi", q: "Why can a naive 'canary looks 50% worse' rule produce many false rollbacks?", options: ["Early samples are small and noisy", "It is evaluated repeatedly (peeking)", "Canaries never fail", "It needs no statistical support for the decision"], answer: [0, 1, 3], explain: "A minimum sample and a significance test, as in the simulation, cut false rollbacks from about 27% to about 1.5%." },
+  { type: "mcq", q: "Why hash the flag name and user id to assign a rollout bucket?", options: ["It encrypts the user", "The same user always gets the same answer, raising the percentage only adds users, and different flags stay independent", "It makes flags free", "It avoids network calls entirely"], answer: 1, explain: "Stable, salted bucketing gives consistent, monotonic and independent rollouts." },
+  { type: "mcq", q: "Which is the safest order for renaming a database column used by running code?", options: ["Rename it in the same release as the code", "Expand (add the new column), dual write, backfill, switch reads, stop old writes, then contract", "Drop and recreate it at night", "Rename it first and deploy code later"], answer: 1, explain: "Each step is compatible with the version before and after, so you can roll back at any point until the contract step." },
+  { type: "mcq", q: "Which statement about delivery frequency is supported by DORA research?", options: ["Deploying less often is safer", "Teams that deploy small changes frequently tend to have lower change failure rates and faster recovery", "Frequency and stability are unrelated", "Only large releases can be rolled back"], answer: 1, explain: "Small changes are easier to understand, test, observe and revert." }
+]} />
