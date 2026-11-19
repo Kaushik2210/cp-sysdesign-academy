@@ -1,0 +1,264 @@
+---
+title: "Case Study: Design a Notification System"
+track: sd
+module: case-studies-core-services
+order: 4
+difficulty: medium
+estMinutes: 45
+prerequisites: ["sd/queues-and-streaming/why-queues", "sd/queues-and-streaming/backpressure-retries-and-dlq", "sd/microservice-patterns/retry-amplification-and-circuit-breakers", "sd/scalability/rate-limiting-algorithms"]
+tags: [case-study, notifications, push, email, sms, priority-queues, retries, idempotency, rate-limiting, deliverability]
+type: case-study
+furtherReading:
+  - title: "Apple Developer, Sending notification requests to APNs"
+    url: https://developer.apple.com/documentation/usernotifications/setting_up_a_remote_notification_server/sending_notification_requests_to_apns
+  - title: "Firebase Cloud Messaging documentation, Setting the lifespan of a message"
+    url: https://firebase.google.com/docs/cloud-messaging/customize-messages/setting-message-lifespan
+  - title: "RFC 7489, DMARC (email authentication and policy)"
+    url: https://www.rfc-editor.org/rfc/rfc7489
+  - title: "Google, Email sender guidelines (authentication, unsubscribe, spam rates)"
+    url: https://support.google.com/a/answer/81126
+---
+
+## The problem
+
+Design a **notification system** that other services call to tell users things: a **one-time passcode** by SMS, a **"your order shipped"** push, a **weekly digest** email, a **"someone liked your photo"** in-app alert. It supports several **channels** (mobile push, SMS, email, in-app) and must respect what each user has **opted into**.
+
+The surprise in this problem is that the happy path is trivial (call a provider's API) and almost everything else is about **failure and restraint**: not losing the passcode, not sending 500 notifications for 500 likes, not letting a marketing blast delay a login code, surviving a provider outage, and never contacting someone who opted out.
+
+## 1. Requirements
+
+**Functional**
+
+- Other services submit a **notification request** (user or segment, type, parameters) through an API or an event.
+- Deliver through **push, SMS, email and in-app**, choosing channels by **user preference** and notification type.
+- **Templates** with localisation and variables; **scheduled** and **recurring** sends; **bulk campaigns** to millions of users.
+- Honour **opt-outs**, **quiet hours** and per-type preferences; give delivery **status** and basic analytics.
+
+**Non-functional**
+
+- **Reliable**: a passcode or a security alert must not be lost (at-least-once delivery), and nothing should be sent twice to the user.
+- **Latency by class**: passcodes in seconds; transactional updates in seconds to a minute; marketing in minutes to hours.
+- **Scales** with large spikes (a campaign to 50 million users).
+- **Protects users and providers**: rate limits, no spamming, compliance with consent rules.
+
+## 2. Estimation
+
+Assume 100 million users receiving an average of 5 notifications a day, plus a campaign to 50 million users in one hour.
+
+<CodeRunner language="python" code={`users, per_user_per_day = 100_000_000, 5
+per_day = users * per_user_per_day
+average = per_day / 86400
+campaign = 50_000_000
+campaign_rate = campaign / 3600
+print(f"{per_day / 1e6:,.0f} million notifications a day = {average:,.0f}/s on average")
+print(f"a campaign of {campaign / 1e6:.0f} million in one hour = {campaign_rate:,.0f}/s, {campaign_rate / average:.1f}x the daily average, all at once")
+print(f"if the senders push 1,000 messages a second, that campaign needs {campaign / 1000 / 3600:.1f} hours on its own")
+`} />
+
+The average (about 5,800 a second) is easy. The **campaign** is what hurts: about 14,000 a second, and at the provider's pace it can take **longer than the hour you wanted**. Anything else sharing the same pipeline queues up **behind** it, so the design must **isolate traffic classes**.
+
+## 3. High-level design
+
+<Diagram kind="mermaid" code={`flowchart LR
+  S[Calling services and events] --> API[Notification API]
+  API --> ID[(Idempotency store)]
+  API --> PREF[Preference and consent service]
+  API --> TPL[Template renderer]
+  API --> RL[Per-user limits and collapsing]
+  RL --> QH[[Queue: critical, e.g. OTP]]
+  RL --> QM[[Queue: transactional]]
+  RL --> QL[[Queue: bulk and marketing]]
+  QH --> W1[Push, SMS and email workers]
+  QM --> W1
+  QL --> W1
+  W1 --> P1[Push: APNs and FCM]
+  W1 --> P2[SMS providers A and B]
+  W1 --> P3[Email providers A and B]
+  P1 --> CB[Delivery callbacks and bounces]
+  P2 --> CB
+  P3 --> CB
+  CB --> ST[(Status store and analytics)]
+  W1 -.failed after retries.-> DLQ[[Dead-letter queue]]
+  SCH[Scheduler for delayed and recurring sends] --> API`} caption="Requests are validated and personalised first, then flow through separate queues per priority to channel workers and external providers" />
+
+**The flow of one request**
+
+1. **Accept and de-duplicate.** The caller sends a request with an **idempotency key**; the API records it (a key-value store with a TTL) so a retried call does not send twice.
+2. **Decide whether and how.** The **preference service** answers: is this user opted in to this type, on which channels, is it quiet hours in their time zone, are they on the suppression list (unsubscribed, bounced, complained)?
+3. **Render.** The **template service** fills in language-specific text with escaped variables.
+4. **Limit and collapse.** Per-user limits and collapsing rules decide whether this becomes a message, is merged into a digest, or is dropped.
+5. **Enqueue by priority.** The message goes to the queue for its class; a durable queue gives at-least-once delivery.
+6. **Send.** Channel workers call the provider, handle the response and **retry** transient failures with backoff.
+7. **Track.** Providers report delivery, bounces and opens through callbacks; the status store updates.
+
+## 4. Isolating priorities
+
+If everything shares one first-in-first-out queue, a big marketing blast sits in front of a login code. The simulation sends 400,000 marketing messages in 10 seconds plus 3,000 one-time passcodes spread over a minute, to senders that can push 1,000 messages a second, with one shared queue versus separate priority queues.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import heapq, random
+
+def run(prioritised, seed=3):
+    rng = random.Random(seed)
+    capacity = 1000                                   # messages the senders can push per second
+    events = []                                       # (arrival second, kind)
+    for _ in range(400000):                           # a marketing blast: 400,000 messages arrive within 10 seconds
+        events.append((rng.random() * 10, "marketing"))
+    for _ in range(3000):                             # one-time passcodes arrive steadily over 60 seconds
+        events.append((rng.random() * 60, "otp"))
+    events.sort()
+    waits, i, t, heap = [], 0, 0.0, []
+    while i < len(events) or heap:
+        if not heap and i < len(events) and events[i][0] > t:
+            t = events[i][0]
+        while i < len(events) and events[i][0] <= t:
+            arrival, kind = events[i]
+            priority = (0 if kind == "otp" else 1) if prioritised else 0
+            heapq.heappush(heap, (priority, arrival, kind))
+            i += 1
+        if heap:
+            priority, arrival, kind = heapq.heappop(heap)
+            t += 1 / capacity
+            if kind == "otp":
+                waits.append(t - arrival)
+    return sorted(waits)
+
+for prioritised in (False, True):
+    w = run(prioritised)
+    label = "separate priority for OTP" if prioritised else "one shared FIFO queue     "
+    print(f"{label}: passcode wait  median {w[len(w) // 2] * 1000:9,.0f} ms   p99 {w[int(len(w) * 0.99)] * 1000:9,.0f} ms   max {w[-1] * 1000:9,.0f} ms")
+`} />
+
+With one shared queue the median passcode waited **about six minutes** (the p99 was about 390 seconds), long after the user gave up and requested another. With a separate high-priority queue the same passcodes waited about **2 milliseconds**, little more than the time to send one message. In production use **separate queues (or topics) and separate worker pools per class**, not just a priority flag in one queue, so a flood of low-priority work cannot even occupy the workers; and reserve capacity so critical traffic never needs to wait. (Strict priority can starve the low class if the high class is constantly busy; guard with weighted shares or a minimum rate.)
+
+## 5. Retries, failover and idempotency
+
+Providers fail: APNs and FCM throttle, an SMS carrier goes down, an email provider returns `5xx`. Rules:
+
+- **Retry transient failures** (timeouts, `5xx`, throttling) with **exponential backoff and jitter**, up to a limit, then send to a **dead-letter queue** and alert. Do not retry permanent failures (invalid token, unknown number, hard email bounce): remove the token or add the address to the **suppression list** instead.
+- Put a **circuit breaker** on each provider ([retry amplification and circuit breakers](/sd/microservice-patterns/retry-amplification-and-circuit-breakers/)) so a down provider does not tie up all your workers.
+- Keep **more than one provider per critical channel** (SMS, email) and fail over automatically.
+- Make sends **idempotent** with an id the provider accepts where possible, so a retry after a timeout (the first call may have succeeded) does not double-send.
+
+The simulation sends 10,000 messages over 100 seconds while the primary provider is **down from second 20 to second 80** and fails 2% of calls at other times.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+def send_all(n, use_backup, retries, seed=11):
+    rng = random.Random(seed)
+    def provider_ok(name, t):
+        if name == "primary":
+            return not (20 <= t < 80) and rng.random() > 0.02       # outage from t=20 to t=80, 2% random failures
+        return rng.random() > 0.01
+    delivered, latencies = 0, []
+    for k in range(n):
+        t0 = k * 100 / n                                             # messages arrive evenly over 100 seconds
+        t, ok = t0, False
+        for attempt in range(retries + 1):
+            if provider_ok("primary", t):
+                ok = True
+                break
+            if use_backup and provider_ok("backup", t):
+                ok = True
+                break
+            t += min(30, 2 ** attempt) * (0.5 + rng.random())         # exponential backoff with jitter
+        if ok:
+            delivered += 1
+            latencies.append(t - t0)
+    latencies.sort()
+    return delivered / n, latencies[len(latencies) // 2], latencies[int(len(latencies) * 0.99)]
+
+for use_backup, retries, label in ((False, 0, "primary only, no retry"), (False, 5, "primary only, 5 retries with backoff"), (True, 5, "primary + backup provider, 5 retries")):
+    rate, p50, p99 = send_all(10000, use_backup, retries)
+    print(f"{label:40s} delivered {rate:6.1%}   latency median {p50:5.1f} s   p99 {p99:6.1f} s")
+`} />
+
+During a 60-second outage in a 100-second window the results were:
+
+- **No retry**: only **39.2%** delivered (the outage swallowed the rest).
+- **Retries with backoff** raised that to **70.4%**, with a p99 delay of about **40 seconds** for the messages that had to wait. Retries cannot save messages whose whole retry budget falls inside the outage.
+- **A second provider** delivered **100.0%** with essentially no added delay.
+
+A backup provider fixes provider outages but adds cost, a second integration and the need to keep sender identities, templates and deliverability reputation warm on both.
+
+## 6. Not annoying users: preferences, limits and collapsing
+
+- **Preferences:** per type and channel, with global **quiet hours** in the user's own time zone, and always honour **unsubscribe** immediately (legal requirements apply in many places; the suppression list is checked on every send).
+- **Per-user rate limits** ([algorithms](/sd/scalability/rate-limiting-algorithms/)): at most N notifications per hour, with higher caps for critical types.
+- **Collapsing and digests:** merge many similar events into one. A "collapse key" per `(user, type, object)` lets the system replace a pending notification instead of adding another.
+
+<CodeRunner language="python" code={`import random
+
+rng = random.Random(7)
+likes = sorted(rng.random() * 600 for _ in range(500))        # 500 "someone liked your photo" events in 10 minutes
+
+def collapse(times, window):
+    sent, last = 0, None
+    for t in times:
+        if last is None or t - last >= window:
+            sent += 1
+            last = t
+    return sent
+
+for window in (0, 30, 120, 600):
+    sent = collapse(likes, window) if window else len(likes)
+    print(f"at most one notification per {window:3d} s: {sent:3d} notifications for {len(likes)} events")
+`} />
+
+A 30-second window turns **500 events into 20 notifications**, and 2 minutes into 5. The trade-off is **delay**: a collapsing notification is sent at the start of its window and later events are folded into a count ("12 people liked your photo") or into the next digest.
+
+## 7. Channel details that matter
+
+- **Push (APNs, FCM):** keep a **device token registry** per user and device; tokens change and expire, so handle "unregistered" responses by deleting them. Use the provider's **priority** and **time-to-live** so a stale "your ride arrived" push is dropped. Payloads are small; for sensitive content send a signal and let the app fetch.
+- **SMS:** the most expensive and most regulated channel (sender registration, opt-in proof, per-country rules, delivery varies by carrier). Use it for **passcodes and critical alerts**, not marketing by default. Protect it from **SMS pumping fraud** (attackers triggering expensive messages to premium numbers) with rate limits and country restrictions.
+- **Email:** deliverability is its own discipline: **SPF, DKIM and DMARC** authentication, a good sender reputation, low bounce and spam-complaint rates, a one-click unsubscribe header, separate sending domains and IPs for transactional and marketing mail. Handle **hard bounces** (stop sending) and **complaints** (suppress) automatically.
+- **In-app:** stored per user and delivered over the user's live connection or on next open ([chat system](/sd/case-studies-core-services/design-a-chat-system/) shows that machinery); keep a read/unread state.
+
+## 8. Scheduling and campaigns
+
+- **Delayed and recurring sends** use a **scheduler**: a persistent delayed queue or a time-bucketed store scanned by workers (a timer wheel in memory, backed by a database). Make triggering idempotent, because two schedulers may fire the same job.
+- **Campaigns to segments** are **expanded gradually** (page through the audience and enqueue in batches) so the queue and databases are not flooded, with **throttling** by provider limits, and a **kill switch** to stop a wrong campaign immediately.
+- **Time-zone-aware sends** ("9 am local") spread the load across hours naturally.
+
+## 9. Observability and operations
+
+Track per channel and per provider: **send rate, success rate, delivery latency percentiles, bounce and complaint rates, queue depth and age of the oldest message**, DLQ size and push token invalidation rate ([observability](/sd/observability/logs-metrics-and-traces/)). Alert when the **oldest critical message** is older than its target, which is a user-visible symptom, instead of on raw queue length. Keep an **audit trail** of consent changes and sends (who, what, when), with personal data retention limits.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "One shared queue for all traffic", pros: "Simplest", cons: "A campaign delays passcodes; no isolation", chooseWhen: "A prototype only" },
+  { option: "Separate queues and worker pools per priority", pros: "Critical traffic is never blocked; independent scaling", cons: "More infrastructure to run and monitor", chooseWhen: "Any production system" },
+  { option: "Retry with backoff only", pros: "Handles brief glitches", cons: "A long provider outage still loses or delays everything", chooseWhen: "Non-critical channels" },
+  { option: "Multiple providers with failover", pros: "Survives provider outages", cons: "Cost, integration and reputation on each", chooseWhen: "Critical channels (SMS passcodes, transactional email)" },
+  { option: "Send immediately for every event", pros: "Lowest latency", cons: "Notification spam; user fatigue and opt-outs", chooseWhen: "Rare, high-value events" },
+  { option: "Collapse and digest", pros: "Fewer, more useful notifications", cons: "Delay; extra state per user", chooseWhen: "High-frequency social or activity events" },
+  { option: "Push content in the payload", pros: "Instant display", cons: "Sensitive data passes through providers; payload limits", chooseWhen: "Non-sensitive text" }
+]} />
+
+## Pitfalls
+
+- Running marketing and critical messages through the same queue and workers.
+- Retrying permanent failures (invalid tokens, bounced addresses) forever.
+- Retrying without an idempotency key, so a timeout leads to duplicate sends.
+- Ignoring the suppression list, or taking hours to honour an unsubscribe.
+- Sending in the recipient's night because time zones were ignored.
+- Letting one provider's outage block every worker (no circuit breaker, no timeouts).
+- Unescaped template variables, which allow content injection in emails or in-app messages.
+- No SMS fraud controls, leading to a surprise bill.
+- Sending campaigns with no throttle and no kill switch.
+- Measuring only "accepted by provider", not "delivered" and "complained".
+
+## What would you choose and why?
+
+A security team wants a "new login from an unknown device" alert to reach users within 10 seconds on every channel they use, while marketing wants a 20-million-user email sent at the same hour. Describe the queue and worker layout, how you prevent duplicate alerts if the event is delivered twice, what you do when the SMS provider is down, and which rules stop users from getting the alert on five channels at once.
+
+## Quiz
+
+<Quiz id="sd-m17-notification-system" tags={["case-study", "notifications", "queues", "retries"]} questions={[
+  { type: "mcq", q: "Why use separate queues and worker pools for critical and bulk notifications?", options: ["Bulk messages are larger", "A flood of low-priority work cannot delay time-sensitive messages such as login codes", "Queues are free", "It removes the need for retries"], answer: 1, explain: "The simulation showed passcodes waiting about six minutes behind a marketing blast in a shared FIFO queue." },
+  { type: "mcq", q: "Which failures should NOT be retried?", options: ["Timeouts", "5xx responses from the provider", "Permanent failures such as an invalid device token or a hard-bounced address", "Throttling responses"], answer: 2, explain: "Remove the token or suppress the address; retrying cannot succeed and harms sender reputation." },
+  { type: "multi", q: "Which measures reduce duplicate notifications?", options: ["An idempotency key on each request", "Idempotent provider calls where supported", "Collapse keys per user, type and object", "Retrying twice immediately after every success"], answer: [0, 1, 2], explain: "Duplicates arise from retried requests, retried provider calls and repeated events." },
+  { type: "mcq", q: "What did the failover simulation show for a 60-second provider outage in a 100-second window?", options: ["Retries alone delivered everything", "A backup provider delivered essentially everything; retries alone left many messages undelivered", "No retries worked best", "Failover only added latency"], answer: 1, explain: "Backoff cannot help messages whose entire retry budget falls inside the outage; a second provider can." },
+  { type: "mcq", q: "Why check the suppression list and user preferences on every send?", options: ["To speed up sending", "Consent and unsubscribes must be honoured immediately, and sending to opted-out users is a legal and deliverability problem", "Providers require it for pricing", "To collapse events"], answer: 1, explain: "Opt-outs, bounces and complaints change continuously and must take effect before the next message." },
+  { type: "mcq", q: "How does collapsing reduce noise?", options: ["It deletes events", "It merges many similar events into one notification or a digest, at the cost of a small delay", "It speeds up providers", "It encrypts payloads"], answer: 1, explain: "In the demo a 30-second window turned 500 like events into 20 notifications." }
+]} />
