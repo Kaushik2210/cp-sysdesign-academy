@@ -898,3 +898,21 @@ test.describe("visualizer lessons", () => {
     await expect(page.getByRole("link", { name: /Shortest Paths with Dijkstra/ })).toBeVisible();
   });
 });
+
+test.describe("security module", () => {
+  const LESSONS: [string, string][] = [
+    ["/sd/security/passwords-sessions-and-mfa/", "Passwords, Sessions and Multi-Factor Login"],
+    ["/sd/security/tokens-oauth-and-jwt/", "Tokens, OAuth 2.0 and JWT"],
+    ["/sd/security/tls-encryption-and-key-management/", "TLS, Encryption at Rest and Key Management"],
+    ["/sd/security/web-and-api-attacks/", "Web and API Attacks: Injection, XSS, CSRF and SSRF"],
+  ];
+  for (const [path, title] of LESSONS) {
+    test(`${title} renders its runnable demos, trade-offs and quiz`, async ({ page }) => {
+      await page.goto(path);
+      await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 2, name: "Trade-offs" })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 2, name: "Quiz" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /^Run/ }).first()).toBeVisible();
+    });
+  }
+});
