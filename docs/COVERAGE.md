@@ -71,7 +71,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 
 ## Known gaps and caveats
 
-- `furtherReading` and problem-ladder URLs were written from memory and have **not** been link-checked.
+- `furtherReading` and problem-ladder URLs were written from memory. `pnpm check-external` on 2026-11-19 found two dead links (both fixed). It cannot verify LeetCode and SPOJ links (they return 403 to bots) or about 35 sites whose certificates this authoring machine does not trust, so those remain unchecked.
 - C++ reference solutions are verified only in CI (no `g++` on the authoring machine); Python, JS and Java run locally via `pnpm verify`.
 - Problems are scaled down (tests ship to the browser); editorials state real-scale constraints.
 - Lessons per module are 4-5, below the 4-10 target for some modules; practice problems per lesson are about 1 embedded plus external ladder links, not 3-8 embedded.
