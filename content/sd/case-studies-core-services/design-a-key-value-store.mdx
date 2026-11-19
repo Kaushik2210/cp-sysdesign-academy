@@ -1,0 +1,248 @@
+---
+title: "Case Study: Design a Distributed Key-Value Store"
+track: sd
+module: case-studies-core-services
+order: 2
+difficulty: hard
+estMinutes: 50
+prerequisites: ["sd/databases-2/consistent-hashing", "sd/databases-2/replication", "sd/distributed-theory/consistency-models", "sd/distributed-theory/clocks-and-ordering", "sd/distributed-theory/failure-detection-and-gossip"]
+tags: [case-study, key-value-store, dynamo, quorum, vector-clocks, merkle-tree, hinted-handoff, lsm-tree, availability]
+type: case-study
+furtherReading:
+  - title: "DeCandia et al., Dynamo: Amazon's Highly Available Key-value Store (SOSP 2007)"
+    url: https://www.allthingsdistributed.com/2007/10/amazons_dynamo.html
+  - title: "Apache Cassandra documentation, Dynamo-style architecture"
+    url: https://cassandra.apache.org/doc/latest/cassandra/architecture/dynamo.html
+  - title: "Chang et al., Bigtable: A Distributed Storage System for Structured Data (storage engine ideas)"
+    url: https://research.google/pubs/bigtable-a-distributed-storage-system-for-structured-data/
+  - title: "Apache Cassandra documentation, Storage engine (commit log, memtables, SSTables, compaction)"
+    url: https://cassandra.apache.org/doc/latest/cassandra/architecture/storage-engine.html
+---
+
+## The problem
+
+Design a **distributed key-value store**: a service with the operations `put(key, value)` and `get(key)` that stores far more data than one machine holds, serves it at low latency, and **keeps working when machines fail**. Cassandra, Riak, DynamoDB and the original Amazon Dynamo are systems of this kind. Think of a shopping cart, a session store or a user-profile service, where **being always writable matters more than every reader seeing the very latest write**.
+
+The design is a tour of ideas from earlier lessons put together: [consistent hashing](/sd/databases-2/consistent-hashing/), [replication](/sd/databases-2/replication/), [quorums and consistency models](/sd/distributed-theory/consistency-models/), [logical clocks](/sd/distributed-theory/clocks-and-ordering/) and [failure detection with gossip](/sd/distributed-theory/failure-detection-and-gossip/).
+
+## 1. Requirements
+
+**Functional**
+
+- `put(key, value)`, `get(key)`, `delete(key)`. Values are opaque blobs, up to about 1 MB.
+- No joins and no multi-key transactions (these would force coordination and cost availability).
+
+**Non-functional**
+
+- **Scales out horizontally**: adding nodes adds capacity, with little data movement.
+- **Highly available for writes**: accept writes even when some nodes or a whole zone are down.
+- **Low latency**: single-digit milliseconds at the median, a bounded tail.
+- **Tunable consistency**: let each operation choose between lower latency and stronger guarantees.
+- **Self-healing**: failed nodes are detected and replaced without an operator rewriting data by hand.
+
+This places the system on the **AP** side of the CAP trade-off (see [consistency models](/sd/distributed-theory/consistency-models/)): during a partition it prefers to stay available and **reconcile later**. If you need strict linearizability (a lock service, a configuration store), use a **consensus** system such as Raft-based etcd instead; it is a different design for a different job.
+
+## 2. Estimation (an example)
+
+Say 1 billion keys of 1 KB each, replicated 3 times, and 100,000 operations per second at peak.
+
+- Data: 1 B x 1 KB x 3 = **3 TB** of replicated data, easily 30 nodes of 100 GB or 10 nodes of 300 GB each, leaving headroom for compaction and growth.
+- Operations: 100,000/s over 30 nodes is about **3,300 operations per node per second**, comfortably within one node's capability, so **capacity is set by storage and fan-out, not CPU**.
+- Each write touches 3 replicas, so the cluster sees about 300,000 replica writes per second at peak if all are writes.
+
+## 3. High-level design
+
+The building blocks:
+
+1. **Partitioning:** the key is hashed onto a **ring**; each node owns many **virtual nodes** (tokens), which spreads load evenly and makes adding or removing a node move only a small slice of the keys. Try the [consistent hashing sandbox](/sandbox/consistent-hashing/).
+2. **Replication:** each key is stored on **N** nodes: the node that owns its position on the ring and the next `N - 1` **distinct physical** nodes clockwise. This list is the key's **preference list**. A common default is **N = 3**.
+3. **Coordinator:** any node can receive a request (or a client library routes it); that node acts as **coordinator**, forwards the operation to the replicas and answers the client.
+4. **Quorums:** a write succeeds once **W** replicas acknowledge it; a read waits for **R** replicas and returns the newest version. If **R + W > N**, every read set overlaps every write set.
+5. **Versioning:** concurrent writes to the same key can create **conflicting versions**, detected with vector clocks and resolved by the application or by a rule.
+6. **Failure handling:** gossip-based failure detection, **sloppy quorums with hinted handoff**, **read repair** and **anti-entropy** with Merkle trees.
+7. **Storage engine** on each node: an LSM tree with a write-ahead log.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant X as Coordinator (any node)
+  participant R1 as Replica 1
+  participant R2 as Replica 2
+  participant R3 as Replica 3 (slow or down)
+  C->>X: put(cart:42, value)
+  X->>R1: write (version v7)
+  X->>R2: write (version v7)
+  X->>R3: write (version v7)
+  R1-->>X: ack
+  R2-->>X: ack
+  X-->>C: success (W = 2 reached)
+  Note over R3: missed the write, repaired later by hinted handoff, read repair or anti-entropy`} caption="A write with N = 3 and W = 2: the client is answered after two acknowledgements, the third replica catches up later" />
+
+## 4. Quorums: how consistent is a read?
+
+After a write has been acknowledged by W replicas, the other `N - W` replicas may still hold the old value. A read contacts R replicas; it returns **stale data only if all R replicas it asks are among the stale ones**. With random replica choices the chance is `C(N - W, R) / C(N, R)`. The simulation compares that formula with a measurement for several settings.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+from math import comb
+
+random.seed(8)
+
+def stale_probability(n, r, w, trials=40000):
+    stale = 0
+    for _ in range(trials):
+        written = set(random.sample(range(n), w))      # replicas that acknowledged the latest write
+        read = random.sample(range(n), r)               # replicas the read contacts
+        if not any(i in written for i in read):
+            stale += 1
+    return stale / trials
+
+print("N  R  W   R+W>N   stale read: formula   simulated")
+for n, r, w in ((3, 1, 1), (3, 1, 2), (3, 2, 1), (3, 2, 2), (3, 1, 3), (5, 1, 1), (5, 2, 2), (5, 3, 3)):
+    formula = comb(n - w, r) / comb(n, r)
+    print(f"{n}  {r}  {w}   {'yes' if r + w > n else 'no ':3s}     {formula:18.3%}   {stale_probability(n, r, w):9.3%}")
+`} />
+
+Reading the table:
+
+- **N = 3, R = 1, W = 1** (fastest, weakest): a read hits stale data **two times in three** right after a write.
+- **R = 2, W = 2** (the classic default): **0%**. Because `R + W = 4 > 3`, any two replicas read must include at least one of the two that took the write.
+- **R + W ≤ N** settings are stale with exactly the probability the formula predicts (the simulation matches within noise).
+- You choose the trade-off **per operation**: `W = 1` for fast, low-value writes; `R = 1` for cheap reads; `R = W = QUORUM` when freshness matters; `W = N` makes writes slower and **less available**, because any single down replica blocks them.
+
+Quorum overlap is **not full linearizability**: concurrent writes, a write that fails after reaching some replicas, and clock or sloppy-quorum effects can still show surprising results. It gives **read-your-writes style freshness** under normal operation, not a global order.
+
+## 5. Conflicts: last-write-wins versus version vectors
+
+Always accepting writes means two clients can update the same key at the same time on different replicas. Which value wins?
+
+- **Last-write-wins (LWW)**: keep the version with the larger timestamp. Simple, but it **silently discards** the other update, and it depends on clocks that are never perfectly synchronised.
+- **Version vectors (vector clocks)**: every version carries a map of "how many updates each coordinator has made". One version **supersedes** another only if its vector is greater or equal in every position. If neither dominates, the versions are **concurrent**, and the store keeps both as **siblings** for the client (or a merge function) to reconcile on the next read.
+
+<CodeRunner language="python" code={`def vc_before(a, b):
+    """True if vector a happened strictly before vector b."""
+    return all(a.get(k, 0) <= b.get(k, 0) for k in set(a) | set(b)) and a != b
+
+class Cell:
+    """One key on one replica: keeps every version that is not strictly older than another."""
+    def __init__(self):
+        self.versions = []          # list of (vector, value)
+    def put(self, vector, value):
+        self.versions = [(v, x) for v, x in self.versions if not vc_before(v, vector)]
+        if not any(vc_before(vector, v) or vector == v for v, _ in self.versions):
+            self.versions.append((vector, value))
+
+cart = Cell()
+cart.put({"A": 1}, ["book"])                                  # client A creates the cart
+# two clients read the cart, then both add an item without seeing each other's change
+cart.put({"A": 1, "B": 1}, ["book", "pen"])                   # client B adds a pen
+cart.put({"A": 2}, ["book", "lamp"])                          # client A adds a lamp (concurrent with B)
+print("versions kept by the store:", [(v, x) for v, x in cart.versions])
+
+lww = max(({"t": 1, "x": ["book", "pen"]}, {"t": 2, "x": ["book", "lamp"]}), key=lambda d: d["t"])["x"]
+print("last-write-wins keeps:", lww, "-> the pen is lost")
+merged = sorted({item for _, value in cart.versions for item in value})
+print("vector clocks kept both siblings; merging them (union) gives:", merged)
+`} />
+
+The pen disappears under LWW, while the vector-clock store keeps both siblings and a union merge brings back every item. (This is the famous Dynamo shopping-cart example; deleting items then needs care, because a union merge can resurrect them, which is why real designs use **tombstones** or CRDTs.) Version vectors grow with the number of coordinators, so real systems **prune** them, or use dotted version vectors, at some cost in precision. Many modern stores (Cassandra) choose LWW at **cell level** for simplicity, and rely on applications writing different columns or using idempotent updates.
+
+## 6. Failure handling
+
+- **Failure detection**: nodes **gossip** heartbeat counters, and each node suspects a peer when its counter stops advancing (see [failure detection and gossip](/sd/distributed-theory/failure-detection-and-gossip/)). There is no central health checker to fail.
+- **Sloppy quorum and hinted handoff**: when a replica in the preference list is down, the coordinator writes to the **next healthy node on the ring** instead, with a **hint** naming the intended owner. When the owner returns, the stand-in hands the data back. Writes stay available at the cost of weaker overlap guarantees (a read quorum may not include the stand-in).
+- **Read repair**: if a read finds replicas with different versions, the coordinator returns the newest and **writes it back to the stale replicas** in the background.
+- **Anti-entropy with Merkle trees**: read repair only fixes keys that are read. A background process compares replicas of each key range using **hash trees**, so replicas that differ in a few keys are found without comparing every key.
+
+<CodeRunner language="python" code={`import hashlib
+
+def h(data):
+    return hashlib.sha256(data).hexdigest()
+
+def build(leaves):
+    levels = [[h(x) for x in leaves]]
+    while len(levels[-1]) > 1:
+        prev = levels[-1]
+        levels.append([h((prev[i] + prev[i + 1]).encode()) for i in range(0, len(prev), 2)])
+    return levels
+
+def find_differences(a, b, level, index, counter):
+    counter[0] += 1                                    # one hash comparison
+    if a[level][index] == b[level][index]:
+        return []
+    if level == 0:
+        return [index]
+    return find_differences(a, b, level - 1, 2 * index, counter) + find_differences(a, b, level - 1, 2 * index + 1, counter)
+
+N = 1024
+replica1 = [f"key{i}=value{i}".encode() for i in range(N)]
+replica2 = list(replica1)
+for i in (37, 600, 601):                               # replica 2 missed three updates
+    replica2[i] = f"key{i}=OLD".encode()
+t1, t2 = build(replica1), build(replica2)
+counter = [0]
+diff = find_differences(t1, t2, len(t1) - 1, 0, counter)
+print(f"Merkle comparison of {N} keys found {diff} with {counter[0]} hash comparisons (a full scan compares {N})")
+same = [0]
+find_differences(t1, build(replica1), len(t1) - 1, 0, same)
+print("identical replicas: found no differences after", same[0], "comparison (just the root hashes)")
+`} />
+
+The two replicas disagree on three keys out of 1,024, and the tree walk found exactly those with **39 hash comparisons** instead of 1,024. For replicas that are already identical, the cost is **one comparison** of the root hash, which is why anti-entropy can run continuously in the background.
+
+## 7. The storage engine on each node
+
+Each node stores its share of keys with a **log-structured merge tree (LSM tree)**, which turns random writes into sequential ones:
+
+1. A write is appended to a **write-ahead (commit) log** for durability, then inserted into an in-memory sorted **memtable**.
+2. When the memtable is full it is flushed as an immutable, sorted file (an **SSTable**).
+3. Reads check the memtable, then SSTables from newest to oldest, using **Bloom filters** to skip files that cannot contain the key.
+4. Background **compaction** merges files, drops overwritten values and **tombstones** (deletion markers) that are old enough, and bounds read cost.
+
+This gives very high write throughput, at the cost of **read and space amplification** and compaction work that must be scheduled so it does not hurt latency. A B-tree engine (see [indexes and query plans](/sd/databases-1/indexes-and-query-plans/)) is the alternative, with cheaper reads and costlier random writes.
+
+**Deletes** are tricky in an eventually consistent store: if a delete is simply removed, a replica that missed it will later **resurrect** the old value. So deletes write a **tombstone** that is replicated like any write and kept for a **grace period**, longer than the longest time a replica can be down, before it is purged.
+
+## 8. Operations
+
+- **Adding a node:** it takes a set of tokens, streams the data for those ranges from the current owners, and only then starts serving them; only about `1/n` of the data moves.
+- **Replacing a failed node:** stream its ranges from the other replicas (this is repair at scale).
+- **Rack and zone awareness:** place the `N` replicas in different racks and zones so one failure cannot remove all of them.
+- **Hot keys:** a few keys can dominate load (see [hot keys](/sd/databases-2/hot-keys-and-hot-partitions/)); add caching in front, split a hot key into several sub-keys, or use client-side batching.
+- **Monitoring:** compaction backlog, tombstone counts, hinted-handoff queue size, repair progress and read/write latency percentiles ([observability](/sd/observability/logs-metrics-and-traces/)).
+
+## Trade-offs
+
+<TradeOffs caption="Choosing a store design" rows={[
+  { option: "Dynamo-style (leaderless, quorum, eventual)", pros: "Always writable; scales out easily; tunable consistency", cons: "Conflicts to resolve; no cross-key transactions; weaker guarantees", chooseWhen: "Carts, sessions, profiles, time-series and other high-write, available-first data" },
+  { option: "Consensus-based store (Raft or Paxos per shard)", pros: "Linearizable reads and writes; simple semantics", cons: "Unavailable without a majority; higher write latency", chooseWhen: "Coordination data, metadata, money-like invariants" },
+  { option: "W = N (write to all)", pros: "Any single replica has the latest data", cons: "One down replica blocks all writes", chooseWhen: "Rarely; prefer quorum writes" },
+  { option: "R = W = quorum", pros: "Read-your-writes style freshness with fault tolerance", cons: "Higher latency than R = 1 or W = 1", chooseWhen: "The default for important data" },
+  { option: "Last-write-wins", pros: "Simple; no sibling handling in the client", cons: "Silently drops concurrent updates; clock-dependent", chooseWhen: "Idempotent overwrites or per-field updates" },
+  { option: "Version vectors with sibling merge", pros: "No lost concurrent updates", cons: "More complex clients; metadata growth; resurrection pitfalls", chooseWhen: "Mergeable data such as sets and carts" }
+]} />
+
+## Pitfalls
+
+- Assuming `R + W > N` makes the store linearizable.
+- Setting `W = N` or `R = N` and then wondering why one slow node ruins latency and availability.
+- Last-write-wins with unsynchronised clocks, which can let an older write win.
+- Purging tombstones before every replica has seen the delete, so deleted data returns.
+- Placing all replicas of a range in one rack or zone.
+- Letting the compaction backlog grow until reads slow down and disks fill.
+- Choosing too few virtual nodes, so one node gets far more data than another.
+- Using an AP store for data that needs uniqueness or exact balances without any extra protection.
+- Ignoring repair: replicas drift apart silently until a failure exposes it.
+
+## What would you choose and why?
+
+A shopping cart service uses this store with `N = 3`, `R = 1` and `W = 1` for speed, and customers sometimes report that items they added **vanish or reappear**. Explain the likely causes in terms of quorums, conflict resolution and tombstones, propose the settings and the merge strategy you would use for the cart, and say which data in the same company you would **not** put on this store and what you would use instead.
+
+## Quiz
+
+<Quiz id="sd-m17-key-value-store" tags={["case-study", "key-value-store", "quorum", "dynamo"]} questions={[
+  { type: "mcq", q: "With N = 3, R = 2, W = 2, why does a read see the latest acknowledged write?", options: ["Writes go to all replicas", "Any 2 replicas read must overlap the 2 that acknowledged the write, because R + W > N", "Clocks are synchronised", "The coordinator caches it"], answer: 1, explain: "Two sets of size 2 drawn from 3 replicas must share at least one replica." },
+  { type: "predict", q: "N = 5, R = 1, W = 1. What is the probability that a read right after a write returns stale data (the read contacts one random replica)?", code: "from math import comb\nprint(comb(4, 1) / comb(5, 1))", options: ["20%", "40%", "80%", "100%"], answer: 2, explain: "Only 1 of the 5 replicas took the write, so a random read misses it 4 times in 5: 80%." },
+  { type: "mcq", q: "What does a sloppy quorum with hinted handoff trade?", options: ["Consistency for write availability: writes stay accepted by stand-in nodes and are handed back later", "Durability for speed", "Availability for strict ordering", "Nothing"], answer: 0, explain: "Stand-in writes keep the store writable during failures, but a later read quorum may not include them until the data is handed back." },
+  { type: "mcq", q: "Why are Merkle trees used for anti-entropy?", options: ["They encrypt data", "They let two replicas find the few differing key ranges by comparing hashes top-down, instead of comparing every key", "They replace the commit log", "They order writes"], answer: 1, explain: "Equal root hashes mean nothing to do; otherwise only the subtrees whose hashes differ are explored." },
+  { type: "multi", q: "Which statements about conflict handling are true?", options: ["Last-write-wins can silently drop a concurrent update", "Version vectors detect concurrent updates and keep them as siblings", "Union-merging carts can resurrect deleted items unless deletes are tracked", "Vector clocks never grow in size"], answer: [0, 1, 2], explain: "Vector sizes grow with the number of coordinators, so real systems prune or use dotted versions." },
+  { type: "mcq", q: "Why does a delete in an eventually consistent store write a tombstone instead of just removing the data?", options: ["Tombstones are smaller", "A replica that missed the delete would otherwise resurrect the old value during repair", "To speed up reads", "To save the commit log"], answer: 1, explain: "The tombstone must be replicated and kept longer than any replica can stay down, then purged." }
+]} />
