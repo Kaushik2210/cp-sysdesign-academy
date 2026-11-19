@@ -1,0 +1,221 @@
+---
+title: Web and API Attacks: Injection, XSS, CSRF and SSRF
+track: sd
+module: security
+order: 4
+difficulty: medium
+estMinutes: 40
+prerequisites: ["sd/security/passwords-sessions-and-mfa", "sd/security/tokens-oauth-and-jwt", "sd/databases-1/relational-vs-nosql"]
+tags: [security, owasp, sql-injection, xss, csrf, ssrf, idor, threat-modeling, input-validation]
+type: lesson
+furtherReading:
+  - title: "OWASP Top 10"
+    url: https://owasp.org/www-project-top-ten/
+  - title: "OWASP SQL Injection Prevention Cheat Sheet"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html
+  - title: "OWASP Cross-Site Request Forgery Prevention Cheat Sheet"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+  - title: "OWASP Server-Side Request Forgery Prevention Cheat Sheet"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html
+  - title: "OWASP API Security Top 10"
+    url: https://owasp.org/API-Security/
+---
+
+## Intuition
+
+Everything that crosses a **trust boundary** is hostile until proven otherwise: a form field, a header, a JSON body, a file name, a URL, even data from your own database that came from a user. Most breaches are not exotic. They are one of a handful of old mistakes, repeated:
+
+- the program **treats data as code** (injection, cross-site scripting),
+- the program **acts for the wrong party** (cross-site request forgery, server-side request forgery),
+- the program **forgets to check who is asking** (broken access control).
+
+The defences share a shape too: **keep data and instructions separate, check permissions on the server for every request, and give each component the least power it needs.**
+
+## Injection: data that becomes code
+
+If a program builds a query by gluing strings together, the user's text can change the *structure* of the query. The cure is **parameterized queries**: the query shape is sent separately from the values, so a value can never become syntax.
+
+<CodeRunner language="python" code={`import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.executescript("""
+CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT, pw_hash TEXT, is_admin INTEGER);
+INSERT INTO users(name, pw_hash, is_admin) VALUES ('alice', 'hash-of-alice', 0), ('root', 'hash-of-root', 1);
+""")
+
+def find_user_vulnerable(name):
+    query = "SELECT id, name, is_admin FROM users WHERE name = '" + name + "'"     # string building: do not do this
+    return db.execute(query).fetchall()
+
+def find_user_safe(name):
+    return db.execute("SELECT id, name, is_admin FROM users WHERE name = ?", (name,)).fetchall()
+
+print("normal input          :", find_user_vulnerable("alice"))
+
+always_true = "x' OR '1'='1"
+print("OR '1'='1' (vulnerable):", find_user_vulnerable(always_true))
+print("OR '1'='1' (safe)      :", find_user_safe(always_true))
+
+exfiltrate = "x' UNION SELECT id, pw_hash, is_admin FROM users --"
+print("UNION (vulnerable)    :", find_user_vulnerable(exfiltrate))
+print("UNION (safe)          :", find_user_safe(exfiltrate))
+`} />
+
+The vulnerable version returns **every row** for the always-true input, and with a `UNION` it even returns the **password hashes** in the name column. The parameterized version treats the whole malicious string as a user name that does not exist and returns nothing.
+
+Rules that generalise:
+
+- Use **parameterized queries / prepared statements** or a query builder; never concatenate. ORMs help, but raw-SQL escape hatches in them are injectable too.
+- **Table and column names cannot be parameters**: choose them from a fixed allowlist.
+- The same idea applies to **OS commands** (pass an argument list, never a shell string), **LDAP**, **NoSQL** operators in JSON, **template engines** and **XML parsers** (disable external entities).
+- Run the database account with **least privilege**: an app that only reads and writes its own tables cannot `DROP` anything or read other schemas.
+
+## Cross-site scripting (XSS)
+
+XSS is injection into the **browser**: attacker-controlled text is rendered as HTML or JavaScript on your page, so it runs with your site's authority (reading the page, making requests as the user, and, if cookies are not `HttpOnly`, stealing sessions).
+
+- **Reflected**: the payload comes in the request and is echoed back. **Stored**: it is saved (a comment, a profile) and served to everyone. **DOM-based**: client-side code writes untrusted data into the page.
+- **Defence 1: output encoding for the context** (HTML text, attribute, URL, JavaScript). Modern frameworks do this by default; the bugs live in the escape hatches (`innerHTML`, `dangerouslySetInnerHTML`, `v-html`, `|safe`).
+- **Defence 2: a Content Security Policy (CSP)** that forbids inline scripts and limits script sources, so an injected script does not run.
+- **Defence 3: `HttpOnly` cookies**, so stolen script execution cannot read the session cookie (see the [first lesson](/sd/security/passwords-sessions-and-mfa/)).
+- If users may submit rich text, **sanitize with a maintained allowlist library**; do not write regex filters.
+
+## Cross-site request forgery (CSRF)
+
+Browsers attach cookies to requests automatically. If you are logged in to `bank.example` and visit a malicious page that submits a form to `bank.example/transfer`, the browser sends your session cookie, and the server cannot tell that you did not intend it.
+
+Defences, usually combined:
+
+- **`SameSite=Lax` or `Strict` cookies**: the browser does not send them on most cross-site requests. This is now the default in major browsers, but do not rely on defaults alone.
+- **Anti-CSRF tokens**: a secret per session that a legitimate page includes in each state-changing request and an attacker's page cannot read.
+- **Check the `Origin` (or `Referer`) header** on state-changing requests.
+- **Never change state on `GET`**, and require re-authentication for sensitive actions.
+- APIs that authenticate with an `Authorization: Bearer` header (not a cookie) are not CSRF-prone, because the browser does not attach that header by itself.
+
+<CodeRunner language="python" code={`import hashlib, hmac, secrets
+
+SERVER_KEY = secrets.token_bytes(32)
+
+def csrf_token(session_id):
+    return hmac.new(SERVER_KEY, session_id.encode(), hashlib.sha256).hexdigest()
+
+def handle_transfer(request):
+    """request: dict with the session cookie, the Origin header and the submitted csrf field."""
+    if request["origin"] != "https://bank.example":
+        return "403 wrong Origin"
+    expected = csrf_token(request["session"])
+    if not hmac.compare_digest(request.get("csrf", ""), expected):
+        return "403 missing or invalid CSRF token"
+    return "200 transferred"
+
+session = "session-of-alice"
+good = {"session": session, "origin": "https://bank.example", "csrf": csrf_token(session)}
+forged_form = {"session": session, "origin": "https://evil.example"}                      # the cookie is attached by the browser
+forged_no_origin = {"session": session, "origin": "https://bank.example"}                  # origin faked, token unknown
+print("legitimate page   :", handle_transfer(good))
+print("form on evil site :", handle_transfer(forged_form))
+print("no token guessed  :", handle_transfer(forged_no_origin))
+`} />
+
+## Server-side request forgery (SSRF)
+
+Many features make the **server** fetch a URL the user supplies: link previews, webhooks, image import, PDF rendering. An attacker supplies `http://169.254.169.254/latest/meta-data/` (the cloud metadata service, which can hand out credentials) or `http://localhost:9200/` (an internal admin port), and your server fetches it **from inside the firewall**.
+
+Defences:
+
+- Prefer an **allowlist** of destinations or hostnames where possible.
+- Otherwise: parse the URL with a real parser, allow only `http` and `https`, **resolve the hostname yourself**, reject any address that is **not a public one** (loopback, private ranges, link-local including the metadata IP, multicast, reserved, and IPv4-mapped IPv6 forms), then **connect to the IP you checked**. Otherwise **DNS rebinding** can answer "public" at check time and "internal" at connect time. Re-validate **every redirect**.
+- Block egress from these services at the network layer, run them in an isolated network segment and require the hardened version of the cloud metadata service (token-based, such as IMDSv2).
+
+<CodeRunner language="python" code={`import ipaddress
+from urllib.parse import urlparse
+
+def public_ip(text):
+    ip = ipaddress.ip_address(text)
+    if ip.version == 6 and ip.ipv4_mapped:         # ::ffff:127.0.0.1 is really IPv4 loopback
+        ip = ip.ipv4_mapped
+    return ip.is_global and not ip.is_multicast
+
+candidates = {
+    "93.184.216.34": "a public address",
+    "127.0.0.1": "loopback",
+    "10.1.2.3": "private network",
+    "192.168.0.10": "private network",
+    "172.16.5.4": "private network",
+    "169.254.169.254": "cloud metadata service (link-local)",
+    "100.64.0.1": "carrier-grade NAT range",
+    "::1": "IPv6 loopback",
+    "::ffff:127.0.0.1": "IPv4 loopback written as IPv6",
+    "fe80::1": "IPv6 link-local",
+}
+for text, note in candidates.items():
+    print(f"{text:18s} {'ALLOW' if public_ip(text) else 'block'}   {note}")
+
+# Parse URLs with a real parser: prefix checks on the raw string are easy to fool.
+for url in ["https://example.com/image.png", "http://evil.example@127.0.0.1/admin", "file:///etc/passwd", "http://127.0.0.1:9200/"]:
+    parts = urlparse(url)
+    print(f"{url:42s} scheme={parts.scheme:5s} host={parts.hostname}")
+`} />
+
+Note the userinfo trick: in `http://evil.example@127.0.0.1/admin` the host is `127.0.0.1`, not `evil.example`. A check that looks at the start of the string would approve it. Always validate the **parsed host after resolution**.
+
+## Broken access control (IDOR)
+
+The most common serious flaw: the server checks that you are **logged in** but not that **this object belongs to you**. `GET /invoices/1042` works, so someone tries `/invoices/1043`.
+
+- Enforce authorization **on the server, on every request**, using the authenticated identity: `WHERE id = ? AND owner_id = :current_user`.
+- Hiding or randomising ids (UUIDs) is **not** access control, only a speed bump.
+- Check **function-level** access too (can this role call `DELETE`?), and guard against **mass assignment**: do not bind a request body straight onto a model that has an `is_admin` field.
+- Test it: log in as user A and try user B's ids.
+
+## Defence in depth for APIs
+
+- **Authenticate every endpoint**, including internal and "undocumented" ones; deny by default.
+- **Validate input** against a schema (types, lengths, ranges, enums) at the edge, and cap request sizes, page sizes and nesting depth.
+- **Rate limit** per user, per key and per IP (see [rate limiting algorithms](/sd/scalability/rate-limiting-algorithms/)); also limit expensive operations such as login, password reset and search.
+- **Return generic errors** to clients and detailed ones to logs; never leak stack traces, SQL or internal hostnames.
+- **CORS is not a firewall.** It relaxes the browser's same-origin policy for specific origins; a wildcard with credentials is a bug, and it does nothing against non-browser clients.
+- **Security headers:** `Strict-Transport-Security`, `Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`.
+- **Keep dependencies patched** and scan them (software composition analysis, an SBOM); a vulnerable library is your vulnerability.
+- **Log security events** (failed logins, permission denials, token reuse) and alert on patterns, without logging secrets.
+
+## Thinking like an attacker: threat modeling
+
+Before building a feature, draw the data flows and ask, for each boundary: **S**poofing (can someone pretend to be another user or service?), **T**ampering (can data be changed?), **R**epudiation (can an actor deny an action?), **I**nformation disclosure (what leaks?), **D**enial of service (what can be exhausted?), **E**levation of privilege (how could someone gain rights?). This is the **STRIDE** checklist. Rank the findings by likelihood and impact and fix the top ones first.
+
+## Trade-offs
+
+<TradeOffs caption="Where to defend" rows={[
+  { option: "Fix the root cause in code (parameterized queries, output encoding)", pros: "Removes the vulnerability class", cons: "Needs discipline in every code path", chooseWhen: "Always the first choice" },
+  { option: "Web application firewall (WAF)", pros: "Quick virtual patching; blocks common payloads and bots", cons: "Bypassable, false positives, does not understand your business logic", chooseWhen: "An extra layer, not a substitute" },
+  { option: "Strict CSP", pros: "Stops many XSS payloads even when a bug exists", cons: "Takes effort to adopt on old pages", chooseWhen: "Any site with user-generated content" },
+  { option: "Network isolation and egress filtering", pros: "Limits what a compromised or tricked service can reach", cons: "Operational work to maintain rules", chooseWhen: "Services that fetch user-supplied URLs" },
+  { option: "Least-privilege credentials", pros: "Reduces the blast radius of any bug", cons: "More roles and accounts to manage", chooseWhen: "Databases, cloud roles, service accounts" }
+]} />
+
+## Pitfalls
+
+- Building SQL, shell commands or HTML by string concatenation.
+- Checking login but not ownership of the object (IDOR).
+- Relying on client-side validation or hidden form fields.
+- Trusting `Origin`, `Referer` or `X-Forwarded-For` blindly, or checking only the beginning of a URL string for SSRF.
+- Allowing redirects in server-side fetchers without re-validating the target.
+- `Access-Control-Allow-Origin: *` together with credentialed requests, or reflecting any origin.
+- Verbose errors, debug endpoints and default credentials left in production.
+- A WAF treated as the whole security plan.
+- Never testing: no one ever tries user B's ids as user A.
+
+## What would you choose and why?
+
+Your product lets users paste a link and your server fetches the page to show a preview card, and it also lets users export their invoices as PDF at `/invoices/{id}/pdf`. List the attacks each feature invites, the defences you would put at the code, network and monitoring levels, and how you would test that each one actually works.
+
+## Quiz
+
+<Quiz id="sd-m15-web-api-attacks" tags={["security", "owasp", "injection", "xss", "csrf", "ssrf"]} questions={[
+  { type: "mcq", q: "What is the most reliable way to prevent SQL injection?", options: ["Remove quotes from the input", "Use parameterized queries so values can never become query syntax", "Hide the database port", "Hash the input"], answer: 1, explain: "Filtering is fragile; separating the query structure from the values removes the problem at its root." },
+  { type: "mcq", q: "Which statement best describes XSS?", options: ["The server runs attacker SQL", "Attacker-controlled data is rendered as script in another user's browser on your site", "A forged request is sent with the user's cookie", "The server fetches an internal URL"], answer: 1, explain: "Context-aware output encoding, CSP and HttpOnly cookies reduce it and its impact." },
+  { type: "multi", q: "Which defences help against CSRF?", options: ["SameSite cookies", "Anti-CSRF tokens", "Checking the Origin header on state-changing requests", "Making state-changing actions available through GET"], answer: [0, 1, 2], explain: "GET requests must not change state, and cookie-less bearer-token APIs are not CSRF-prone." },
+  { type: "mcq", q: "Why is the address 169.254.169.254 important in SSRF?", options: ["It is a public DNS server", "It is the cloud metadata service that can return credentials, reachable only from inside", "It is the default web port", "It is a CDN"], answer: 1, explain: "An SSRF bug lets an outsider make your server read from that internal endpoint." },
+  { type: "mcq", q: "A user can open /invoices/1043 that belongs to someone else after changing the number. What is this?", options: ["XSS", "CSRF", "Broken access control (IDOR)", "Clickjacking"], answer: 2, explain: "The server authenticated the user but did not check that the invoice belongs to them." },
+  { type: "mcq", q: "What does CORS do?", options: ["Blocks all cross-origin requests to your server", "Lets a server relax the browser's same-origin policy for chosen origins; it is not protection against other clients", "Encrypts traffic", "Prevents SQL injection"], answer: 1, explain: "CORS is enforced by browsers only, so it is not an authentication or firewall mechanism." }
+]} />
