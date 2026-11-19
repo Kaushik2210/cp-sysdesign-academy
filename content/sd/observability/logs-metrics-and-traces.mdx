@@ -1,0 +1,206 @@
+---
+title: Logs, Metrics and Traces
+track: sd
+module: observability
+order: 1
+difficulty: medium
+estMinutes: 35
+prerequisites: ["sd/microservice-patterns/service-boundaries-and-availability", "sd/scalability/capacity-planning"]
+tags: [observability, logging, metrics, tracing, percentiles, histograms, cardinality, opentelemetry]
+type: lesson
+furtherReading:
+  - title: "Google SRE Book, Monitoring Distributed Systems (the four golden signals)"
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+  - title: "OpenTelemetry documentation, Observability primer"
+    url: https://opentelemetry.io/docs/concepts/observability-primer/
+  - title: "Prometheus documentation, Histograms and summaries"
+    url: https://prometheus.io/docs/practices/histograms/
+  - title: "Dapper, a Large-Scale Distributed Systems Tracing Infrastructure (Google, 2010)"
+    url: https://research.google/pubs/dapper-a-large-scale-distributed-systems-tracing-infrastructure/
+---
+
+## Intuition
+
+A system that you cannot see into fails in ways you cannot explain. **Observability** is the ability to ask new questions about a running system, from the outside, using the data it emits, **without shipping new code to answer them**. "Why is checkout slow for users in one region since 14:05?" is not a question you can plan a dashboard for in advance.
+
+Three kinds of data cover most of it, and they answer different questions:
+
+| signal | what it is | good at | weak at |
+| --- | --- | --- | --- |
+| **metrics** | numbers aggregated over time (counters, gauges, histograms) | "is something wrong?", trends, alerting; cheap to store | no detail about individual requests |
+| **logs** | timestamped records of events | "what exactly happened?", for one event or entity | expensive at volume; hard to see across services |
+| **traces** | the path of one request through many services, as a tree of timed **spans** | "where did the time go?", cross-service causes | sampled; needs every service to propagate context |
+
+A common flow: a **metric** alert tells you something is wrong, a **trace** shows which service and call is slow, and a **log** line from that span says why.
+
+## Metrics: what to measure
+
+Two checklists save you from measuring everything:
+
+- The **four golden signals** (from Google's SRE book), for any user-facing service: **latency** (separately for successes and errors), **traffic** (requests per second), **errors** (rate of failed requests, including wrong content) and **saturation** (how full the most constrained resource is).
+- **RED** for request-driven services: **R**ate, **E**rrors, **D**uration. **USE** for resources (CPU, disk, pools): **U**tilization, **S**aturation, **E**rrors.
+
+Metric types: a **counter** only goes up (requests served; you chart its rate), a **gauge** goes up and down (queue length), a **histogram** counts observations into buckets (request duration).
+
+### Latency: why the mean misleads
+
+A user does not experience the average. One request in a hundred taking over a second is invisible in the mean and is exactly what a user with a long shopping cart sees. Use **percentiles** (p50, p95, p99), and remember that a page that makes 50 backend calls hits the p99 of at least one almost every time (see [scatter-gather and tail latency](/sd/search-systems/scatter-gather-search-and-tail-latency/)).
+
+Two traps are shown below. First, **you cannot average percentiles**: the average of the hosts' p50s is not the p50 of all traffic. Compute percentiles from merged data (or merged histograms). Second, a **histogram** stores only counts per bucket, so a percentile is an **estimate** whose error depends on where the bucket boundaries are.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import math, random, bisect
+
+random.seed(5)
+
+def request_latency():
+    t = random.lognormvariate(math.log(80), 0.45)        # a typical request takes about 80 ms
+    if random.random() < 0.02:
+        t += random.uniform(400, 1500)                    # 2% hit a slow path
+    return t
+
+def pct(sorted_values, p):
+    return sorted_values[min(len(sorted_values) - 1, int(p / 100 * len(sorted_values)))]
+
+traffic = {"host-a": 20000, "host-b": 20000, "host-c": 2000}   # host-c is unhealthy and gets little traffic
+samples = {}
+for host, n in traffic.items():
+    values = [request_latency() for _ in range(n)]
+    if host == "host-c":
+        values = [v + random.uniform(0, 600) for v in values]
+    samples[host] = sorted(values)
+everything = sorted(v for vs in samples.values() for v in vs)
+
+print(f"all requests: n={len(everything)}  mean={sum(everything)/len(everything):.0f} ms  p50={pct(everything,50):.0f}  p95={pct(everything,95):.0f}  p99={pct(everything,99):.0f}  max={everything[-1]:.0f}")
+for host, vs in samples.items():
+    print(f"  {host}: n={len(vs):5d}  p50={pct(vs,50):4.0f}  p99={pct(vs,99):5.0f}")
+print(f"average of the per-host medians = {sum(pct(v,50) for v in samples.values())/3:.0f} ms, but the real median of all traffic = {pct(everything,50):.0f} ms")
+
+# A histogram keeps only counts per bucket (like Prometheus) and estimates percentiles by interpolation.
+bounds = [10, 25, 50, 100, 250, 500, 1000, 2500]
+counts = [0] * len(bounds)
+for v in everything:
+    counts[bisect.bisect_left(bounds, v)] += 1
+print("bucket counts:", dict(zip([f"<={b}" for b in bounds], counts)))
+
+def histogram_quantile(q):
+    target, seen, lower = q * len(everything), 0, 0
+    for ub, c in zip(bounds, counts):
+        if seen + c >= target:
+            return lower + (ub - lower) * (target - seen) / c
+        seen, lower = seen + c, ub
+    return bounds[-1]
+
+for q in (0.5, 0.95, 0.99):
+    print(f"p{int(q*100)}: exact {pct(everything, q*100):5.0f} ms   histogram estimate {histogram_quantile(q):5.0f} ms")
+`} />
+
+Read the output like this: the mean (about 120 ms) sits far from the p99 (over a second); the unhealthy `host-c` drags the average of medians well above the real median, which is the reason to **aggregate raw counts or histograms and compute percentiles at the end**; and the p99 estimate from coarse buckets is off by roughly 10% because the buckets above 500 ms are wide. **Choose bucket boundaries around your latency target** (for a 300 ms goal, have several buckets near 300 ms).
+
+### Cardinality: the cost nobody expects
+
+Every distinct combination of label values is a separate **time series**, stored and indexed. Labels with unbounded values (user id, request id, URL with ids, email) multiply the series count until the metrics system falls over or the bill explodes.
+
+<CodeRunner language="python" code={`routes, methods, statuses = 40, 5, 6
+series = routes * methods * statuses
+print("requests_total{route, method, status}:", f"{routes} x {methods} x {statuses} = {series:,} time series")
+print("add a user_id label (1,000,000 users):", f"{series * 1_000_000:,} series")
+print("use a status class (2xx/4xx/5xx) instead of the exact status:", routes * methods * 3, "series")
+`} />
+
+Keep labels **low-cardinality** (route template, method, status class, region, version). Put high-cardinality detail (user id, order id) in **logs and traces**, which are built for it.
+
+## Logs: events with context
+
+- Write **structured logs** (JSON or key=value), not prose you have to regex later: `{"ts": "...", "level": "error", "service": "orders", "trace_id": "...", "user_id": "...", "msg": "payment declined", "code": "card_expired"}`.
+- Always include a **correlation id** (the trace id) so one request's lines can be found across services.
+- Use levels consistently (`ERROR` for something a person should look at, `INFO` for state changes, `DEBUG` off in production), and **sample or rate-limit** noisy lines.
+- **Never log secrets or personal data** (passwords, tokens, card numbers, full request bodies); scrub at the source.
+- Ship logs off the machine to a central store (agent or sidecar, then a queue, then storage and search), and set **retention** by value: hot for days, cold and cheap for months.
+
+## Traces: following one request
+
+A **trace** is the story of one request. Each unit of work is a **span** with a start, a duration, a parent and attributes. A **trace id** and **span id** travel with the request in headers (the W3C `traceparent` header is the standard), so every service attaches its spans to the same tree.
+
+<Diagram kind="mermaid" code={`flowchart TD
+  G["gateway: 120 ms total"] --> A["auth: 15 ms"]
+  G --> O["orders: 95 ms total"]
+  O --> D["db.query: 50 ms"]
+  O --> I["inventory: 30 ms total"]
+  I --> C["cache: 4 ms"]`} caption="One request as a tree of spans: the database query inside the orders service owns the most time" />
+
+The code below turns a flat list of spans into the tree and finds where time is spent **in each span itself** (its **self time**: its duration minus the time of its children), which is what a trace viewer does.
+
+<CodeRunner language="python" code={`# (span id, parent id, service, start ms, duration ms)
+spans = [
+    ("a", None, "gateway", 0, 120),
+    ("b", "a", "auth", 5, 15),
+    ("c", "a", "orders", 22, 95),
+    ("d", "c", "db.query", 30, 50),
+    ("e", "c", "inventory", 82, 30),
+    ("f", "e", "cache", 85, 4),
+]
+children = {}
+for span in spans:
+    children.setdefault(span[1], []).append(span)
+
+def self_time(span):
+    return span[4] - sum(kid[4] for kid in children.get(span[0], []))
+
+def show(parent, depth=0):
+    for span in sorted(children.get(parent, []), key=lambda s: s[3]):
+        print("  " * depth + f"{span[2]:10s} start={span[3]:3d} ms  duration={span[4]:3d} ms  self={self_time(span):3d} ms")
+        show(span[0], depth + 1)
+
+show(None)
+slowest = max(spans, key=self_time)
+print("most time spent inside one span:", slowest[2], f"({self_time(slowest)} ms of its own)")
+`} />
+
+The **database query** owns 50 ms of the 120 ms request on its own; no amount of staring at the gateway's metrics would have said so.
+
+**Sampling.** Tracing every request is expensive. **Head sampling** decides at the start (for example 1%): cheap, but it throws away most of the rare errors. **Tail sampling** decides after the trace completes, so you can keep all slow and failed traces and a small share of the normal ones: better data, but the collector must buffer whole traces.
+
+**OpenTelemetry** is the vendor-neutral standard for generating and exporting all three signals; instrument once, choose a backend later.
+
+## Connecting the signals
+
+- Put the **trace id in every log line**, and attach **exemplars** (a trace id) to slow histogram buckets, so you can jump from a latency spike to an example trace.
+- Alert on **symptoms users feel** (error rate, latency percentile, failed checkouts) rather than on every cause (CPU at 80%). Causes belong on dashboards for diagnosis. The next lesson shows how to turn this into service level objectives.
+- Observability costs money and CPU: decide what to keep, at what resolution and for how long, as deliberately as you decide the schema.
+
+## Trade-offs
+
+<TradeOffs caption="Choosing what to record" rows={[
+  { option: "Metrics for everything, high resolution", pros: "Cheap per point; ideal for alerting and trends", cons: "No per-request detail; cardinality blow-ups", chooseWhen: "The default for health and capacity" },
+  { option: "Full structured logging", pros: "Complete record of events and errors", cons: "Volume and cost; risk of leaking sensitive data", chooseWhen: "Errors, audits and state changes; sampled for noisy paths" },
+  { option: "Head-sampled traces (for example 1%)", pros: "Low overhead, simple", cons: "Rare failures are usually not captured", chooseWhen: "High traffic where cost matters most" },
+  { option: "Tail-sampled traces", pros: "Keeps all slow and failed requests", cons: "Needs a collector that buffers whole traces", chooseWhen: "When debugging rare, slow or failing requests is the goal" },
+  { option: "Managed observability platform", pros: "Little to operate; integrated UI", cons: "Cost grows with volume; lock-in risk", chooseWhen: "Small teams, or when running it yourself is not your business" },
+  { option: "Self-hosted open source stack", pros: "Control over cost and data location", cons: "You run, scale and upgrade it", chooseWhen: "Large volume or strict data rules" }
+]} />
+
+## Pitfalls
+
+- Alerting on averages, or averaging percentiles across hosts or time windows.
+- Unbounded label values (user id, URL with ids) in metrics.
+- Unstructured logs with no trace id, so one request cannot be followed.
+- Logging secrets or personal data; keeping logs forever.
+- Tracing that breaks at a queue, a thread pool or a legacy service because the context was not propagated.
+- Dashboards with 80 graphs and no one who knows which to read: start from the golden signals.
+- Collecting data nobody looks at, while the one signal that explains the last outage was never recorded.
+- Monitoring that runs on the same infrastructure as the system it watches, and fails with it.
+
+## What would you choose and why?
+
+Checkout p99 latency doubles at 14:05 but CPU, error rate and the average all look normal. You have metrics, unstructured logs from 12 services and no tracing. In what order do you add instrumentation, which signal do you check first on the next incident, and how do you keep the cost under control?
+
+## Quiz
+
+<Quiz id="sd-m16-logs-metrics-traces" tags={["observability", "metrics", "tracing", "logging"]} questions={[
+  { type: "mcq", q: "Which signal best answers 'where did the time go for this one slow request across five services'?", options: ["A counter", "A distributed trace", "CPU utilization", "A gauge"], answer: 1, explain: "A trace links the timed spans of every service that touched the request, so the slow call stands out." },
+  { type: "mcq", q: "Why can you not compute a fleet-wide p99 by averaging each host's p99?", options: ["Percentiles are not additive; the result depends on how traffic and the distribution are spread across hosts", "Hosts use different clocks", "p99 is always equal to the maximum", "Averages are always larger"], answer: 0, explain: "Merge raw samples or histogram buckets and compute the percentile at the end." },
+  { type: "multi", q: "Which are the four golden signals?", options: ["Latency", "Traffic", "Errors", "Saturation"], answer: [0, 1, 2, 3], explain: "They apply to nearly any user-facing service; RED and USE are related checklists." },
+  { type: "mcq", q: "What is the main danger of adding a user_id label to a metric?", options: ["The metric becomes a gauge", "Every user creates new time series, multiplying storage and index cost", "Labels cannot be strings", "It disables alerts"], answer: 1, explain: "Unbounded label values create unbounded series; keep such detail in logs and traces." },
+  { type: "mcq", q: "What does tail sampling of traces allow that head sampling does not?", options: ["Lower overhead", "Keeping every slow or failed trace by deciding after the trace completes", "Skipping context propagation", "Removing the need for a collector"], answer: 1, explain: "The decision needs the whole trace, so a collector must buffer it, which costs memory." },
+  { type: "mcq", q: "Which alert is better for users?", options: ["CPU above 80% on any host", "5% of checkout requests failing for 5 minutes", "Disk usage 60%", "A single slow request"], answer: 1, explain: "Alert on symptoms users feel; keep causes such as CPU on dashboards for diagnosis." }
+]} />

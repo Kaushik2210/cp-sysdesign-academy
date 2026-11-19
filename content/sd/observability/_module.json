@@ -1,0 +1,1 @@
+{ "title": "Observability and Reliability", "level": "Level 2: Intermediate Systems", "order": 16, "summary": "Knowing what a system is doing and keeping it available: logs, metrics and traces, service level objectives and error budgets, safe deployments, and backups and disaster recovery." }
