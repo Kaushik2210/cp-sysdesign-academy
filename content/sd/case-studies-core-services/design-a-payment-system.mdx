@@ -1,0 +1,323 @@
+---
+title: "Case Study: Design a Payment System"
+track: sd
+module: case-studies-core-services
+order: 7
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/databases-1/acid-and-transactions", "sd/distributed-theory/distributed-commit-and-sagas", "sd/security/tls-encryption-and-key-management"]
+tags: [case-study, payments, idempotency, ledger, double-entry, webhooks, reconciliation, state-machine, outbox, pci-dss]
+type: case-study
+furtherReading:
+  - title: "Stripe documentation, Idempotent requests"
+    url: https://docs.stripe.com/api/idempotent_requests
+  - title: "Stripe documentation, Webhooks (signatures, retries and ordering)"
+    url: https://docs.stripe.com/webhooks
+  - title: "PCI Security Standards Council, PCI DSS overview"
+    url: https://www.pcisecuritystandards.org/standards/pci-dss/
+  - title: "microservices.io, Pattern: Transactional outbox"
+    url: https://microservices.io/patterns/data/transactional-outbox.html
+---
+
+## The problem
+
+Design the **payment backend of an online marketplace**: shoppers pay for orders by card or wallet, the platform keeps the money safe, takes a fee, and later pays the sellers. We will integrate with an external **payment service provider (PSP)** such as Stripe or Adyen, which talks to the card networks and banks, and we will keep our own **ledger** of who owns what.
+
+Unlike most case studies, this one is **not a throughput problem**. A busy platform handles a few hundred payments a second. The challenge is **correctness under failure**: a customer must never be charged twice, a payment must never silently disappear, and every cent must be traceable. Timeouts, retries, duplicate and out-of-order callbacks, and crashes in the middle of a multi-step operation are the normal conditions, not edge cases.
+
+## 1. Requirements
+
+**Functional**
+
+- **Pay**: create a payment for an order, collect the customer's payment method, **authorize** and **capture** funds.
+- **Refund** (full or partial) and handle **chargebacks** (disputes).
+- **Payouts** to sellers, net of fees.
+- A **ledger** with a complete audit trail, and statements per merchant.
+- Process **webhooks** from the PSP (asynchronous results) and **reconcile** against its reports.
+
+**Non-functional**
+
+- **No double charges and no lost payments** (exactly-once *effect*), even with retries and crashes.
+- **Money is conserved**: every movement has a matching opposite entry; balances can always be recomputed from history.
+- **Strong consistency** for the ledger; availability matters but **never at the cost of wrong money**.
+- **Auditability, security and compliance** (PCI DSS, strong customer authentication, data protection).
+- **Graceful degradation**: if one PSP is down, fail over or queue, and tell the user honestly.
+
+## 2. Estimation
+
+Assume 10 million payments a day.
+
+<CodeRunner language="python" code={`payments_per_day = 10_000_000
+seconds = 86400
+avg = payments_per_day / seconds
+print(f"{payments_per_day / 1e6:.0f} million payments a day = {avg:,.0f}/s on average, about {5 * avg:,.0f}/s at 5x peak")
+entries_per_payment = 4                              # e.g. customer funds, platform receivable, merchant payable, fee revenue
+entry_bytes = 100
+print(f"ledger entries: {payments_per_day * entries_per_payment / 1e6:.0f} million a day, about {payments_per_day * entries_per_payment * entry_bytes / 1e9:.0f} GB a day, {payments_per_day * entries_per_payment * entry_bytes * 365 / 1e12:.1f} TB a year")
+print(f"a 1-in-10,000 duplicate-charge bug would double-charge {payments_per_day // 10_000:,} customers a day")
+`} />
+
+About **116 payments a second** (580 at peak) and **about 1.5 TB of ledger a year** are small for a modern database. The last line is the real sizing exercise: at this volume **a failure rate that sounds negligible still harms a thousand customers every day**, so correctness is designed in, not tested in.
+
+## 3. How a card payment actually works
+
+1. The customer enters card details into a form **hosted by the PSP** (or a PSP-provided field in our page). The browser sends the card data **directly to the PSP**, which returns a **token**. Our servers never see the card number, which keeps most of the **PCI DSS** burden off us ([TLS and key management](/sd/security/tls-encryption-and-key-management/) covers the encryption side).
+2. Our server creates a **payment** (often called a payment intent) at the PSP with the amount, currency, the token and an **idempotency key**.
+3. The PSP asks the card network and the issuing bank to **authorize** the payment: the bank checks funds and risk, and places a hold. The customer may be asked for **strong customer authentication** (3-D Secure, a one-time code in the bank's app).
+4. We **capture** the authorized funds (immediately, or later, for example when the item ships).
+5. The PSP tells us the outcome through a **webhook** (an HTTP call to our endpoint), because many steps are asynchronous.
+6. Days later the money is **settled**: the PSP pays out to our bank account, minus its fees, and sends a **settlement report**.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant B as Browser
+  participant P as PSP
+  participant S as Our payment service
+  participant L as Ledger DB
+  participant O as Order service
+  B->>P: card details (hosted fields)
+  P-->>B: token
+  B->>S: pay(order 42, token) with idempotency key
+  S->>L: save payment 'created' (one transaction)
+  S->>P: create and confirm payment (idempotency key)
+  P-->>S: pending / requires action
+  P->>S: webhook: payment authorized
+  S->>L: record state, write ledger entries, queue event (one transaction)
+  S->>O: order paid (event, at least once)
+  P->>S: webhook: payment captured (may arrive twice or late)
+  Note over S,P: later: settlement report is reconciled against the ledger`} caption="The result of a payment is learned asynchronously; the ledger and the order service are updated from webhooks, and everything is idempotent" />
+
+## 4. Idempotency: the first rule of payments
+
+Networks lose responses. If the client sends a charge request and gets a **timeout**, it cannot tell whether the charge happened. Retrying blindly can charge the customer twice; not retrying can lose the sale. The answer is an **idempotency key**: a unique id the client generates for one logical operation and sends with every attempt. The server stores the **result against the key** and **replays** it if the key appears again.
+
+The simulation charges 1,000 orders of 100 each. The provider **sometimes takes the money and loses the response** (a 30% chance), and the client retries after a timeout, up to five times.
+
+<CodeRunner language="python" code={`import random
+
+class PaymentProvider:
+    """A charge API that always processes the request but sometimes loses the response (the client sees a timeout)."""
+    def __init__(self, seed):
+        self.rng = random.Random(seed)
+        self.charges = []                    # the money actually taken
+        self.by_key = {}
+    def charge(self, amount, idempotency_key=None):
+        if idempotency_key is not None and idempotency_key in self.by_key:
+            outcome = self.by_key[idempotency_key]              # replay the stored result, do not charge again
+        else:
+            self.charges.append(amount)
+            outcome = f"ch_{len(self.charges)}"
+            if idempotency_key is not None:
+                self.by_key[idempotency_key] = outcome
+        if self.rng.random() < 0.3:
+            raise TimeoutError("response lost")                  # the charge happened, but we never heard back
+        return outcome
+
+def checkout(provider, orders, use_key):
+    for order in orders:
+        key = f"order-{order}" if use_key else None
+        for attempt in range(5):
+            try:
+                provider.charge(100, key)
+                break
+            except TimeoutError:
+                continue                                         # the client retries
+
+for use_key in (False, True):
+    p = PaymentProvider(seed=4)
+    checkout(p, range(1000), use_key)
+    print(f"{'with' if use_key else 'without'} idempotency keys: 1000 orders of 100 -> {len(p.charges)} charges taken = {sum(p.charges):,} (should be 100,000)")
+`} />
+
+Without keys, 1,000 orders produced **1,436 charges and 143,600 taken instead of 100,000**: 436 customers charged twice or more. With keys, exactly **1,000 charges**. Rules for a good implementation:
+
+- The **client generates the key** (a UUID per logical attempt, tied to the order) and reuses it on every retry, never a new one.
+- The server stores `(key, request fingerprint, status, response)` **atomically with the work**, and if the same key arrives with a **different** request body, it rejects it.
+- Keys expire after a window (for example 24 hours), long enough to cover retries.
+- If the outcome is **unknown** (timeout, crash), the system must not assume failure: it **asks the PSP for the status** (by key or payment id) before deciding anything. See [delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/).
+
+## 5. A payment is a state machine, and webhooks are messy
+
+A payment moves through states: `created` → `pending` → `authorized` → `captured` → (`refunded`), or `failed` at several points. Webhooks arrive **at least once, sometimes late, duplicated, or out of order** (a `captured` event can overtake `authorized`). A handler therefore must:
+
+1. **Verify the signature** (an HMAC over the body with a shared secret, as in the [tokens lesson](/sd/security/tokens-oauth-and-jwt/)), and reject anything unsigned.
+2. Be **idempotent by event id**: ignore duplicates.
+3. **Never move backwards**: an old `authorized` arriving after `captured` is ignored.
+4. If it sees a state that **skips steps** (a lost or delayed earlier event), accept it but **flag it** and reconcile later.
+5. **Not trust the browser redirect** ("success" page) as proof of payment; only the webhook (or a direct status query) counts.
+6. Keep a **polling fallback**: payments stuck in `pending` too long are checked against the PSP.
+
+<CodeRunner language="python" code={`RANK = {"created": 0, "pending": 1, "authorized": 2, "captured": 3, "refunded": 4, "failed": 3}
+ALLOWED = {("created", "pending"), ("pending", "authorized"), ("pending", "failed"), ("authorized", "captured"),
+           ("authorized", "failed"), ("captured", "refunded"), ("created", "failed")}
+
+def apply_events(events):
+    state, seen, log = "created", set(), []
+    for event_id, new_state in events:
+        if event_id in seen:
+            log.append(f"{event_id}: duplicate, ignored")
+            continue
+        seen.add(event_id)
+        if new_state == state or RANK[new_state] < RANK[state]:
+            log.append(f"{event_id}: stale '{new_state}' arrived after '{state}', ignored")
+        elif (state, new_state) in ALLOWED:
+            state = new_state
+            log.append(f"{event_id}: {state}")
+        else:
+            state = new_state                                       # a skipped step: accept, but flag it for review
+            log.append(f"{event_id}: {state} (skipped intermediate states, flagged)")
+    return state, log
+
+state, log = apply_events([("e1", "pending"), ("e3", "captured"), ("e2", "authorized"), ("e3", "captured"), ("e4", "refunded")])
+print("final state after out-of-order and duplicate webhooks:", state)
+print("\\n".join("  " + line for line in log))
+`} />
+
+The handler ended in the right place (`refunded`) despite the late `authorized` event and the duplicate `captured` one, and flagged the skipped step for review.
+
+## 6. The ledger: double-entry bookkeeping
+
+Do not store "the balance" as the source of truth. Store an **append-only ledger of entries**, and treat balances as **derived** (and cached) from it. Use **double entry**: every transaction consists of two or more entries that **sum to zero**, so money is only ever **moved**, never created or destroyed.
+
+For a 100.00 purchase with a 2.90 fee, the entries might be: customer funds clearing `-100.00`, merchant payable `+97.10`, platform fee revenue `+2.90`. The sum is zero. A **refund** is not an edit: it is a **new** transaction with opposite entries. History is **immutable**; corrections are new entries.
+
+Rules that prevent whole classes of bugs:
+
+- **Money is an integer in minor units** (cents) plus a **currency code**, never a floating-point number.
+- A transaction is **atomic**: all entries are written or none, in one database transaction ([ACID](/sd/databases-1/acid-and-transactions/)).
+- **Invariants are enforced by the database**: a `CHECK (balance >= 0)` constraint, conditional updates, unique constraints for idempotency keys.
+- **Never read, check in application code, then write.** Two concurrent requests can both pass the check. Do the check and the update in **one statement** (`UPDATE ... WHERE balance >= :amount`) or lock the row.
+
+The code runs on SQLite, which is built into the browser runner. It transfers money atomically, rejects an overdraft with a conditional update, verifies that each transaction sums to zero, and shows what the naive read-then-write race does.
+
+<CodeRunner language="python" code={`import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.executescript("""
+CREATE TABLE accounts(id TEXT PRIMARY KEY, balance INTEGER NOT NULL CHECK (balance >= 0));
+CREATE TABLE entries(id INTEGER PRIMARY KEY AUTOINCREMENT, txn TEXT, account TEXT, amount INTEGER);
+INSERT INTO accounts VALUES ('alice', 10000), ('bob', 0), ('merchant', 0);
+""")
+db.execute("INSERT INTO entries(txn, account, amount) VALUES ('opening', 'alice', 10000), ('opening', 'equity', -10000)")
+
+def transfer(txn, src, dst, amount):
+    """One database transaction: both legs are written, or neither is."""
+    try:
+        with db:
+            cur = db.execute("UPDATE accounts SET balance = balance - ? WHERE id = ? AND balance >= ?", (amount, src, amount))
+            if cur.rowcount == 0:
+                raise ValueError("insufficient funds")
+            db.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount, dst))
+            db.execute("INSERT INTO entries(txn, account, amount) VALUES (?, ?, ?), (?, ?, ?)", (txn, src, -amount, txn, dst, amount))
+        return "ok"
+    except ValueError as e:
+        return str(e)
+
+print("alice pays bob 8,000:", transfer("t1", "alice", "bob", 8000))
+print("alice pays merchant 8,000 (only 2,000 left):", transfer("t2", "alice", "merchant", 8000))
+print("balances:", dict(db.execute("SELECT id, balance FROM accounts")))
+print("every transaction sums to zero:", all(total == 0 for (total,) in db.execute("SELECT SUM(amount) FROM entries GROUP BY txn")))
+
+# The naive version reads the balance, checks it in application code, then writes. Two requests can interleave:
+balance = 10000
+read_a, read_b = balance, balance                      # both requests read 10,000 before either one writes
+if read_a >= 8000:
+    balance = read_a - 8000
+if read_b >= 8000:
+    balance = read_b - 8000
+print(f"naive read-check-write, two 8,000 payments approved from a 10,000 balance: balance is {balance}, but 16,000 was paid out")
+`} />
+
+The overdraft was rejected by the database **in the same statement** that changed the balance, the second payment left no partial changes, and every transaction's entries summed to zero. The naive version approved both 8,000 payments from the same stale balance and ended at 2,000 after paying out 16,000: a **lost update**.
+
+**Scaling the ledger.** At this volume a single well-run relational database (with replicas for reads) is enough for a long time. When you must shard, **shard by account** so most transactions are local. A transfer between accounts on different shards then needs coordination: use a **saga** with compensating entries ([distributed commit and sagas](/sd/distributed-theory/distributed-commit-and-sagas/)) or keep both legs in a platform-owned account on the same shard and settle between shards asynchronously. Do not reach for two-phase commit across services as a first answer.
+
+## 7. Keeping the payment, the order and the event consistent: the outbox
+
+A payment service typically has to do two things when a payment succeeds: **update its own database** and **tell the order service**. If it updates the database and then crashes before publishing the event, the order is never marked paid. If it publishes first and the database write fails, the order is marked paid for money it never recorded. There is no atomic "database and message broker" operation.
+
+The **transactional outbox** pattern solves this: in the **same database transaction** that records the payment, insert a row into an `outbox` table describing the event. A separate relay process reads new outbox rows and **publishes them to the queue at least once**, marking them sent. Consumers (the order service) are **idempotent**, so duplicates are harmless. The state change and the intent to notify now commit or fail together.
+
+## 8. Reconciliation: the safety net
+
+Even with idempotency and a careful ledger, things diverge: a webhook is lost, a settlement amount differs because of fees or currency conversion, a chargeback arrives, a bug writes a wrong entry. **Reconciliation** compares your records with the external source of truth (the PSP's settlement report, and the bank statement) and flags every difference for investigation. It runs **daily** and is a core system, not a spreadsheet.
+
+<CodeRunner language="python" code={`ours = {"p1": 5000, "p2": 1200, "p3": 7700, "p4": 300}      # payments in our ledger and their amounts (minor units)
+theirs = {"p1": 5000, "p2": 1250, "p4": 300, "p5": 900}      # the provider's settlement report
+
+print("reconciliation breaks:")
+for pid in sorted(set(ours) | set(theirs)):
+    if pid not in theirs:
+        print(f"  {pid}: we recorded {ours[pid]} but the provider has no such payment -> investigate (never captured?)")
+    elif pid not in ours:
+        print(f"  {pid}: the provider settled {theirs[pid]} that we have no record of -> investigate (lost webhook or callback?)")
+    elif ours[pid] != theirs[pid]:
+        print(f"  {pid}: amounts differ, ours {ours[pid]} vs provider {theirs[pid]} -> investigate (fee, currency conversion or partial capture?)")
+print("matched:", [pid for pid in ours if pid in theirs and ours[pid] == theirs[pid]])
+`} />
+
+Three categories of break appear: **missing at the provider**, **missing in our ledger**, and **amount mismatch**, each with a different likely cause and owner. Mature systems auto-resolve the known benign cases (a standard fee, a timing difference) and **alert on the rest**, tracking the age and total value of open breaks.
+
+## 9. Refunds, payouts and disputes
+
+- **Refunds** are new reversing transactions linked to the original payment, limited to the captured amount, and idempotent like charges. A partial refund reduces the merchant's payable and may or may not return the fee.
+- **Payouts**: aggregate each merchant's payable balance, apply a holding period and minimum, send a bank transfer through the PSP or a payout API (again with an idempotency key), and record the entries when the bank confirms. Payout failures (closed account, wrong details) create **return** entries.
+- **Chargebacks**: the cardholder disputes the payment with their bank; money is clawed back and a **fee** applies. Model them as state transitions with a deadline for evidence, and entries on the ledger.
+- **Multiple currencies**: keep the **original currency and amount**, the conversion rate and the converted amount on the entry; never convert silently.
+
+## 10. Security, compliance and fraud
+
+- **Reduce PCI scope**: use PSP-hosted fields and tokens so card numbers never reach your systems; store only the token and the last four digits and brand. If you must handle card data, the compliance burden, network segmentation and encryption requirements are far heavier.
+- **Encrypt** sensitive data at rest and in transit, restrict and **audit** access, rotate keys and secrets ([key management](/sd/security/tls-encryption-and-key-management/)).
+- **Authenticate callers** and protect the payment API from abuse (rate limits, [web and API attacks](/sd/security/web-and-api-attacks/)).
+- **Fraud and risk**: velocity limits (many payments from one device or card), address and device checks, risk scores that can trigger extra authentication or manual review. Fraud decisions should not break correctness: a payment held for review is a state, not an error.
+- **Compliance** with local rules (strong customer authentication in many regions, anti-money-laundering checks, data residency) shapes workflows and must be designed with legal advice.
+
+## 11. Availability and observability
+
+- **Multiple PSPs**: route by method, country and cost, and fail over when one has an outage, keeping idempotency per provider (a retry on a different provider could double-charge: record which provider is authoritative for each payment).
+- **Timeouts and circuit breakers** around the PSP ([retry amplification and circuit breakers](/sd/microservice-patterns/retry-amplification-and-circuit-breakers/)); degrade by offering other payment methods or accepting the order as "payment pending".
+- **Key metrics**: payment success and authorization rates (by PSP, method, country), latency, webhook lag, payments stuck in `pending`, outbox backlog, **ledger imbalance (must be exactly zero)**, number and age of reconciliation breaks. Alert on the ones that mean money is wrong ([SLOs and alerting](/sd/observability/slos-error-budgets-and-alerting/)).
+- **Runbooks** for PSP outages, duplicate-charge reports and reconciliation breaks, and regular drills.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "Retry blindly on timeout", pros: "Simplest client", cons: "Double charges when the first attempt succeeded", chooseWhen: "Never for money movement" },
+  { option: "Idempotency keys with stored results", pros: "Safe retries; exactly-once effect", cons: "Key storage and expiry to manage; careful semantics", chooseWhen: "Every state-changing payment call" },
+  { option: "Append-only double-entry ledger", pros: "Auditable; balances recomputable; invariants checkable", cons: "More tables and discipline than a balance column", chooseWhen: "Anything holding or moving money" },
+  { option: "Balance column updated in place", pros: "Simple", cons: "No history; lost updates; hard to audit or repair", chooseWhen: "Never as the only record" },
+  { option: "Transactional outbox", pros: "State and event commit atomically; no lost notifications", cons: "A relay process; consumers must handle duplicates", chooseWhen: "Whenever a DB change must trigger a message" },
+  { option: "Two-phase commit across services", pros: "Atomic across systems", cons: "Blocking, availability cost, rarely supported by PSPs", chooseWhen: "Rarely; prefer sagas and idempotent steps" },
+  { option: "Saga with compensating entries", pros: "Works across services; no global locks", cons: "Intermediate states visible; compensation logic", chooseWhen: "Multi-step flows spanning services" },
+  { option: "Single PSP", pros: "One integration", cons: "An outage stops all payments", chooseWhen: "Early stage" },
+  { option: "Multiple PSPs with routing", pros: "Resilience and cost optimisation", cons: "More integrations, reconciliation and idempotency complexity", chooseWhen: "At scale or where availability is critical" }
+]} />
+
+## Pitfalls
+
+- Using floating-point numbers for money.
+- Treating a timeout as a failure, or retrying without an idempotency key.
+- Checking a balance in application code and then writing (lost updates and double spends).
+- Marking an order paid from the browser's success redirect instead of a verified webhook or status query.
+- Webhook handlers that are not idempotent, not signature-verified or assume ordering.
+- Editing or deleting ledger entries instead of adding reversing ones.
+- Publishing events outside the database transaction (no outbox).
+- Storing card numbers or logging full payment details.
+- No reconciliation, so silent drift is discovered by customers or auditors.
+- Retrying on a second PSP without knowing whether the first one succeeded.
+- Ignoring currencies, rounding rules and time zones in settlement.
+
+## What would you choose and why?
+
+The marketplace adds **a wallet**: customers can keep a balance and pay from it, split payments between several sellers in one checkout, and withdraw to their bank account. Describe the ledger accounts and entries for a split payment, how you guarantee a wallet balance never goes negative under concurrent requests, how a failure halfway through a three-seller split is handled, and which reconciliations you add.
+
+## Quiz
+
+<Quiz id="sd-m17-payment-system" tags={["case-study", "payments", "idempotency", "ledger"]} questions={[
+  { type: "mcq", q: "A charge request times out. What is the right way to proceed?", options: ["Assume it failed and tell the customer to pay again", "Retry with the same idempotency key, or query the PSP for the status, because the charge may have succeeded", "Retry with a new key each time", "Refund automatically"], answer: 1, explain: "A timeout means the outcome is unknown; the same key makes the retry safe, and a status query can confirm the result." },
+  { type: "mcq", q: "What is the main idea of double-entry bookkeeping in a ledger?", options: ["Every payment is stored twice for backup", "Every transaction has entries that sum to zero, so money is moved and never created or destroyed", "Balances are stored in two currencies", "Two servers write each entry"], answer: 1, explain: "The invariant (each transaction sums to zero) can be checked at any time and detects bugs and tampering." },
+  { type: "multi", q: "Which practices make a webhook handler safe?", options: ["Verify the signature", "Deduplicate by event id", "Ignore events that would move the payment backwards", "Mark the order paid when the browser reaches the success page"], answer: [0, 1, 2], explain: "The browser redirect can be forged or lost; only a verified webhook or direct status query is proof." },
+  { type: "predict", q: "Two concurrent requests each read a balance of 10,000, each check balance >= 8,000 in application code, then each subtract 8,000 from what they read. What is the stored balance afterwards?", code: "balance = 10000\na = b = balance\nbalance = a - 8000\nbalance = b - 8000\nprint(balance)", options: ["-6000", "2000", "10000", "-16000"], answer: 1, explain: "Both writes start from the stale 10,000, so the balance ends at 2,000 although 16,000 was approved: a lost update. A conditional UPDATE prevents it." },
+  { type: "mcq", q: "What does the transactional outbox solve?", options: ["Slow queries", "Updating the database and publishing an event atomically, so neither is lost without the other", "Currency conversion", "Fraud detection"], answer: 1, explain: "The event is written in the same transaction as the state change, then published at least once by a relay." },
+  { type: "mcq", q: "Why run reconciliation even with idempotency and a careful ledger?", options: ["It is required by browsers", "Lost webhooks, fee or currency differences, chargebacks and bugs still create differences from the PSP's and the bank's records", "To speed up payments", "To remove the ledger"], answer: 1, explain: "Reconciliation compares your records with the external source of truth and surfaces every break." }
+]} />
