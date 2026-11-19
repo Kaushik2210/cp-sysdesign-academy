@@ -1,0 +1,232 @@
+---
+title: SLOs, Error Budgets and Burn-Rate Alerts
+track: sd
+module: observability
+order: 2
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/observability/logs-metrics-and-traces", "sd/microservice-patterns/service-boundaries-and-availability"]
+tags: [reliability, sre, sli, slo, sla, error-budget, burn-rate, alerting, availability]
+type: lesson
+furtherReading:
+  - title: "Google SRE Book, Service Level Objectives"
+    url: https://sre.google/sre-book/service-level-objectives/
+  - title: "Google SRE Workbook, Implementing SLOs"
+    url: https://sre.google/workbook/implementing-slos/
+  - title: "Google SRE Workbook, Alerting on SLOs"
+    url: https://sre.google/workbook/alerting-on-slos/
+  - title: "Google SRE Book, Embracing Risk"
+    url: https://sre.google/sre-book/embracing-risk/
+---
+
+## Intuition
+
+How reliable should a service be? "As reliable as possible" sounds right and is wrong. Each extra nine of availability tends to cost far more than the last (more redundancy, slower and safer releases, more people on call), and beyond a point it is **invisible to users**, whose own phone, Wi-Fi and browser already fail more often than that. The honest question is: **how unreliable can we afford to be?**
+
+Site reliability engineering turns that into a number, a budget and a rule:
+
+- an **SLI** (service level indicator) measures what users experience,
+- an **SLO** (service level objective) says how good that measurement must be,
+- the **error budget** is the allowed shortfall, and it is **spent deliberately**: on launches, experiments and maintenance, as well as on failures.
+
+## The vocabulary
+
+| term | meaning | example |
+| --- | --- | --- |
+| **SLI** | a measured ratio of **good events to valid events** | the share of checkout requests that return successfully in under 800 ms |
+| **SLO** | a target for the SLI over a window | 99.9% of checkout requests are good, over 30 days |
+| **SLA** | a contract with consequences (credits, penalties) if broken; usually looser than the SLO | 99.5% or the customer gets a refund |
+| **error budget** | `1 - SLO`: the fraction of events allowed to be bad | 0.1% of requests per 30 days |
+
+A good SLI is expressed as **good / valid**, so 0% to 100%, and is measured as close to the user as practical (at the load balancer or in the client), not from inside the server that may be the one that is broken. Typical SLIs: **availability** (successful requests), **latency** (requests faster than a threshold, not an average), **freshness** (data updated within N minutes), **correctness**, and **durability** for storage. Define them **per user journey** (log in, search, pay), not per microservice.
+
+### What the nines mean
+
+<CodeRunner language="python" code={`def human(seconds):
+    if seconds >= 3600:
+        return f"{seconds / 3600:.1f} h"
+    if seconds >= 60:
+        return f"{seconds / 60:.1f} min"
+    return f"{seconds:.0f} s"
+
+MONTH = 30 * 24 * 3600
+print("allowed downtime in 30 days:")
+for slo in (0.99, 0.999, 0.9995, 0.9999, 0.99999):
+    print(f"  {100 * slo:>8.3f}%   {human((1 - slo) * MONTH)}")
+
+print()
+a = 0.999
+print("three services in series, each 99.9%       ->", f"{100 * a ** 3:.3f}%   (every one must work)")
+print("five services in series, each 99.9%        ->", f"{100 * a ** 5:.3f}%")
+print("two redundant copies, each 99.9%, independent ->", f"{100 * (1 - (1 - a) ** 2):.4f}%   (either one is enough)")
+`} />
+
+Two lessons hide in that output. At **99.9%** you may be down about **43 minutes a month**; at 99.99% about **4 minutes**, which is shorter than many failovers take. And dependencies **multiply**: a request that needs five 99.9% services cannot be better than 99.5%, so the availability you can promise is bounded by your hard dependencies. **Redundancy** helps only if failures are **independent**; two replicas in the same rack or behind the same bad config fail together.
+
+## The error budget in practice
+
+The budget is a shared currency between the people who want to ship and the people who want stability:
+
+- **Budget left?** Ship, experiment, take planned risks.
+- **Budget nearly gone or spent?** Slow down: freeze risky launches, fix the causes of the burn first.
+- This replaces arguments about opinions with a number both sides agreed to **in advance**, written as an **error budget policy** ("if we exceed the budget, feature releases pause until the 30-day figure recovers, except for reliability and security fixes").
+- Pick SLOs a little **below what the system actually achieves** and what users need; an SLO that is always 100% met means you are wasting velocity, and one that is always missed is ignored.
+
+## Alerting on the budget: burn rate
+
+Alerting on "error rate above 1% for 5 minutes" sounds sensible and fails in both directions: it pages on harmless blips and it **never notices a slow leak** that is quietly eating the month.
+
+**Burn rate** is how fast you are spending the budget relative to the rate that would spend exactly all of it by the end of the window:
+
+```text
+burn rate = (observed error ratio) / (1 - SLO)
+
+burn rate 1    -> the budget lasts exactly the whole 30 days
+burn rate 14.4 -> a 30-day budget is gone in 30 / 14.4 = ~2.1 days (2% of it every hour)
+burn rate 6    -> gone in 5 days (5% in 6 hours)
+```
+
+The **multi-window, multi-burn-rate** recipe from Google's SRE Workbook uses a long window for significance and a short one to stop alerting soon after recovery:
+
+| severity | burn rate | long window | short window | budget spent in the long window |
+| --- | --- | --- | --- | --- |
+| page | 14.4 | 1 hour | 5 minutes | 2% |
+| page | 6 | 6 hours | 30 minutes | 5% |
+| ticket | 1 | 3 days | 6 hours | 10% |
+
+Both windows must exceed the burn rate. A fast, severe outage pages quickly; a moderate problem pages after hours; a slow leak opens a ticket in time to fix it during working hours.
+
+## Simulating a month
+
+The program below generates a month of per-minute traffic (1,000 requests a minute, SLO 99.9%) with a noisy baseline, about two short error blips a day, one **25-minute outage** at 40% errors, and a **5-day slow leak** at 0.5% errors. It then replays four alert rules over the same data and reports what each one did.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+random.seed(11)
+MIN_PER_DAY = 1440
+N = 30 * MIN_PER_DAY                          # one 30-day window, minute by minute
+REQ = 1000                                    # requests per minute
+SLO = 0.999
+BUDGET_RATE = 1 - SLO                         # 0.1% of requests may fail
+
+# error ratio per minute: a small baseline, brief noisy blips, one outage and one slow leak
+ratio = [0.0004 + random.random() * 0.0004 for _ in range(N)]
+for _ in range(60):                           # about 2 blips a day: 1 to 2 minutes at 3% errors
+    start = random.randrange(N - 2)
+    for m in range(start, start + random.randint(1, 2)):
+        ratio[m] = 0.03
+OUTAGE_START = 10 * MIN_PER_DAY + 13 * 60     # day 10, 13:00: 25 minutes with 40% of requests failing
+for m in range(OUTAGE_START, OUTAGE_START + 25):
+    ratio[m] = 0.40
+LEAK_START = 20 * MIN_PER_DAY                 # days 20 to 25: a slow leak at 0.5% errors
+LEAK_END = LEAK_START + 5 * MIN_PER_DAY
+for m in range(LEAK_START, LEAK_END):
+    ratio[m] = 0.005
+
+errors = [r * REQ for r in ratio]
+prefix = [0.0]
+for e in errors:
+    prefix.append(prefix[-1] + e)
+
+def error_rate(t, window):                    # error ratio over the \`window\` minutes ending at minute t
+    lo = max(0, t + 1 - window)
+    return (prefix[t + 1] - prefix[lo]) / (REQ * (t + 1 - lo))
+
+def burn(t, window):                          # 1.0 means "spending the budget exactly as fast as it is granted"
+    return error_rate(t, window) / BUDGET_RATE
+
+total_requests, total_errors = REQ * N, prefix[-1]
+budget = BUDGET_RATE * total_requests
+print(f"month: {total_requests:,} requests, {total_errors:,.0f} failed -> SLI {100 * (1 - total_errors / total_requests):.3f}% (target {100 * SLO}%)")
+print(f"error budget: {budget:,.0f} failed requests; used {100 * total_errors / budget:.0f}%")
+print(f"  the 25-minute outage alone used {100 * sum(errors[OUTAGE_START:OUTAGE_START + 25]) / budget:.0f}% of the budget")
+print(f"  the 5-day slow leak used        {100 * sum(errors[LEAK_START:LEAK_END]) / budget:.0f}% of the budget")
+
+WARMUP = 3 * MIN_PER_DAY                      # the 3-day window needs 3 days of data before it means anything
+def evaluate(condition):
+    return [t >= WARMUP and condition(t) for t in range(N)]
+
+policies = {
+    "naive: 5-minute error rate above 1%": evaluate(lambda t: error_rate(t, 5) > 0.01),
+    "page: burn rate > 14.4 over 1h and over 5m": evaluate(lambda t: burn(t, 60) > 14.4 and burn(t, 5) > 14.4),
+    "page: burn rate > 6 over 6h and over 30m": evaluate(lambda t: burn(t, 360) > 6 and burn(t, 30) > 6),
+    "ticket: burn rate > 1 over 3d and over 6h": evaluate(lambda t: burn(t, 3 * 1440) > 1 and burn(t, 360) > 1),
+}
+
+def episodes(fires):
+    """Collapse per-minute booleans into (start minute, length) episodes."""
+    out, start = [], None
+    for t, f in enumerate(fires + [False]):
+        if f and start is None:
+            start = t
+        if not f and start is not None:
+            out.append((start, t - start))
+            start = None
+    return out
+
+print()
+for name, fires in policies.items():
+    eps = episodes(fires)
+    outage = [e for e in eps if OUTAGE_START <= e[0] < OUTAGE_START + 25]
+    leak = [e for e in eps if LEAK_START <= e[0] < LEAK_END]
+    false_alarms = len(eps) - len(outage) - len(leak)          # alerts raised while nothing was really wrong
+    found_outage = f"{outage[0][0] - OUTAGE_START} min after it began" if outage else "never"
+    found_leak = f"{(leak[0][0] - LEAK_START) / 60:.1f} h after it began" if leak else "never"
+    print(name)
+    print(f"   outage: {found_outage:22s} slow leak: {found_leak:20s} alerts during blips only: {false_alarms}")
+`} />
+
+What the run shows:
+
+- **The month failed its SLO**: the SLI ended at 99.839%, with 161% of the budget spent. The outage alone cost 23% of it, the slow leak 83%, and the rest (about 55%) was baseline errors and blips.
+- The **naive 5-minute rule** caught the outage instantly but raised **24 alerts on blips alone** (a page every day or so that nobody could act on), and it **never noticed the slow leak**, because 0.5% never crosses 1%.
+- The **fast burn page (14.4x)** fired **one minute** into the outage and had **no false alerts**.
+- The **6x page** fired four minutes in, and **did not fire for the slow leak**: 0.5% errors is a burn rate of 5, below 6.
+- The **ticket rule (1x over 3 days)** caught the slow leak **about 6 hours after it began**, with the budget still mostly intact, and made no false alerts.
+
+That is the point of the design: **alert on how fast the budget is being spent, in proportion to how fast you must respond.**
+
+## Making it work
+
+- Start with **one to three SLOs** for your most important user journeys; do not publish 40.
+- **Measure from the user's side**, count only valid requests (exclude load-tester and client-error traffic that is not your fault), and decide up front how to count partial failures and timeouts.
+- Keep **causes on dashboards**, not pagers: CPU, queue depth and replica lag explain an alert; they should not be the alert.
+- Every page must be **urgent, actionable and new**; review noisy alerts every week. Attach a **runbook** to each.
+- Run **blameless postmortems** for incidents that burn significant budget, with concrete follow-up work owned and tracked.
+- Revisit SLOs **quarterly**: change them when user needs or architecture changes, not to make a bad month look good.
+
+## Trade-offs
+
+<TradeOffs caption="How to alert" rows={[
+  { option: "Threshold on causes (CPU above 80%, disk above 90%)", pros: "Easy to set up; may warn early", cons: "Often fires with no user impact; misses failures that have other causes", chooseWhen: "Dashboards and capacity warnings, rarely as a page" },
+  { option: "Threshold on a symptom for a few minutes", pros: "Simple; user-focused", cons: "Flaps on blips; blind to slow leaks; arbitrary numbers", chooseWhen: "A first alert before you have SLOs" },
+  { option: "Single-window burn-rate alert", pros: "Ties paging to budget loss", cons: "Slow to reset after recovery, or noisy with a short window", chooseWhen: "A small step up from thresholds" },
+  { option: "Multi-window, multi-burn-rate alerts", pros: "Fast on severe incidents, quiet on blips, catches slow leaks", cons: "More rules to understand and tune", chooseWhen: "Any service with a real SLO" },
+  { option: "Stricter SLO (a higher nine)", pros: "Better user experience; fewer incidents tolerated", cons: "Cost and slower change; must also raise every hard dependency", chooseWhen: "The business case justifies roughly 10x the effort per nine" }
+]} />
+
+## Pitfalls
+
+- Aiming for 100%: it cannot be met, and it leaves no room to ship.
+- Measuring only what the server believes (its own success counters) while users time out before reaching it.
+- Using averages for latency SLIs instead of a threshold on a fraction of requests.
+- Setting an SLO that the **dependencies** cannot support (five 99.9% services in series).
+- No policy for what happens when the budget is spent, so the number changes nothing.
+- Alerts that fire on every blip, until people stop trusting the pager.
+- Counting scheduled maintenance, or errors caused by clients, inconsistently from month to month.
+- Treating the SLA and the SLO as the same number.
+
+## What would you choose and why?
+
+Your payments API has a 99.99% target in the sales contract, but it depends on a card network at 99.9% and a database at 99.95%. You also have a nightly 10-minute maintenance window. Is 99.99% achievable? What SLO do you set internally, how do you count the maintenance window and card-network errors, and which alerts do you create?
+
+## Quiz
+
+<Quiz id="sd-m16-slos-error-budgets" tags={["sre", "slo", "error-budget", "alerting"]} questions={[
+  { type: "mcq", q: "What is the error budget of a 99.9% availability SLO over 30 days?", options: ["0.9% of requests", "0.1% of requests, about 43 minutes of full downtime", "99.9% of requests", "10% of the month"], answer: 1, explain: "Budget = 1 - SLO = 0.1%; over 30 days that is 43.2 minutes if the outage affected every request." },
+  { type: "predict", q: "Three services in series each have 99.9% availability. What is the combined availability (to 3 decimals)?", code: "print(round(100 * 0.999 ** 3, 3))", options: ["99.900", "99.700", "99.999", "97.000"], answer: 1, explain: "0.999^3 is about 0.997003, so 99.700%." },
+  { type: "mcq", q: "A burn rate of 1 means:", options: ["The service is down", "The budget would last exactly the whole SLO window", "The budget is already spent", "Errors are 1% of requests"], answer: 1, explain: "Burn rate compares the current error ratio with the one that spends precisely the whole budget over the window." },
+  { type: "mcq", q: "Why do burn-rate alerts use a long and a short window together?", options: ["To double the alert volume", "The long window gives significance, and the short one stops the alert shortly after the problem is fixed", "Short windows are more accurate", "Long windows are cheaper to compute"], answer: 1, explain: "Both must exceed the threshold, so a recovered incident clears quickly and a blip does not page." },
+  { type: "multi", q: "Which are good practices for SLIs and SLOs?", options: ["Measure as close to the user as practical", "Express the SLI as good events over valid events", "Alert on CPU at 80% as the primary page", "Define SLOs per user journey"], answer: [0, 1, 3], explain: "Resource metrics belong on dashboards for diagnosis; pages should reflect user-visible symptoms or budget burn." },
+  { type: "mcq", q: "What should happen when the error budget is exhausted?", options: ["Nothing; it is only a report", "Risky feature releases pause while reliability work takes priority, as agreed in the error budget policy", "Lower the SLO immediately", "Delete the alerts"], answer: 1, explain: "The policy is what turns the number into a decision both product and engineering accepted in advance." }
+]} />
