@@ -1,0 +1,275 @@
+---
+title: "Case Study: Design a URL Shortener"
+track: sd
+module: case-studies-core-services
+order: 1
+difficulty: medium
+estMinutes: 45
+prerequisites: ["sd/what-is-system-design/requirements-and-framework", "sd/estimation/qps-storage-bandwidth", "sd/caching/caching-strategies", "sd/databases-2/sharding-and-partitioning"]
+tags: [case-study, url-shortener, id-generation, base62, caching, redirects, analytics, abuse]
+type: case-study
+furtherReading:
+  - title: "RFC 9110, HTTP Semantics: 301 Moved Permanently and 302 Found"
+    url: https://www.rfc-editor.org/rfc/rfc9110.html#name-redirection-3xx
+  - title: "Designing Data-Intensive Applications (Kleppmann), chapter 6 (partitioning)"
+    url: https://dataintensive.net/
+  - title: "System Design Primer, Design Pastebin.com (or Bit.ly)"
+    url: https://github.com/donnemartin/system-design-primer
+---
+
+## The problem
+
+A **URL shortener** turns a long address (`https://example.com/products/summer-sale?utm_source=newsletter&ref=42`) into a short one (`https://sho.rt/aZ3k9Qx`) and redirects visitors from the short one to the long one. It is a favourite interview question because it looks trivial and hides real decisions: how to **generate unique codes at scale**, how to serve a **read-heavy** workload fast, how to **count clicks without slowing redirects**, and how to handle **abuse**.
+
+This lesson follows the framework from the [interview playbook](/sd/what-is-system-design/requirements-and-framework/): requirements, estimates, API, data model, high-level design, deep dives, bottlenecks and trade-offs.
+
+## 1. Requirements
+
+**Functional**
+
+- Given a long URL, create a short URL (optionally a **custom alias** and an **expiry**).
+- Visiting a short URL **redirects** to the long URL.
+- Owners can see **click statistics** (counts, referrers, countries) and delete a link.
+
+**Non-functional**
+
+- **Very low redirect latency** (tens of milliseconds) and high availability: a broken redirect breaks someone else's page.
+- **Read-heavy**: far more redirects than creations.
+- Codes must be **unique**; short links should be **hard to guess** if links are meant to be private.
+- Durable: a link that worked yesterday must work next year (unless it expires).
+
+**Out of scope** (say so aloud): user accounts and billing, a full analytics dashboard, link previews.
+
+## 2. Estimation
+
+Assume 100 million new URLs a month, 100 redirects per created URL, records of about 500 bytes, kept for 5 years, peak traffic 5 times the average.
+
+<CodeRunner language="python" code={`new_urls_per_month = 100_000_000
+read_write_ratio = 100
+seconds_per_month = 30 * 24 * 3600
+write_qps = new_urls_per_month / seconds_per_month
+read_qps = write_qps * read_write_ratio
+peak = 5                                              # peak traffic is about 5x the average
+bytes_per_record = 500                                # code, long URL, owner, timestamps, flags
+years = 5
+records = new_urls_per_month * 12 * years
+print(f"writes: {write_qps:,.0f}/s average, {write_qps * peak:,.0f}/s peak")
+print(f"reads : {read_qps:,.0f}/s average, {read_qps * peak:,.0f}/s peak")
+print(f"records after {years} years: {records / 1e9:.1f} billion, storage about {records * bytes_per_record / 1e12:.1f} TB")
+hot = 0.2
+print(f"rule of thumb, cache 20% of one day's read volume: about {read_qps * 86400 * hot * bytes_per_record / 1e9:.0f} GB")
+`} />
+
+So: **about 39 writes a second** (193 at peak) and **about 3,900 redirects a second** (19,000 at peak), and **about 3 TB** in five years. That is a small write rate, a moderate read rate and a modest data size: a single sharded key-value store handles it, and the real work is making **redirects fast and the codes unique**. The 33 GB cache figure is a rough rule of thumb (it treats every request as touching a different record); real traffic repeats the same popular links, so the working set is usually smaller and fits in the memory of a few machines.
+
+## 3. API
+
+```text
+POST /api/v1/urls              { "long_url": "...", "custom_alias": "summer", "expires_at": "..." }
+                               -> 201 { "short_url": "https://sho.rt/aZ3k9Qx" }
+GET  /{code}                   -> 301 or 302, Location: <long url>      (404 if missing, 410 if expired or deleted)
+GET  /api/v1/urls/{code}/stats -> clicks by day, referrer, country
+DELETE /api/v1/urls/{code}
+```
+
+Authenticate the management API with an API key or token (see [tokens and OAuth](/sd/security/tokens-oauth-and-jwt/)). The redirect itself is public. **Rate limit** creation per key and per IP ([algorithms](/sd/scalability/rate-limiting-algorithms/)).
+
+### 301 or 302?
+
+- **301 (permanent)**: browsers and proxies may **cache** the redirect, so repeat visits skip your service. Fewer requests, but you **lose click counts** and cannot change or expire the target for clients that cached it.
+- **302/307 (temporary)**: every visit comes back to you. More load, but **analytics, editing, expiry and blocking** all work.
+
+Most services that sell analytics use a temporary redirect. This is a product decision you should state, not a detail.
+
+## 4. Generating the code
+
+A code of `L` characters from a 62-letter alphabet (`0-9 A-Z a-z`) has `62^L` possibilities. How many do we need?
+
+<CodeRunner language="python" code={`import math, random
+
+for length in (5, 6, 7, 8):
+    print(f"{length} characters of base62: {62 ** length:>20,} possible codes")
+
+space = 62 ** 7
+print()
+for n in (1e8, 1e9, 1e10, 1e11):
+    print(f"with {n:>8.0e} codes already used, a random 7-character code is taken with probability {n / space:.4%} (expected tries per insert {1 / (1 - n / space):.3f})")
+
+random.seed(4)
+small = 62 ** 3
+def first_collision():
+    seen, k = set(), 0
+    while True:
+        k += 1
+        c = random.randrange(small)
+        if c in seen:
+            return k
+        seen.add(c)
+trials = [first_collision() for _ in range(2000)]
+print(f"\\nbirthday check on a space of {small:,}: first collision after {sum(trials) / len(trials):.0f} codes on average (formula sqrt(pi*N/2) = {math.sqrt(math.pi * small / 2):.0f})")
+print(f"so for 62^7 the first collision among purely random codes is expected after about {math.sqrt(math.pi * space / 2):,.0f} codes")
+`} />
+
+Six billion records fit comfortably in **7 characters** (3.5 trillion codes, so the space stays under 0.2% full even at 6 billion). The output also shows the trap of **purely random** codes: the first collision is expected after only about **2.3 million** codes (the birthday effect, confirmed by the small-space simulation). So you can never assume random codes are unique; you must **check on insert and retry**, which costs almost nothing while the space is sparse.
+
+There are three standard ways to produce codes:
+
+| approach | how it works | strengths | weaknesses |
+| --- | --- | --- | --- |
+| **hash and truncate** | take the first 7 characters of `base62(hash(long_url))` | the same URL gives the same code (deduplication for free) | collisions are certain at scale, so you need a check and a salt-and-retry; different users sharing a code leaks information |
+| **random code** | generate 7 random characters; insert with a **unique constraint**; retry on conflict | unguessable; no coordination | an extra read or a failed insert on collision; needs a strictly enforced uniqueness constraint |
+| **counter + base62** | a global counter; encode the number in base62 | no collisions, shortest possible codes, trivial to reason about | guessable and enumerable (`/1`, `/2`, ...); the counter is a coordination point |
+
+The counter approach scales if you **allocate ranges**: each application server asks a small coordinator (a database row, ZooKeeper or etcd) for a block of 1,000 ids and hands them out locally, so the coordinator is touched once per 1,000 creations, not once per URL. If the server crashes, the unused part of its block is simply skipped. To stop people from enumerating links, **scramble** the id with a one-to-one mapping (multiplying by a number coprime to `62^7`, modulo `62^7`) or encrypt it with a small block cipher before encoding.
+
+<CodeRunner language="python" code={`import math
+
+ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+def to_base62(n):
+    if n == 0:
+        return ALPHABET[0]
+    out = []
+    while n:
+        n, r = divmod(n, 62)
+        out.append(ALPHABET[r])
+    return "".join(reversed(out))
+
+def from_base62(s):
+    n = 0
+    for ch in s:
+        n = n * 62 + ALPHABET.index(ch)
+    return n
+
+class Coordinator:
+    """Hands out blocks of ids: one call per 1,000 URLs instead of one per URL."""
+    def __init__(self, block=1000):
+        self.next, self.block, self.calls = 1, block, 0
+    def allocate(self):
+        start, self.next = self.next, self.next + self.block
+        self.calls += 1
+        return start, start + self.block
+
+class AppServer:
+    def __init__(self, coordinator):
+        self.c, self.lo, self.hi = coordinator, 0, 0
+    def new_id(self):
+        if self.lo >= self.hi:
+            self.lo, self.hi = self.c.allocate()
+        self.lo += 1
+        return self.lo - 1
+
+coord = Coordinator()
+servers = [AppServer(coord) for _ in range(3)]
+ids = [servers[i % 3].new_id() for i in range(9000)]
+print(f"9,000 ids from 3 servers: unique = {len(set(ids)) == len(ids)}, coordinator calls = {coord.calls}")
+print("sample ids -> codes:", [(i, to_base62(i)) for i in (1, 61, 62, 3844, 123456789)])
+print("round trip ok:", all(from_base62(to_base62(i)) == i for i in range(1, 100000, 997)))
+
+space = 62 ** 7
+K = 1_000_003 * 7919                       # any number coprime to 62^7 works
+assert math.gcd(K, space) == 1
+print("ids 1..4 scrambled:", [to_base62((i * K) % space).rjust(7, "0") for i in (1, 2, 3, 4)])
+print("still one-to-one on 100,000 ids:", len({(i * K) % space for i in range(100000)}) == 100000)
+`} />
+
+Nine thousand ids came from three servers with only **nine** coordinator calls, all unique, and the scrambled codes of consecutive ids look unrelated yet remain one-to-one. (This multiplier is obfuscation, not cryptography: if codes must be truly unguessable, use random codes or a keyed cipher.)
+
+**Custom aliases** (`/summer`) must be checked against the same uniqueness constraint and against a **reserved list** (`/api`, `/admin`, offensive words), and they share the code space with generated codes, so keep generated codes from colliding with likely aliases (for example, a fixed length or a prefix).
+
+## 5. Data model
+
+The access pattern is a **point lookup by code**: no joins, no range scans on the hot path. That fits a key-value or wide-column store, or a relational table sharded by code.
+
+```text
+urls
+  code        string  PRIMARY KEY      -- the short code
+  long_url    string
+  owner_id    string  (nullable)
+  created_at  timestamp
+  expires_at  timestamp (nullable)
+  disabled    boolean                  -- set by abuse handling
+```
+
+Shard by `code` (hash partitioning, ideally with [consistent hashing](/sd/databases-2/sharding-and-partitioning/)): lookups hit one shard and writes spread evenly. A secondary index for "all links of an owner" lives in a separate table, partitioned by owner. Click events belong in their own **append-only store**, not as a counter on the url row (see below).
+
+## 6. High-level design
+
+<Diagram kind="mermaid" code={`flowchart LR
+  U[Visitor] --> CDN[CDN or edge cache]
+  CDN --> LB[Load balancer]
+  LB --> R[Redirect service]
+  R --> C[(Cache: Redis)]
+  C -.miss.-> DB[(Sharded key-value store)]
+  R -.click event.-> Q[[Queue]]
+  Q --> A[Analytics consumers]
+  A --> W[(Event store / warehouse)]
+  M[Owner or API client] --> API[Create and manage API]
+  API --> G[ID generator: range allocator]
+  API --> DB
+  API --> S[Abuse scanner]`} caption="Reads take the short path through the cache; creation and analytics are separate paths" />
+
+**Redirect path (the hot one):** the visitor's request passes the CDN or edge (which can cache `301`s or even short-TTL `302`s), a load balancer, and a **stateless redirect service**. It looks up the code in a **Redis cache**; on a miss it reads the database and fills the cache. It returns the redirect and **publishes a click event to a queue without waiting for it** (a fire-and-forget write), so analytics can never slow or break redirects.
+
+**Create path:** validate and normalise the URL, check it against the abuse scanner, get an id (or random code), insert with a uniqueness constraint, return the short URL. Writes are rare, so this path can afford more work.
+
+## 7. Deep dives
+
+**Caching.** Redirect traffic is heavily skewed: a few viral links take most of the reads. A cache with LRU eviction ([eviction policies](/sd/caching/eviction-policies/)) captures that. Set a TTL, shorter than any link's expiry, and **invalidate on delete or disable** so a blocked malicious link stops redirecting quickly. A viral link can still make one cache key or one shard hot ([hot keys](/sd/databases-2/hot-keys-and-hot-partitions/)): add a small **local in-process cache** in each redirect server and replicate hot keys.
+
+**Counting clicks.** Incrementing a counter on the url row for every redirect would make the hot path write-heavy and create **hot rows**. Instead emit an event per click to a queue ([queues and streaming](/sd/queues-and-streaming/why-queues/)), aggregate in a stream processor into per-link, per-day counts, and write the aggregates. Counts are **approximately real time**, which is fine for statistics. Deduplicate bots, and accept that a failed queue publish means a missed click, not a failed redirect.
+
+**Availability.** The redirect service is stateless and runs in several zones behind a load balancer. The database is replicated across zones with automatic failover; reads can be served from replicas because a link is written once and rarely changed (a tiny staleness window is fine, though **delete and disable** should reach the cache quickly). For global audiences, replicate read data to several regions and use global load balancing ([failover](/sd/load-balancing/global-load-balancing-and-failover/)); creation can stay in one region.
+
+**Abuse.** Shorteners are a favourite tool for phishing and malware, because they hide the destination. Defences: scan submitted URLs against reputation lists and block known-bad ones; allow **reporting** and a fast takedown (`disabled = true` plus a cache purge); rate limit creation and require authentication for bulk use; avoid redirecting to your own domain in a loop; and consider an **interstitial warning page** for suspicious or unverified links. Validate and normalise URLs (scheme allowlist: only `http` and `https`; no `javascript:` or `file:`).
+
+**Expiry and cleanup.** Treat `expires_at` at read time (return `410 Gone`) and clean up expired rows with a background job. Decide whether a deleted or expired code can be **reused**; reuse risks sending visitors who kept the old link to someone else's page, so most services never reuse codes.
+
+**Deduplication.** Should the same long URL always map to the same code? Per-user dedup is cheap (a secondary index on a hash of the URL per owner); global dedup leaks that someone else already shortened the URL and complicates deletion, so it is usually off.
+
+## 8. Bottlenecks and what you would change at 100x scale
+
+- **Redirect QPS** grows linearly: add redirect servers and cache nodes; push caching to the edge.
+- **One database shard per hot range**: monitor skew; split shards; keep the key evenly distributed (random or scrambled codes help, sequential codes with range sharding create a hot tail).
+- **The id allocator** is a single coordination point: make it highly available (a replicated store), and allow servers to run on a leftover block while it recovers.
+- **Analytics volume** grows with reads: batch, sample, aggregate early.
+- **Storage** is cheap relative to the rest; archive links not visited for years to cheaper storage and re-hydrate on demand.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "301 permanent redirect", pros: "Clients and CDNs cache it, so load drops", cons: "No reliable click counts; hard to change or revoke", chooseWhen: "Pure link shortening without analytics or takedown needs" },
+  { option: "302 temporary redirect", pros: "Every click is observed; links can be edited and revoked", cons: "More traffic to serve", chooseWhen: "Analytics, expiry and abuse takedown matter (most products)" },
+  { option: "Counter with ranges + scrambling", pros: "No collisions, shortest codes, little coordination", cons: "A coordinator to keep available; scrambling is not secret", chooseWhen: "A high-volume service that needs predictable code length" },
+  { option: "Random codes with a unique constraint", pros: "Unguessable; no coordination", cons: "Collision retries; needs a strictly enforced constraint", chooseWhen: "Private links and simple infrastructure" },
+  { option: "Hash of the URL", pros: "Free deduplication", cons: "Collisions and information leakage; needs salting", chooseWhen: "Small systems where dedup matters" },
+  { option: "Click counter on the row", pros: "Simplest", cons: "Hot rows and a write on every read", chooseWhen: "Tiny traffic only" },
+  { option: "Async click events to a queue", pros: "Redirects never wait for analytics; scales independently", cons: "Counts are slightly delayed and approximate", chooseWhen: "Any real traffic" }
+]} />
+
+## Pitfalls
+
+- Using random codes without a unique constraint and a retry loop.
+- Using a counter and exposing it directly so that links can be enumerated.
+- Counting clicks synchronously on the redirect path.
+- Forgetting to purge the cache when a link is disabled or deleted.
+- Accepting any scheme in the destination URL (`javascript:`, `file:`), or allowing open redirect loops.
+- Sharding by creation time or by sequential id, which concentrates new writes on one shard.
+- Ignoring abuse until the domain is blocklisted by mail providers and browsers.
+- Reusing deleted or expired codes.
+- Treating the CDN as the source of truth for link state.
+
+## What would you choose and why?
+
+The product team now wants **private links** that only logged-in members of a company can open, **per-click analytics in real time**, and a **99.99% redirect availability** target. Which parts of the design above change, what do you give up on caching and on the 301 shortcut, and how do you keep the redirect fast while checking permissions on every click?
+
+## Quiz
+
+<Quiz id="sd-m17-url-shortener" tags={["case-study", "url-shortener", "id-generation", "caching"]} questions={[
+  { type: "mcq", q: "Why does the design emit click events to a queue instead of incrementing a counter on each redirect?", options: ["Queues are always faster than databases", "It keeps the hot read path free of writes and hot rows, and lets analytics scale and fail independently", "Counters cannot be stored", "It guarantees exact counts"], answer: 1, explain: "Redirects should never wait for analytics; the queue absorbs bursts and aggregation happens asynchronously." },
+  { type: "mcq", q: "Roughly how many characters of base62 are needed for about 6 billion URLs?", options: ["4", "5", "7", "12"], answer: 2, explain: "62^6 is about 57 billion, 62^7 about 3.5 trillion; 7 keeps the space sparse and leaves room to grow." },
+  { type: "mcq", q: "What is the problem with generating purely random 7-character codes and assuming they are unique?", options: ["They are too long", "By the birthday effect a collision is expected after only about 2 million codes, so uniqueness must be enforced and retried", "They cannot be decoded", "They need a hash"], answer: 1, explain: "A unique constraint plus retry makes collisions harmless; the simulation confirmed the sqrt(pi*N/2) estimate." },
+  { type: "multi", q: "Which are advantages of allocating id ranges to application servers?", options: ["The coordinator is contacted once per block, not once per URL", "No collisions between servers", "A crashed server loses its unused ids, which is acceptable", "Codes become cryptographically unguessable"], answer: [0, 1, 2], explain: "Sequential ids are guessable; scramble or encrypt them if guessing matters." },
+  { type: "mcq", q: "Which redirect status helps analytics and revocation?", options: ["301, because it is cached", "302 or 307, because every visit reaches your service", "200", "404"], answer: 1, explain: "Temporary redirects keep the service in the loop on every click, at the cost of more traffic." },
+  { type: "mcq", q: "A link was just reported as phishing. What must happen?", options: ["Wait for the cache TTL to expire", "Mark it disabled in the database and purge it from caches so redirects stop quickly", "Delete the CDN", "Nothing; the destination is someone else's problem"], answer: 1, explain: "Takedown speed depends on invalidating every cache layer, not only the database." }
+]} />
