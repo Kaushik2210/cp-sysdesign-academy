@@ -1,0 +1,248 @@
+---
+title: TLS, Encryption at Rest and Key Management
+track: sd
+module: security
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/security/tokens-oauth-and-jwt", "sd/networking-and-apis/client-server-and-http"]
+tags: [security, tls, encryption, kms, envelope-encryption, key-rotation, mtls, certificates]
+type: lesson
+furtherReading:
+  - title: "RFC 8446, The Transport Layer Security (TLS) Protocol Version 1.3"
+    url: https://www.rfc-editor.org/rfc/rfc8446
+  - title: "OWASP Transport Layer Security Cheat Sheet"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+  - title: "OWASP Cryptographic Storage Cheat Sheet"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html
+  - title: "Let's Encrypt, How it works (ACME and automated certificates)"
+    url: https://letsencrypt.org/how-it-works/
+  - title: "Mozilla, Server Side TLS recommendations"
+    url: https://wiki.mozilla.org/Security/Server_Side_TLS
+---
+
+## Intuition
+
+Data lives in three states: **in transit** (crossing a network), **at rest** (on a disk or in a backup) and **in use** (in memory). Encryption protects the first two. For each you want three properties:
+
+- **Confidentiality**: nobody else can read it.
+- **Integrity**: nobody can change it without being noticed.
+- **Authenticity**: you know who you are talking to or who wrote it.
+
+Most real failures are not broken mathematics. They are **keys kept next to the data**, **certificates that expired**, **verification switched off "to make it work"** and **home-made schemes**. So this lesson is about how the pieces fit together and where the keys live.
+
+## Building blocks
+
+| tool | question it answers | example |
+| --- | --- | --- |
+| **hash** | has this changed? (no key, one way) | SHA-256 |
+| **MAC** | has this changed, and does the sender know the key? | HMAC-SHA256 |
+| **symmetric encryption** | hide this from anyone without the key (one key) | AES-GCM, ChaCha20-Poly1305 |
+| **asymmetric encryption / key agreement** | agree on or share a secret with a stranger | ECDH (X25519), RSA |
+| **digital signature** | this came from the holder of the private key | Ed25519, ECDSA, RSA-PSS |
+
+Symmetric encryption is fast but needs a shared key. Asymmetric cryptography solves the sharing but is slower. So real protocols are **hybrid**: use asymmetric methods to agree on a key, then symmetric encryption for the data. TLS does exactly that.
+
+**Authenticated encryption (AEAD)** modes such as AES-GCM and ChaCha20-Poly1305 give confidentiality **and** integrity together. Always use one of them; encryption without integrity lets an attacker flip bits in the data undetected, as the demo below shows.
+
+## TLS: protecting data in transit
+
+TLS (what HTTPS runs on) gives a connection confidentiality, integrity and **server authentication**. TLS 1.3 needs one round trip:
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: ClientHello (supported ciphers, key share, server name)
+  S-->>C: ServerHello (chosen cipher, key share)
+  Note over C,S: both sides derive the same session keys; everything after this is encrypted
+  S-->>C: Certificate (chain) + signature over the handshake + Finished
+  C->>C: verify chain to a trusted root, hostname, validity dates, signature
+  C->>S: Finished
+  C->>S: HTTP request (encrypted)
+  S-->>C: HTTP response (encrypted)`} caption="TLS 1.3 handshake: key agreement first, then a certificate proves the server's identity" />
+
+What each part is for:
+
+- **Key agreement with fresh (ephemeral) keys**, usually ECDHE: each connection gets its own keys, so recording traffic today and stealing the server's key tomorrow does **not** reveal it. That property is **forward secrecy**.
+- **The certificate** binds a public key to a name. The client checks that it chains up to a **trusted root**, that the **hostname** is listed in it, that it is within its **validity dates** and not revoked, and that the server really holds the matching private key (the signature).
+- **Session resumption / 0-RTT** save round trips on repeat connections. 0-RTT data can be **replayed**, so allow it only for idempotent requests.
+
+Key agreement alone is not enough. Here is a toy Diffie-Hellman exchange, and then the **man-in-the-middle** attack that works when nothing authenticates the exchange. That missing authentication is what the certificate provides.
+
+<CodeRunner language="python" code={`import hashlib, secrets
+
+# Toy parameters for teaching. NOT secure: this prime has a group order that is far too easy to attack.
+# Real systems use standardised large groups or X25519.
+P = 2**127 - 1
+G = 3
+
+def keypair():
+    private = secrets.randbelow(P - 3) + 2
+    return private, pow(G, private, P)
+
+def shared_key(my_private, their_public):
+    return hashlib.sha256(str(pow(their_public, my_private, P)).encode()).hexdigest()[:16]
+
+# 1. Alice and Bob exchange public values over an open network.
+a_priv, a_pub = keypair()
+b_priv, b_pub = keypair()
+print("Alice's key:", shared_key(a_priv, b_pub))
+print("Bob's key  :", shared_key(b_priv, a_pub))
+print("an eavesdropper sees only the public values; in a properly chosen large group the key cannot be computed from them")
+
+# 2. Mallory sits in the middle and swaps in her own public value.
+m_priv, m_pub = keypair()
+print("--- unauthenticated exchange with a man in the middle ---")
+alice_thinks = shared_key(a_priv, m_pub)       # Alice believes m_pub came from Bob
+bob_thinks = shared_key(b_priv, m_pub)         # Bob believes m_pub came from Alice
+mallory_with_alice = shared_key(m_priv, a_pub)
+mallory_with_bob = shared_key(m_priv, b_pub)
+print("Alice's key        :", alice_thinks)
+print("Mallory (to Alice) :", mallory_with_alice, "<- equal, she can read and edit everything")
+print("Bob's key          :", bob_thinks)
+print("Mallory (to Bob)   :", mallory_with_bob, "<- equal")
+print("Alice and Bob share the same key:", alice_thinks == bob_thinks)
+`} />
+
+Alice and Bob each end up with a key that **Mallory also knows**, and they have different keys from each other. Nothing in the exchange told them who they were talking to. In TLS the server signs the handshake with the private key matching its certificate, so Mallory cannot substitute her own values without failing that check.
+
+**Operating TLS**
+
+- **Terminate TLS** at the load balancer or edge, and decide whether to **re-encrypt** to backends. Many compliance regimes and zero-trust designs say yes.
+- **Mutual TLS (mTLS)**: the server also verifies a client certificate. Common for service-to-service calls (often handled by a mesh or sidecar proxy) and for devices.
+- **Automate certificates** (ACME, as with Let's Encrypt): short-lived, auto-renewed. An expired certificate is one of the most common causes of preventable outages.
+- Enforce **HTTPS with HSTS**, disable old protocol versions (below TLS 1.2), and prefer modern AEAD ciphers (see the Mozilla guidance).
+- **Never disable certificate verification** (`verify=False`, `InsecureSkipVerify`, "trust all" managers). That turns TLS into the unauthenticated exchange above.
+
+## Encryption at rest
+
+| layer | protects against | does not protect against |
+| --- | --- | --- |
+| **disk or volume encryption** (block storage, laptop full-disk) | a stolen disk or decommissioned hardware | anyone who can use the running system, including a compromised app or DBA |
+| **database or storage-service encryption** (TDE, server-side encryption of object storage) | stolen files and backups | queries run by a legitimate but over-privileged account |
+| **application-level (field) encryption** | database leaks, curious admins, backup theft | a bug in the application that holds the keys |
+| **client-side / end-to-end** | even the service operator | account recovery gets harder: lose the key, lose the data |
+
+Choose by the **threat you are defending against**. Turning on volume encryption is cheap and worth doing, but it answers a different question from "what if our database is dumped?".
+
+## Key management: the hard part
+
+Encryption turns "protect the data" into "protect the key". Principles:
+
+- **Keep keys apart from the data they protect**, and use a **KMS or HSM** (a managed key service or hardware module) so key material is never exposed to applications in the clear. Applications ask the KMS to wrap, unwrap or sign.
+- **Envelope encryption**: encrypt each piece of data with its own **data encryption key (DEK)**, then encrypt (**wrap**) the DEK with a **key encryption key (KEK)** that stays in the KMS. Store the wrapped DEK next to the ciphertext.
+- Benefits: the KMS never handles bulk data; a leaked DEK exposes one record; and **rotating the KEK only requires re-wrapping the small DEKs, not re-encrypting all the data**.
+- **Rotate** keys on a schedule and after suspected exposure; keep old versions to decrypt old data until it is re-wrapped.
+- Restrict access with **policies and audit every use**; separate who can administer keys from who can use them.
+- **Secrets** (API keys, database passwords) belong in a secrets manager with short-lived credentials where possible, never in source control, container images or logs.
+
+The demo shows envelope encryption. **The cipher in it is a teaching toy built from HMAC; do not use anything like it in production.** In practice call AES-GCM or ChaCha20-Poly1305 from a vetted library or your cloud KMS. The point here is the structure, and what happens without integrity protection.
+
+<CodeRunner language="python" code={`import hashlib, hmac, secrets
+
+# TOY stream cipher (HMAC-SHA256 in counter mode) to show the structure. Not for production use.
+def keystream(key, nonce, n):
+    out, counter = b"", 0
+    while len(out) < n:
+        out += hmac.new(key, nonce + counter.to_bytes(8, "big"), hashlib.sha256).digest()
+        counter += 1
+    return out[:n]
+
+def toy_encrypt(key, nonce, data):
+    return bytes(a ^ b for a, b in zip(data, keystream(key, nonce, len(data))))
+
+toy_decrypt = toy_encrypt                      # XOR is its own inverse
+
+def derive(key, label):
+    return hmac.new(key, label, hashlib.sha256).digest()
+
+# --- the KMS holds the key encryption key (KEK); applications never see it ---
+class KMS:
+    def __init__(self):
+        self.versions = {1: secrets.token_bytes(32)}
+        self.current = 1
+    def rotate(self):
+        self.current += 1
+        self.versions[self.current] = secrets.token_bytes(32)
+    def wrap(self, dek):
+        nonce = secrets.token_bytes(12)
+        return (self.current, nonce, toy_encrypt(self.versions[self.current], nonce, dek))
+    def unwrap(self, wrapped):
+        version, nonce, blob = wrapped
+        return toy_encrypt(self.versions[version], nonce, blob)
+
+kms = KMS()
+
+def seal(plaintext):
+    dek = secrets.token_bytes(32)                       # a fresh data key for every record
+    nonce = secrets.token_bytes(12)
+    ciphertext = toy_encrypt(derive(dek, b"enc"), nonce, plaintext)
+    tag = hmac.new(derive(dek, b"mac"), nonce + ciphertext, hashlib.sha256).digest()   # encrypt-then-MAC
+    return {"wrapped_dek": kms.wrap(dek), "nonce": nonce, "ct": ciphertext, "tag": tag}
+
+def open_(record, check_tag=True):
+    dek = kms.unwrap(record["wrapped_dek"])
+    if check_tag:
+        expected = hmac.new(derive(dek, b"mac"), record["nonce"] + record["ct"], hashlib.sha256).digest()
+        if not hmac.compare_digest(expected, record["tag"]):
+            return "REJECTED: ciphertext was modified"
+    return toy_decrypt(derive(dek, b"enc"), record["nonce"], record["ct"]).decode()
+
+rec = seal(b"amount=0100 to=alice")
+print("decrypts to       :", open_(rec))
+
+# 1. Without integrity protection a flipped bit changes the plaintext silently.
+flipped = dict(rec, ct=bytes([rec["ct"][7] ^ 0x01]).join([rec["ct"][:7], rec["ct"][8:]]))
+print("bit flip, no check:", open_(flipped, check_tag=False))
+# 2. With the MAC the change is detected.
+print("bit flip, MAC     :", open_(flipped))
+
+# 3. Rotating the KEK re-wraps only the small data keys; the data is untouched.
+old_ct = rec["ct"]
+dek = kms.unwrap(rec["wrapped_dek"])
+kms.rotate()
+rec["wrapped_dek"] = kms.wrap(dek)
+print("KEK version now   :", rec["wrapped_dek"][0], "| ciphertext unchanged:", rec["ct"] == old_ct)
+print("still decrypts    :", open_(rec))
+`} />
+
+The bit flip changes the amount silently when there is no integrity check, and is rejected once the tag is verified. Rotating the key encryption key re-wraps the 32-byte data key and leaves the ciphertext byte-for-byte unchanged, which is why envelope encryption makes rotation affordable at any data size.
+
+## Trade-offs
+
+<TradeOffs caption="Where to encrypt data at rest" rows={[
+  { option: "Volume / disk encryption", pros: "Nearly free; always on; protects lost hardware and snapshots", cons: "Transparent to anyone with running access", chooseWhen: "A baseline everywhere" },
+  { option: "Database or storage service encryption (TDE, SSE-KMS)", pros: "Managed keys, audit trail, simple to enable", cons: "The database engine can still read everything", chooseWhen: "Compliance and backup protection" },
+  { option: "Application-level field encryption", pros: "A database leak yields ciphertext; admins cannot read fields", cons: "Cannot query or index the plaintext easily; the app holds key access", chooseWhen: "Highly sensitive fields such as national IDs or card data" },
+  { option: "Client-side / end-to-end encryption", pros: "Even the operator cannot read the data", cons: "No server-side search or recovery; key loss is permanent", chooseWhen: "Messaging, health or notes apps with a privacy promise" },
+  { option: "TLS terminated at the edge only", pros: "Simple and cheap to operate", cons: "Traffic inside the network is clear", chooseWhen: "A trusted private network and low risk" },
+  { option: "TLS or mTLS everywhere (zero trust)", pros: "Protects internal traffic; identifies services", cons: "Certificate lifecycle and some CPU cost", chooseWhen: "Multi-tenant clouds, regulated data, many services" }
+]} />
+
+## Pitfalls
+
+- **Inventing your own crypto**, or composing primitives without a reviewed design.
+- **Encryption without integrity** (raw AES-CBC, ECB mode, stream ciphers with no tag).
+- **Reusing a nonce** with the same key in AES-GCM or ChaCha20: it can leak plaintext and break authentication.
+- Keys or secrets in source control, container images, environment dumps or logs.
+- Keeping the key in the same database or bucket as the data it protects.
+- **Disabling certificate verification** in clients "for testing" and shipping it.
+- Certificates that expire because renewal was manual; no alert before expiry.
+- Old TLS versions or weak ciphers left enabled; no HSTS.
+- No plan for key rotation or for a compromised key.
+- Treating a hash as encryption, or Base64 as protection.
+
+## What would you choose and why?
+
+You store customers' national ID numbers and documents for a lending product, in one Postgres database and an object store, behind 30 services that talk to each other over a private network. Which of the layers above do you use for each, where do the keys live and who can use them, how do services authenticate one another, and how do you rotate the master key without a maintenance window?
+
+## Quiz
+
+<Quiz id="sd-m15-tls-encryption" tags={["security", "tls", "encryption", "kms"]} questions={[
+  { type: "mcq", q: "What does forward secrecy give you?", options: ["Faster handshakes", "Past recorded traffic stays secret even if the server's long-term key is later stolen", "No need for certificates", "Smaller packets"], answer: 1, explain: "Ephemeral key exchange makes each session's keys independent of the server's long-term key." },
+  { type: "mcq", q: "Why does an unauthenticated Diffie-Hellman exchange fail against an active attacker?", options: ["The numbers are too small", "The attacker can substitute her own public values and share a key with each side", "DH cannot produce keys", "It needs a CAPTCHA"], answer: 1, explain: "Without a signature or certificate tying the values to an identity, each side cannot tell who sent them; TLS adds that proof." },
+  { type: "multi", q: "What does a client check when validating a server certificate?", options: ["The chain leads to a trusted root", "The hostname is covered by the certificate", "It is within its validity dates", "That the server's IP address is private"], answer: [0, 1, 2], explain: "Also that the server can sign with the matching private key, and in many setups that the certificate is not revoked." },
+  { type: "mcq", q: "What is the main benefit of envelope encryption?", options: ["Smaller ciphertext", "The master key stays in the KMS and can be rotated by re-wrapping small data keys without re-encrypting the data", "It removes the need for authentication", "It makes hashing reversible"], answer: 1, explain: "The KMS only handles tiny keys, and a leaked data key exposes one record." },
+  { type: "mcq", q: "Why must you use authenticated encryption (AEAD)?", options: ["It is faster than hashing", "Encryption alone lets an attacker modify ciphertext without detection", "It removes the key", "It hides the length"], answer: 1, explain: "AES-GCM and ChaCha20-Poly1305 give confidentiality and integrity together; the demo shows a silent bit flip without a tag." },
+  { type: "mcq", q: "Volume encryption on a database server's disk protects against which threat?", options: ["A SQL injection attack", "A stolen disk or discarded hardware", "A compromised application account", "A malicious DBA running queries"], answer: 1, explain: "Once the volume is mounted and in use, everything on it is readable to the running system; other layers address those threats." }
+]} />
