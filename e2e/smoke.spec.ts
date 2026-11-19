@@ -753,7 +753,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("157");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("159");
   });
 });
 
@@ -899,7 +899,7 @@ test.describe("visualizer lessons", () => {
   });
 });
 
-test.describe("security and observability modules", () => {
+test.describe("security, observability and case-study modules", () => {
   const LESSONS: [string, string][] = [
     ["/sd/security/passwords-sessions-and-mfa/", "Passwords, Sessions and Multi-Factor Login"],
     ["/sd/security/tokens-oauth-and-jwt/", "Tokens, OAuth 2.0 and JWT"],
@@ -909,6 +909,8 @@ test.describe("security and observability modules", () => {
     ["/sd/observability/slos-error-budgets-and-alerting/", "SLOs, Error Budgets and Burn-Rate Alerts"],
     ["/sd/observability/safe-deployments-canaries-and-feature-flags/", "Safe Deployments, Canaries and Feature Flags"],
     ["/sd/observability/backups-disaster-recovery-and-chaos/", "Backups, Disaster Recovery and Chaos Engineering"],
+    ["/sd/case-studies-core-services/design-a-url-shortener/", "Case Study: Design a URL Shortener"],
+    ["/sd/case-studies-core-services/design-a-key-value-store/", "Case Study: Design a Distributed Key-Value Store"],
   ];
   for (const [path, title] of LESSONS) {
     test(`${title} renders its runnable demos, trade-offs and quiz`, async ({ page }) => {
