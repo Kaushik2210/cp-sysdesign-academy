@@ -1,0 +1,238 @@
+---
+title: Tokens, OAuth 2.0 and JWT
+track: sd
+module: security
+order: 2
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/security/passwords-sessions-and-mfa", "sd/networking-and-apis/api-styles-rest-graphql-grpc"]
+tags: [security, authorization, oauth2, openid-connect, jwt, pkce, tokens, rbac]
+type: lesson
+furtherReading:
+  - title: "RFC 6749, The OAuth 2.0 Authorization Framework"
+    url: https://www.rfc-editor.org/rfc/rfc6749
+  - title: "RFC 7636, Proof Key for Code Exchange (PKCE)"
+    url: https://www.rfc-editor.org/rfc/rfc7636
+  - title: "RFC 8725, JSON Web Token Best Current Practices"
+    url: https://www.rfc-editor.org/rfc/rfc8725
+  - title: "OpenID Connect Core 1.0"
+    url: https://openid.net/specs/openid-connect-core-1_0.html
+  - title: "OWASP JSON Web Token Cheat Sheet"
+    url: https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html
+---
+
+## Intuition
+
+A photo-printing site wants to read your pictures from a cloud drive. Handing it your **password** would give it everything: all your files, your settings, and no way to take the access back without changing the password. What you want is a **limited, expiring, revocable permission slip**: "this app may read photos, for an hour, and you can cancel it".
+
+That slip is a **token**, and handing out such slips safely is what **OAuth 2.0** is for. Two words are easy to mix up:
+
+- **Authentication** is "who are you?". (**OpenID Connect**, built on OAuth, answers this for apps.)
+- **Authorization** is "what may you (or this app) do?". (**OAuth 2.0** is a framework for this.)
+
+## The roles
+
+| role | in the photo example |
+| --- | --- |
+| **resource owner** | you |
+| **client** | the photo-printing app |
+| **authorization server** | the cloud drive's login and consent service; issues tokens |
+| **resource server** | the cloud drive's API; checks tokens and returns the files |
+
+## The authorization code flow with PKCE
+
+This is the flow to use for web apps, mobile apps and single-page apps.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant U as User (browser)
+  participant C as Client app
+  participant A as Authorization server
+  participant R as Resource server (API)
+  C->>C: make a random code_verifier, code_challenge = SHA256(verifier)
+  C->>U: redirect to /authorize (client_id, scope, redirect_uri, state, code_challenge)
+  U->>A: log in and approve the requested scopes
+  A-->>U: redirect back with a short-lived code and the state
+  U->>C: code + state
+  C->>A: POST /token (code, code_verifier, client_id)
+  A->>A: check SHA256(code_verifier) equals the stored challenge
+  A-->>C: access token (+ refresh token, + ID token for OIDC)
+  C->>R: GET /photos (Authorization: Bearer access_token)
+  R-->>C: 200 photos`} caption="Authorization code flow with PKCE: the code travels through the browser, the tokens do not" />
+
+Why it is shaped this way:
+
+- The browser only ever carries a **code** that is useless alone. The **tokens** are fetched by the client over a direct back-channel call.
+- **PKCE** (RFC 7636) stops a stolen code from being redeemed. The client commits to a secret **verifier** at the start by sending its hash, the **challenge**, and must reveal the verifier when it exchanges the code. An attacker who intercepts the redirect does not know the verifier.
+- **`state`** ties the response to the request and prevents cross-site request forgery on the redirect. The server must also match the `redirect_uri` **exactly** against a registered list.
+
+The challenge computation, checked against the test vector in the RFC:
+
+<CodeRunner language="python" code={`import base64, hashlib
+
+def b64url(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"   # the RFC 7636 example verifier
+challenge = b64url(hashlib.sha256(verifier.encode()).digest())
+print("challenge:", challenge)
+print("matches the RFC example:", challenge == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
+`} />
+
+**Other flows**
+
+| flow | used when |
+| --- | --- |
+| client credentials | one backend calling another (**machine-to-machine**); no user involved |
+| device authorization | a TV or CLI with no good keyboard: the user approves on a phone |
+| refresh token grant | swapping a long-lived refresh token for a new short-lived access token |
+| implicit, password grant | **legacy; do not use** (dropped from OAuth 2.1) |
+
+## The tokens
+
+- **Access token**: sent to the API; **short-lived** (minutes to an hour); limited by **scopes** such as `photos:read`.
+- **Refresh token**: long-lived, used only against the authorization server to get new access tokens; **rotate it on use**, store it carefully, and revoke it on logout or suspicious reuse.
+- **ID token** (OpenID Connect): a signed statement **for the client** about who the user is. It is not meant to be sent to APIs.
+
+## JWT: a self-contained token
+
+A **JSON Web Token** has three base64url parts: `header.payload.signature`.
+
+```text
+header    {"alg":"HS256","typ":"JWT"}
+payload   {"iss":"https://auth.example.com","sub":"user-42","aud":"orders-api",
+           "scope":"orders:read","iat":1800000000,"exp":1800000900}
+signature HMAC-SHA256(key, base64url(header) + "." + base64url(payload))
+```
+
+- **`iss`** (issuer), **`sub`** (subject), **`aud`** (audience: who the token is for), **`exp`** (expiry), **`nbf`** (not before), **`iat`** (issued at), **`jti`** (unique id).
+- A signed JWT is **signed, not encrypted**: anyone can read the payload. Never put secrets in it.
+- **HS256** uses one shared secret: whoever can verify can also forge. **RS256 / ES256** use a key pair: the issuer signs with the private key, and every resource server verifies with the **public key**, published at a JWKS endpoint. For many services, the asymmetric kind is the safer default.
+
+The code below builds a token by hand and verifies it **correctly**: pin the algorithm, check the signature, then check issuer, audience and time. It then shows how a naive verifier, one that trusts the `alg` field of the token itself, accepts a forged admin token.
+
+<CodeRunner language="python" code={`import base64, hashlib, hmac, json
+
+def b64(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+def unb64(s):
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+def compact(obj):
+    return b64(json.dumps(obj, separators=(",", ":")).encode())
+
+def sign_jwt(claims, key):
+    signing_input = compact({"alg": "HS256", "typ": "JWT"}) + "." + compact(claims)
+    return signing_input + "." + b64(hmac.new(key, signing_input.encode(), hashlib.sha256).digest())
+
+def naive_verify(token, key):
+    h, p, s = token.split(".")
+    if json.loads(unb64(h))["alg"] == "none":          # the classic mistake: trusting the token's own header
+        return json.loads(unb64(p))
+    expected = b64(hmac.new(key, (h + "." + p).encode(), hashlib.sha256).digest())
+    return json.loads(unb64(p)) if hmac.compare_digest(s, expected) else None
+
+def verify_jwt(token, key, issuer, audience, now):
+    try:
+        h, p, s = token.split(".")
+        if json.loads(unb64(h)).get("alg") != "HS256":
+            return "rejected: algorithm not allowed"
+        expected = b64(hmac.new(key, (h + "." + p).encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(s, expected):
+            return "rejected: bad signature"
+        claims = json.loads(unb64(p))
+    except Exception:
+        return "rejected: malformed token"
+    if claims.get("iss") != issuer:
+        return "rejected: wrong issuer"
+    aud = claims.get("aud")
+    if audience not in (aud if isinstance(aud, list) else [aud]):
+        return "rejected: wrong audience"
+    if claims.get("exp", 0) <= now:
+        return "rejected: expired"
+    return "accepted: " + claims["scope"]
+
+KEY = b"a long random secret shared by the issuer and the verifier"
+NOW = 1_800_000_000
+ISS = "https://auth.example.com"
+claims = {"iss": ISS, "sub": "user-42", "aud": "orders-api", "scope": "orders:read", "iat": NOW, "exp": NOW + 900}
+token = sign_jwt(claims, KEY)
+
+print("valid           :", verify_jwt(token, KEY, ISS, "orders-api", NOW + 10))
+print("after expiry    :", verify_jwt(token, KEY, ISS, "orders-api", NOW + 901))
+print("wrong audience  :", verify_jwt(token, KEY, ISS, "billing-api", NOW + 10))
+print("wrong issuer    :", verify_jwt(token, KEY, "https://evil.example.com", "orders-api", NOW + 10))
+
+h, p, s = token.split(".")
+admin = dict(claims, scope="orders:read orders:admin")
+print("tampered payload:", verify_jwt(h + "." + compact(admin) + "." + s, KEY, ISS, "orders-api", NOW + 10))
+
+forged = compact({"alg": "none", "typ": "JWT"}) + "." + compact(admin) + "."
+print("alg=none, naive verifier :", naive_verify(forged, KEY)["scope"])
+print("alg=none, pinned verifier:", verify_jwt(forged, KEY, ISS, "orders-api", NOW + 10))
+`} />
+
+The output shows the valid token accepted, and expiry, wrong audience, wrong issuer and a tampered payload all rejected. The forged `alg: none` token **is accepted by the naive verifier with the admin scope** and rejected by the pinned one. A related real-world bug is **algorithm confusion**: a verifier expecting RS256 that accepts HS256 can be fed a token "signed" with the public key used as an HMAC secret. Always fix the accepted algorithms in the verifier's configuration, never read them from the token, and use a maintained library rather than your own parser.
+
+### The revocation problem
+
+A self-contained token is valid until it expires, wherever it travels, with no lookup. That is its strength and its weakness. The standard answers:
+
+- **Short lifetimes** (minutes) plus refresh tokens, so a stolen access token dies quickly.
+- **Opaque tokens** (random strings) checked through **token introspection** (RFC 7662) when instant revocation matters.
+- A small **denylist** of revoked `jti` values, checked by the API gateway.
+- Revoke the **refresh token**, which stops new access tokens.
+
+## Where tokens are stored
+
+| place | risk |
+| --- | --- |
+| `localStorage` / `sessionStorage` | readable by any script on the page: one XSS bug leaks the token |
+| `HttpOnly; Secure; SameSite` cookie | JavaScript cannot read it; needs CSRF thought (`SameSite` handles most of it) |
+| mobile secure storage (Keychain, Keystore) | the right place on devices |
+| browser memory only, plus a refresh cookie | a common compromise for single-page apps |
+
+For browser apps many teams use a small **backend-for-frontend** that holds the tokens server-side and gives the browser only a session cookie.
+
+## Authorization models
+
+- **Scopes** limit what a *token* may do on behalf of a user (`photos:read`).
+- **RBAC** (role-based): users have roles, roles have permissions (`admin`, `editor`). Simple and auditable.
+- **ABAC** (attribute-based): decisions use attributes of user, resource and context ("a manager may approve expenses under 1,000 in their own department, during business hours"). More expressive, harder to reason about.
+- Check authorization **in every service that holds data**, not only at the gateway: a gateway can be bypassed by an internal caller or a bug. Apply **least privilege**, and beware the **confused deputy** (a service with broad rights doing something for a caller who should not have it: pass the user's identity along and check it).
+
+## Trade-offs
+
+<TradeOffs caption="Session cookie, opaque token or JWT" rows={[
+  { option: "Server-side session cookie", pros: "Instant revocation; simple for first-party web apps", cons: "Shared store lookup; not natural for third-party API clients", chooseWhen: "A classic web app with one front end" },
+  { option: "Opaque access token + introspection", pros: "Instant revocation, nothing readable in the token", cons: "A network call (or cache) per request", chooseWhen: "High-risk APIs where immediate revocation matters" },
+  { option: "JWT access token (short-lived)", pros: "Verified locally with no lookup; carries claims between services", cons: "Cannot be revoked before expiry; payload readable; easy to verify wrongly", chooseWhen: "Many services verifying tokens at high volume" },
+  { option: "Asymmetric signing (RS256/ES256)", pros: "Verifiers cannot forge; keys published and rotated via JWKS", cons: "Key management and slightly more CPU", chooseWhen: "More than one service verifies the tokens" },
+  { option: "Backend-for-frontend holding tokens", pros: "Tokens never reach the browser", cons: "An extra component to run", chooseWhen: "Single-page apps with sensitive data" }
+]} />
+
+## Pitfalls
+
+- Accepting the `alg` named in the token, or accepting `none`.
+- Not checking `iss`, `aud` and `exp` (a token meant for another API is accepted).
+- Putting secrets or personal data in a JWT payload (it is only encoded).
+- Long-lived access tokens, and refresh tokens that are never rotated.
+- Wildcard or open `redirect_uri` values; skipping `state` or PKCE.
+- Storing tokens in `localStorage` in apps that render any untrusted content.
+- Using an OAuth access token as proof of **who the user is**; that is what the OpenID Connect ID token is for.
+- Authorizing only at the gateway.
+
+## What would you choose and why?
+
+Your company runs 40 microservices, a web app and a mobile app. Today every service checks a session cookie against one shared database, and that database is a bottleneck and a single point of failure. Propose a token design: which flow for each client, whether access tokens are JWTs or opaque, how long they live, how you revoke a compromised account within a minute, and how a service decides what a caller may do.
+
+## Quiz
+
+<Quiz id="sd-m15-tokens-oauth-jwt" tags={["security", "oauth2", "jwt"]} questions={[
+  { type: "mcq", q: "What is the main purpose of OAuth 2.0?", options: ["Encrypting traffic", "Letting an app act on a user's behalf with limited, revocable access without handing over the password", "Storing passwords safely", "Load balancing"], answer: 1, explain: "OAuth is a delegation framework; OpenID Connect adds identity on top." },
+  { type: "mcq", q: "What problem does PKCE solve?", options: ["Slow logins", "A stolen authorization code being redeemed by someone else", "Token expiry", "Password reuse"], answer: 1, explain: "The client proves at the token step that it is the one that started the flow, by revealing the verifier behind the challenge it sent earlier." },
+  { type: "multi", q: "Which checks must a resource server perform on a JWT access token?", options: ["The signature, with a pinned algorithm", "The issuer (iss)", "The audience (aud)", "That the payload is encrypted"], answer: [0, 1, 2], explain: "The payload of a signed JWT is readable by design; the audience check keeps a token meant for another API from being accepted." },
+  { type: "mcq", q: "Why is accepting alg: none from the token header dangerous?", options: ["It makes the token larger", "An attacker can forge a token with any claims and no signature", "It disables expiry", "It breaks base64"], answer: 1, explain: "A verifier must decide the algorithm itself; trusting the token's own header lets the attacker choose to skip verification." },
+  { type: "mcq", q: "What is the main weakness of self-contained JWT access tokens?", options: ["They cannot carry claims", "They stay valid until expiry and are hard to revoke", "They need a database lookup", "They cannot be signed"], answer: 1, explain: "Mitigate with short lifetimes, refresh tokens, introspection for sensitive APIs or a denylist." },
+  { type: "mcq", q: "Which flow suits one backend service calling another with no user involved?", options: ["Authorization code with PKCE", "Client credentials", "Implicit", "Device authorization"], answer: 1, explain: "Client credentials authenticates the service itself and returns a token scoped to what that service may do." }
+]} />
