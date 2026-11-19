@@ -1,0 +1,1 @@
+{ "title": "Security", "level": "Level 2: Intermediate Systems", "order": 15, "summary": "Designing systems that stay safe when parts of them are attacked: storing passwords and sessions, tokens and OAuth, encryption and key management, and the common web and API attacks." }
