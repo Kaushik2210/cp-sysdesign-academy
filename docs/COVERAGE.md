@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 203 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 204 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -69,7 +69,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 14 Search systems | Complete (4: inverted indexes and text analysis, TF-IDF and BM25 ranking, scatter-gather and tail latency, vector search and ANN; no typeahead or learning-to-rank lesson) | 4 |
 | 15 Security | Complete (4: passwords, sessions and MFA; tokens, OAuth 2.0 and JWT; TLS, encryption at rest and key management; web and API attacks. No lesson on secure software supply chains or cloud IAM yet) | 4 |
 | 16 Observability and reliability | Complete (4: logs, metrics and traces; SLOs, error budgets and burn-rate alerts; safe deployments, canaries and feature flags; backups, disaster recovery and chaos engineering. No incident-management or capacity-testing lesson yet) | 4 |
-| 17 Case studies: core services | Partial (6: URL shortener, distributed key-value store, chat system, notification system, news feed, web crawler; no video, maps or payments case study yet) | 6 |
+| 17 Case studies: core services | Partial (7: URL shortener, distributed key-value store, chat system, notification system, news feed, web crawler, payment system; no video streaming or maps case study yet) | 7 |
 | 18-28 (more Level 3 case studies, Level 4 LLD) | Planned | 0 |
 
 ## Known gaps and caveats
