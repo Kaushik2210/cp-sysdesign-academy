@@ -1,0 +1,197 @@
+---
+title: Backups, Disaster Recovery and Chaos Engineering
+track: sd
+module: observability
+order: 4
+difficulty: hard
+estMinutes: 40
+prerequisites: ["sd/databases-2/read-replicas-and-failover", "sd/load-balancing/global-load-balancing-and-failover", "sd/observability/slos-error-budgets-and-alerting"]
+tags: [disaster-recovery, backups, rpo, rto, failover, multi-region, chaos-engineering, resilience]
+type: lesson
+furtherReading:
+  - title: "AWS Whitepaper, Disaster Recovery of Workloads on AWS (strategies and RPO/RTO)"
+    url: https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-workloads-on-aws.html
+  - title: "Google SRE Book, Data Integrity: What You Read Is What You Wrote"
+    url: https://sre.google/sre-book/data-integrity/
+  - title: "Principles of Chaos Engineering"
+    url: https://principlesofchaos.org/
+  - title: "CISA, #StopRansomware Guide (backups and recovery)"
+    url: https://www.cisa.gov/stopransomware/ransomware-guide
+---
+
+## Intuition
+
+Redundancy keeps a system running through **expected** failures: a disk dies, a server reboots. **Disaster recovery (DR)** is about the failures redundancy does not cover: a whole region goes offline, a bad deploy corrupts data on every replica, an engineer runs `DELETE` without a `WHERE`, ransomware encrypts the primary **and** the copies attached to it.
+
+Two numbers frame every DR plan:
+
+- **RPO** (recovery point objective): how much **data** can you afford to lose, measured in time ("the last 5 minutes of writes")?
+- **RTO** (recovery time objective): how long can you be **down** before it is unacceptable?
+
+Smaller RPO and RTO cost more, so they are business decisions made per system. A payments ledger and an internal wiki should not have the same targets.
+
+<Callout type="pitfall" title="Replication is not a backup">
+A replica copies **everything**, including accidental deletes, corrupt writes and a bad migration, within seconds. Replication protects against hardware failure. Only a **point-in-time, independently stored backup** can bring back what was deleted or corrupted yesterday.
+</Callout>
+
+## Backups done properly
+
+- **Full** backups copy everything; **incremental** copies only changes since the last backup of any kind (small, but a restore needs the whole chain); **differential** copies changes since the last full (a restore needs only the full plus the latest differential).
+- **Point-in-time recovery (PITR)** combines a base backup with the continuous **write-ahead log** (WAL), so you can restore to any second, for example the moment before the bad delete.
+- **Snapshots** (storage or volume level) are fast, but a snapshot stored next to the data is not a disaster backup.
+- The **3-2-1 rule**: 3 copies of the data, on 2 different kinds of storage, with 1 off site. Add **immutability** (write-once, retention locks) and a **separate account or credentials**, so an attacker or a mistake that controls production cannot also delete the backups.
+- **Encrypt backups**, keep the keys somewhere that survives the disaster, and set **retention** from the longest time a problem might go unnoticed, not from the storage bill.
+- **A backup you have never restored is a hope, not a backup.** Restore regularly, into a clean environment, check the data and **time it**. That time is the data part of your RTO.
+
+## Failure domains
+
+Plan by **how much** can fail together:
+
+| domain | example failure | typical defence |
+| --- | --- | --- |
+| process or host | crash, kernel panic | restarts, replicas behind a load balancer |
+| rack or power feed | top-of-rack switch dies | spread replicas across racks |
+| availability zone (AZ) | data-centre power or cooling | multi-AZ deployment |
+| region | regional network or provider outage, disaster | multi-region DR |
+| provider or account | account suspended, credentials compromised, vendor outage | separate accounts, backups in another account, sometimes another provider |
+| human or software | bad deploy, bad migration, deleted data | backups, PITR, staged rollouts, access controls |
+
+Watch for **shared dependencies** that quietly join domains: one DNS provider, one identity service, one certificate authority, one CI system, one secrets store. A "multi-region" system whose control plane lives in one region is a one-region system.
+
+## How much data does a failover lose?
+
+With **asynchronous** replication the primary acknowledges a write before the replica has it. If the primary dies, the writes still in flight are **lost**. The loss depends on **replication lag**, which is usually tiny and occasionally large. With **synchronous** replication no acknowledged write is lost, but every write waits for the replica and a replica outage blocks writes.
+
+The program simulates 20,000 primary failures at random moments with a lag that is usually about 50 ms but stalls for several seconds 1% of the time, at 200 writes per second. Then it estimates what an RTO is made of, and what a long backup chain does to the odds of a successful restore. (The step times in the second part are **illustrative assumptions**; replace them with your own measured numbers.)
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+# ---- A: how much data does a failover lose? (RPO with asynchronous replication) ----
+random.seed(3)
+WRITES_PER_SEC = 200
+
+def replication_lag_seconds():
+    lag = random.expovariate(1 / 0.05)                       # usually about 50 ms behind
+    if random.random() < 0.01:
+        lag += random.uniform(1, 8)                          # 1% of the time replication stalls for seconds
+    return lag
+
+lost = sorted(int(replication_lag_seconds() * WRITES_PER_SEC) for _ in range(20000))   # the primary dies at 20,000 random moments
+def at(p):
+    return lost[min(len(lost) - 1, int(p / 100 * len(lost)))]
+print("asynchronous replication, primary lost at a random moment:")
+print(f"  writes lost: mean {sum(lost) / len(lost):.0f}, median {at(50)}, p99 {at(99)}, worst {lost[-1]}   (at {WRITES_PER_SEC} writes/s)")
+print("  synchronous replication: 0 writes lost, but every write waits for the replica, and the replica being down blocks writes")
+primary, replica = 0.9995, 0.9995
+print(f"  write availability: async {100 * primary:.3f}%   synchronous to one replica {100 * primary * replica:.3f}%")
+
+# ---- B: what an RTO is made of ----
+def restore_hours(size_tb, mb_per_s):
+    return size_tb * 1024 * 1024 / mb_per_s / 3600
+
+print("\\nrestoring 2 TB at 200 MB/s takes", f"{restore_hours(2, 200):.1f} h", "of copying alone")
+strategies = [
+    # name, detect, decide, bring up infrastructure, restore or promote data, verify and switch traffic (minutes, illustrative)
+    ("backup and restore",   10, 20, 45, restore_hours(2, 200) * 60, 30),
+    ("pilot light",          10, 20, 15, 30,                         20),
+    ("warm standby",         10, 10,  5, 5,                          10),
+    ("active-active",         2,  0,  0, 0,                           3),
+]
+print(f"{'strategy':22s}{'detect':>8s}{'decide':>8s}{'infra':>8s}{'data':>8s}{'verify':>8s}{'RTO':>10s}")
+for name, *steps in strategies:
+    print(f"{name:22s}" + "".join(f"{s:>6.0f} m" for s in steps) + f"{sum(steps) / 60:>8.1f} h")
+
+# ---- C: a backup chain is only as strong as its weakest link ----
+print("\\nprobability a restore works when each backup file is silently corrupt with chance 0.5%:")
+for label, files in (("1 full backup", 1), ("full + 1 differential", 2), ("full + 6 daily incrementals", 7), ("full + 30 daily incrementals", 31)):
+    print(f"  {label:32s} needs {files:2d} files -> {100 * 0.995 ** files:5.1f}% restorable")
+`} />
+
+What it shows:
+
+- **Asynchronous replication lost 19 writes on average**, a median of 7, but **271 at the 99th percentile and 1,602 in the worst case**, because the rare lag spikes dominate. If your RPO is "no lost orders", asynchronous replication alone cannot meet it, and you need **synchronous or quorum replication** for that data, or a way to **reconcile** the lost window afterwards. Synchronous replication to a single replica cut write availability from 99.950% to 99.900% in this model, since both nodes must be up.
+- An **RTO is a sum**: detecting the failure, **deciding** to fail over (often a human, and the slowest honest step), bringing up infrastructure, moving the data, and verifying. In this illustrative table, restoring 2 TB from backups takes **2.9 hours of copying alone** and **4.7 hours** end to end, while a warm standby is about 0.7 hours and active-active about 0.1 hour. The **data step is the one a restore test measures**.
+- **Long incremental chains are fragile**: with a 0.5% chance of a silently corrupt file, a full backup restores 99.5% of the time, but a full plus 30 daily incrementals only about 85.6%. Take **fresh full backups regularly**, prefer differentials for shorter chains, and **verify every backup file** (checksums, test restores).
+
+## DR strategies
+
+| strategy | how it works | typical RPO | typical RTO | cost |
+| --- | --- | --- | --- | --- |
+| **backup and restore** | back up to another region or account; rebuild after a disaster | hours (the backup interval, or minutes with PITR) | hours to a day | lowest |
+| **pilot light** | core data replicated continuously; compute is off or minimal, scaled up on failover | minutes | tens of minutes to hours | low |
+| **warm standby** | a scaled-down but running copy of the whole stack; scale up on failover | seconds to minutes | minutes | medium |
+| **active-active (multi-region)** | all regions serve traffic; data replicated across them | near zero | near zero | highest, and the hardest to build |
+
+Active-active is not "free availability": it forces you to solve **conflicting writes** across regions (see [consistency models](/sd/distributed-theory/consistency-models/)), higher write latency or weaker consistency, and a doubling of operational complexity. Many systems are best served by a well-tested warm standby.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant M as Monitoring
+  participant H as On-call or automation
+  participant P as Primary region
+  participant S as Standby region
+  participant D as DNS / global load balancer
+  M->>H: region health checks failing for 3 minutes
+  H->>H: confirm it is real (not a monitoring fault) and decide
+  H->>P: fence it: revoke write access so it cannot keep accepting writes
+  H->>S: promote the replica to primary, scale up capacity
+  H->>S: run data and smoke checks
+  H->>D: switch traffic to the standby region
+  Note over D,S: users reach the standby; later: rebuild the old primary and fail back deliberately`} caption="A regional failover: confirm, fence, promote, verify, switch traffic" />
+
+**Failover mechanics worth planning:**
+
+- **Detection and decision.** Automatic failover is fast but can be triggered by a false alarm or a partial failure and make things worse; manual failover is slower but deliberate. Many teams automate detection and require a human (or a quorum) to confirm.
+- **Fencing.** Before promoting the standby, make sure the old primary can **no longer accept writes**, or two regions will both accept writes and diverge (**split brain**). See [leases, locks and fencing](/sd/consensus-and-coordination/leases-locks-and-fencing/).
+- **Traffic switch.** DNS changes are limited by TTLs and caching; global load balancers and anycast switch faster (see [global load balancing and failover](/sd/load-balancing/global-load-balancing-and-failover/)).
+- **Capacity.** Does the standby region have quota and capacity for **all** the traffic, and can it start at once? Pre-reserve what you need.
+- **Dependencies.** Secrets, certificates, feature flags, queues and third-party allow-lists must exist in the standby region too.
+- **Failing back** is a second migration: plan it, do not rush it.
+- **Keep a runbook** with exact commands, owners and a decision tree, and keep it where you can reach it when your main systems are down.
+
+## Chaos engineering: practising failure
+
+You do not know whether failover works until you fail over. **Chaos engineering** is the discipline of **running controlled experiments on a system to find weaknesses before an outage does**:
+
+1. Define the **steady state** with a metric that reflects user experience (checkout success rate, p99 latency).
+2. Form a **hypothesis**: "if we kill one database replica, the steady state holds."
+3. **Inject the failure** (kill instances, add latency or packet loss, make a dependency return errors, fill a disk, expire a certificate, block a region), starting with a **small blast radius**, in a **time window when people are watching**, with an **abort button**.
+4. **Compare** against the hypothesis, fix what you learn, and **automate** the experiment so it keeps being true.
+
+**Game days** rehearse the human side: run a simulated regional outage with the on-call team and the real runbooks, and measure detection time, decision time and communication, not just the technology. Start in staging; move to production only when experiments are safe and well observed.
+
+## Trade-offs
+
+<TradeOffs caption="Choosing a DR approach" rows={[
+  { option: "Backups only (restore on demand)", pros: "Cheapest; simple; protects against deletion and corruption", cons: "Hours of downtime; RPO set by backup frequency", chooseWhen: "Internal tools and systems that can be down for hours" },
+  { option: "Backups with PITR and a pilot light", pros: "Small RPO and RTO of an hour or two at modest cost", cons: "Needs scripted scale-up and regular rehearsals", chooseWhen: "Business systems with an RTO of hours" },
+  { option: "Warm standby in another region", pros: "Minutes of RTO; the standby is exercised continuously", cons: "Paying for idle capacity; replication lag means non-zero RPO", chooseWhen: "Customer-facing services with an RTO of minutes" },
+  { option: "Active-active multi-region", pros: "Near-zero RTO and RPO; lower latency for users everywhere", cons: "Conflict handling, complexity, cost; every bug is a distributed bug", chooseWhen: "Global services with very tight availability targets and the engineering budget" },
+  { option: "Synchronous replication across zones, async across regions", pros: "No data loss for AZ failures; manageable latency", cons: "Region loss can still lose recent writes", chooseWhen: "A common compromise for primary databases" }
+]} />
+
+## Pitfalls
+
+- Treating replication, RAID or snapshots on the same account as backups.
+- Never restoring a backup in a test, then discovering during the disaster that it is incomplete, corrupt or has no key.
+- Backups reachable with the same credentials as production, so ransomware or a rogue script deletes them too.
+- Long incremental chains with no regular full backup and no verification.
+- DR plans that assume capacity, quotas and secrets that are not actually available in the standby region.
+- A runbook stored only in the system that is down.
+- Failover without fencing, producing split brain.
+- Chaos experiments with no hypothesis, no abort condition or on a day nobody is watching.
+- Setting the same RPO and RTO for everything, which is either wasteful or dangerous.
+
+## What would you choose and why?
+
+An online store runs in one region with a primary Postgres database, an async replica in another availability zone and nightly snapshots in the same account. Management wants "to survive a region outage and never lose an order". Which RPO and RTO do you propose for orders, for the product catalog and for the analytics warehouse, which DR strategy and replication mode for each, how do you protect the backups from deletion and ransomware, and how will you prove in the next quarter that the plan works?
+
+## Quiz
+
+<Quiz id="sd-m16-backups-dr-chaos" tags={["disaster-recovery", "backups", "rpo", "rto", "chaos"]} questions={[
+  { type: "mcq", q: "What does RPO measure?", options: ["How long recovery takes", "How much data, as time, you can afford to lose", "How many replicas exist", "The age of the hardware"], answer: 1, explain: "RTO is the downtime target; RPO is the data-loss target." },
+  { type: "mcq", q: "Why is replication not a substitute for backups?", options: ["Replicas are slower", "Deletions and corruption replicate within seconds, so every copy is damaged", "Replicas cannot store data", "Backups are encrypted and replicas are not"], answer: 1, explain: "You need an independent, point-in-time, ideally immutable copy to recover from logical errors and ransomware." },
+  { type: "multi", q: "Which practices belong in a sound backup strategy?", options: ["Copies in a separate account or region with immutability", "Regular restore tests that measure the restore time", "Keeping the only backup on the same volume as the data", "Checksums and verification of every backup file"], answer: [0, 1, 3], explain: "A backup on the same volume fails with the volume, and an untested backup is only a hope." },
+  { type: "mcq", q: "Why does asynchronous replication make a non-zero RPO?", options: ["It compresses writes", "The primary acknowledges writes before the replica has them, so a failover loses the in-flight writes", "Replicas reject some writes", "It uses less bandwidth"], answer: 1, explain: "The loss equals the replication lag at the moment of failure, which has rare large spikes." },
+  { type: "mcq", q: "What is fencing for in a failover?", options: ["Encrypting the standby", "Making sure the old primary can no longer accept writes, to prevent split brain", "Speeding up DNS", "Compressing logs"], answer: 1, explain: "Two primaries accepting writes diverge; fence the old one before promoting the new one." },
+  { type: "mcq", q: "Which is the best description of a chaos experiment?", options: ["Randomly breaking production without telling anyone", "A controlled test of a hypothesis about steady-state behaviour, with a small blast radius and an abort condition", "A load test", "A security audit"], answer: 1, explain: "Chaos engineering is disciplined experimentation: hypothesis, measured steady state, limited blast radius, and learning." }
+]} />
