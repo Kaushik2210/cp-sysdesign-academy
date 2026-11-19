@@ -753,7 +753,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("153");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("157");
   });
 });
 
@@ -899,12 +899,16 @@ test.describe("visualizer lessons", () => {
   });
 });
 
-test.describe("security module", () => {
+test.describe("security and observability modules", () => {
   const LESSONS: [string, string][] = [
     ["/sd/security/passwords-sessions-and-mfa/", "Passwords, Sessions and Multi-Factor Login"],
     ["/sd/security/tokens-oauth-and-jwt/", "Tokens, OAuth 2.0 and JWT"],
     ["/sd/security/tls-encryption-and-key-management/", "TLS, Encryption at Rest and Key Management"],
     ["/sd/security/web-and-api-attacks/", "Web and API Attacks: Injection, XSS, CSRF and SSRF"],
+    ["/sd/observability/logs-metrics-and-traces/", "Logs, Metrics and Traces"],
+    ["/sd/observability/slos-error-budgets-and-alerting/", "SLOs, Error Budgets and Burn-Rate Alerts"],
+    ["/sd/observability/safe-deployments-canaries-and-feature-flags/", "Safe Deployments, Canaries and Feature Flags"],
+    ["/sd/observability/backups-disaster-recovery-and-chaos/", "Backups, Disaster Recovery and Chaos Engineering"],
   ];
   for (const [path, title] of LESSONS) {
     test(`${title} renders its runnable demos, trade-offs and quiz`, async ({ page }) => {
