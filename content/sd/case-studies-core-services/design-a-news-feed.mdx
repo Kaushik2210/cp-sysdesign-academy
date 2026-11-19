@@ -1,0 +1,243 @@
+---
+title: "Case Study: Design a News Feed"
+track: sd
+module: case-studies-core-services
+order: 5
+difficulty: hard
+estMinutes: 50
+prerequisites: ["sd/case-studies-core-services/design-a-chat-system", "sd/caching/caching-strategies", "sd/databases-2/hot-keys-and-hot-partitions", "sd/queues-and-streaming/why-queues"]
+tags: [case-study, news-feed, timeline, fan-out, social-graph, ranking, pagination, caching, celebrity-problem]
+type: case-study
+furtherReading:
+  - title: "Designing Data-Intensive Applications (Kleppmann), chapter 1 (Twitter's timeline example: describing load)"
+    url: https://dataintensive.net/
+  - title: "Raffi Krikorian, Timelines at Scale (InfoQ talk, Twitter)"
+    url: https://www.infoq.com/presentations/Twitter-Timeline-Scalability/
+  - title: "Meta Engineering, Scaling the social graph with TAO"
+    url: https://engineering.fb.com/2013/06/25/core-infra/tao-the-power-of-the-graph/
+  - title: "System Design Primer, Design the Twitter timeline and search"
+    url: https://github.com/donnemartin/system-design-primer
+---
+
+## The problem
+
+Design the **home feed** of a social network: users **follow** other accounts, accounts **post**, and each user opens the app to see a list of recent posts from the accounts they follow, newest or best first, scrolling endlessly. It looks like "read a few lists and merge them", and at scale it becomes one of the classic examples of a **read-heavy workload with a skewed write fan-out**.
+
+The core tension: a post by someone with 200 followers must be visible to 200 people, but a post by someone with 50 million followers must be visible to 50 million. Do you **do that work when the post is written** or **when each follower reads**?
+
+## 1. Requirements
+
+**Functional**
+
+- Create a post (text, images, video links); **follow and unfollow** accounts.
+- **Home feed**: posts from followed accounts, in reverse chronological or ranked order, with **infinite scroll**.
+- Likes, comments and reshares are shown on posts (details out of scope).
+
+**Non-functional**
+
+- **Fast feed loads** (about 200 ms at the 95th percentile), because the feed is the main screen.
+- **Eventual consistency is fine**: a new post may take a few seconds to reach followers' feeds, but a user should see **their own post immediately**.
+- **High availability**; degrade gracefully (a slightly stale feed beats an error).
+- Handle **extreme skew**: celebrities, viral posts and a few huge accounts.
+
+## 2. Estimation
+
+Assume 300 million daily active users who open the feed 10 times a day, 100 million new posts a day and an average of 200 followers per account.
+
+<CodeRunner language="python" code={`dau, opens_per_user = 300_000_000, 10
+posts_per_day = 100_000_000
+avg_followers = 200
+seconds = 86400
+feed_reads = dau * opens_per_user
+timeline_inserts = posts_per_day * avg_followers
+print(f"feed reads : {feed_reads / 1e9:.0f} billion a day = {feed_reads / seconds:,.0f}/s average, about {3 * feed_reads / seconds:,.0f}/s at 3x peak")
+print(f"new posts  : {posts_per_day / 1e6:.0f} million a day = {posts_per_day / seconds:,.0f}/s")
+print(f"fan-out on write: {timeline_inserts / 1e9:.0f} billion timeline inserts a day = {timeline_inserts / seconds:,.0f}/s")
+entry = 24                                                    # post id + timestamp + small metadata per timeline entry
+print(f"timeline storage for 7 days at {entry} bytes an entry: {timeline_inserts * 7 * entry / 1e12:.1f} TB")
+print(f"read to write ratio on the home feed: {feed_reads / posts_per_day:.0f} : 1")
+`} />
+
+Three numbers shape the design: about **35,000 feed reads a second** (100,000 at peak), **1,200 new posts a second**, and **20 billion timeline inserts a day** (about 231,000 a second) if every post is pushed to every follower. Reads outnumber posts 30 to 1, which favours **precomputing** timelines, but the insert volume (and especially its skew) is what threatens the plan.
+
+## 3. The follower distribution is not average
+
+Averages hide the problem. Real follower counts follow a **heavy tail**: most accounts have a handful of followers and a very few have millions. The simulation draws 200,000 accounts from such a distribution and measures how much of the total fan-out belongs to the biggest ones. (The data is synthetic, but the shape is the real phenomenon.)
+
+<CodeRunner language="python" code={`import random
+
+random.seed(12)
+USERS = 200_000
+followers = sorted((min(int(random.paretovariate(1.05)), 5_000_000) for _ in range(USERS)), reverse=True)
+total = sum(followers)
+print(f"{USERS:,} accounts, {total:,} follow edges, average {total / USERS:.0f} followers, median {followers[USERS // 2]}, max {followers[0]:,}")
+for share in (0.0001, 0.001, 0.01):
+    top = int(USERS * share)
+    print(f"  the top {share:.2%} of accounts ({top:,}) own {100 * sum(followers[:top]) / total:5.1f}% of all follow edges")
+
+posts_per_account_per_day = 2
+THRESHOLD = 20_000                                            # accounts above this are "celebrities": not fanned out on write
+write_all = posts_per_account_per_day * total
+write_hybrid = posts_per_account_per_day * sum(f for f in followers if f <= THRESHOLD)
+celebs = sum(1 for f in followers if f > THRESHOLD)
+print(f"fan-out on write for everyone : {write_all / 1e6:8.1f} million timeline inserts a day")
+print(f"hybrid (skip {celebs} celebrities)    : {write_hybrid / 1e6:8.1f} million timeline inserts a day ({100 * (1 - write_hybrid / write_all):.0f}% fewer)")
+`} />
+
+In this sample the **top 0.01% of accounts (just 20 of 200,000) own 27% of all follow edges**, the top 0.1% own 43.5% and the top 1% own 62%. Skipping only **7 celebrity accounts** (those above 20,000 followers) removed **19% of all timeline inserts**. In a real network the tail is longer and the effect larger, and, just as important, a single celebrity post would otherwise create **millions of writes in one burst**, delaying everyone else's posts queued behind it.
+
+## 4. Fan-out on write, on read, or both
+
+| approach | what happens | read cost | write cost | problem |
+| --- | --- | --- | --- | --- |
+| **fan-out on read (pull)** | at read time, fetch recent posts from each followed account and merge them | high: one lookup per followed account | tiny: one row per post | slow feeds for users following many accounts |
+| **fan-out on write (push)** | at post time, insert the post id into every follower's stored timeline | tiny: read one precomputed list | high: one insert per follower | celebrity posts create huge bursts; wasted work for inactive followers |
+| **hybrid** | push for ordinary accounts, pull for celebrities, merged at read time | small: one list plus a few celebrity lookups | bounded | more moving parts |
+
+The hybrid is what large networks use. The program below builds one user's feed all three ways from the same data, checks each against the ground truth, and counts the storage reads per feed request. It also shows **cursor pagination**.
+
+<CodeRunner language="python" code={`import heapq, random
+
+random.seed(3)
+ACCOUNTS = 400
+posts = {a: sorted((random.randint(0, 1_000_000), f"{a}:{i}") for i in range(random.randint(0, 40)))[::-1] for a in range(ACCOUNTS)}   # newest first
+following = random.sample(range(ACCOUNTS), 120)
+celebrities = set(random.sample(range(ACCOUNTS), 15))
+LIMIT = 20
+
+def truth():
+    return sorted((p for a in following for p in posts[a]), reverse=True)[:LIMIT]
+
+def pull_feed():                                              # fan-out on read: merge every followee's list
+    streams = [posts[a] for a in following]
+    return list(heapq.merge(*streams, reverse=True))[:LIMIT], len(streams)
+
+def push_feed():                                              # fan-out on write: a stored, already merged timeline
+    return sorted((p for a in following for p in posts[a]), reverse=True)[:LIMIT], 1
+
+def hybrid_feed():                                            # precomputed timeline for normal accounts + live pull for celebrities
+    timeline = sorted((p for a in following if a not in celebrities for p in posts[a]), reverse=True)[:LIMIT]
+    celeb_streams = [posts[a] for a in following if a in celebrities]
+    merged = list(heapq.merge(timeline, *celeb_streams, reverse=True))[:LIMIT]
+    return merged, 1 + len(celeb_streams)
+
+expected = truth()
+for name, fn in (("fan-out on read (pull)", pull_feed), ("fan-out on write (push)", push_feed), ("hybrid", hybrid_feed)):
+    feed, lookups = fn()
+    print(f"{name:24s} correct: {feed == expected}   storage reads per feed request: {lookups}")
+print(f"(the user follows {len(following)} accounts, {len([a for a in following if a in celebrities])} of them celebrities)")
+
+def page_after(cursor, size=5):
+    pool = sorted((p for a in following for p in posts[a]), reverse=True)
+    return [p for p in pool if cursor is None or p < cursor][:size]
+cursor, seen = None, []
+while True:
+    page = page_after(cursor)
+    if not page:
+        break
+    seen += page
+    cursor = page[-1]
+ok = seen == sorted(seen, reverse=True) and len(seen) == len(set(seen)) == sum(len(posts[a]) for a in following)
+print("cursor pagination returned every post exactly once, newest first:", ok)
+`} />
+
+All three strategies return the **same correct feed**. The difference is work: the pull feed needed **120 storage reads** for one request, the pushed timeline **1**, and the hybrid **6** (one timeline plus the 5 celebrities this user follows). In production the timeline read is one key lookup, and the celebrity reads hit a hot cache because celebrity posts are read by millions.
+
+**Cursor pagination:** a feed changes while the user scrolls, so *page numbers* cause repeated or skipped posts (a new post pushes everything down one place). Use a **cursor** (the sort key of the last item seen, such as `(timestamp, post_id)`) and ask for "items older than the cursor". The demo returned every post exactly once, in order.
+
+## 5. High-level design
+
+<Diagram kind="mermaid" code={`flowchart LR
+  W[Writer app] --> API[Post service]
+  API --> PS[(Post store)]
+  API --> Q[[Fan-out queue]]
+  Q --> FO[Fan-out workers]
+  FO --> SG[(Social graph: followers)]
+  FO --> TL[(Timeline store: per-user post ids)]
+  R[Reader app] --> FS[Feed service]
+  FS --> TL
+  FS --> CEL[Celebrity post cache]
+  FS --> HYD[Hydration: posts, users, counts]
+  HYD --> PC[(Post and user caches)]
+  HYD --> PS
+  FS --> RANK[Ranking service]
+  W --> MEDIA[Media upload]
+  MEDIA --> BLOB[(Blob store and CDN)]`} caption="The write path fans post ids out into stored timelines; the read path assembles, hydrates and ranks a page" />
+
+**Write path**
+
+1. The post service stores the post (sharded by post id or author) and returns immediately to the author.
+2. It publishes a **post-created event** to a queue ([why queues](/sd/queues-and-streaming/why-queues/)).
+3. **Fan-out workers** read the author's followers from the **social graph** in pages and insert the **post id** (not the whole post) into each follower's **timeline**, a capped list (for example the latest 800 ids) in a fast key-value store or cache.
+4. For **celebrity** authors (above a follower threshold) the worker does nothing for followers; the post is just stored and placed in a hot **celebrity post cache**.
+
+**Read path**
+
+1. The feed service reads the user's **timeline of post ids**, plus recent posts from the celebrities they follow.
+2. It **merges** the lists, **hydrates** them (batched multi-gets of post bodies, author names, like counts from caches), and **filters** (blocked or muted authors, deleted posts, already seen).
+3. A **ranking** step orders the candidates, and the service returns one page with a **cursor**.
+
+Storing only **ids** in timelines keeps them tiny (24 bytes an entry in the estimate) and makes edits and deletes cheap: change the post once, not millions of copies.
+
+## 6. Ranking
+
+A strictly chronological feed is easy to reason about but fills with low-value content. Ranked feeds use a **two-stage** shape: **candidate generation** (the timeline and celebrity posts, a few hundred candidates) then **scoring** (a model estimating how relevant each is to this user, from features such as author affinity, post type, recency, engagement), followed by **filtering and diversification** (do not show ten posts from one author in a row). The ranking service has a tight **latency budget** (tens of milliseconds), so models are served from memory with precomputed features, and the system falls back to chronological order if the ranker is slow or down. Ranking is a large topic of its own; the architectural point here is that **retrieval is cheap and shared, ranking is per request and budgeted**.
+
+## 7. Details that decide quality
+
+- **Read your own writes:** the author should see their new post at once, so the feed service merges the author's recent posts directly, even before fan-out finishes.
+- **Inactive users:** do not fan out to accounts that have not opened the app for weeks; **rebuild their timeline lazily** (a pull) when they return. This can remove a large share of the writes.
+- **New follower and unfollow:** on follow, **backfill** the new account's recent posts into the timeline; on unfollow, **filter at read time** instead of rewriting timelines.
+- **Deletes and privacy changes:** timelines hold ids, so a deleted, blocked or newly private post is **dropped at hydration time**; do not rely on removing it from every timeline.
+- **Hot posts and counters:** a viral post's likes can become a hot key ([hot keys](/sd/databases-2/hot-keys-and-hot-partitions/)); shard counters, buffer increments and show approximate counts.
+- **Caching:** cache hydrated posts and author profiles with a short TTL; use **request coalescing** so a thousand simultaneous misses on one popular post become one database read.
+- **Graceful degradation:** if ranking, counters or recommendations are slow, return the chronological timeline without them.
+- **Failure and backfill:** if the timeline store loses data, rebuild from the post store and the social graph; keep this rebuild path tested.
+
+## 8. Bottlenecks and scale
+
+- **Fan-out bursts** from big accounts: threshold them out, rate limit workers, and use separate queues so one celebrity does not delay normal posts ([notification priorities](/sd/case-studies-core-services/design-a-notification-system/) use the same idea).
+- **Timeline store size**: cap per-user length, expire old entries, partition by user id.
+- **Social graph reads**: store follower lists sharded by account, with caches for hot accounts; paginate when fanning out.
+- **Hydration fan-in**: a page of 20 posts needs about 20 post lookups, 20 author lookups and counters, so use batched multi-gets and tiered caches.
+- **Global users**: replicate timelines and caches regionally, with writes flowing asynchronously ([global failover](/sd/load-balancing/global-load-balancing-and-failover/)).
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "Fan-out on read only", pros: "Simple; tiny write cost; always fresh", cons: "Slow feeds when following many accounts; repeated work for every read", chooseWhen: "Small graphs or low read volume" },
+  { option: "Fan-out on write only", pros: "Very fast reads", cons: "Celebrity bursts, wasted work for inactive users, huge storage", chooseWhen: "Mostly small accounts" },
+  { option: "Hybrid push for normal and pull for celebrities", pros: "Fast reads and bounded write cost", cons: "Two code paths; threshold tuning", chooseWhen: "Skewed follower distributions (nearly every real network)" },
+  { option: "Store ids in timelines", pros: "Small; edits and deletes are cheap; hydrate fresh data", cons: "Extra lookups at read time", chooseWhen: "The default" },
+  { option: "Chronological feed", pros: "Predictable and cheap", cons: "Low relevance as accounts and posts multiply", chooseWhen: "Small communities, or as the fallback when ranking fails" },
+  { option: "Ranked feed", pros: "Higher engagement and relevance", cons: "Model infrastructure, latency budget, explainability and filter-bubble concerns", chooseWhen: "Large networks with many candidates per user" },
+  { option: "Cursor pagination", pros: "Stable while the feed changes", cons: "No jumping to page N", chooseWhen: "Always for feeds" }
+]} />
+
+## Pitfalls
+
+- Treating average followers as the design point and ignoring the tail.
+- Fanning out a celebrity's post synchronously to millions of followers, delaying all other posts.
+- Copying whole posts into every timeline, so edits and deletes become mass updates.
+- Offset or page-number pagination on a feed that changes.
+- Fanning out to long-inactive users.
+- Not showing the author their own post immediately.
+- A ranking service with no timeout and no chronological fallback.
+- Counting likes with a single hot counter row.
+- Forgetting block, mute and privacy checks at read time.
+- No tested path for rebuilding a lost timeline.
+
+## What would you choose and why?
+
+The product adds **"close friends only" posts** (visible to a chosen list) and **stories that expire after 24 hours**. How do these change the fan-out strategy, the timeline contents and the delete path? What happens to the follower threshold for celebrity posts that are only visible to a subset of followers?
+
+## Quiz
+
+<Quiz id="sd-m17-news-feed" tags={["case-study", "news-feed", "fan-out", "ranking"]} questions={[
+  { type: "mcq", q: "What is the main problem with pure fan-out on write?", options: ["Reads become slow", "A post by an account with millions of followers creates a huge burst of writes, much of it wasted on inactive followers", "Posts cannot be deleted", "It needs no storage"], answer: 1, explain: "The hybrid skips fan-out for celebrities and merges their posts at read time." },
+  { type: "mcq", q: "Why store only post ids in each follower's timeline?", options: ["Ids are encrypted", "Timelines stay tiny, and edits and deletes change one post instead of millions of copies", "It avoids ranking", "It removes the need for caches"], answer: 1, explain: "Hydrating at read time also applies fresh counts and privacy filters." },
+  { type: "predict", q: "A user follows 120 accounts, 5 of them celebrities. In the hybrid design, how many storage reads does one feed request need (one timeline read plus one per celebrity)?", code: "followed, celebrities = 120, 5\nprint(1 + celebrities)", options: ["1", "6", "120", "125"], answer: 1, explain: "One precomputed timeline plus 5 celebrity lookups is 6, against 120 for pure pull." },
+  { type: "mcq", q: "Why use cursor pagination for a feed?", options: ["It is faster to compute", "Page numbers repeat or skip items when new posts arrive; a cursor stays stable", "It hides the timestamp", "It removes ordering"], answer: 1, explain: "A cursor of (timestamp, id) means 'items older than this one', which is unaffected by new items at the top." },
+  { type: "multi", q: "Which help keep fan-out cheap and feeds correct?", options: ["Skip fan-out for inactive users and rebuild their timeline when they return", "Filter deleted and blocked posts at hydration time", "Merge the author's own recent posts at read time so they see their post at once", "Fan out every post synchronously before returning to the author"], answer: [0, 1, 2], explain: "The write path should return immediately; fan-out belongs on a queue." },
+  { type: "mcq", q: "What should happen if the ranking service is slow or down?", options: ["Return an error", "Fall back to the chronological timeline within the latency budget", "Retry for a minute", "Show an empty feed"], answer: 1, explain: "Graceful degradation keeps the main screen working." }
+]} />
