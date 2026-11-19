@@ -1,0 +1,303 @@
+---
+title: "Case Study: Design a Video Streaming Service"
+track: sd
+module: case-studies-core-services
+order: 8
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/storage/blob-stores", "sd/networking-and-apis/cdn-and-api-design", "sd/caching/redis-memcached-and-cdn-caching", "sd/queues-and-streaming/stream-processing-basics"]
+tags: [case-study, video-streaming, transcoding, adaptive-bitrate, hls, dash, cdn, blob-storage, drm, scalability]
+type: case-study
+furtherReading:
+  - title: "RFC 8216, HTTP Live Streaming (HLS)"
+    url: https://www.rfc-editor.org/rfc/rfc8216
+  - title: "Huang et al., A Buffer-Based Approach to Rate Adaptation (SIGCOMM 2014)"
+    url: https://dl.acm.org/doi/10.1145/2619239.2626296
+  - title: "Netflix Technology Blog, Per-Title Encode Optimization"
+    url: https://netflixtechblog.com/per-title-encode-optimization-7e99442b62a2
+  - title: "Netflix Open Connect: how Netflix delivers video from servers inside ISPs"
+    url: https://openconnect.netflix.com/en/
+---
+
+## The problem
+
+Design a **video streaming service** like YouTube or Netflix: creators (or the studio) **upload** videos, the platform **processes** them, and viewers around the world **watch** them on phones, TVs and browsers with fast start, little buffering and good quality, whatever their network does.
+
+Three facts shape everything:
+
+1. **Video is huge.** One hour of high-quality video is gigabytes; a busy service moves petabytes a day. **Bandwidth and storage cost** dominate the budget.
+2. **Viewers' networks vary and fluctuate**, so one fixed file cannot give everyone a good experience. The solution is **adaptive streaming** with several versions of each video.
+3. **Popularity is extremely skewed**: a small fraction of videos produce most of the views, which makes **caching** the central design tool.
+
+## 1. Requirements
+
+**Functional**
+
+- **Upload** videos (large files, flaky connections), with resumable uploads.
+- **Process** them into formats playable everywhere, plus **thumbnails**, subtitles and audio tracks.
+- **Play** videos with adaptive quality, seeking and resume.
+- Basic **metadata** (title, description), view counts, and access control (private, region-locked, paid).
+- (Out of scope here: search, recommendations, comments, live streaming. Live is called out at the end.)
+
+**Non-functional**
+
+- **Playback**: fast start (about a second or two), very little rebuffering, quality that adapts to the network.
+- **Global scale** with **cost efficiency**: serving bytes cheaply is the business.
+- **Durability** of originals (never lose an upload); **high availability** of playback.
+- **Content protection** where required (DRM, expiring links).
+
+## 2. Estimation
+
+Assume 100 million daily viewers who each watch 40 minutes a day at an average of 3 Mbit/s, and 30,000 hours of new video uploaded per day.
+
+<CodeRunner language="python" code={`viewers, minutes, mbps = 100_000_000, 40, 3
+bits_per_day = viewers * minutes * 60 * mbps * 1e6
+egress_pb_day = bits_per_day / 8 / 1e15
+avg_tbps = bits_per_day / 86400 / 1e12
+print(f"viewing traffic: {egress_pb_day:,.0f} PB a day = {avg_tbps:,.0f} Tbit/s on average, perhaps {2.5 * avg_tbps:,.0f} Tbit/s at the evening peak")
+hours = 30_000
+ladder_mbps = [0.3, 0.75, 1.2, 2.5, 4.5, 8.0, 16.0]          # renditions from 240p to 4K
+per_hour_gb = [r * 3600 / 8 / 1000 for r in ladder_mbps]
+print(f"one hour of video stored in {len(ladder_mbps)} renditions: {sum(per_hour_gb):.1f} GB")
+print(f"{hours:,} hours uploaded a day -> {hours * sum(per_hour_gb) / 1000:,.0f} TB of new renditions a day, {hours * sum(per_hour_gb) * 365 / 1e6:,.0f} PB a year")
+print(f"transcoding at about 1 core-second per video-second per rendition: {hours * 3600 * len(ladder_mbps) / 86400:,.0f} cores busy around the clock")
+`} />
+
+The viewing side moves **about 90 petabytes a day, 8 Tbit/s on average and perhaps 21 Tbit/s at peak**, far more than any single data centre can serve: a **content delivery network (CDN)** is not an optimisation here, it **is** the delivery system. On the upload side, **every hour of video becomes about 15 GB of renditions**, around **450 TB a day**, and thousands of cores of transcoding. (Estimates like these are assumptions to state aloud; the shape matters more than the digits.)
+
+## 3. High-level design
+
+<Diagram kind="mermaid" code={`flowchart TD
+  C[Creator] -->|resumable chunked upload via pre-signed URLs| UP[Upload service]
+  UP --> RAW[(Blob store: original files)]
+  UP --> Q[[Processing queue]]
+  Q --> ORCH[Workflow orchestrator]
+  ORCH --> SPLIT[Split into chunks]
+  SPLIT --> T1[Transcode workers: many in parallel]
+  T1 --> PKG[Package: segments and manifests]
+  PKG --> OUT[(Blob store: renditions)]
+  ORCH --> TH[Thumbnails, audio, subtitles]
+  ORCH --> META[(Metadata DB)]
+  V[Viewer] --> API[Playback API: auth, manifest URL]
+  API --> META
+  V --> CDN[CDN edge caches]
+  CDN -.miss.-> SHIELD[Regional cache / origin shield]
+  SHIELD -.miss.-> OUT
+  V -.events.-> EV[[Event stream]]
+  EV --> AGG[View counts, analytics]`} caption="Uploads become renditions through a parallel pipeline; viewers fetch small segments from CDN edge caches, which rarely need the origin" />
+
+**Upload path.** The client uploads the file in **chunks directly to blob storage** using pre-signed URLs, so large transfers never pass through application servers and an interrupted upload **resumes** from the last chunk. When complete, an event enters the processing queue and the video is marked `processing`.
+
+**Processing path.** A **workflow orchestrator** runs a graph of tasks: validate the file, split it into chunks, transcode every chunk into every rendition in parallel, package the output, create thumbnails, extract audio and subtitles, then publish (the video becomes `ready` and playable). Each task is idempotent and retried on failure (see [queues and retries](/sd/queues-and-streaming/backpressure-retries-and-dlq/)).
+
+**Playback path.** The player asks the playback API for the video's **manifest URL** (after an access check). It fetches the manifest and then **small video segments** from the CDN. The origin storage is touched only on cache misses.
+
+## 4. Adaptive bitrate streaming
+
+Instead of one big file, each video is encoded into **several renditions** (a **bitrate ladder**: 240p, 360p, 480p, 720p, 1080p, 4K) and each rendition is cut into **segments** of a few seconds. A **manifest** (an HLS `.m3u8` playlist or a DASH `.mpd` file) lists the renditions and their segments. The **player** measures how fast segments arrive and how full its buffer is, and **chooses the rendition of every next segment**. Because segments are just static files served over ordinary HTTP, the whole thing runs on standard CDNs and caches ([HLS is specified in RFC 8216](https://www.rfc-editor.org/rfc/rfc8216)).
+
+The simulation compares three players on a deliberately poor, fluctuating network: one that **always asks for the top quality**, a **rate-based** player (choose the best rendition below 80% of the last measured throughput) and a **buffer-based** player (choose by how many seconds are buffered: low buffer means low quality).
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+LADDER = [0.3, 0.75, 1.2, 2.5, 4.5, 8.0]            # Mbit/s renditions
+SEG = 4.0                                             # seconds of video per segment
+rng = random.Random(9)
+trace, level = [], 5.0
+for sec in range(600):                                # throughput per second: a random walk with sudden drops
+    level = max(0.4, min(12.0, level + rng.uniform(-0.8, 0.8)))
+    if rng.random() < 0.01:
+        level = rng.uniform(0.4, 1.0)
+    trace.append(level)
+print(f"network: mean {sum(trace) / len(trace):.1f} Mbit/s, below 1 Mbit/s for {sum(1 for x in trace if x < 1) / len(trace):.0%} of the time, never above {max(trace):.1f}")
+
+def download_time(start, megabits):
+    """Seconds needed to download \`megabits\` starting at time \`start\` on the throughput trace."""
+    t, remaining = start, megabits
+    while remaining > 0:
+        rate = trace[min(int(t), len(trace) - 1)]
+        step = min(1.0 - (t - int(t)), remaining / rate)
+        remaining -= rate * step
+        t += step
+    return t - start
+
+def play(policy, segments=120):
+    t, buffer, rebuffer, last_rate, history, switches = 0.0, 0.0, 0.0, 5.0, [], 0
+    for _ in range(segments):
+        idx = policy(buffer, last_rate)
+        if history and idx != history[-1]:
+            switches += 1
+        history.append(idx)
+        d = download_time(t, LADDER[idx] * SEG)
+        last_rate = LADDER[idx] * SEG / d
+        if d > buffer:
+            rebuffer += d - buffer if t > 0 else 0          # the startup wait is not counted as a stall
+            buffer = 0.0
+        else:
+            buffer -= d
+        buffer += SEG
+        t += d
+        if buffer > 30:                                      # the player pauses downloading when it has 30 s buffered
+            t += buffer - 30
+            buffer = 30
+    return sum(LADDER[i] for i in history) / len(history), rebuffer, switches
+
+def always_highest(buffer, last_rate):
+    return len(LADDER) - 1
+
+def rate_based(buffer, last_rate):                           # the highest rendition below 80% of the last measured throughput
+    ok = [i for i, r in enumerate(LADDER) if r <= 0.8 * last_rate]
+    return ok[-1] if ok else 0
+
+def buffer_based(buffer, last_rate):                         # map the buffer level to a rendition: low buffer -> low quality
+    if buffer < 8:
+        return 0 if buffer < 4 else 1
+    top = len(LADDER) - 1
+    return min(top, 1 + int((buffer - 8) / 22 * top))
+
+print("120 segments (8 minutes of video):")
+for name, policy in (("always the highest quality", always_highest), ("rate-based", rate_based), ("buffer-based", buffer_based)):
+    avg, stalls, switches = play(policy)
+    print(f"  {name:28s} average bitrate {avg:4.2f} Mbit/s   stalled {stalls:6.1f} s   quality switches {switches:3d}")
+`} />
+
+The network averages only **2.0 Mbit/s** and falls below 1 Mbit/s about a fifth of the time. The results:
+
+- **Always the highest quality (8 Mbit/s)** looks great on paper and is unwatchable: it **stalled for 869 seconds** in an 8-minute video.
+- The **rate-based** player never stalled and averaged **1.19 Mbit/s**, but **switched quality 56 times**, because it reacts to every throughput wobble and its estimates come from short, noisy downloads.
+- The **buffer-based** player also never stalled, averaged a higher **1.95 Mbit/s** and switched **48 times**: using the buffer level as the signal is more stable than guessing the throughput.
+
+Real players combine both signals, limit the **frequency of switches** (visible quality flicker annoys viewers), use **small first segments and a conservative start** for fast startup, and **prefetch** the next segments. The architectural point: **the intelligence lives in the client**, so the servers stay simple, stateless and cacheable.
+
+## 5. Transcoding
+
+**What gets produced.** For each video: renditions across the bitrate ladder (and codecs: **H.264/AVC** plays everywhere, **VP9, HEVC and AV1** compress better, saving bandwidth for viewers with capable devices, but cost much more CPU and may carry licensing), audio tracks, subtitles, thumbnails and previews. Better services tune the ladder **per title** (a cartoon needs far fewer bits than a sports match for the same quality).
+
+**It is a very parallel job.** Split the video at keyframes into chunks of about 10 seconds, transcode all chunks (and renditions) on a fleet of workers, then **concatenate and package**. The simulation shows how makespan falls as workers are added: one 2-hour video, one rendition, chunks taking about 1.5 times their duration to encode with some natural variation, plus 20 seconds for splitting, merging and verification.
+
+<CodeRunner language="python" code={`import heapq, random
+
+def makespan(video_seconds, chunk, workers, seed=1):
+    r = random.Random(seed)
+    n = int(video_seconds / chunk)
+    times = [chunk * 1.5 * r.lognormvariate(0, 0.25) for _ in range(n)]       # a chunk takes about 1.5x its duration to encode
+    free = [0.0] * workers
+    heapq.heapify(free)
+    for t in times:
+        heapq.heappush(free, heapq.heappop(free) + t)
+    return max(free) + 20                                                    # 20 s to split, merge and verify
+
+video = 2 * 3600
+sequential = makespan(video, video, 1)
+print(f"transcoding a {video // 3600}-hour video into one rendition:")
+print(f"  as one job on one machine      : {sequential / 60:6.1f} minutes")
+for chunk, workers in ((60, 10), (10, 10), (10, 100), (10, 1000)):
+    t = makespan(video, chunk, workers)
+    print(f"  {chunk:3d} s chunks on {workers:4d} workers: {t / 60:6.1f} minutes ({sequential / t:5.1f}x faster)")
+`} />
+
+A 2-hour video that takes about **210 minutes** as one job finishes in about **19 minutes on 10 workers** and in about **2.4 minutes on 100**; at **1,000 workers** it needs only about **1 minute**, where the fixed 20-second split-and-merge step and the single longest chunk start to dominate, so returns diminish (an Amdahl's-law effect). Design consequences:
+
+- **Chunk-level tasks are idempotent and retryable**: if a worker dies, only that chunk is redone.
+- **Prioritise**: new uploads from popular channels and short videos first, the long tail later; use **spot or preemptible machines** for the bulk of the work.
+- **Do not pre-compute everything for everything.** Transcode the common renditions up front and **create rarely needed renditions (4K, odd codecs) lazily** or only for videos that become popular.
+- Keep the **original**: when a better codec arrives, you can re-encode the catalogue.
+
+## 6. The CDN and caching
+
+Serving 20 Tbit/s from the origin is impossible, so segments are served from **CDN edge caches** near viewers. Popularity follows a **heavy-tailed (Zipf-like) distribution**, which is why caching works so well even with modest cache sizes. The simulation requests videos from a 100,000-video catalogue with Zipf popularity through an LRU cache of several sizes.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+from collections import OrderedDict
+
+random.seed(5)
+catalog = 100_000
+weights = [1 / (rank + 1) for rank in range(catalog)]          # Zipf: the k-th most popular video has popularity 1/k
+requests = random.choices(range(catalog), weights, k=300_000)
+print(f"CDN edge cache, {catalog:,} videos with Zipf popularity, {len(requests):,} requests:")
+for pct in (0.001, 0.01, 0.05, 0.10):
+    size, cache, hits = int(catalog * pct), OrderedDict(), 0
+    for v in requests:
+        if v in cache:
+            hits += 1
+            cache.move_to_end(v)
+        else:
+            cache[v] = True
+            if len(cache) > size:
+                cache.popitem(last=False)
+    print(f"  cache holding {pct:6.1%} of the catalog ({size:6,} videos): hit ratio {hits / len(requests):6.1%}")
+`} />
+
+A cache holding just **0.1% of the catalogue served 29% of requests**, **1% served about 51%**, and **10% served 73%**. The curve flattens quickly, which defines the strategy:
+
+- **Hierarchy**: edge caches (many, small, near viewers) in front of **regional caches** and an **origin shield** (one tier that collapses many edge misses into one origin request), so the origin sees only the long tail.
+- **Place content proactively**: push the new hit show or a trending video to edge caches **before** demand arrives (large services put servers inside ISP networks and fill them during off-peak hours).
+- The **long tail** (rarely watched videos) mostly misses and travels from origin; keep it on cheaper storage and accept a slightly slower start for those.
+- **Cache keys** are segment URLs, immutable and versioned, so they never need invalidation, only expiry; use long TTLs.
+- Watch **hit ratio, origin egress, and cost per delivered GB** as the headline metrics ([observability](/sd/observability/logs-metrics-and-traces/)).
+
+## 7. Fast start and smooth seeking
+
+- Start with a **low or medium rendition and small first segments**, then climb; start fetching the manifest and first segments as soon as the page loads (**preconnect**, prefetch).
+- Align **keyframes** across renditions so the player can switch quality at a segment boundary without glitches and seek quickly.
+- Serve manifests and segments from the **same CDN** with HTTP/2 or HTTP/3 and TLS session resumption.
+- **Resume position** is stored per user and device (a small key-value write, batched).
+
+## 8. Access control and content protection
+
+- **Signed, expiring URLs** (or cookies) for segments stop casual hotlinking and sharing of private videos; the token is checked at the CDN edge.
+- **DRM** (Widevine, FairPlay, PlayReady) encrypts segments and delivers keys only to licensed players, for studio content. It adds complexity and per-platform work, so reserve it for content that requires it.
+- **Geo and rights restrictions** per region and time window in the metadata.
+- **Upload abuse**: scan for malware, enforce size and format limits, use fingerprinting to detect known copyrighted material, and rate limit uploads.
+
+## 9. Metadata, counters and analytics
+
+- **Metadata** (title, owner, state, renditions available) lives in a sharded database or key-value store with caching; reads vastly outnumber writes.
+- **View counts** at this scale are **not** an `UPDATE views = views + 1` on a row: viewers' players send **events** to a stream, a processor aggregates them in windows, and counters are updated in batches and approximated for popular videos ([hot keys](/sd/databases-2/hot-keys-and-hot-partitions/)). Exactness is neither necessary nor affordable for display counts; billing-grade counts use a separate, deduplicated pipeline.
+- **Playback quality analytics** (startup time, rebuffer ratio, bitrate, errors per region and ISP) feed alerts and capacity decisions ([SLOs](/sd/observability/slos-error-budgets-and-alerting/): rebuffer ratio and start time are natural SLIs).
+
+## 10. Live streaming is a different problem
+
+Live video cannot be transcoded ahead of time. The pipeline ingests a stream (RTMP, SRT or WebRTC), transcodes **on the fly** into the ladder, packages **short segments (2 seconds or less for low latency)** and pushes them through the CDN while viewers are already watching. Latency, not cost, is the constraint: each stage adds delay, CDNs cannot cache a segment before it exists, and a single failure is visible to everyone immediately. Treat it as its own design with redundant ingest and transcoding paths.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "Adaptive bitrate (HLS or DASH)", pros: "Smooth playback across networks; static files over plain HTTP", cons: "Many renditions to store and produce; client complexity", chooseWhen: "Always for internet video" },
+  { option: "One progressive file", pros: "Simplest", cons: "Stalls or wastes bandwidth; no adaptation", chooseWhen: "Tiny, internal or trusted-network use" },
+  { option: "Pre-transcode every rendition", pros: "Instant playback in any quality", cons: "Large storage and compute for videos nobody watches", chooseWhen: "Popular or high-value content" },
+  { option: "Lazy transcoding of rare renditions", pros: "Saves cost on the long tail", cons: "First viewers may wait or get a lower quality", chooseWhen: "Huge catalogues with a long tail" },
+  { option: "Newer codecs (AV1, HEVC)", pros: "20 to 50 percent fewer bits for the same quality", cons: "Much more encoding CPU; device support; licensing", chooseWhen: "Very popular titles where bandwidth savings outweigh encoding cost" },
+  { option: "Third-party CDN", pros: "Global footprint immediately", cons: "Per-GB cost at huge volume; less control", chooseWhen: "Most companies" },
+  { option: "Own CDN servers in ISPs", pros: "Lowest cost per GB and best quality at massive scale", cons: "Large operational investment and partnerships", chooseWhen: "Very large streaming services" },
+  { option: "Chunk-parallel transcoding", pros: "Minutes instead of hours; easy retries", cons: "Orchestration and merge complexity; keyframe handling", chooseWhen: "Any production pipeline" },
+  { option: "DRM", pros: "Required by studios; limits piracy", cons: "Per-platform complexity and licensing", chooseWhen: "Licensed premium content" }
+]} />
+
+## Pitfalls
+
+- Streaming the original upload without transcoding, or only one quality.
+- Uploading through application servers instead of directly to blob storage with resumable chunks.
+- Pre-computing every rendition for every video, including ones never watched.
+- No origin shield, so a viral video's cache misses stampede the origin.
+- Players that chase every throughput fluctuation and flicker between qualities.
+- Non-idempotent transcoding tasks that produce duplicate or corrupt output on retry.
+- Counting views with a single hot row.
+- Long, personalised or non-immutable segment URLs that destroy the cache hit ratio.
+- Ignoring the cost per delivered GB until the first big bill.
+- Treating live streaming as "just faster VOD".
+
+## What would you choose and why?
+
+Your platform now has **short vertical videos** that are 15 seconds long, watched in an endless feed where the next video must start instantly, and creators upload **millions per day**. What changes in the bitrate ladder, segment length and transcoding approach, how do you get instant starts (prefetch, cache placement), and how do you control the cost of storing and delivering videos that most people never watch?
+
+## Quiz
+
+<Quiz id="sd-m17-video-streaming" tags={["case-study", "video-streaming", "abr", "cdn", "transcoding"]} questions={[
+  { type: "mcq", q: "How does adaptive bitrate streaming work?", options: ["The server picks a quality and pushes it", "The video is encoded at several bitrates and cut into segments; the player picks the rendition of each next segment from a manifest", "One big file is downloaded in full", "The CDN re-encodes video on demand"], answer: 1, explain: "The logic lives in the client and the segments are static, cacheable files." },
+  { type: "mcq", q: "Why does a CDN work so well for video?", options: ["Videos are small", "Popularity is heavily skewed, so a small cache captures a large share of requests", "CDNs transcode faster", "Viewers all watch the same title"], answer: 1, explain: "In the simulation 1% of the catalogue in cache served about half of requests and 10% served about 73%." },
+  { type: "predict", q: "A 2-hour video is transcoded in 10-second chunks. How many chunks are there?", code: "print(2 * 3600 // 10)", options: ["72", "720", "7,200", "72,000"], answer: 1, explain: "7,200 seconds divided by 10-second chunks gives 720 independent tasks to spread over workers." },
+  { type: "multi", q: "Which are good practices for the transcoding pipeline?", options: ["Idempotent, retryable chunk tasks", "Keeping the original upload", "Pre-computing every rendition for every video, however obscure", "Prioritising popular and new content"], answer: [0, 1, 3], explain: "Compute rare renditions lazily; the long tail rarely justifies full pre-computation." },
+  { type: "mcq", q: "What is an origin shield?", options: ["A DRM scheme", "A cache tier between the edge caches and the origin that collapses many edge misses into one origin request", "A video codec", "A firewall"], answer: 1, explain: "It protects origin storage from miss stampedes, especially for suddenly popular videos." },
+  { type: "mcq", q: "Why are view counts aggregated from an event stream rather than incremented on a database row per view?", options: ["Rows cannot hold integers", "A hot row would become a bottleneck; batching and approximation scale and are good enough for display counts", "Events are encrypted", "Streams are cheaper than storage"], answer: 1, explain: "Billing-grade counts use a separate, deduplicated pipeline." }
+]} />
