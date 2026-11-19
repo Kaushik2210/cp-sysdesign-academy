@@ -1,0 +1,255 @@
+---
+title: "Case Study: Design a Chat System"
+track: sd
+module: case-studies-core-services
+order: 3
+difficulty: hard
+estMinutes: 50
+prerequisites: ["sd/networking-and-apis/real-time-communication", "sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/databases-2/sharding-and-partitioning", "sd/case-studies-core-services/design-a-url-shortener"]
+tags: [case-study, chat, websocket, messaging, ordering, delivery-guarantees, fan-out, presence, push-notifications]
+type: case-study
+furtherReading:
+  - title: "RFC 6455, The WebSocket Protocol"
+    url: https://www.rfc-editor.org/rfc/rfc6455
+  - title: "Signal Documentation, The Double Ratchet Algorithm (end-to-end encryption)"
+    url: https://signal.org/docs/specifications/doubleratchet/
+  - title: "Designing Data-Intensive Applications (Kleppmann), chapter 11 (stream processing and messaging)"
+    url: https://dataintensive.net/
+  - title: "Firebase Cloud Messaging documentation, how push messages are delivered"
+    url: https://firebase.google.com/docs/cloud-messaging
+---
+
+## The problem
+
+Design a **chat system** like WhatsApp or Messenger: people exchange text and media in **one-to-one** and **group** conversations, see whether others are **online**, get **delivered and read** receipts, and receive a **push notification** when the app is closed. History must be available on every device.
+
+It is a good case study because the hard parts are not the obvious ones. Sending a message is easy; the difficulty is **keeping 100 million connections open**, delivering each message **exactly once, in order, even over bad networks**, and **fanning out group messages** without multiplying storage by the group size.
+
+## 1. Requirements
+
+**Functional**
+
+- 1:1 chat and **group chat** (up to 1,000 members).
+- Text, images and files (media goes to blob storage; chat carries links).
+- **Online presence**, **delivery and read receipts**, typing indicators.
+- **Offline delivery**: messages sent while a user is offline arrive when they return, plus a **push notification**.
+- **Multi-device**: a user's phone and laptop show the same history.
+
+**Non-functional**
+
+- **Low latency**: a message appears within a few hundred milliseconds when both people are online.
+- **No lost messages** and **no duplicates visible to the user**; **messages in a conversation appear in the same order for everyone**.
+- High availability; the system stays up when servers fail.
+- Optional: **end-to-end encryption**, which changes what the server can do (see below).
+
+## 2. Estimation
+
+Assume 500 million daily active users, 5 billion messages a day, 20% of users connected at the busy hour, and a gateway server that can hold 250,000 open connections. These are **assumptions to state aloud**, not measurements.
+
+- **Message rate:** 5 billion / 86,400 = about **58,000 messages a second** on average, so perhaps 170,000 at peak.
+- **Storage:** at 100 bytes of text per message, about **500 GB a day** of text; media (stored once in a blob store) dominates.
+- **Connections:** 100 million concurrent connections across about **400 gateway servers**.
+
+<CodeRunner language="python" code={`dau, concurrent_share = 500_000_000, 0.20
+messages_per_day = 5_000_000_000
+concurrent = dau * concurrent_share
+per_server = 250_000
+print(f"message rate: {messages_per_day / 86400:,.0f}/s average, about {3 * messages_per_day / 86400:,.0f}/s at 3x peak")
+print(f"text storage: about {messages_per_day * 100 / 1e9:,.0f} GB a day at 100 bytes per message")
+print(f"{concurrent / 1e6:.0f} million concurrent connections at {per_server:,} per gateway -> {concurrent / per_server:,.0f} gateway servers")
+for interval in (5, 30, 60):
+    print(f"  a heartbeat every {interval:2d} s written to a database would be {concurrent / interval / 1e6:6.1f} million writes/s")
+print("so presence cannot be a database write per heartbeat: keep it in memory on the gateways with a short TTL")
+`} />
+
+The numbers tell the design: the message rate is moderate, but **connection count** and **presence traffic** are what shape the architecture.
+
+## 3. Connections: WebSocket gateways
+
+Chat needs the **server to push** messages to the client the moment they arrive. HTTP request/response polling wastes bandwidth and adds latency; **WebSocket** (RFC 6455) keeps one persistent two-way connection per device (see [real-time communication](/sd/networking-and-apis/real-time-communication/)). Mobile apps often use a lighter protocol over the same idea (MQTT, or a custom binary protocol) and fall back to **push notifications** (APNs for iOS, FCM for Android) when the app is not running.
+
+Connections are **stateful**, so they live on a dedicated tier of **gateway servers**:
+
+- A gateway only keeps sockets, authenticates the connection, and forwards frames to and from internal services. It holds **no business logic**, so it can be upgraded and drained gracefully.
+- A **session registry** (an in-memory store such as Redis) maps `user_id / device_id -> gateway` so the system knows where to deliver.
+- When a gateway dies, its clients **reconnect** (with jittered backoff to avoid a thundering herd) to another gateway and **resync** from their last known sequence number.
+
+## 4. High-level design
+
+<Diagram kind="mermaid" code={`flowchart LR
+  A[Sender device] <--> GA[Gateway A]
+  B[Recipient device] <--> GB[Gateway B]
+  GA --> CS[Chat service: stateless]
+  CS --> SEQ[Per-conversation sequencer]
+  SEQ --> MS[(Message store: partitioned by conversation)]
+  CS --> REG[(Session registry)]
+  CS --> GB
+  CS --> Q[[Queue]]
+  Q --> PUSH[Push notification service]
+  PUSH --> N[APNs / FCM]
+  CS --> PRES[Presence service]
+  A --> MEDIA[Media upload API]
+  MEDIA --> BLOB[(Blob store + CDN)]`} caption="Gateways hold connections, the chat service routes and persists, offline users get push notifications and sync on reconnect" />
+
+**The path of one message (online recipient):**
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant A as Sender
+  participant G1 as Gateway A
+  participant S as Chat service
+  participant DB as Message store
+  participant G2 as Gateway B
+  participant B as Recipient
+  A->>G1: send(conv, client_msg_id, text)
+  G1->>S: forward
+  S->>DB: persist with the next sequence number for conv
+  S-->>G1: ack(client_msg_id, seq)   // sender sees one tick
+  S->>G2: deliver(conv, seq, text)
+  G2->>B: message
+  B-->>G2: ack(seq)
+  G2-->>S: delivered(conv, seq)
+  S-->>G1: delivered   // sender sees two ticks`} caption="Persist first, acknowledge the sender, then deliver; the recipient's ack produces the delivered receipt" />
+
+**If the recipient is offline:** the message is **already persisted**, so the service skips live delivery, sends a **push notification** (the payload is usually just "new message", not the content, so it works with end-to-end encryption and avoids leaking content through the push provider), and the device **fetches everything after its last sequence number** when it next connects.
+
+## 5. Reliability, ordering and duplicates
+
+Networks drop packets, reorder them and cut connections in the middle of a send. Two rules make a chat reliable:
+
+1. **At-least-once delivery**: the sender (and the server toward the recipient) **retransmit until acknowledged**. Nothing is lost, but the same message may arrive more than once.
+2. **Idempotent processing**: every message carries a **client-generated id** and a **per-conversation sequence number**. The receiver ignores sequence numbers it has already seen, and releases messages **strictly in order**, holding back any that arrive early.
+
+Together this gives the **effect** of exactly-once, in-order delivery (see [delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)). The simulation sends 100 messages over a link that loses 30% of packets **and** acknowledgements and delays packets randomly, with and without these rules.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+def simulate(n_messages, loss, dedupe, seed):
+    rng = random.Random(seed)
+    acked = set()                      # what the sender knows has arrived
+    in_flight = []                     # (arrival round, seq) on the way to the recipient
+    ack_flight = []                    # (arrival round, seq) acknowledgements on the way back
+    delivered = []                     # what the recipient's app receives, in order
+    seen, buffer, next_expected = set(), {}, 1
+    sends, rnd = 0, 0
+    while len(acked) < n_messages:
+        rnd += 1
+        for seq in range(1, n_messages + 1):                   # retransmit everything not acknowledged yet
+            if seq not in acked:
+                sends += 1
+                if rng.random() > loss:
+                    in_flight.append((rnd + rng.randint(1, 3), seq))   # random delay: packets can overtake each other
+        arrived = [m for m in in_flight if m[0] <= rnd]
+        in_flight = [m for m in in_flight if m[0] > rnd]
+        for _, seq in sorted(arrived):
+            if dedupe:
+                if seq not in seen:                            # a duplicate is ignored, but still acknowledged below
+                    seen.add(seq)
+                    buffer[seq] = True
+                    while next_expected in buffer:             # release messages strictly in order
+                        delivered.append(next_expected)
+                        next_expected += 1
+            else:
+                delivered.append(seq)
+            if rng.random() > loss:
+                ack_flight.append((rnd + rng.randint(1, 3), seq))
+        for _, seq in [m for m in ack_flight if m[0] <= rnd]:
+            acked.add(seq)
+        ack_flight = [m for m in ack_flight if m[0] > rnd]
+    duplicates = len(delivered) - len(set(delivered))
+    in_order = all(a < b for a, b in zip(delivered, delivered[1:]))
+    return rnd, sends, len(delivered), duplicates, in_order
+
+print("100 messages over a link that loses 30% of packets and acknowledgements, with random delays")
+for dedupe in (False, True):
+    rounds, sends, delivered, dups, ordered = simulate(100, 0.30, dedupe, seed=5)
+    label = "with sequence numbers + dedupe" if dedupe else "plain retries, no dedupe     "
+    print(f"  {label}: {rounds} rounds, {sends} transmissions, {delivered} delivered to the app, {dups} duplicates, in order: {ordered}")
+`} />
+
+With plain retries the application received **409 deliveries for 100 messages: 309 duplicates, out of order**. With sequence numbers and deduplication the same traffic (**570 transmissions in 12 rounds** either way) delivered **exactly 100 messages, no duplicates, in order**. Reliability costs extra transmissions; correctness comes from the **identifiers**, not from making the network reliable.
+
+**Where do sequence numbers come from?** Timestamps are not enough: device clocks disagree and two messages can carry the same millisecond. Give each conversation a **single writer**: the shard that owns the conversation assigns the next number (a counter in the conversation's partition). Different conversations are independent, so this scales by adding shards, and a conversation never needs a global order. A globally unique **message id** (for example a time-ordered id) can be added for referencing and deduplication across the system.
+
+## 6. Groups and fan-out
+
+In a group of `g` members each message must reach `g - 1` others. How you **store** it matters a great deal.
+
+- **Copy per recipient (fan-out on write)**: write the message into every member's inbox. Reading is trivial, but storage and write load multiply by the group size.
+- **One shared log per conversation plus a read cursor per member**: store the message **once**; each member remembers "I have read up to sequence 4,312". Online members receive it live; offline members sync from their cursor.
+
+<CodeRunner language="python" code={`total_msgs = 5_000_000_000
+share_of_messages = {2: 0.80, 10: 0.12, 100: 0.07, 1000: 0.01}      # conversation size -> share of messages (an assumption)
+per_participant = sum(total_msgs * share * size for size, share in share_of_messages.items())
+shared_log = sum(total_msgs * share for share in share_of_messages.values())
+print(f"assumed mix of {total_msgs:,} messages a day (80% 1:1, 12% groups of 10, 7% of 100, 1% of 1000)")
+print(f"  one stored copy per participant (fan-out on write): {per_participant / 1e9:.1f} billion writes a day ({per_participant / shared_log:.1f}x)")
+print(f"  one shared conversation log + a read cursor per member: {shared_log / 1e9:.1f} billion writes a day (plus a tiny cursor update per read)")
+`} />
+
+The per-recipient design writes **almost 20 times** as much, and the 1% of messages sent to 1,000-member groups account for the biggest share of that. Chat systems therefore use the **shared log**; the delivery fan-out to *online* members' connections still happens, but it is **ephemeral network traffic**, not stored copies. The **message store** is partitioned by `conversation_id`, clustered by sequence number, so reading the latest messages of a conversation is one contiguous range scan. Very large or very hot conversations (a celebrity broadcast group) need special handling: batch deliveries, rate limit, or move to a broadcast/pub-sub path.
+
+## 7. Presence, receipts and typing
+
+- **Presence** is expensive (see the estimate). The gateway that holds a connection **already knows** the user is online, so keep presence **in memory** with a **short TTL renewed by the connection's own keep-alive**, not a database write per heartbeat. Write a coarse **"last seen"** to storage at most about once a minute.
+- **Do not broadcast every change to everyone.** Send presence updates only to contacts who currently have that chat open or visible, and fetch presence lazily when a screen opens.
+- **Typing indicators** are ephemeral: send over the connection, never persist, drop if the recipient is offline.
+- **Delivered and read receipts** are small events keyed by `(conversation, member, seq)`. Store the **highest read sequence per member** (a cursor), not one record per message.
+
+## 8. Multi-device and sync
+
+Each device keeps its own **cursor** (the highest sequence it has). On connect it asks "give me everything after seq N for each conversation I am in", paginated. The server only needs the **conversation list with last sequence numbers**, which keeps the sync protocol cheap and works the same after a long offline period or for a brand new device (with history limits).
+
+## 9. Media
+
+Do not push large files through chat connections. The client **uploads media directly to blob storage** through a pre-signed URL, gets back a reference, and sends a small message containing that reference (and a thumbnail). Recipients download from a **CDN**. Scan uploads for malware, and enforce size limits and expiry.
+
+## 10. End-to-end encryption
+
+With **end-to-end encryption** (the Signal protocol is the common design), messages are encrypted on the sender's device and only decrypted on the recipient's, so the server **cannot read them**. The server still routes, orders, stores ciphertext and delivers push notifications. Consequences you should be able to discuss: **no server-side search or content moderation** of the plaintext, **group chats** need group key management, **multi-device** needs per-device keys (the sender encrypts once per recipient device), and **backups** become the user's responsibility or must be encrypted with a user-held key.
+
+## 11. Scaling and failure
+
+- **Gateway failure:** clients reconnect and resync; draining before deploys avoids disconnect storms.
+- **Chat service and queue failure:** because the message is **persisted before it is acknowledged**, a crash between persist and delivery loses nothing; the recipient syncs by cursor.
+- **Store partition failure:** replicate each partition ([replication](/sd/databases-2/replication/)); losing the primary for a conversation briefly blocks sequencing for it, not for the others.
+- **Hot spots:** huge groups, and a viral event making many users reconnect at once; use rate limits, backoff with jitter and capacity headroom.
+- **Observability:** track message send-to-delivery latency percentiles, reconnect rate, undelivered backlog and push success ([observability](/sd/observability/logs-metrics-and-traces/)).
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "WebSocket (or MQTT) persistent connections", pros: "Instant push, low overhead per message", cons: "Stateful tier; many connections to manage; reconnect storms", chooseWhen: "Any real-time chat" },
+  { option: "Long polling or HTTP polling", pros: "Works everywhere; stateless servers", cons: "Higher latency and overhead", chooseWhen: "A fallback or a very small system" },
+  { option: "Shared conversation log + cursors", pros: "One write per message; cheap groups", cons: "Reads fetch by range; cursors to maintain", chooseWhen: "The default for chat" },
+  { option: "Copy per recipient inbox", pros: "Simple per-user reads and per-user deletion", cons: "Storage and writes multiply by group size", chooseWhen: "Small groups or per-user mutable state" },
+  { option: "Per-conversation sequence numbers", pros: "A consistent order for everyone, cheap deduplication", cons: "A single writer per conversation", chooseWhen: "Always preferable to timestamps for ordering" },
+  { option: "Push notification with only a 'new message' signal", pros: "No content leaks; works with E2EE", cons: "The app must fetch the message after the notification", chooseWhen: "Privacy-sensitive apps" },
+  { option: "End-to-end encryption", pros: "The operator cannot read messages", cons: "No server-side search or moderation of content; harder multi-device and backup", chooseWhen: "Privacy is a core promise" }
+]} />
+
+## Pitfalls
+
+- Ordering messages by client or server timestamps, so conversations show different orders to different people.
+- Acknowledging the sender before the message is durably stored.
+- Retrying without idempotency keys, so users see duplicates.
+- Writing a presence heartbeat to a database for every connected user.
+- Storing one copy of every group message per member.
+- Putting business logic in the gateways, so deploys disconnect millions of users.
+- Reconnect storms after a gateway or network failure, because clients retry without jittered backoff.
+- Sending message content in push notifications for end-to-end encrypted chats.
+- Forgetting message deletion, retention and abuse reporting.
+
+## What would you choose and why?
+
+Your product adds **channels** with up to 2 million subscribers where only admins post, and members expect to see new posts within seconds. Which parts of the design above still apply, what changes about storage, delivery and presence for such a channel, and what would you do to keep a post from overloading the gateways when it is sent?
+
+## Quiz
+
+<Quiz id="sd-m17-chat-system" tags={["case-study", "chat", "websocket", "ordering", "fan-out"]} questions={[
+  { type: "mcq", q: "Why does a chat message get a per-conversation sequence number rather than relying on timestamps?", options: ["Timestamps are too long", "Device clocks disagree and can tie, but one writer per conversation can assign a consistent order", "Sequence numbers are encrypted", "Timestamps cannot be stored"], answer: 1, explain: "A single sequencer per conversation gives every participant the same order and cheap duplicate detection." },
+  { type: "mcq", q: "What makes the effect of exactly-once, in-order delivery possible over a lossy network?", options: ["A perfectly reliable network", "At-least-once retries combined with idempotent processing using ids and sequence numbers", "Sending every message twice", "Using UDP"], answer: 1, explain: "Retries prevent loss; deduplication and in-order release prevent duplicates and reordering." },
+  { type: "predict", q: "A group has 500 members and receives 1,000 messages. How many stored message copies does fan-out on write create, versus a shared log?", code: "members, messages = 500, 1000\nprint(members * messages, messages)", options: ["1,000 and 1,000", "500,000 and 1,000", "1,000 and 500,000", "500 and 500"], answer: 1, explain: "A copy per member is 500 x 1,000 = 500,000 writes; a shared log stores each message once." },
+  { type: "mcq", q: "Why is presence not stored by writing every heartbeat to a database?", options: ["Databases cannot store booleans", "With ~100 million connections the write rate would be millions per second; the gateway already knows who is connected, so keep it in memory with a TTL", "Presence is not needed", "Heartbeats are encrypted"], answer: 1, explain: "Keep presence in memory on the gateways and write a coarse last-seen value rarely." },
+  { type: "multi", q: "What happens when the recipient is offline?", options: ["The message is already persisted before acknowledgement", "A push notification (often content-free) is sent", "The device fetches messages after its last sequence number on reconnect", "The message is discarded"], answer: [0, 1, 2], explain: "Persist first, then notify; the cursor-based sync delivers whatever was missed." },
+  { type: "mcq", q: "What is a consequence of end-to-end encryption for the server?", options: ["It can still search message contents", "It can route and store ciphertext but cannot read, search or moderate the plaintext", "It no longer needs gateways", "It must store keys in the push notification"], answer: 1, explain: "That is the purpose of E2EE, and it limits features such as server-side search." }
+]} />
