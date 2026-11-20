@@ -1,0 +1,1 @@
+{ "title": "Case Studies: Data and Transactions", "level": "Level 3: Case Studies", "order": 18, "summary": "Designs where correctness under contention and large volumes of data are the main problem: ticket booking and flash sales, with more to come." }
