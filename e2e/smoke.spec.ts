@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("173");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("174");
   });
 });
 
@@ -928,6 +928,7 @@ test.describe("security, observability and case-study modules", () => {
     ["/sd/oop-and-design-patterns/solid-principles-in-practice/", "SOLID Principles in Practice"],
     ["/sd/oop-and-design-patterns/creational-and-structural-patterns/", "Creational and Structural Design Patterns"],
     ["/sd/oop-and-design-patterns/behavioral-patterns/", "Behavioral Design Patterns"],
+    ["/sd/lld-case-studies/design-a-parking-lot/", "LLD Case Study: Design a Parking Lot"],
   ];
   for (const [path, title] of LESSONS) {
     test(`${title} renders its runnable demos, trade-offs and quiz`, async ({ page }) => {
