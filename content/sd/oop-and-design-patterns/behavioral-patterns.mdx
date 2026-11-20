@@ -1,0 +1,335 @@
+---
+title: Behavioral Design Patterns
+track: sd
+module: oop-and-design-patterns
+order: 3
+difficulty: medium
+estMinutes: 50
+prerequisites: ["sd/oop-and-design-patterns/creational-and-structural-patterns"]
+tags: [lld, design-patterns, strategy, observer, state, command, chain-of-responsibility, template-method, undo-redo]
+type: lesson
+furtherReading:
+  - title: "Gamma, Helm, Johnson, Vlissides, Design Patterns (the 'Gang of Four' book), behavioural patterns"
+    url: https://en.wikipedia.org/wiki/Design_Patterns
+  - title: "Refactoring Guru, Behavioral design patterns"
+    url: https://refactoring.guru/design-patterns/behavioral-patterns
+  - title: "Python documentation, enum (states and event kinds)"
+    url: https://docs.python.org/3/library/enum.html
+  - title: "Martin Fowler, Event Sourcing (the command log idea at system scale)"
+    url: https://martinfowler.com/eaaDev/EventSourcing.html
+---
+
+## Intuition
+
+**Behavioural patterns** describe how objects **cooperate and share responsibility**: who decides what to do, who is told when something happens, how a sequence of steps is organised. Where creational patterns answer "how is this made?" and structural patterns "how are these assembled?", behavioural patterns answer **"who does what, and when?"**
+
+The six patterns below cover most real code:
+
+| pattern | one-line purpose |
+| --- | --- |
+| **Strategy** | swap an algorithm at run time |
+| **Observer** | notify many interested parties when something changes |
+| **State** | change behaviour as internal state changes |
+| **Command** | turn a request into an object (queue it, log it, **undo** it) |
+| **Chain of Responsibility** | pass a request along a pipeline of handlers |
+| **Template Method** | fix the skeleton of an algorithm, let subclasses fill in steps |
+
+As in the [previous lesson](/sd/oop-and-design-patterns/creational-and-structural-patterns/), use a pattern only when you have the problem it solves, and remember that in Python **functions are objects**, so several of these collapse to "pass a function".
+
+## Strategy
+
+**Problem:** a task can be done by several interchangeable algorithms (sort order, pricing rule, compression method, route planner) and callers should choose without `if/elif` ladders.
+
+**Idea:** put each algorithm behind the same interface and let the caller **pass the one it wants**. In Python the "interface" is often just a function.
+
+<CodeRunner language="python" code={`from dataclasses import dataclass
+
+@dataclass
+class Product:
+    name: str
+    price: float
+    rating: float
+
+catalog = [Product("kettle", 39.0, 4.1), Product("blender", 89.0, 4.7), Product("toaster", 24.0, 3.9)]
+
+# Each strategy is a function from a product to a sort key. New strategies need no change to 'search'.
+by_price = lambda p: p.price
+by_rating = lambda p: -p.rating
+by_value = lambda p: p.price / p.rating
+
+def search(products, strategy):
+    return [p.name for p in sorted(products, key=strategy)]
+
+for label, strat in (("cheapest first", by_price), ("best rated first", by_rating), ("best value first", by_value)):
+    print(f"{label:17s}", search(catalog, strat))
+
+# A strategy with its own state or configuration is a small class with the same call signature.
+class ExpensiveBoost:
+    def __init__(self, threshold): self.threshold = threshold
+    def __call__(self, p): return (p.price > self.threshold, p.price)
+print(f"{'cheap before dear':17s}", search(catalog, ExpensiveBoost(50)))
+`} />
+
+**Use it** when behaviour varies by context. It is the practical form of the Open/Closed Principle. **Skip it** for a variation that has two fixed cases that will never grow.
+
+## Observer
+
+**Problem:** when one object changes, several others must react (update a UI, invalidate a cache, send an email), but the source should not know who they are or how many.
+
+**Idea:** the **subject** keeps a list of **observers** (subscribers) and notifies them of events. Subscribers register and unregister themselves. This is the basis of event buses, UI frameworks and message topics.
+
+<CodeRunner language="python" code={`class EventBus:
+    def __init__(self):
+        self._subscribers = {}
+    def subscribe(self, event, handler):
+        self._subscribers.setdefault(event, []).append(handler)
+        return lambda: self._subscribers[event].remove(handler)         # an 'unsubscribe' handle
+    def publish(self, event, payload):
+        for handler in list(self._subscribers.get(event, [])):          # copy: handlers may unsubscribe while we iterate
+            try:
+                handler(payload)
+            except Exception as exc:                                    # one bad subscriber must not break the others
+                print(f"  (handler {handler.__name__} failed: {exc})")
+
+bus = EventBus()
+log = []
+
+def send_receipt(order): log.append(f"receipt for order {order['id']}")
+def update_stock(order): log.append(f"stock reduced by {order['qty']}")
+def broken_analytics(order): raise RuntimeError("analytics service down")
+
+bus.subscribe("order_placed", send_receipt)
+bus.subscribe("order_placed", broken_analytics)
+unsubscribe = bus.subscribe("order_placed", update_stock)
+
+bus.publish("order_placed", {"id": 1, "qty": 2})
+unsubscribe()
+bus.publish("order_placed", {"id": 2, "qty": 5})
+print(log)
+`} />
+
+The publisher knows nothing about receipts or stock. The failing analytics handler did not stop the others, and after `unsubscribe()` the stock handler no longer ran. **Pitfalls:** unbounded subscriber lists that leak memory when objects never unsubscribe, hidden **ordering** assumptions between handlers, **long chains** of events that are hard to trace, and **synchronous** handlers that slow the publisher (at larger scale use a queue: see [why queues](/sd/queues-and-streaming/why-queues/)).
+
+## State
+
+**Problem:** an object behaves very differently depending on its state, and the code fills with `if state == ...` checks scattered over every method.
+
+**Idea:** make the **legal states and transitions explicit**. For small machines a **transition table** is the clearest form; for states with substantial behaviour use **one class per state**, each implementing the same methods. Invalid transitions become impossible or rejected in one place.
+
+<CodeRunner language="python" code={`from enum import Enum
+
+class State(Enum):
+    CREATED = "created"
+    PAID = "paid"
+    SHIPPED = "shipped"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+
+# The whole state machine is one table: (state, event) -> next state.
+TRANSITIONS = {
+    (State.CREATED, "pay"): State.PAID,
+    (State.CREATED, "cancel"): State.CANCELLED,
+    (State.PAID, "ship"): State.SHIPPED,
+    (State.PAID, "cancel"): State.CANCELLED,
+    (State.SHIPPED, "deliver"): State.DELIVERED,
+}
+
+class Order:
+    def __init__(self):
+        self.state, self.history = State.CREATED, []
+    def handle(self, event):
+        nxt = TRANSITIONS.get((self.state, event))
+        if nxt is None:
+            raise ValueError(f"cannot {event} an order that is {self.state.value}")
+        self.history.append((self.state.value, event, nxt.value))
+        self.state = nxt
+        return self
+
+order = Order().handle("pay").handle("ship")
+print("state:", order.state.value)
+for step in ("cancel", "deliver"):
+    try:
+        order.handle(step)
+        print("did", step, "->", order.state.value)
+    except ValueError as e:
+        print("rejected:", e)
+print("history:", order.history)
+`} />
+
+Cancelling a shipped order was **rejected in one place** instead of in a dozen `if` statements. Use **state classes** when each state carries its own behaviour (a media player where `play()` does different things in `Stopped`, `Playing` and `Paused`). The same idea appears at system scale in the [payment state machine](/sd/case-studies-core-services/design-a-payment-system/).
+
+## Command
+
+**Problem:** you want to treat an action as **data**: queue it, log it, retry it, send it over a network or **undo** it.
+
+**Idea:** wrap each action in an object with `execute()` (and `undo()`). An **invoker** keeps a history, giving undo and redo almost for free.
+
+<CodeRunner language="python" code={`class Document:
+    def __init__(self): self.text = ""
+
+class Insert:
+    def __init__(self, doc, position, s): self.doc, self.position, self.s = doc, position, s
+    def execute(self): self.doc.text = self.doc.text[:self.position] + self.s + self.doc.text[self.position:]
+    def undo(self): self.doc.text = self.doc.text[:self.position] + self.doc.text[self.position + len(self.s):]
+
+class Delete:
+    def __init__(self, doc, start, end): self.doc, self.start, self.end, self.removed = doc, start, end, ""
+    def execute(self):
+        self.removed = self.doc.text[self.start:self.end]                # remember what was removed, so we can restore it
+        self.doc.text = self.doc.text[:self.start] + self.doc.text[self.end:]
+    def undo(self): self.doc.text = self.doc.text[:self.start] + self.removed + self.doc.text[self.start:]
+
+class Editor:
+    def __init__(self, doc): self.doc, self.done, self.undone = doc, [], []
+    def run(self, command):
+        command.execute()
+        self.done.append(command)
+        self.undone.clear()                                              # a new action invalidates the redo history
+    def undo(self):
+        if self.done:
+            c = self.done.pop(); c.undo(); self.undone.append(c)
+    def redo(self):
+        if self.undone:
+            c = self.undone.pop(); c.execute(); self.done.append(c)
+
+doc = Document(); ed = Editor(doc)
+ed.run(Insert(doc, 0, "Hello world"))
+ed.run(Delete(doc, 5, 11))
+ed.run(Insert(doc, 5, ", team"))
+print("after edits :", repr(doc.text))
+ed.undo(); print("undo        :", repr(doc.text))
+ed.undo(); print("undo again  :", repr(doc.text))
+ed.redo(); print("redo        :", repr(doc.text))
+ed.run(Insert(doc, 0, ">> ")); ed.redo()
+print("new edit    :", repr(doc.text), "(redo is cleared after a new action)")
+`} />
+
+Commands also power **job queues**, **transaction logs** and **event sourcing**, where the sequence of commands is the stored truth. **Care:** `undo()` must restore the exact previous state (store what you need at execution time), and commands that touch external systems may not be undoable at all (a sent email).
+
+## Chain of Responsibility
+
+**Problem:** a request must pass through several independent checks or processing steps, and each step may handle it, change it, or stop it.
+
+**Idea:** link **handlers** in a pipeline; each does its part and either passes the request on or rejects it. This is how **web middleware**, validation pipelines and approval workflows are built.
+
+<CodeRunner language="python" code={`def authenticate(request, nxt):
+    if not request.get("user"):
+        return "401 not authenticated"
+    return nxt(request)
+
+def rate_limit(request, nxt, seen={}):
+    seen[request["user"]] = seen.get(request["user"], 0) + 1
+    if seen[request["user"]] > 2:
+        return "429 too many requests"
+    return nxt(request)
+
+def validate(request, nxt):
+    if not request.get("body"):
+        return "400 empty body"
+    return nxt(request)
+
+def handler(request):
+    return f"200 created {request['body']}"
+
+def build_chain(*middlewares, final):
+    chain = final
+    for mw in reversed(middlewares):                  # wrap from the inside out
+        chain = (lambda mw, nxt: (lambda req: mw(req, nxt)))(mw, chain)
+    return chain
+
+app = build_chain(authenticate, rate_limit, validate, final=handler)
+print(app({"body": "x"}))
+print(app({"user": "ada", "body": ""}))
+print(app({"user": "ada", "body": "order-1"}))
+print(app({"user": "ada", "body": "order-2"}))
+print(app({"user": "ada", "body": "order-3"}))
+`} />
+
+Each middleware has one job and the order is explicit: authentication first, then rate limiting, then validation. The chain stops at the first handler that rejects. **Care:** order changes behaviour (validating before authenticating leaks information), and a long chain can hide where a response came from; log each step in production.
+
+## Template Method
+
+**Problem:** several algorithms share the same **skeleton** but differ in a few steps (import data from CSV or JSON: open, parse, validate, save).
+
+**Idea:** a base class defines the fixed sequence in one method and leaves certain steps to subclasses (**hooks**). It is the inheritance-based cousin of Strategy; prefer **composition (Strategy)** when you can, and use the template when the sequence itself must be locked down.
+
+<CodeRunner language="python" code={`import json
+from abc import ABC, abstractmethod
+
+class Importer(ABC):
+    def run(self, raw):                           # the template: the order is fixed here and cannot be skipped
+        records = self.parse(raw)
+        valid = [r for r in records if self.validate(r)]
+        self.save(valid)
+        return f"{type(self).__name__}: saved {len(valid)} of {len(records)}"
+    @abstractmethod
+    def parse(self, raw): ...
+    def validate(self, record):                   # a hook with a sensible default
+        return True
+    def save(self, records):
+        self.saved = records
+
+class CsvImporter(Importer):
+    def parse(self, raw):
+        header, *rows = [line.split(",") for line in raw.strip().splitlines()]
+        return [dict(zip(header, row)) for row in rows]
+
+class JsonImporter(Importer):
+    def parse(self, raw): return json.loads(raw)
+    def validate(self, record): return record.get("age", 0) >= 18      # overrides only the step that differs
+
+print(CsvImporter().run("name,age\\nada,36\\nbob,17"))
+print(JsonImporter().run('[{"name": "cy", "age": 40}, {"name": "di", "age": 12}]'))
+`} />
+
+Both importers get the same guaranteed sequence (parse, validate, save) and supply only what differs. **Care:** deep hierarchies of templates are hard to follow; if variation is limited to one or two steps, passing functions (Strategy) is simpler.
+
+## Choosing between them
+
+| you need to... | consider |
+| --- | --- |
+| swap an algorithm | Strategy |
+| tell many parties something happened | Observer |
+| change behaviour with state and forbid bad transitions | State |
+| queue, log, retry or undo actions | Command |
+| run a request through ordered, independent checks | Chain of Responsibility |
+| lock the order of steps but vary a few of them | Template Method |
+
+## Trade-offs
+
+<TradeOffs caption="Using behavioural patterns" rows={[
+  { option: "Strategy (pass a function or object)", pros: "Simple, flexible, testable", cons: "Callers must choose a strategy", chooseWhen: "A behaviour that varies and may grow" },
+  { option: "Observer or event bus", pros: "Loose coupling between producer and consumers", cons: "Implicit control flow; leaks; ordering and error handling", chooseWhen: "One event, several independent reactions" },
+  { option: "Direct calls instead of observers", pros: "Easy to trace and debug", cons: "Source must know every reaction", chooseWhen: "One or two fixed reactions" },
+  { option: "Transition table for state", pros: "All legal moves in one place", cons: "Behaviour per state lives elsewhere", chooseWhen: "Workflows and lifecycles with few states" },
+  { option: "State classes", pros: "Behaviour grouped by state", cons: "More classes", chooseWhen: "States with substantial, different behaviour" },
+  { option: "Command objects", pros: "Undo, queueing, logging, retries", cons: "A class per action; careful undo logic", chooseWhen: "Editors, job systems, audit logs, event sourcing" },
+  { option: "Middleware chain", pros: "Composable, ordered pipeline", cons: "Order sensitivity; hard to see the whole flow", chooseWhen: "Request processing" },
+  { option: "Template Method (inheritance)", pros: "Enforces the algorithm's skeleton", cons: "Couples subclasses to the base; deep hierarchies", chooseWhen: "A fixed skeleton with a few overridable steps" }
+]} />
+
+## Pitfalls
+
+- Observers that are never removed, so the subject keeps dead objects alive.
+- A failing subscriber that stops the notification loop for everyone else.
+- Event chains so long that nobody can say what a single change triggers.
+- State machines with implicit transitions scattered across methods.
+- Commands whose `undo` assumes state that has since changed.
+- Middleware whose order is accidental and undocumented.
+- Template methods that let subclasses skip or reorder essential steps.
+- Introducing a pattern for a case that a direct function call handles clearly.
+
+## What would you choose and why?
+
+You are designing a text editor with **undo and redo**, **autosave** that reacts to every change, **pluggable syntax highlighters** and **macro recording** (replaying a sequence of user actions). Which behavioural patterns fit each requirement, how do they interact (for example, what is recorded in a macro), and what could go wrong when undo meets autosave?
+
+## Quiz
+
+<Quiz id="sd-m27-behavioral-patterns" tags={["lld", "design-patterns", "strategy", "observer", "state", "command"]} questions={[
+  { type: "mcq", q: "Which pattern turns a request into an object so that it can be queued, logged or undone?", options: ["Observer", "Strategy", "Command", "Adapter"], answer: 2, explain: "A command object carries the action (and what is needed to reverse it), so an invoker can keep a history." },
+  { type: "mcq", q: "Why copy the subscriber list before notifying in an observer implementation?", options: ["To make it faster", "A handler may unsubscribe (or subscribe) during notification, which would otherwise corrupt the iteration", "Python requires it", "To sort the handlers"], answer: 1, explain: "Iterating over a copy keeps the loop safe when the list changes underneath it." },
+  { type: "predict", q: "An order is CREATED and receives 'pay', then 'ship', then 'cancel' using the transition table in the lesson. What happens on 'cancel'?", code: "TRANSITIONS = {('created','pay'):'paid', ('created','cancel'):'cancelled', ('paid','ship'):'shipped', ('paid','cancel'):'cancelled', ('shipped','deliver'):'delivered'}\nstate = 'shipped'\nprint(TRANSITIONS.get((state, 'cancel')))", options: ["'cancelled'", "'paid'", "None, so the transition is rejected", "'delivered'"], answer: 2, explain: "There is no entry for ('shipped', 'cancel'), so the machine refuses it in one place." },
+  { type: "multi", q: "Which are valid concerns when using the Observer pattern?", options: ["Subscribers that are never removed can leak memory", "A failing handler can stop other handlers if not isolated", "Control flow becomes implicit and harder to trace", "It forces the subject to know every observer"], answer: [0, 1, 2], explain: "The point of the pattern is that the subject does not know its observers." },
+  { type: "mcq", q: "How does Template Method differ from Strategy?", options: ["There is no difference", "Template Method fixes the algorithm's skeleton in a base class and varies steps by inheritance; Strategy swaps the whole algorithm by composition", "Strategy uses inheritance only", "Template Method works only with functions"], answer: 1, explain: "Prefer composition (Strategy) unless the sequence itself must be enforced." },
+  { type: "mcq", q: "In a middleware chain, why does the order of handlers matter?", options: ["It does not", "Each handler can stop or change the request, so checking, for example, validation before authentication changes what an anonymous caller learns", "Handlers run in parallel", "Python sorts them alphabetically"], answer: 1, explain: "Order defines which checks protect which, and what information leaks on failure." }
+]} />
