@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 211 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 212 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -72,7 +72,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 17 Case studies: core services | Partial (9: URL shortener, distributed key-value store, chat system, notification system, news feed, web crawler, payment system, video streaming, ride-hailing; no maps navigation or e-commerce case study yet) | 9 |
 | 18 Case studies: data and transactions | Partial (4: ticket booking, search autocomplete, file storage and sync, metrics and monitoring; no e-commerce, hotel booking or distributed message queue case study yet) | 4 |
 | 19-26 (more Level 3 case studies) | Planned | 0 |
-| 27 Object-oriented design and patterns | Partial (1: SOLID principles in practice; no design-pattern lessons yet) | 1 |
+| 27 Object-oriented design and patterns | Partial (2: SOLID principles in practice, creational and structural patterns; no behavioural-pattern lesson yet) | 2 |
 | 28 LLD case studies | Planned | 0 |
 
 ## Known gaps and caveats
