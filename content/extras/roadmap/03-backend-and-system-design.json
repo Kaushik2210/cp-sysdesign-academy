@@ -54,6 +54,7 @@
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/behavioral-patterns" },
     { "kind": "lesson", "ref": "sd/lld-case-studies/design-a-parking-lot" },
     { "kind": "lesson", "ref": "sd/lld-case-studies/design-an-lru-cache" },
+    { "kind": "lesson", "ref": "sd/lld-case-studies/design-a-vending-machine" },
     { "kind": "external", "title": "Designing Data-Intensive Applications (Martin Kleppmann)", "url": "https://dataintensive.net/", "type": "book", "note": "Read chapters 1 to 9 alongside the lessons. It is the best single book on this subject." },
     { "kind": "external", "title": "The System Design Primer", "url": "https://github.com/donnemartin/system-design-primer", "type": "article", "note": "Free reference with diagrams and practice questions." },
     { "kind": "external", "title": "The Twelve-Factor App", "url": "https://12factor.net/", "type": "article", "note": "Short and practical rules for deployable services." },
