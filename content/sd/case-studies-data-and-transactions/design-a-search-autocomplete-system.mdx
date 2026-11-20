@@ -1,0 +1,244 @@
+---
+title: "Case Study: Design a Search Autocomplete System"
+track: sd
+module: case-studies-data-and-transactions
+order: 2
+difficulty: medium
+estMinutes: 45
+prerequisites: ["sd/search-systems/inverted-indexes-and-text-analysis", "sd/caching/caching-strategies", "sd/queues-and-streaming/stream-processing-basics", "sd/case-studies-core-services/design-a-web-crawler"]
+tags: [case-study, autocomplete, typeahead, trie, top-k, trending, caching, data-pipeline, ranking]
+type: case-study
+furtherReading:
+  - title: "Elasticsearch documentation, Completion suggester"
+    url: https://www.elastic.co/guide/en/elasticsearch/reference/current/search-suggesters.html
+  - title: "Wikipedia, Trie"
+    url: https://en.wikipedia.org/wiki/Trie
+  - title: "Wikipedia, Exponential decay and half-life (used for trending scores)"
+    url: https://en.wikipedia.org/wiki/Exponential_decay
+  - title: "Google Search Central, Autocomplete policies"
+    url: https://support.google.com/websearch/answer/7368877
+---
+
+## The problem
+
+When you type `how to` into a search box, a list drops down: `how to tie a tie`, `how to screenshot on mac`, ... That is **search autocomplete** (also called typeahead or search suggestions). Design the system that produces those suggestions: for each prefix the user has typed, return the **best few completions** in **well under 100 milliseconds**, ranked by how likely people are to want them, and keep them fresh as the world changes.
+
+It looks like a trivial lookup, but it combines three hard things: a **data structure** chosen for extremely fast prefix queries, a **huge and bursty request rate** (one request per keystroke), and a **continuous data pipeline** that turns search logs into suggestions without ever serving something offensive or stale.
+
+## 1. Requirements
+
+**Functional**
+
+- Given a **prefix**, return the top **5 to 10** suggested queries.
+- Suggestions are ranked by **popularity**, with **freshness** (trending queries rise quickly).
+- Optional extensions: **personalisation**, **spelling tolerance**, location awareness, several languages.
+- **Safety**: never suggest blocked, offensive or legally restricted queries.
+
+**Non-functional**
+
+- **Very low latency**: results must arrive faster than the user types the next character (aim for under 50 to 100 ms end to end).
+- **High availability**: the search box must work even if suggestions fail (degrade to plain search).
+- **Scalable**: hundreds of millions of searches a day.
+- **Eventually consistent** is fine: a new trending query may take minutes to appear; it does not need to be instant.
+
+## 2. Estimation
+
+Assume 500 million searches a day with an average of 12 characters each. If the client sent a request per keystroke, how much traffic would that be, and how much do simple client-side optimisations save?
+
+<CodeRunner language="python" code={`searches_per_day, avg_chars = 500_000_000, 12
+keystrokes = searches_per_day * avg_chars
+print(f"{searches_per_day / 1e6:.0f} million searches a day, {avg_chars} characters each:")
+print(f"  a request per keystroke: {keystrokes / 86400:,.0f}/s on average, about {3 * keystrokes / 86400:,.0f}/s at 3x peak")
+for factor, label in ((0.5, "client waits for a 150 ms typing pause (assume about half the keystrokes)"),
+                      (0.35, "plus no request below 2 characters and prefixes cached in the browser (an assumption)")):
+    print(f"  {label}: {keystrokes * factor / 86400:,.0f}/s on average, about {3 * keystrokes * factor / 86400:,.0f}/s at peak")
+`} />
+
+The naive client would send **about 69,000 requests a second on average and over 200,000 at peak**. Debouncing (waiting for a short pause in typing), skipping the first character and caching in the browser cut that by roughly two thirds. (The reduction factors are assumptions; measure your own.) This is a **read-heavy, latency-critical, small-response** workload: each answer is a handful of short strings. The **corpus** is also small: even a billion logged searches contain perhaps 100 million distinct popular queries averaging 20 bytes, which is about 2 GB of text, **small enough to hold in memory** on each serving node.
+
+## 3. The data structure: a trie with the answers precomputed
+
+A **trie** (prefix tree) stores strings character by character, so all queries that share a prefix share a path. To answer "what are the best completions of `tor`?" you walk three edges to the node for `tor` and then need the best queries **below** it.
+
+Finding them by traversing the whole subtree on every request would be slow for short prefixes (the subtree of `a` is huge). The trick: **precompute at every node the top-k completions** of its subtree and store them in the node. A lookup becomes **O(length of the prefix)**, independent of how many queries exist.
+
+The program builds such a trie from 30,000 synthetic queries with Zipf-like popularity (the k-th most popular query is searched about 1,000,000 / k times), stores the top 5 at every node, and checks the answers against a brute-force scan of all queries.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import heapq, random, time
+
+random.seed(7)
+syllables = ["pa", "ri", "to", "ma", "ne", "ko", "li", "sa", "du", "ve", "no", "ba", "ze", "fi", "gu", "he"]
+def make_query():
+    words = ["".join(random.choice(syllables) for _ in range(random.randint(1, 3))) for _ in range(random.randint(1, 3))]
+    return " ".join(words)
+queries = {}
+for rank in range(1, 30001):
+    q = make_query()
+    queries[q] = queries.get(q, 0) + int(1_000_000 / rank)          # Zipf-like popularity
+print(f"{len(queries):,} distinct queries")
+
+K = 5
+class Node:
+    __slots__ = ("kids", "top")
+    def __init__(self):
+        self.kids, self.top = {}, []
+
+root, nodes = Node(), 1
+for q, count in queries.items():
+    node = root
+    for ch in q:
+        if ch not in node.kids:
+            node.kids[ch] = Node()
+            nodes += 1
+        node = node.kids[ch]
+        node.top.append((count, q))
+def trim(node):
+    node.top = heapq.nlargest(K, node.top)                           # keep only the K best completions at every node
+    for kid in node.kids.values():
+        trim(kid)
+trim(root)
+
+def suggest(prefix):
+    node, steps = root, 0
+    for ch in prefix:
+        node = node.kids.get(ch)
+        steps += 1
+        if node is None:
+            return [], steps
+    return [q for _, q in node.top], steps
+
+def suggest_scan(prefix):
+    return [q for _, q in heapq.nlargest(K, ((c, q) for q, c in queries.items() if q.startswith(prefix)))]
+
+tests = ["pa", "tori", "ma ne", "ko l", "zzz", "b", "ve no ba"]
+print(f"trie nodes: {nodes:,}; top-{K} lists agree with a full scan on {len(tests)} prefixes: {all(suggest(p)[0] == suggest_scan(p) for p in tests)}")
+for p in ("pa", "tori"):
+    s, steps = suggest(p)
+    print(f"  '{p}' -> {s[:3]} ...  looked at {steps} nodes instead of scanning {len(queries):,} queries")
+
+t0 = time.perf_counter()
+for _ in range(2000):
+    suggest("tori")
+trie_time = time.perf_counter() - t0
+t0 = time.perf_counter()
+for _ in range(20):
+    suggest_scan("tori")
+scan_time = (time.perf_counter() - t0) / 20 * 2000
+print(f"  2,000 lookups: the trie is roughly {scan_time / trie_time:,.0f}x faster than scanning (timings depend on the machine)")
+`} />
+
+The trie's answers matched the brute force on every test prefix. A lookup of `tori` touched **4 nodes** instead of scanning **21,307 queries**, and on a typical run the trie is **more than a thousand times faster** than the scan (the exact ratio depends on the machine). The price is **memory**: every node stores up to `k` completions, so the structure is larger than a plain trie. That is the standard trade: **spend memory at build time to make every lookup constant work**.
+
+Alternatives and refinements:
+
+- **Sorted array plus binary search**: keep all queries sorted; a prefix is a contiguous **range**, found by two binary searches. The top-k in a range comes from a range-maximum structure such as a [sparse table](/cp/range-queries/sparse-table/) over the counts. Compact and cache-friendly, slower to update.
+- **Compressed tries / finite state transducers** (what Lucene and Elasticsearch's completion suggester use) shrink memory dramatically by sharing both prefixes and suffixes.
+- **Store query ids in nodes, not strings**, and keep the strings in one table, so top-k lists are small integers.
+- **Limit depth**: suggestions rarely need more than the first 30 to 50 characters of a query.
+
+## 4. Ranking: popularity, freshness and personalisation
+
+The simplest rank is **total search count**, but it favours the all-time giants. A query that suddenly spikes (breaking news, a sports result, a product launch) should rise quickly and fade as interest ends. A standard approach: score each query with **exponentially decayed counts**, where each past search counts for less the older it is, with a **half-life** of a few hours to a few days.
+
+<CodeRunner language="python" code={`HALF_LIFE_H = 6
+
+def decayed(hourly_counts):                                         # hourly_counts[0] is the most recent hour
+    return sum(c * 0.5 ** (age / HALF_LIFE_H) for age, c in enumerate(hourly_counts))
+
+evergreen = [1000] * 72                                             # a steady query: 1,000 searches an hour for 3 days
+breaking = [4000, 3500, 3000, 2000, 1000, 400] + [0] * 66           # an event that erupted over the last six hours
+print(f"all-time count over 72 h: evergreen {sum(evergreen):,}, breaking news {sum(breaking):,}")
+print(f"  -> ranking by all-time count keeps the evergreen query on top")
+print(f"decayed score (half-life {HALF_LIFE_H} h): evergreen {decayed(evergreen):,.0f}, breaking news {decayed(breaking):,.0f}")
+print(f"  -> the decayed ranking puts breaking news first, as users expect")
+`} />
+
+By raw count the evergreen query leads (72,000 against 13,900), yet its **decayed score is 9,164 and the breaking query's is 11,768**, so the breaking query rises to the top. In production, blend several signals: **long-term popularity**, **recent trend**, the **click-through rate** of the suggestion itself (do people pick it when shown?), and optional **personal** and **location** signals (your recent searches, your city). Personalised results are computed by **merging** a small per-user or per-segment list into the global top-k at request time, never by building a trie per user.
+
+## 5. The data pipeline
+
+Suggestions are only as good as the data behind them.
+
+1. **Collect**: every search (with timestamp, language, region, and whether the user clicked a suggestion) is written to a log stream ([stream processing](/sd/queues-and-streaming/stream-processing-basics/)). Log only what you need and respect privacy rules.
+2. **Clean and filter**: normalise text (case, Unicode, whitespace), drop queries that are too rare (to avoid exposing individuals' unique searches), remove spam, bot traffic and **blocked or sensitive content** using blocklists and classifiers, and apply legal removals.
+3. **Aggregate**: count queries in time windows (say hourly), and maintain decayed scores. A batch job (MapReduce or Spark) handles the long history; a streaming job maintains the **fresh** window.
+4. **Build**: create the serving structure (the trie or compressed index) with top-k lists. Keep each build as a **versioned snapshot**.
+5. **Publish**: ship the snapshot to all serving nodes and **swap it in atomically**; keep the previous version for instant rollback.
+
+Two cadences work together. A **daily or hourly full rebuild** gives complete, stable suggestions. A small **trending overlay** (updated every few minutes from the streaming job) holds the currently spiking queries; the serving layer merges the overlay's top entries into the trie results at request time. Rebuilding the whole trie every few minutes would be wasteful, and updating it in place on every search would require locks and constant top-k recomputation along the whole path.
+
+## 6. The serving architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  U[Browser or app] -->|debounced prefix requests| CDN[CDN and browser cache]
+  CDN -.miss.-> GW[API gateway]
+  GW --> SS[Suggestion service]
+  SS --> MEM[(In-memory trie snapshot: replicated, sharded by prefix)]
+  SS --> TR[(Trending overlay)]
+  SS --> PR[Personal and location signals]
+  SS --> SAFE[Safety filter]
+  SEARCH[Search service] --> LOG[[Query log stream]]
+  LOG --> FILT[Clean and filter]
+  FILT --> BATCH[Batch aggregation]
+  FILT --> STREAM[Streaming trending counts]
+  BATCH --> BUILD[Snapshot builder]
+  BUILD --> STORE[(Snapshot store)]
+  STORE --> MEM
+  STREAM --> TR`} caption="Serving is a read-only, in-memory lookup; a separate pipeline builds versioned snapshots and a fresh trending overlay" />
+
+- **Suggestion service**: stateless, holds the current snapshot in memory, answers in a millisecond or two. Replicate it widely; it needs no database on the request path.
+- **Sharding** is needed only when the structure outgrows one machine's memory, or to spread load. Shard by the **first one or two characters** of the prefix, but beware **skew**: some starting letters carry far more traffic than others, so split by measured load (hash of the prefix, or learned ranges), and keep every shard replicated.
+- **Caching in layers**: the **browser** (recent prefixes), the **CDN** (very popular short prefixes cached for tens of seconds to minutes; the shortest prefixes are the same for everyone), and a **local cache** in the service. Short prefixes dominate traffic and have enormous cache hit rates; deep, unusual prefixes are rare and cheap to compute.
+- **Graceful degradation**: if the suggestion service is slow or down, the client shows no suggestions and plain search still works. Use short timeouts and never block the typing experience.
+- **Safety filter at serve time** as well as build time, so an urgent takedown (a harmful suggestion) can be applied immediately through a small deny list without waiting for a rebuild.
+
+## 7. Details that matter
+
+- **Typos and fuzzy matching**: suggest `restaurant` for `restuarant`. Exact-prefix tries do not do this. Options include a spell-correction layer using **edit distance** ([edit distance and LCS](/cp/dynamic-programming/edit-distance-and-lcs/)) against a dictionary of popular queries, character n-gram indexes, or learned models. Apply it only when the exact prefix yields few results, because it costs far more.
+- **Multiple languages and scripts**: normalise Unicode, segment words appropriately (some languages have no spaces), and keep language-specific tries chosen by the user's language and region. Right-to-left and mixed-script input need testing.
+- **Tokenisation and word-start matching**: users type `new york` or `york new`; supporting matches that begin at any word start is an extension, with its own index.
+- **Quality and evaluation**: measure **click-through rate on suggestions**, **keystrokes saved**, **latency percentiles**, **coverage** (how often there is any suggestion), and run **A/B tests** on ranking changes.
+- **Ethics and policy**: autocomplete can surface harmful, defamatory or private information. Maintain **policies, review and removal processes**, avoid suggesting personal data from rare queries (minimum counts, k-anonymity style thresholds), and be careful with personalised suggestions.
+- **Cold start for new content**: a brand-new query has no history; the trending overlay and click feedback are what let it appear.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "Full scan of all queries per request", pros: "No preprocessing", cons: "Far too slow at scale", chooseWhen: "Tiny datasets only" },
+  { option: "Trie with top-k at every node", pros: "Lookup cost depends only on prefix length", cons: "Extra memory; rebuilds to update", chooseWhen: "A read-heavy, latency-critical service (the default)" },
+  { option: "Sorted array with binary search and range top-k", pros: "Compact, cache-friendly", cons: "Updates are costly; needs a range-max structure", chooseWhen: "Memory-constrained, mostly static data" },
+  { option: "Compressed FST (Lucene, Elasticsearch)", pros: "Very small and fast", cons: "Immutable; build and tooling complexity", chooseWhen: "Large vocabularies, existing search stack" },
+  { option: "Rank by all-time counts", pros: "Stable and simple", cons: "Misses trending queries", chooseWhen: "A first version" },
+  { option: "Rank by decayed counts plus click-through", pros: "Fresh and relevant", cons: "More signals to compute and tune", chooseWhen: "A production service" },
+  { option: "Daily rebuild only", pros: "Simple operations", cons: "Trends appear a day late", chooseWhen: "Slow-changing domains" },
+  { option: "Rebuild plus streaming trending overlay", pros: "Stable base and minutes-fresh trends", cons: "Two paths to run and merge", chooseWhen: "News, social and shopping search" },
+  { option: "Request per keystroke", pros: "Immediate feedback", cons: "Several times the traffic", chooseWhen: "Never without debouncing and caching" }
+]} />
+
+## Pitfalls
+
+- Traversing the subtree under a prefix on each request instead of storing top-k per node.
+- Updating the trie in place on every search, with locks and constant top-k recomputation.
+- Ranking only by all-time popularity, so fresh events never appear.
+- Sending a request per keystroke with no debounce or cache.
+- Sharding by first letter without accounting for skew.
+- No offensive-content filtering, or a filter that needs a full rebuild to take effect.
+- Exposing rare personal queries as suggestions.
+- Blocking the search box on suggestion latency instead of timing out quickly.
+- Swapping snapshots non-atomically, so users see a mixture of old and new results.
+- Measuring only latency, not whether suggestions actually help (clicks, keystrokes saved).
+
+## What would you choose and why?
+
+A shopping site wants autocomplete that suggests **products and categories** (not just past queries), must reflect **stock and price changes within a minute**, and should show different suggestions to **logged-in customers** based on their history. How do the data structure, update path and caching change? What can still be cached at the CDN, and what must be computed per request?
+
+## Quiz
+
+<Quiz id="sd-m18-search-autocomplete" tags={["case-study", "autocomplete", "trie", "caching", "ranking"]} questions={[
+  { type: "mcq", q: "Why store the top-k completions at every trie node?", options: ["To reduce the number of nodes", "So a lookup takes time proportional to the prefix length instead of traversing the whole subtree", "To avoid using memory", "To support deletion"], answer: 1, explain: "Precomputing answers at build time makes every lookup cheap; the cost is extra memory." },
+  { type: "mcq", q: "How does a typical system keep suggestions fresh without rebuilding the whole structure every few minutes?", options: ["It never updates", "A periodic full snapshot plus a small streaming trending overlay merged at request time", "It rebuilds on every search", "It asks users"], answer: 1, explain: "The overlay carries recent spikes; the snapshot carries the stable long-term ranking." },
+  { type: "predict", q: "500 million searches a day with 12 keystrokes each, one request per keystroke. About how many requests per second on average?", code: "print(round(500_000_000 * 12 / 86400))", options: ["6,944", "69,444", "694,444", "6,944,444"], answer: 1, explain: "6 billion keystrokes divided by 86,400 seconds is about 69,000 requests a second." },
+  { type: "multi", q: "Which reduce the request load from keystrokes?", options: ["Waiting for a short typing pause (debounce)", "Not querying until two characters are typed", "Caching popular short prefixes in the browser and CDN", "Sending a request for every keystroke"], answer: [0, 1, 2], explain: "Short prefixes are the most requested and the most cacheable." },
+  { type: "mcq", q: "Why use a time-decayed score for trending queries?", options: ["It reduces memory", "Recent searches count more than old ones, so a spiking query can overtake an all-time favourite and fade when interest ends", "It removes duplicates", "It speeds up the trie"], answer: 1, explain: "In the example the breaking query's decayed score (about 11,768) beat the evergreen query's (about 9,164) despite far fewer total searches." },
+  { type: "mcq", q: "What should happen if the suggestion service is slow or down?", options: ["The search box stops working", "The client shows no suggestions and plain search still works, using short timeouts", "Retry for 30 seconds", "Show an error page"], answer: 1, explain: "Suggestions are an enhancement; they must never block the main search experience." }
+]} />
