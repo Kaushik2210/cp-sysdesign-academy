@@ -1,0 +1,290 @@
+---
+title: "Case Study: Design a File Storage and Sync Service"
+track: sd
+module: case-studies-data-and-transactions
+order: 3
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/storage/blob-stores", "sd/storage/durability-backups-tiering", "sd/distributed-theory/clocks-and-ordering", "sd/case-studies-core-services/design-a-key-value-store"]
+tags: [case-study, file-sync, dropbox, chunking, deduplication, content-addressed-storage, version-vectors, conflict-resolution, metadata]
+type: case-study
+furtherReading:
+  - title: "Dropbox Tech Blog, Inside the Magic Pocket (block storage)"
+    url: https://dropbox.tech/infrastructure/inside-the-magic-pocket
+  - title: "Muthitacharoen et al., A Low-bandwidth Network File System (content-defined chunking)"
+    url: https://pdos.csail.mit.edu/papers/lbfs:sosp01/lbfs.pdf
+  - title: "Xia et al., FastCDC: a Fast and Efficient Content-Defined Chunking Approach"
+    url: https://www.usenix.org/conference/atc16/technical-sessions/presentation/xia
+  - title: "Wikipedia, rsync (delta transfer algorithm)"
+    url: https://en.wikipedia.org/wiki/Rsync
+---
+
+## The problem
+
+Design a **file storage and sync service** like Dropbox or Google Drive. Users keep files in a folder on their laptop; the service **uploads changes automatically**, keeps **other devices in sync**, lets people **share folders**, and **keeps old versions** so a mistake can be undone.
+
+The core difficulty is **efficiency and correctness at scale**: a 2 GB file changed by one sentence must not be uploaded again, the same installer stored by a million users should not occupy a million copies, two devices editing the same file while offline must not silently overwrite each other, and **no file may ever be lost**.
+
+## 1. Requirements
+
+**Functional**
+
+- **Upload, download, delete, rename and move** files and folders from desktop, mobile and web.
+- **Automatic sync** across a user's devices, including after being **offline** for days.
+- **Sharing** with other users or by link, with permissions and optional expiry.
+- **Version history** and recovery of deleted files.
+- Large files (many gigabytes), resumable transfers, and efficient **delta** uploads.
+
+**Non-functional**
+
+- **Durability above all**: files must never be lost (target many nines).
+- **Efficient bandwidth and storage** (transfer only what changed, store identical data once).
+- **Consistency of the namespace**: after sync, every device sees the same tree; conflicts are detected and **never silently resolved by data loss**.
+- Reasonable latency for small changes; high availability; strong security and privacy.
+
+## 2. Estimation
+
+Assume 100 million users with 200 files each of about 1 MB on average, and think about how the **chunk size** decides how many records the system must manage.
+
+<CodeRunner language="python" code={`users, files_per_user, avg_mb = 100_000_000, 200, 1.0
+files = users * files_per_user
+total_bytes = files * avg_mb * 1e6
+print(f"{users / 1e6:.0f} million users x {files_per_user} files of about {avg_mb:.0f} MB: {total_bytes / 1e15:,.0f} PB before deduplication ({files / 1e9:.0f} billion file records)")
+print("number of chunk records for different average chunk sizes:")
+for label, size in (("4 KB", 4096), ("64 KB", 65536), ("4 MB", 4 * 1024 * 1024)):
+    chunks = total_bytes / size
+    print(f"  {label:>5s} chunks: {chunks / 1e9:9,.1f} billion chunk records, about {chunks * 50 / 1e12:7,.2f} TB of chunk metadata at 50 bytes each")
+`} />
+
+At **20 PB**, a design with 4 KB chunks would need **trillions of chunk records** and terabytes of metadata, which is its own scaling problem. Large chunks (megabytes) keep metadata manageable but waste bandwidth on small edits and dedupe less. Real systems pick an **intermediate size** (tens of kilobytes to a few megabytes) and make the **metadata layer sharded and compact**. This tension runs through the whole design.
+
+## 3. High-level design
+
+The service separates **what the data is** (bytes, stored as content-addressed blocks) from **what the files are** (names, folders, versions, which blocks belong to which file version).
+
+<Diagram kind="mermaid" code={`flowchart LR
+  subgraph Device
+    W[File watcher] --> CH[Chunker and hasher]
+    CH --> LDB[(Local metadata DB)]
+    CH --> SY[Sync engine]
+  end
+  SY -->|1. which of these chunk hashes are missing?| BS[Block service]
+  SY -->|2. upload only missing chunks| BS
+  BS --> STORE[(Block store: content-addressed chunks)]
+  SY -->|3. commit file version: ordered chunk list| MS[Metadata service]
+  MS --> MDB[(Metadata DB: namespaces, file versions, sharded)]
+  MS --> JOUR[(Per-namespace change journal)]
+  JOUR --> NS[Notification service]
+  NS -->|something changed since cursor N| OTHER[Other devices]
+  OTHER -->|fetch the changes, then missing chunks| MS
+  OTHER --> BS
+  MS --> SHARE[Sharing and permissions]`} caption="Chunks live in a content-addressed block store; a transactional metadata service ties them into file versions and publishes a change journal" />
+
+- **Client sync agent**: watches the folder, **splits changed files into chunks and hashes them**, keeps a **local metadata database** of what the server has acknowledged, and reconciles differences.
+- **Block service and store**: stores chunks **by the hash of their content** (a content-addressed store). Chunks are immutable.
+- **Metadata service**: the **source of truth for the namespace**: folders, file versions (each version is an ordered list of chunk hashes), permissions. It uses a transactional, sharded relational store.
+- **Change journal and notification service**: every namespace has an **append-only journal of changes** with a monotonically increasing **cursor**. Devices ask "what changed since cursor N?" and are notified when the cursor advances.
+
+**The upload protocol** (for one changed file):
+
+1. The client splits the file into chunks and computes each chunk's hash.
+2. It sends the **list of hashes** to the server: "which of these do you not already have?"
+3. It uploads **only the missing chunks**, in parallel, resumably.
+4. It **commits** a new file version: path, parent version, and the ordered chunk list, in one metadata transaction. The commit succeeds only if the file's current version is still the one the client started from (**optimistic concurrency**; see conflicts below).
+5. The journal advances; other devices are notified, fetch the new version's chunk list, download any chunks they lack, and reassemble the file.
+
+## 4. Chunking: how to split a file
+
+**Fixed-size chunking** cuts every N bytes. It is simple, but **inserting a few bytes near the start shifts every later chunk boundary**, so every chunk hash changes and the whole file must be uploaded again.
+
+**Content-defined chunking (CDC)** chooses boundaries by looking at the **content**: slide a small window over the data, compute a rolling hash, and **cut where the hash matches a pattern** (for example, the low 12 bits are zero, giving an average chunk of about 4 KB). Because the boundary depends on nearby bytes, not on position, an insertion **changes only the chunks around it**, and the others keep their hashes. (This is the idea behind low-bandwidth file systems and rsync-style delta transfer.)
+
+The program implements both and measures how many bytes must be uploaded after three kinds of edits to a 200 KB file (chunks average about 4 KB).
+
+<CodeRunner language="python" timeoutMs={60000} code={`import hashlib, random
+
+rng = random.Random(11)
+GEAR = [rng.getrandbits(64) for _ in range(256)]
+MASK = (1 << 12) - 1                                     # about one cut per 4 KB on average
+MIN_SIZE, MAX_SIZE = 1024, 32768
+
+def fixed_chunks(data, size=4096):
+    return [data[i:i + size] for i in range(0, len(data), size)]
+
+def cdc_chunks(data):
+    """Cut where a rolling 'gear' hash of the most recent bytes matches a pattern: the cut depends on content, not on position."""
+    chunks, start, h = [], 0, 0
+    for i, b in enumerate(data):
+        h = ((h << 1) + GEAR[b]) & 0xFFFFFFFFFFFFFFFF
+        size = i - start + 1
+        if (size >= MIN_SIZE and (h & MASK) == 0) or size >= MAX_SIZE:
+            chunks.append(data[start:i + 1])
+            start, h = i + 1, 0
+    if start < len(data):
+        chunks.append(data[start:])
+    return chunks
+
+def digest(chunks):
+    return [hashlib.sha256(c).hexdigest() for c in chunks]
+
+original = random.Random(5).randbytes(200_000)
+edits = {
+    "insert 10 bytes at the start": b"0123456789" + original,
+    "overwrite 100 bytes in the middle": original[:100_000] + bytes(100) + original[100_100:],
+    "append 1 KB at the end": original + bytes(1024),
+}
+print(f"a {len(original) // 1000} KB file; how many bytes must be uploaded after each edit?")
+for name, edited in edits.items():
+    line = f"  {name:34s}"
+    for label, chunker in (("fixed 4 KB", fixed_chunks), ("content-defined", cdc_chunks)):
+        old = set(digest(chunker(original)))
+        new_chunks = chunker(edited)
+        uploaded = sum(len(c) for c, d in zip(new_chunks, digest(new_chunks)) if d not in old)
+        line += f"  {label}: {uploaded:7,d} bytes"
+    print(line)
+sizes = [len(c) for c in cdc_chunks(original)]
+print(f"content-defined chunks: {len(sizes)} chunks, average {sum(sizes) // len(sizes):,} bytes, smallest {min(sizes):,}, largest {max(sizes):,}")
+`} />
+
+Results:
+
+- **Insert 10 bytes at the start**: fixed chunking re-uploads **all 200,010 bytes**; content-defined chunking uploads only **1,280 bytes**. This is the case content-defined chunking is built for.
+- **Overwrite 100 bytes in the middle**: both are similar (4,096 against 3,402 bytes): the edit lives inside one chunk either way.
+- **Append 1 KB at the end**: fixed chunking is **better** here (4,416 against 7,023 bytes), because the last variable-size chunk's boundary moves.
+
+So content-defined chunking is not free or universally better. It costs CPU (hashing every byte) and, for the append case, a little more. Real clients **pick the chunker by file type and size** (large media files that are never edited in place can use big fixed blocks; documents, archives and database files benefit from CDC), compress chunks before upload, and **hash with a strong function (SHA-256)** so equal hashes can safely mean equal content.
+
+## 5. Deduplication and the block store
+
+Because chunks are named by the **hash of their content**, identical content is stored **once**, however many files and users reference it. The upload step "which hashes do you already have?" skips the data entirely for known chunks. This is **content-addressed storage**.
+
+<CodeRunner language="python" code={`import hashlib, random
+
+rng = random.Random(11)
+GEAR = [rng.getrandbits(64) for _ in range(256)]
+MASK, MIN_SIZE, MAX_SIZE = (1 << 12) - 1, 1024, 32768
+
+def cdc_chunks(data):
+    chunks, start, h = [], 0, 0
+    for i, b in enumerate(data):
+        h = ((h << 1) + GEAR[b]) & 0xFFFFFFFFFFFFFFFF
+        if (i - start + 1 >= MIN_SIZE and (h & MASK) == 0) or i - start + 1 >= MAX_SIZE:
+            chunks.append(data[start:i + 1])
+            start, h = i + 1, 0
+    if start < len(data):
+        chunks.append(data[start:])
+    return chunks
+
+class ChunkStore:
+    def __init__(self):
+        self.chunks, self.logical = {}, 0
+    def put_file(self, data):
+        ids = []
+        for c in cdc_chunks(data):
+            d = hashlib.sha256(c).hexdigest()
+            self.chunks.setdefault(d, len(c))                         # stored once, however many files reference it
+            self.logical += len(c)
+            ids.append(d)
+        return ids
+
+store = ChunkStore()
+shared_installer = random.Random(8).randbytes(100_000)
+for user in range(20):
+    store.put_file(shared_installer)                                  # 20 users keep the same installer
+    store.put_file(random.Random(1000 + user).randbytes(10_000))      # and each has a private file
+physical = sum(store.chunks.values())
+print(f"20 users x (a shared 100 KB file + a private 10 KB file): logical {store.logical / 1e6:.2f} MB, stored {physical / 1e6:.2f} MB ({store.logical / physical:.1f}x less)")
+`} />
+
+Twenty users holding the same 100 KB installer and each a private 10 KB file need **2.2 MB of logical storage but only 0.30 MB physically, 7.3 times less**. In real data, duplication ranges from small (personal photos) to huge (software packages, shared documents, email attachments forwarded around a company).
+
+Operating a content-addressed block store:
+
+- **Reference counting and garbage collection**: a chunk can be deleted only when **no file version references it**. Counting must be reliable (a missed decrement leaks space, a wrong one **loses data**), so many systems use **mark-and-sweep style collection** over the metadata with a safety delay, never immediate deletes.
+- **Durability**: replicate chunks across zones or use **erasure coding** (store coded fragments so that losing some machines loses nothing, at roughly 1.4x to 1.5x storage instead of 3x). See [durability, backups and tiering](/sd/storage/durability-backups-tiering/) and [blob stores](/sd/storage/blob-stores/). Verify checksums continuously ("scrubbing") to catch silent corruption before the last good copy disappears.
+- **Tiering**: recent and frequently accessed chunks on fast storage; old, cold versions on cheap archival tiers.
+- **Privacy side channel**: cross-user deduplication reveals whether *someone* already stored a given file (an upload finishing instantly says "this exists"). Services mitigate by limiting cross-user dedupe to public or large common files, or by deduplicating only **within a user or team**. Client-side encryption with per-user keys defeats cross-user dedupe entirely, which is a real trade-off between privacy and cost.
+
+## 6. Metadata, the change journal and sync
+
+The **metadata service** holds, per namespace (a user's folder tree or a shared team folder): the file tree, each file's versions (a list of chunk hashes, size, modification time), and permissions. It needs **transactions** (renaming a folder with a million files must be atomic from the user's point of view) and is **sharded by namespace** so most operations stay on one shard (a **shared folder is its own namespace** that members mount).
+
+**The change journal** is the key to sync. Each namespace has an **append-only log of changes** ("file X is now version V", "folder Y was renamed", "file Z deleted"), numbered by a **monotonic cursor**. A device remembers the last cursor it processed. To sync it asks for **"changes after cursor N"**, applies them in order, and stores the new cursor. This makes sync **incremental, resumable and idempotent**, even after weeks offline. A **notification channel** (long polling or a WebSocket) tells the device only that "cursor advanced"; the device then pulls the details.
+
+**Moves and renames are metadata-only**: no chunks are touched. **Deletes** create a tombstone version, and the data is retained for the recovery window (for example 30 days or more) before the garbage collector may free it.
+
+## 7. Conflicts: two devices edit the same file
+
+The laptop and the phone both edit `report.docx` while offline. Neither knows about the other's change. When they reconnect, last-writer-wins would **silently destroy one person's work**. Instead, each commit says **which version it was based on**; the server accepts it only if that base is still the latest (compare-and-set), and otherwise reports a conflict.
+
+A **version vector** (a counter per device) distinguishes the three situations: one version **descends from** the other (a plain update), they are the **same**, or they are **concurrent** (a real conflict, since neither includes the other's changes).
+
+<CodeRunner language="python" code={`def compare(a, b):
+    ge = all(a.get(k, 0) >= b.get(k, 0) for k in set(a) | set(b))
+    le = all(a.get(k, 0) <= b.get(k, 0) for k in set(a) | set(b))
+    if ge and le:
+        return "same"
+    return "a is newer" if ge else ("b is newer" if le else "CONFLICT")
+
+base = {"laptop": 1}                                            # the version both devices last synced
+print("laptop edits after syncing        :", compare({"laptop": 2}, base))
+print("phone edits, laptop did not       :", compare(base, {"laptop": 1, "phone": 1}))
+print("both edit while offline           :", compare({"laptop": 2}, {"laptop": 1, "phone": 1}))
+print("-> on a conflict the server keeps both: 'report.docx' and 'report (laptop's conflicted copy).docx'")
+`} />
+
+The service **keeps both versions**: the first commit becomes the main file and the second is saved as a **"conflicted copy"** that the user can merge by hand. For file types with a defined merge (text, some document formats, collaborative editors) the service can attempt an **automatic merge** or use operational transformation/CRDTs for real-time collaboration (a larger, separate design). The principle is **never lose a user's data silently**. Clocks are not trusted for ordering (see [clocks and ordering](/sd/distributed-theory/clocks-and-ordering/)); version vectors or server-assigned cursors are.
+
+## 8. Practical details
+
+- **Large files**: **resumable** chunked uploads (the "which chunks are missing" step makes resume automatic), **parallel** chunk transfers, adaptive **bandwidth throttling**, and an optional **LAN sync** where devices on the same network exchange chunks directly.
+- **Initial sync and mass changes**: throttle and batch; do not hammer the metadata service when a user drops 100,000 files into the folder; coalesce rapid repeated saves ("debounce" until the file is stable).
+- **Notifications at scale**: millions of idle devices hold a long-poll or WebSocket connection to learn about changes (see the [chat system](/sd/case-studies-core-services/design-a-chat-system/) for the connection tier). A change in a **shared folder with 10,000 members** fans out to many devices, so notify with just the namespace and cursor, jitter the pulls, and let clients fetch lazily.
+- **Selective sync and placeholders**: show files without downloading them (download on open) to save disk space.
+- **Security**: TLS in transit, encryption at rest with managed keys ([key management](/sd/security/tls-encryption-and-key-management/)), per-share permissions, expiring links, audit logs, and malware scanning of shared files. Optional **client-side (end-to-end) encryption** protects against the provider but disables server-side search, previews, deduplication across users and web editing.
+- **Monitoring**: upload and sync latency percentiles, the lag between a commit and every device seeing it, failed commits and conflicts per day, block-store checksum failures, and garbage collection backlog. A **durability audit** (random chunks verified end to end) is a first-class job.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "Fixed-size chunks", pros: "Simple and fast to compute; good for append-mostly and media files", cons: "An early insertion changes every later chunk", chooseWhen: "Large files that are rarely edited in place" },
+  { option: "Content-defined chunks", pros: "Edits change only nearby chunks; strong delta savings", cons: "CPU cost; variable chunk sizes; slightly worse for appends", chooseWhen: "Documents, archives, database files" },
+  { option: "Small chunks (a few KB)", pros: "Best deduplication and delta transfer", cons: "Trillions of metadata records; many small requests", chooseWhen: "Small datasets or when metadata is cheap" },
+  { option: "Large chunks (megabytes)", pros: "Small metadata and efficient transfers", cons: "More data re-uploaded per edit; weaker dedupe", chooseWhen: "Petabyte scale with limited metadata budget" },
+  { option: "Cross-user deduplication", pros: "Big storage and upload savings", cons: "Privacy side channel; prevents client-side encryption", chooseWhen: "Public or common content, or when savings dominate" },
+  { option: "Per-user deduplication only", pros: "Avoids cross-user leakage", cons: "Less saving", chooseWhen: "Privacy-sensitive products" },
+  { option: "Last-writer-wins", pros: "Simplest", cons: "Silently loses concurrent edits", chooseWhen: "Never for user documents" },
+  { option: "Detect conflicts and keep a conflicted copy", pros: "No data loss; understandable to users", cons: "Users must merge by hand", chooseWhen: "The default for files" },
+  { option: "Real-time collaborative editing (OT or CRDT)", pros: "Merges edits automatically in documents", cons: "Complex; applies to specific formats", chooseWhen: "Document editors, not arbitrary files" },
+  { option: "Replicate blocks 3x", pros: "Simple and fast repair", cons: "200 percent storage overhead", chooseWhen: "Hot tier or small scale" },
+  { option: "Erasure-code blocks", pros: "About 1.4x to 1.5x overhead with high durability", cons: "More CPU and slower reads and repairs", chooseWhen: "Large cold data" }
+]} />
+
+## Pitfalls
+
+- Chunking only with fixed offsets and then re-uploading whole files after tiny insertions.
+- Deleting chunks as soon as a reference count reaches zero, with no safety delay (a counting bug then loses data).
+- Letting the client trust its own clock to decide which version wins.
+- Commits that do not check the base version, so concurrent edits overwrite each other.
+- Treating a rename or move as delete plus re-upload.
+- One metadata database for everything, with cross-shard transactions on the hot path.
+- Notifying every device with the full change list rather than a small "cursor advanced" signal.
+- Cross-user dedupe with no thought for the information it leaks.
+- Not verifying stored chunks (silent corruption discovered when it is too late).
+- No retention window, so an accidental deletion is permanent.
+- Syncing every keystroke-save of a large file instead of waiting for it to settle.
+
+## What would you choose and why?
+
+You are asked to add **a "smart sync" feature for 50 GB virtual machine disk images** that users edit in place constantly (each run changes a few hundred megabytes scattered across the file), and a **company-wide shared drive** with 20,000 members. How do your chunking choice, upload protocol and notification design change for each? What limits would you impose, and what would you tell customers to expect?
+
+## Quiz
+
+<Quiz id="sd-m18-file-sync" tags={["case-study", "file-sync", "chunking", "deduplication", "conflicts"]} questions={[
+  { type: "mcq", q: "Why does inserting a few bytes at the start of a file hurt fixed-size chunking?", options: ["The file becomes encrypted", "Every later chunk boundary shifts, so every chunk's hash changes and the whole file is re-uploaded", "Chunks become smaller", "The hash function fails"], answer: 1, explain: "In the simulation fixed chunking re-uploaded 200,010 bytes after a 10-byte insertion; content-defined chunking uploaded 1,280." },
+  { type: "mcq", q: "What is stored under a chunk's hash in a content-addressed block store?", options: ["The file name", "The immutable bytes of that chunk, stored once however many files reference it", "The user's password", "The folder structure"], answer: 1, explain: "The name is derived from the content, so identical chunks deduplicate automatically." },
+  { type: "multi", q: "Which statements about the sync protocol are true?", options: ["The client first asks which chunk hashes the server lacks and uploads only those", "A commit includes the base version so concurrent edits are detected", "Moves and renames require re-uploading the file", "Devices use a cursor into a change journal to pull what they missed"], answer: [0, 1, 3], explain: "Moves and renames are metadata-only operations." },
+  { type: "predict", q: "Two devices each edit a file offline. The laptop's version vector is {laptop: 2} and the phone's is {laptop: 1, phone: 1}. Which comparison is correct?", code: "a = {'laptop': 2}\nb = {'laptop': 1, 'phone': 1}\nge = all(a.get(k, 0) >= b.get(k, 0) for k in set(a) | set(b))\nle = all(a.get(k, 0) <= b.get(k, 0) for k in set(a) | set(b))\nprint(ge, le)", options: ["True True", "True False", "False True", "False False"], answer: 3, explain: "Neither vector dominates the other, so the edits are concurrent: a genuine conflict." },
+  { type: "mcq", q: "Why not delete a chunk the instant its reference count hits zero?", options: ["Chunks cannot be deleted", "A counting bug or a late upload could make you delete data that is still needed; safe systems delay and verify before freeing", "It saves bandwidth", "Hashes forbid it"], answer: 1, explain: "A wrong delete is unrecoverable; leaking space for a while is cheap." },
+  { type: "mcq", q: "What is the privacy risk of cross-user deduplication?", options: ["It increases latency", "An upload that completes instantly reveals that someone already stored the same file", "It disables TLS", "It breaks versioning"], answer: 1, explain: "Services restrict cross-user dedupe, or dedupe only within a user or team, when this matters." }
+]} />
