@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("166");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("167");
   });
 });
 
@@ -921,6 +921,7 @@ test.describe("security, observability and case-study modules", () => {
     ["/sd/case-studies-core-services/design-a-payment-system/", "Case Study: Design a Payment System"],
     ["/sd/case-studies-core-services/design-a-video-streaming-service/", "Case Study: Design a Video Streaming Service"],
     ["/sd/case-studies-core-services/design-a-ride-hailing-service/", "Case Study: Design a Ride-Hailing Service"],
+    ["/sd/case-studies-data-and-transactions/design-a-ticket-booking-system/", "Case Study: Design a Ticket Booking System"],
   ];
   for (const [path, title] of LESSONS) {
     test(`${title} renders its runnable demos, trade-offs and quiz`, async ({ page }) => {
