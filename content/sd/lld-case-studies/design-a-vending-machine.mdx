@@ -1,0 +1,302 @@
+---
+title: "LLD Case Study: Design a Vending Machine"
+track: sd
+module: lld-case-studies
+order: 3
+difficulty: medium
+estMinutes: 45
+prerequisites: ["sd/lld-case-studies/design-a-parking-lot", "sd/oop-and-design-patterns/behavioral-patterns"]
+tags: [lld, case-study, vending-machine, state-pattern, state-machine, invariants, change-making]
+type: case-study
+furtherReading:
+  - title: "Refactoring Guru, State pattern"
+    url: https://refactoring.guru/design-patterns/state
+  - title: "Wikipedia, Finite-state machine"
+    url: https://en.wikipedia.org/wiki/Finite-state_machine
+  - title: "Wikipedia, Change-making problem"
+    url: https://en.wikipedia.org/wiki/Change-making_problem
+  - title: "Python documentation, abc: abstract base classes"
+    url: https://docs.python.org/3/library/abc.html
+---
+
+## The problem
+
+Design the software for a **vending machine**: it accepts coins, lets the customer choose a product, dispenses it and returns change. It is the standard exercise for **state machines**, because the same button means different things at different moments: pressing "select" before inserting money is an error, after inserting money it may dispense a product, and after a sale it does nothing until new money arrives.
+
+The skills it tests: modelling **states and transitions** explicitly, keeping **invariants** (money is never created or lost), and handling **unhappy paths** (sold out, not enough money, no change available).
+
+## Requirements
+
+- Accepts coins of 5, 10, 25, 50 and 100 cents. Other coins are **rejected**.
+- Products live in **slots** (code, name, price, stock).
+- The customer inserts coins, then selects a slot. If the credit covers the price, the machine dispenses the product and returns **change**.
+- The customer can **cancel** before buying and gets a **refund** of exactly what they inserted (as coins).
+- The machine has a **limited coin bank**. If it cannot make **exact change**, it must refuse the sale, not keep the customer's money.
+- **Out of scope**: card payment, remote monitoring, restocking UI (we say how they fit at the end).
+
+## Modelling the states
+
+Ask: *what can the machine be doing, and which actions are legal then?*
+
+| state | meaning | legal actions |
+| --- | --- | --- |
+| **Idle** | no money inserted | insert coin |
+| **HasMoney** | credit greater than zero | insert more coins, select a slot, cancel |
+
+After a successful sale or a cancel the machine returns to **Idle**. (Real hardware has more states, such as a short *Dispensing* state while the motor runs and an *OutOfService* state when a jam is detected. In software that runs synchronously the dispense is one step, so we do not invent a state that nothing can observe. We come back to this under extensions.)
+
+<Diagram kind="mermaid" code={`stateDiagram-v2
+  [*] --> Idle
+  Idle --> HasMoney: insert coin
+  HasMoney --> HasMoney: insert coin
+  HasMoney --> HasMoney: select (not enough money, sold out, no change)
+  HasMoney --> Idle: select (sale completed, change returned)
+  HasMoney --> Idle: cancel (refund returned)`} caption="Two states. A failed selection leaves the customer's credit untouched" />
+
+## The State pattern
+
+The naive version is one class full of `if state == "idle"` branches in every method. Each new state touches every method. The **[State pattern](/sd/oop-and-design-patterns/behavioral-patterns/)** puts each state's behaviour in **its own class** behind one interface. The machine **delegates** each action to its current state object, and the states decide the next state.
+
+- The base `State` class makes **every action an error by default**, so a state only implements what is legal in it. Illegal actions are rejected without any `if`.
+- `Idle` and `HasMoney` are the only states.
+- The machine owns the **data** (slots, coin bank, inserted coins, credit). States own the **rules** for what is legal and what happens next.
+
+## Exact change
+
+Greedy change (largest coin first) is correct for this coin system, but it must use the coins **actually in the bank**, including the coins the customer just inserted. If the remainder cannot be paid out, `make_change` returns `None` and the sale is refused **before any state changes**. This is the key correctness rule: **check everything that can fail first, then mutate**, so a failure never leaves the machine half-way through a sale.
+
+## The code
+
+The invariants the tests check: the credit always equals the coins inserted in the current session, no stock or coin count goes negative, and **money is conserved**: coins in the machine now equal the coins at the start, plus everything customers inserted, minus everything returned to them as change or refunds. The test drives 5,000 random operations (including invalid coins, unknown slots and sold-out products) and checks every invariant after every step.
+
+<CodeRunner language="python" timeoutMs={30000} code={`from abc import ABC
+from dataclasses import dataclass
+import random
+
+COINS = (100, 50, 25, 10, 5)    # cents, largest first
+
+
+class VendingError(Exception):
+    pass
+
+
+@dataclass
+class Slot:
+    name: str
+    price: int
+    stock: int
+
+
+def make_change(amount, coin_stock):
+    """Greedy change using the coins actually available; None when exact change is impossible."""
+    out, left = {}, amount
+    for c in COINS:
+        n = min(left // c, coin_stock.get(c, 0))
+        if n:
+            out[c] = n
+            left -= n * c
+    return out if left == 0 else None
+
+
+class State(ABC):
+    name = "state"
+    # every action is illegal unless a state overrides it
+    def insert(self, m, coin): raise VendingError(f"cannot insert coins in {self.name}")
+    def select(self, m, code): raise VendingError(f"cannot select in {self.name}")
+    def cancel(self, m): raise VendingError(f"nothing to cancel in {self.name}")
+
+
+class Idle(State):
+    name = "idle"
+    def insert(self, m, coin):
+        m._accept(coin)
+        m._state = HasMoney()
+    def select(self, m, code):
+        raise VendingError("insert money first")
+
+
+class HasMoney(State):
+    name = "has_money"
+    def insert(self, m, coin):
+        m._accept(coin)
+    def select(self, m, code):
+        slot = m.slots.get(code)
+        # check everything that can fail BEFORE changing anything
+        if slot is None:
+            raise VendingError(f"unknown slot {code}")
+        if slot.stock == 0:
+            raise VendingError(f"{slot.name} is sold out")
+        if m.credit < slot.price:
+            raise VendingError(f"need {slot.price - m.credit} more cents")
+        change = make_change(m.credit - slot.price, m._pool())
+        if change is None:
+            raise VendingError("cannot make exact change; cancel to get a refund")
+        m._settle(change, m.credit - slot.price)
+        slot.stock -= 1
+        m.sales += slot.price
+        m._state = Idle()
+        return slot.name, change
+    def cancel(self, m):
+        refund = make_change(m.credit, m._pool())
+        m._settle(refund, m.credit)
+        m._state = Idle()
+        return refund
+
+
+class VendingMachine:
+    def __init__(self, slots, coins):
+        self.slots, self.coins = dict(slots), dict(coins)   # slot code -> Slot, coin bank
+        self._inserted, self.credit, self.sales = {}, 0, 0
+        self._state = Idle()
+
+    @property
+    def state(self):
+        return self._state.name
+
+    # the public API only delegates to the current state
+    def insert(self, coin):
+        if coin not in COINS:
+            raise VendingError(f"rejected coin {coin}")
+        return self._state.insert(self, coin)
+    def select(self, code):
+        return self._state.select(self, code)
+    def cancel(self):
+        return self._state.cancel(self)
+
+    # helpers used by the states
+    def _accept(self, coin):
+        self._inserted[coin] = self._inserted.get(coin, 0) + 1
+        self.credit += coin
+
+    def _pool(self):
+        """Coins available to pay out: the bank plus what the customer just inserted."""
+        pool = dict(self.coins)
+        for c, n in self._inserted.items():
+            pool[c] = pool.get(c, 0) + n
+        return pool
+
+    def _settle(self, change, expected):
+        assert sum(c * n for c, n in change.items()) == expected
+        for c, n in self._inserted.items():
+            self.coins[c] = self.coins.get(c, 0) + n
+        for c, n in change.items():
+            self.coins[c] -= n
+        self._inserted, self.credit = {}, 0
+
+
+def new_machine():
+    return VendingMachine({"A1": Slot("cola", 125, 2), "A2": Slot("chips", 90, 1)}, {25: 4, 10: 4, 5: 4})
+
+
+def attempt(fn, *args):
+    try:
+        return fn(*args)
+    except VendingError as e:
+        print("  error:", e)
+
+
+m = new_machine()
+print("start:", m.state)
+attempt(m.select, "A1")
+m.insert(100); m.insert(25)
+print("after two coins:", m.state, "credit", m.credit)
+print("buy cola:", m.select("A1"), "->", m.state)
+m.insert(100)
+attempt(m.select, "A1")
+print("cancel:", m.cancel(), "->", m.state)
+
+# the bank is empty, so 100 for a 90 cent item needs 10 cents of change that does not exist
+m2 = VendingMachine({"A2": Slot("chips", 90, 3)}, {})
+m2.insert(100)
+attempt(m2.select, "A2")
+print("refund instead:", m2.cancel())
+
+m3 = new_machine()
+for _ in range(2):
+    m3.insert(100); m3.insert(25); m3.select("A1")
+m3.insert(100); m3.insert(25)
+attempt(m3.select, "A1")
+
+# random test: invariants after every one of 5000 operations
+rnd = random.Random(5)
+m4 = new_machine()
+held = lambda mm: sum(c * n for c, n in mm.coins.items()) + sum(c * n for c, n in mm._inserted.items())
+start, user_in, user_out, ok = held(m4), 0, 0, True
+for _ in range(5000):
+    op = rnd.choice(["coin", "coin", "select", "cancel"])
+    try:
+        if op == "coin":
+            c = rnd.choice(COINS + (2,))          # 2 is not an accepted coin
+            m4.insert(c)
+            user_in += c
+        elif op == "select":
+            _, change = m4.select(rnd.choice(["A1", "A2", "Z9"]))
+            user_out += sum(c * n for c, n in change.items())
+        else:
+            user_out += sum(c * n for c, n in m4.cancel().items())
+    except VendingError:
+        pass
+    ok &= m4.credit == sum(c * n for c, n in m4._inserted.items())
+    ok &= all(v >= 0 for v in m4.coins.values()) and all(s.stock >= 0 for s in m4.slots.values())
+    ok &= held(m4) == start + user_in - user_out
+print("invariants and money conservation hold over 5000 random operations:", ok, "| sales:", m4.sales)
+`} />
+
+## What the output shows
+
+- **Pressing select in `Idle`** is refused with "insert money first": the illegal action is rejected by the state, not by an `if` in the machine.
+- 100 plus 25 cents buys the 125-cent cola with **no change** and the machine returns to `Idle`.
+- Inserting only 100 cents for the 125-cent cola and selecting shows **"need 25 more cents"**: the failed selection **does not touch the credit**, so the customer could add a coin. Cancel instead returns exactly the 100 cent coin.
+- With an **empty coin bank**, 100 cents for a 90 cent item is refused with "cannot make exact change", the customer keeps their credit and a **cancel refunds the 100 cent coin**. The machine never pockets money it cannot give change for.
+- A **sold-out** slot is rejected the same way.
+- Over **5,000 random operations**, including invalid coins and unknown slots, the credit, stock, coin counts and **money conservation** invariants held after every step.
+
+## Extending the design
+
+| requirement | change |
+| --- | --- |
+| **A dispensing or jammed state** | add `Dispensing` and `OutOfService` state classes; a hardware callback triggers the transitions. Existing states are untouched |
+| **Card payments** | a `PaymentMethod` interface (coins, card) used by `HasMoney`; the machine charges the card instead of tracking credit ([strategy](/sd/oop-and-design-patterns/behavioral-patterns/)) |
+| **Restocking and an admin mode** | an `Admin` state reachable only with a key or code; restock and coin-refill operations live there |
+| **Remote monitoring** | publish events (sale, low stock, jam) to subscribers ([observer](/sd/oop-and-design-patterns/behavioral-patterns/)) and expose them as metrics ([observability](/sd/observability/logs-metrics-and-traces/)) |
+| **Promotions and dynamic prices** | a `PricingPolicy` consulted when the price is checked |
+| **Non-greedy coin systems** | replace `make_change` with dynamic programming (the [coin change](/cp/dynamic-programming/coin-change/) lesson) because greedy fails for some coin sets |
+| **Several machines** | each machine runs this model locally; a backend collects sales and stock, with idempotent reports ([idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)) |
+
+## Trade-offs
+
+<TradeOffs caption="Ways to model the machine" rows={[
+  { option: "State pattern (a class per state)", pros: "Each state is small; adding a state touches no existing state; illegal actions fail by default", cons: "More classes; transitions are spread across them", chooseWhen: "Several states with different rules (most real machines)" },
+  { option: "Enum plus if or switch in each method", pros: "Everything in one place; very short for two states", cons: "Every new state edits every method; easy to forget a case", chooseWhen: "Two or three states that will not grow" },
+  { option: "Transition table (state, event) to (next state, action)", pros: "Data driven; easy to verify and to visualise", cons: "Actions become indirect; harder with rich per-state data", chooseWhen: "Protocols and many events, generated or configurable machines" },
+  { option: "Greedy change", pros: "Simple and fast", cons: "Wrong for some coin systems; may fail when a different combination would work", chooseWhen: "Standard coin sets with known greedy behaviour" },
+  { option: "Dynamic programming change", pros: "Always finds a solution if one exists", cons: "More code, slower for large amounts", chooseWhen: "Unusual denominations or limited coin stock" },
+  { option: "Check first, then mutate", pros: "A failed sale leaves no partial state", cons: "Needs the checks to be complete and cheap", chooseWhen: "Always, for anything involving money" }
+]} />
+
+## Pitfalls
+
+- A giant `if state == ...` chain duplicated in every method.
+- **Mutating before validating**: taking the coins, then discovering there is no change.
+- Counting only the bank when making change and forgetting the coins the customer just inserted.
+- Returning a refund in coins you do not have, or in a different total than was inserted.
+- Letting `select` reduce the credit on a failed attempt.
+- States that hold copies of machine data that can go out of sync, instead of keeping the data in the machine.
+- Inventing states no one can observe, or omitting real hardware states (jam, door open) the product needs.
+- Using floats for money. Use integer cents.
+- No tests for the unhappy paths: sold out, short credit, no change, invalid coin.
+
+## What would you choose and why?
+
+The operator wants to add a card reader, a loyalty discount that changes the price per customer, and an "out of order" state that a technician can set remotely. Which of these are new states, which are new strategies, which are new events, and what would you test before shipping the change to ten thousand machines?
+
+## Quiz
+
+<Quiz id="sd-m28-vending-machine" tags={["lld", "case-study", "state-pattern", "vending-machine"]} questions={[
+  { type: "mcq", q: "What does the State pattern replace?", options: ["Inheritance", "Big if or switch chains on the current state repeated in every method", "The database", "Locks"], answer: 1, explain: "Each state class holds the behaviour for that state; the context delegates to the current state object." },
+  { type: "mcq", q: "Why does select check slot, stock, credit and change availability before changing anything?", options: ["It is faster", "So a failed sale leaves the machine and the customer's credit untouched", "Python requires it", "To avoid exceptions"], answer: 1, explain: "Validate first, then mutate: no partial transactions." },
+  { type: "predict", q: "The bank is empty. A customer inserts one 100 cent coin and selects an item that costs 90. What happens?", code: "# pool = bank (empty) + inserted {100: 1}\n# change needed = 10 cents; pool has no 10, 5 or 25 cent coins", options: ["The item is dispensed and the machine keeps 10 cents", "The sale is refused with an error and the 100 cent coin can be refunded", "The machine returns 100 cents and the item", "The machine crashes"], answer: 1, explain: "make_change returns None, so select raises before changing any state." },
+  { type: "multi", q: "Which are invariants the random test checks?", options: ["Credit equals the inserted coins of the session", "No coin count or stock goes negative", "Money in the machine equals the start amount plus coins inserted minus coins returned", "The cola is always in stock"], answer: [0, 1, 2], explain: "Invariants describe what must always be true, whatever the sequence of operations." },
+  { type: "mcq", q: "When does greedy change making fail?", options: ["Never", "For some coin systems, or when the preferred coin is out of stock but another combination would work", "Only for amounts above 100", "Only with floats"], answer: 1, explain: "Greedy is right for standard coin systems with unlimited coins; limited stock or odd denominations may need dynamic programming." },
+  { type: "mcq", q: "Why store money as integer cents?", options: ["It is shorter to type", "Floating point cannot represent most decimal fractions exactly, so sums drift", "Integers are faster to print", "The coin list requires it"], answer: 1, explain: "Use integers (or decimal types) for money to avoid rounding errors." }
+]} />
