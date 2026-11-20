@@ -1,0 +1,311 @@
+---
+title: "Case Study: Design a Metrics and Monitoring System"
+track: sd
+module: case-studies-data-and-transactions
+order: 4
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/observability/logs-metrics-and-traces", "sd/observability/slos-error-budgets-and-alerting", "sd/databases-2/sharding-and-partitioning", "sd/queues-and-streaming/kafka-rabbitmq-sqs"]
+tags: [case-study, monitoring, metrics, time-series-database, compression, downsampling, alerting, ingestion, cardinality]
+type: case-study
+furtherReading:
+  - title: "Pelkonen et al., Gorilla: A Fast, Scalable, In-Memory Time Series Database (VLDB 2015)"
+    url: https://www.vldb.org/pvldb/vol8/p1816-teller.pdf
+  - title: "Prometheus documentation, Storage (blocks, head, WAL, compaction)"
+    url: https://prometheus.io/docs/prometheus/latest/storage/
+  - title: "Prometheus documentation, Alerting rules (for, keep_firing_for) and Alertmanager"
+    url: https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/
+  - title: "Google SRE Book, Monitoring Distributed Systems"
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+---
+
+## The problem
+
+Design a **metrics and monitoring system** like Prometheus, Datadog or an internal platform: thousands of servers and services **emit numbers** (CPU, request counts, latencies, queue depths), the system **stores them as time series**, lets engineers **chart** them on dashboards and **query** them, and **alerts** the on-call person when something goes wrong.
+
+The [observability lesson](/sd/observability/logs-metrics-and-traces/) explained *what* to measure. This design is about **how the system that holds the measurements works**. It has unusual properties: it is **write-heavy** (millions of points per second, almost never updated), reads are **ranges over recent data**, the data is **highly compressible**, and it has a requirement most systems do not: it must keep working **when everything else is broken**, because that is exactly when you need it.
+
+## 1. Requirements
+
+**Functional**
+
+- **Collect** metrics from hosts, containers, applications and cloud services (counters, gauges, histograms), with **labels** (service, region, version).
+- **Store** them with configurable **retention** (for example high resolution for two weeks, coarse for years).
+- **Query**: select series by name and labels, aggregate (sum, average, rate, percentiles) over time ranges, power **dashboards**.
+- **Alert**: evaluate rules continuously and **notify** people (pager, chat, email) with grouping, silencing and routing.
+
+**Non-functional**
+
+- **High ingest throughput** (millions of points per second) with low delay (data visible in seconds).
+- **Fast queries**: a dashboard of 20 panels should load in a second or two.
+- **Efficient storage** (the data is huge but regular).
+- **Highly available**, especially **alerting**: the monitor must be more reliable than the systems it watches.
+- **Multi-tenant controls**: quotas and protection against runaway label cardinality.
+
+## 2. The data model
+
+A **time series** is identified by a **metric name plus a set of labels**, for example `http_requests_total{service="checkout", region="eu", status="500"}`, and consists of **points** `(timestamp, value)`. The three metric types:
+
+- **Counter**: only increases (requests served); you chart its **rate**. A reset (process restart) is detected as a drop.
+- **Gauge**: goes up and down (memory in use, queue length).
+- **Histogram**: counts of observations in buckets (latency), used to compute percentiles ([metrics lesson](/sd/observability/logs-metrics-and-traces/)).
+
+**Every distinct label combination is a separate series**, so the number of **active series** (the **cardinality**) drives cost far more than the number of points. A label such as `user_id` can create millions of series and sink the system.
+
+**Push or pull?** In a **pull** model (Prometheus) the monitoring system **scrapes** each target's `/metrics` endpoint on a schedule, using **service discovery** to find targets: the monitor controls the load, a down target is itself visible (the scrape fails), and targets need no knowledge of the monitor. In a **push** model (StatsD and many agents) targets send data to a collector: it suits short-lived jobs and networks where inbound connections are blocked, and lets agents batch and buffer, but the monitor must defend itself against floods and cannot tell "no data" from "down" as easily. Large systems use **both**: pull inside a cluster, push (via an agent) across boundaries and for batch jobs.
+
+## 3. Estimation
+
+Assume 10 million active series, one point per series every 10 seconds.
+
+<CodeRunner language="python" code={`series_count, interval = 10_000_000, 10
+points_per_sec = series_count / interval
+print(f"{series_count:,} active series, one point every {interval} s = {points_per_sec:,.0f} points per second")
+for name, bits in (("raw, 16 bytes a point", 128), ("compressed, about 1.4 bytes a point", 11)):
+    per_day = points_per_sec * 86400 * bits / 8 / 1e12
+    print(f"  {name}: {per_day:6.2f} TB a day, {per_day * 30:7.1f} TB for 30 days")
+rolled = series_count * (86400 / 60) * 4 * 8 / 1e12
+print(f"1-minute rollups (min, max, sum, count as 8-byte values): {rolled:5.2f} TB a day, {rolled * 365:5.1f} TB for a year")
+`} />
+
+One million points a second is large but very regular. Uncompressed it would be **about 1.4 TB a day (42 TB for 30 days)**. With time-series compression of about 1.4 bytes a point (the Gorilla paper reports roughly this on production data), it falls to **about 0.1 TB a day, 3.6 TB for 30 days**: the compression ratio decides whether the system fits on a handful of machines or hundreds. **Rollups** make long retention affordable: a year of one-minute rollups is about 170 TB for these 10 million series, and coarser tiers shrink it further.
+
+## 4. High-level design
+
+<Diagram kind="mermaid" code={`flowchart LR
+  T[Targets: hosts, apps, containers] -->|scrape| COL[Collectors and agents]
+  T -->|push| COL
+  COL -->|batched writes| LB[Load balancer]
+  LB --> ING[Ingestion nodes: validate, rate limit, cardinality limits]
+  ING --> Q[[Durable queue]]
+  Q --> TS1[(Time-series shard 1: WAL, head block, immutable blocks)]
+  Q --> TS2[(Time-series shard 2)]
+  Q --> TSN[(Time-series shard N)]
+  TS1 --> OBJ[(Object storage: long-term blocks and rollups)]
+  U[Dashboards and API clients] --> QF[Query frontend: split, cache, limit]
+  QF --> QE[Query engines]
+  QE --> TS1
+  QE --> TS2
+  QE --> OBJ
+  RE[Rule evaluators] --> QE
+  RE --> AM[Alert manager: group, dedupe, silence, route]
+  AM --> ON[Pager, chat, email]`} caption="Agents batch writes into ingestion nodes, a queue buffers them into sharded time-series stores, queries fan out through a caching frontend, and a separate rule evaluator feeds the alert manager" />
+
+**Ingestion.** Collectors **batch** many points into one request. Stateless **ingestion nodes** authenticate the tenant, **validate** names and labels, enforce **rate and cardinality limits** (reject or drop series beyond a quota, with a clear metric about what was dropped), and write to a **durable queue** ([Kafka-style logs](/sd/queues-and-streaming/kafka-rabbitmq-sqs/)) that absorbs bursts and decouples producers from storage. Writes are **idempotent**: the same `(series, timestamp)` arriving twice is deduplicated, so retries are safe.
+
+**Storage nodes.** The series space is **sharded by a hash of the series identity** ([sharding](/sd/databases-2/sharding-and-partitioning/)) and each shard is **replicated** (two or three copies, so the loss of a node loses no data). Within a node:
+
+1. A write goes to a **write-ahead log** (for crash recovery) and to an **in-memory "head" block** holding the most recent hours of data in compressed form.
+2. Periodically the head is **flushed to an immutable on-disk block** covering a time range (such as two hours), with an **index**.
+3. Background **compaction** merges small blocks into larger ones and applies retention.
+4. Old blocks move to **object storage** (cheap, durable; see [durability and tiering](/sd/storage/durability-backups-tiering/)), where queries can still read them.
+
+Because data arrives in time order and is almost never modified, this **append-only, block-oriented** layout is fast and simple, and recent data (what most queries read) is served from memory.
+
+## 5. Compression: why a time series is so cheap to store
+
+Two regularities make time series extremely compressible (the technique comes from Facebook's **Gorilla**):
+
+- **Timestamps** arrive at regular intervals. Store the **delta of deltas**: if samples come every 10 seconds, the second difference is almost always **0**, which costs **one bit**.
+- **Values** change little from one sample to the next. **XOR** each value (as a 64-bit float) with the previous one: identical values give 0 (one bit), and similar values give XORs with long runs of zero bits at both ends, so only the **few meaningful middle bits** are stored.
+
+<CodeRunner language="python" code={`import random, struct
+
+def ts_bits(timestamps):
+    bits, prev_delta = 64, None                        # the first timestamp is stored in full
+    for i in range(1, len(timestamps)):
+        delta = timestamps[i] - timestamps[i - 1]
+        if prev_delta is None:
+            bits += 14                                 # the first delta
+        else:
+            dod = delta - prev_delta                   # delta of deltas: zero for perfectly regular samples
+            if dod == 0:
+                bits += 1
+            elif -63 <= dod <= 64:
+                bits += 2 + 7
+            elif -255 <= dod <= 256:
+                bits += 3 + 9
+            elif -2047 <= dod <= 2048:
+                bits += 4 + 12
+            else:
+                bits += 4 + 32
+        prev_delta = delta
+    return bits
+
+def to_bits(x):
+    return struct.unpack(">Q", struct.pack(">d", x))[0]
+
+def value_bits(values):
+    bits, prev, prev_window = 64, to_bits(values[0]), None      # the first value is stored in full
+    for v in values[1:]:
+        cur = to_bits(v)
+        x = prev ^ cur
+        if x == 0:
+            bits += 1                                            # identical to the previous value
+        else:
+            lead = min(64 - x.bit_length(), 31)
+            trail = (x & -x).bit_length() - 1
+            meaningful = 64 - lead - trail
+            if prev_window and lead >= prev_window[0] and trail >= prev_window[1]:
+                bits += 2 + (64 - prev_window[0] - prev_window[1])   # reuse the previous window of meaningful bits
+            else:
+                bits += 2 + 5 + 6 + meaningful                         # a new window: its lengths plus the meaningful bits
+                prev_window = (lead, trail)
+        prev = cur
+    return bits
+
+rng = random.Random(3)
+n, t0 = 3600, 1_700_000_000
+series = {
+    "a constant gauge (a feature flag, a version)": [42.0] * n,
+    "an integer request counter": [float(1000 + 7 * i + rng.randint(0, 5)) for i in range(n)],
+    "a noisy gauge (CPU utilisation %)": [50 + rng.gauss(0, 3) for _ in range(n)],
+    "a smooth gauge rounded to 2 decimals": [round(20 + 5 * ((i // 60) % 3) + rng.random() * 0.02, 2) for i in range(n)],
+}
+timestamps = [t0 + 10 * i + (rng.randint(-1, 1) if rng.random() < 0.05 else 0) for i in range(n)]   # every 10 s, a little jitter
+print(f"{n} points per series, timestamps every 10 s with a little jitter:")
+for name, values in series.items():
+    bits = ts_bits(timestamps) + value_bits(values)
+    print(f"  {name:46s} {bits / n:6.2f} bits per point ({128 / (bits / n):4.1f}x smaller than 128 bits)")
+`} />
+
+The result depends heavily on the data:
+
+- A **constant gauge** costs under **3 bits per point** (45 times smaller than the 128 raw bits).
+- An **integer counter** costs about **15 bits** (8.5 times smaller).
+- A **smooth gauge rounded to two decimals** costs about **36 bits** (3.6 times smaller).
+- A **noisy floating-point gauge** costs about **56 bits** (only 2.3 times smaller): random low-order digits make consecutive XORs full of meaningful bits.
+
+The lesson: compression is great on **regular** data and modest on **noisy** floats, and instrumentation choices matter. **Rounding or quantising values** (CPU to 0.1%, latency to a millisecond) can multiply the savings. Averaged over a real fleet, systems report on the order of 1 to 1.5 bytes a point, which is where the estimate above came from. (This sketch estimates bit counts; a real encoder writes the bits into a stream.)
+
+## 6. Indexing and querying
+
+A query like `sum by (service) (rate(http_requests_total{region="eu", status=~"5.."}[5m]))` must find the matching series fast. The index is an **inverted index from labels to series ids**, the same idea as in [search systems](/sd/search-systems/inverted-indexes-and-text-analysis/): each `label=value` maps to a **sorted list of series ids** (a posting list); label matchers are answered by **intersecting** those lists. Then the engine reads the compressed chunks for those series in the time range, **decompresses** them and computes the aggregation.
+
+Dashboards issue **many similar queries repeatedly** over sliding windows, so the **query frontend**:
+
+- **splits** a long time range into aligned sub-ranges (days) and **caches** each result, so refreshing a dashboard only computes the newest slice;
+- enforces **limits** (maximum series, samples and time range per query) to protect storage from accidental heavy queries;
+- runs queries across shards **in parallel** and merges partial aggregates;
+- supports **recording rules**: precompute expensive, commonly used aggregations (for example a per-service request rate) as new series, so dashboards read a cheap series instead of recomputing from thousands.
+
+## 7. Retention and downsampling
+
+Nobody needs 10-second resolution from two years ago, and keeping it would cost enormous storage. Use **tiers**: for example raw data for 15 days, 1-minute rollups for 90 days, 1-hour rollups for 2 years. A **rollup** is only correct if it stores **enough to be combined**. The classic mistake is storing the **average** of each interval and then averaging averages.
+
+<CodeRunner language="python" code={`import random
+
+random.seed(4)
+minute_counts = [random.choice([1, 1, 2, 500]) for _ in range(60)]                          # requests per minute: mostly tiny, one busy minute
+minute_avg_latency = [random.uniform(40, 60) if c < 100 else random.uniform(180, 220) for c in minute_counts]
+sums = [c * a for c, a in zip(minute_counts, minute_avg_latency)]
+true_mean = sum(sums) / sum(minute_counts)
+mean_of_means = sum(minute_avg_latency) / len(minute_avg_latency)
+print(f"average latency over one hour, computed from the rollups:")
+print(f"  correct, from sum and count      : {true_mean:6.1f} ms")
+print(f"  wrong, the average of the averages: {mean_of_means:6.1f} ms")
+`} />
+
+The hour contained one busy minute with 500 slow requests and many minutes with one or two fast ones. The **correct average from sums and counts is about 192 ms**; **averaging the per-minute averages gives about 76 ms**, weighting a minute with one request the same as a minute with 500. So rollups keep **sum, count, min and max**, and for latency they keep **histogram bucket counts**, which add correctly across time and across series (percentiles are then estimated from the merged buckets; you can never average percentiles).
+
+## 8. Alerting
+
+Alerting is a separate, **continuously running** component: a **rule evaluator** runs each alert rule on a schedule (every 15 to 60 seconds), asks the query engine for the current value and decides whether the alert is **pending**, **firing** or **resolved**. An **alert manager** then **groups** related alerts (so one bad cluster sends one page, not 400), **deduplicates** repeats, applies **silences** (planned maintenance) and **inhibition** (do not page about the service if the whole datacenter alert is already firing), and **routes** by labels to the right team and channel.
+
+The central design choice for a rule is **how long a condition must hold before alerting**. The simulation uses a noisy CPU metric evaluated once a minute, with one real 40-minute incident starting at minute 600, and counts alerts for different required durations over an 80% threshold.
+
+<CodeRunner language="python" code={`import random
+
+random.seed(9)
+cpu = []
+for t in range(2000):                                             # one evaluation per minute
+    base = 60 + random.gauss(0, 8)
+    if 600 <= t < 640:
+        base += 30                                                # a real incident lasting 40 minutes
+    cpu.append(base)
+
+def alerts(for_minutes, threshold=80):
+    fired, run, active = [], 0, False
+    for t, v in enumerate(cpu):
+        run = run + 1 if v > threshold else 0                     # consecutive evaluations over the threshold
+        if run >= max(1, for_minutes) and not active:
+            active = True
+            fired.append(t)
+        if v <= threshold and active:
+            active = False
+    return fired
+
+print("CPU alert on a noisy metric, one real 40-minute incident starting at minute 600:")
+for f in (1, 3, 5, 10):
+    fired = alerts(f)
+    real = [t for t in fired if 600 <= t < 660]
+    print(f"  fire after {f:2d} consecutive minutes over 80%: {len(fired):3d} alerts, {len(fired) - len(real):3d} outside the incident, incident noticed after {real[0] - 600 if real else 'never'} min")
+`} />
+
+- Alerting the **instant** the metric crosses 80% raised **23 alerts, 18 of them with no incident under way**: pure noise that teaches people to ignore the pager.
+- Requiring **3 consecutive minutes** removed every false alert and still noticed the real incident after **2 minutes**.
+- Requiring **5 minutes** noticed it after 9 minutes, and **10 minutes** after 14: a longer wait is quieter but slower.
+- Notice that even the good settings produced **several alerts inside the one incident**: the metric dipped below the threshold briefly and re-fired. Real systems add **hysteresis** (a separate lower threshold to resolve, or a `keep_firing_for` hold) so one incident is one alert.
+
+This is the same trade-off the [SLO lesson](/sd/observability/slos-error-budgets-and-alerting/) resolves more rigorously with burn rates: **alert on symptoms users feel, with a duration that balances speed against noise**.
+
+**Who watches the watcher?** The alerting path must survive the failures it reports:
+
+- Run evaluators and the alert manager **redundantly across failure domains** (the alert manager instances gossip to deduplicate).
+- Keep a **separate, simple "dead-man's switch"**: an alert that is **always firing**, sent to an **independent external service**; if the heartbeat stops, that service pages you that monitoring itself is down.
+- Do not host the monitoring system only inside the cluster it monitors.
+
+## 9. Reliability and scale
+
+- **Agents buffer locally** (on disk) when the backend is unreachable and **backfill** when it returns, so short outages do not become holes in graphs. Timestamps come from the sender; **tolerate out-of-order and late samples** within a window.
+- **Backpressure and load shedding**: if storage falls behind, the queue absorbs bursts; beyond that, drop **low-priority** data first and keep alert-critical metrics.
+- **Cardinality protection**: limit active series per tenant and per metric, reject new series beyond the limit, and alert the owner. One bad deploy that adds a user id label can otherwise take down monitoring for everyone.
+- **Hierarchy and federation**: regional clusters hold detailed local data; a **global view** queries them or receives selected rollups, so a region's problems cannot overload the global system.
+- **Long-term storage in object storage** with a query layer that reads blocks directly keeps cost low and scales retention almost independently of the cluster size.
+- **Multi-tenancy**: authentication, per-tenant quotas for ingestion rate, series, query cost and retention; isolate noisy neighbours.
+- **Operating it**: monitor the monitoring system (ingest lag, dropped samples, query latency, compaction backlog, WAL size, series count) with an **independent, minimal** setup.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "Pull (scrape) model", pros: "The monitor controls load; a failed scrape shows a target is down; simple targets", cons: "Needs service discovery and network reachability; awkward for short-lived jobs", chooseWhen: "Long-running services inside one network or cluster" },
+  { option: "Push model", pros: "Works for batch jobs and across firewalls; agents can batch", cons: "Can flood the backend; harder to detect 'no data'", chooseWhen: "Short-lived jobs and multi-network setups" },
+  { option: "Durable queue before storage", pros: "Absorbs bursts; storage can lag or restart", cons: "Another system to run; added latency", chooseWhen: "Large scale and bursty ingestion" },
+  { option: "Direct writes to storage", pros: "Simplest; lowest latency", cons: "Storage overload drops data", chooseWhen: "Small systems" },
+  { option: "Gorilla-style compression", pros: "Order-of-magnitude savings on regular data", cons: "Little gain on noisy floats; CPU to encode", chooseWhen: "Always for time-series blocks; quantise noisy values" },
+  { option: "Store only averages in rollups", pros: "Smallest", cons: "Wrong results when combined; no percentiles", chooseWhen: "Never; keep sum, count, min, max or histograms" },
+  { option: "High retention at full resolution", pros: "Maximum detail", cons: "Storage cost grows linearly with time", chooseWhen: "A short window only" },
+  { option: "Tiered retention with rollups", pros: "Affordable long history", cons: "Old data is coarse", chooseWhen: "The default" },
+  { option: "Alert on a single threshold crossing", pros: "Fastest detection", cons: "Noisy; alert fatigue", chooseWhen: "Rarely; for catastrophic conditions only" },
+  { option: "Alert with a duration, hysteresis and burn rates", pros: "Quiet and reliable", cons: "Slightly slower to notice", chooseWhen: "Almost always" },
+  { option: "Self-hosted open source stack", pros: "Control and cost at scale", cons: "You operate and scale it", chooseWhen: "Large, steady volumes and strong platform teams" },
+  { option: "Managed monitoring service", pros: "Little operations work", cons: "Cost grows quickly with series and data volume", chooseWhen: "Small and medium teams" }
+]} />
+
+## Pitfalls
+
+- Unbounded label values (user ids, request ids, URLs) creating millions of series.
+- Rollups that keep averages instead of sums and counts.
+- Averaging percentiles across hosts or time windows.
+- Alerts that fire on a single sample, producing pager fatigue.
+- Monitoring that runs only inside the failure domain it watches, with no external heartbeat.
+- No local buffering in agents, so every backend blip becomes missing data.
+- Dashboards that run raw, heavy queries on every refresh instead of recording rules and caching.
+- No query limits, so one wide query degrades everyone's dashboards.
+- Ignoring clock skew and late data.
+- Keeping everything at full resolution forever.
+
+## What would you choose and why?
+
+Your platform serves 2,000 teams, and the bill and storage growth are alarming: the top 20 metrics account for 60% of all series, and two teams' dashboards generate half of the query load. What do you measure first, which limits and quotas do you introduce, which data do you downsample or stop collecting, and how do you give teams cost visibility without making them afraid to instrument their code?
+
+## Quiz
+
+<Quiz id="sd-m18-metrics-monitoring" tags={["case-study", "monitoring", "time-series", "alerting", "downsampling"]} questions={[
+  { type: "mcq", q: "What drives the cost of a metrics system most?", options: ["The number of dashboards", "The number of active time series (label cardinality), more than the number of points", "The length of metric names", "The number of alert rules"], answer: 1, explain: "Each distinct label combination is a separate series to index and store; one unbounded label can multiply the cost." },
+  { type: "mcq", q: "Why are time-series timestamps stored as delta of deltas?", options: ["To hide them", "Samples arrive at regular intervals, so the second difference is almost always zero and costs one bit", "To sort them", "To make them human readable"], answer: 1, explain: "Regular sampling makes the change in the interval nearly constant." },
+  { type: "predict", q: "One minute had 1 request averaging 50 ms and another had 500 requests averaging 200 ms. What is the correct overall average latency (to the nearest ms), from sums and counts?", code: "c1, a1, c2, a2 = 1, 50, 500, 200\nprint(round((c1 * a1 + c2 * a2) / (c1 + c2)))", options: ["75", "125", "200", "250"], answer: 2, explain: "(50 + 100,000) / 501 is about 200 ms, while the average of the two averages (125 ms) would be wrong." },
+  { type: "multi", q: "Which are sound practices for the alerting path?", options: ["Require the condition to hold for a duration before firing", "Group and deduplicate alerts before paging", "Run a dead-man's switch to an independent service", "Host the only alerting system inside the cluster it monitors"], answer: [0, 1, 2], explain: "The monitor must survive the failures it reports, so part of it must live outside that failure domain." },
+  { type: "mcq", q: "Why does the query frontend split and cache long time ranges?", options: ["To shorten metric names", "Dashboards refresh repeatedly over sliding windows, so only the newest slice needs recomputation", "To remove series", "To compress timestamps"], answer: 1, explain: "Aligned sub-range results are reusable across refreshes and users." },
+  { type: "mcq", q: "What must a correct rollup store so intervals can be combined?", options: ["Only the average", "Sum, count, min and max (and histogram buckets for latency)", "Only the last value", "Only the maximum"], answer: 1, explain: "Sums and counts combine exactly; averages and percentiles do not." }
+]} />
