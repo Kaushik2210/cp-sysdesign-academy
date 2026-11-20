@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 207 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 208 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -70,7 +70,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 15 Security | Complete (4: passwords, sessions and MFA; tokens, OAuth 2.0 and JWT; TLS, encryption at rest and key management; web and API attacks. No lesson on secure software supply chains or cloud IAM yet) | 4 |
 | 16 Observability and reliability | Complete (4: logs, metrics and traces; SLOs, error budgets and burn-rate alerts; safe deployments, canaries and feature flags; backups, disaster recovery and chaos engineering. No incident-management or capacity-testing lesson yet) | 4 |
 | 17 Case studies: core services | Partial (9: URL shortener, distributed key-value store, chat system, notification system, news feed, web crawler, payment system, video streaming, ride-hailing; no maps navigation or e-commerce case study yet) | 9 |
-| 18 Case studies: data and transactions | Partial (1: ticket booking; no file sync, typeahead or metrics-system case study yet) | 1 |
+| 18 Case studies: data and transactions | Partial (2: ticket booking, search autocomplete; no file sync or metrics-system case study yet) | 2 |
 | 19-28 (more Level 3 case studies, Level 4 LLD) | Planned | 0 |
 
 ## Known gaps and caveats
