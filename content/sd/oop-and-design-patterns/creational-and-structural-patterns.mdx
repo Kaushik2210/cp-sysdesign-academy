@@ -1,0 +1,396 @@
+---
+title: Creational and Structural Design Patterns
+track: sd
+module: oop-and-design-patterns
+order: 2
+difficulty: medium
+estMinutes: 50
+prerequisites: ["sd/oop-and-design-patterns/solid-principles-in-practice"]
+tags: [lld, design-patterns, factory, builder, singleton, adapter, decorator, facade, proxy]
+type: lesson
+furtherReading:
+  - title: "Gamma, Helm, Johnson, Vlissides, Design Patterns: Elements of Reusable Object-Oriented Software (the 'Gang of Four' book)"
+    url: https://en.wikipedia.org/wiki/Design_Patterns
+  - title: "Refactoring Guru, Design patterns catalog"
+    url: https://refactoring.guru/design-patterns/catalog
+  - title: "Python documentation, dataclasses (frozen instances for immutable builders)"
+    url: https://docs.python.org/3/library/dataclasses.html
+  - title: "Python documentation, functools.lru_cache and decorators"
+    url: https://docs.python.org/3/library/functools.html
+---
+
+## Intuition
+
+A **design pattern** is a named, reusable solution to a problem that keeps showing up in object-oriented code. It is **not a library** you import and not a template you paste. It is a **shared vocabulary**: saying "this is an adapter around the old billing API" tells a teammate the shape of the code in five words.
+
+The classic catalogue (from the "Gang of Four" book) has three families:
+
+- **Creational** patterns control **how objects are made** (factory, builder, singleton).
+- **Structural** patterns control **how objects are combined** (adapter, decorator, facade, proxy).
+- **Behavioural** patterns control **how objects communicate** (strategy, observer, state, command; covered in the next lesson).
+
+Two cautions apply throughout. A pattern is only worth using when it **solves a problem you actually have**: patterns used for decoration produce over-engineered code. And in a language like Python, with first-class functions, modules and duck typing, several patterns shrink to a few lines or disappear. Each section below shows the idea in runnable code and says when **not** to use it.
+
+## Factory (creational)
+
+**Problem:** the code that **uses** an object should not need to know **which concrete class** to build, or how. Putting `if channel == "email": ... elif channel == "sms": ...` at every call site spreads that knowledge everywhere.
+
+**Idea:** centralise creation behind a function or class (a **factory**) that returns objects satisfying a common interface. A **registry**-based factory keeps it open to extension (the [Open/Closed Principle](/sd/oop-and-design-patterns/solid-principles-in-practice/)): new types register themselves without editing the factory.
+
+<CodeRunner language="python" code={`from abc import ABC, abstractmethod
+
+class Notifier(ABC):
+    @abstractmethod
+    def send(self, to: str, message: str) -> str: ...
+
+class EmailNotifier(Notifier):
+    def send(self, to, message): return f"email to {to}: {message}"
+
+class SmsNotifier(Notifier):
+    def send(self, to, message): return f"sms to {to}: {message[:20]}"
+
+_REGISTRY = {}
+
+def register(channel):
+    def wrap(cls):
+        _REGISTRY[channel] = cls
+        return cls
+    return wrap
+
+register("email")(EmailNotifier)
+register("sms")(SmsNotifier)
+
+def create_notifier(channel: str) -> Notifier:
+    try:
+        return _REGISTRY[channel]()
+    except KeyError:
+        raise ValueError(f"unknown channel: {channel}")
+
+# new type added without touching create_notifier or any caller
+@register("push")
+class PushNotifier(Notifier):
+    def send(self, to, message): return f"push to {to}: {message}"
+
+for ch in ("email", "sms", "push"):
+    print(create_notifier(ch).send("ada", "your order has shipped"))
+try:
+    create_notifier("fax")
+except ValueError as e:
+    print("error:", e)
+`} />
+
+**Use it** when creation logic varies or is complex, or when callers should depend only on an interface. **Skip it** when there is a single type: a plain constructor call is clearer. In Python a dictionary of classes or functions is often the entire factory.
+
+## Builder (creational)
+
+**Problem:** an object has **many optional parameters**, or must satisfy rules before it is valid. A constructor with ten positional arguments (`Request(url, "POST", None, None, 30, True, ...)`) is unreadable and easy to get wrong.
+
+**Idea:** a **builder** collects settings step by step with readable method names, **validates** at the end, and produces an **immutable** result. In Python, keyword arguments and `dataclasses` cover many cases; a builder earns its place when there are cross-field rules or multi-step construction.
+
+<CodeRunner language="python" code={`from dataclasses import dataclass, field
+
+@dataclass(frozen=True)                         # the finished object cannot be changed
+class HttpRequest:
+    method: str
+    url: str
+    headers: tuple = ()
+    body: str = ""
+    timeout: float = 10.0
+
+class RequestBuilder:
+    def __init__(self, url):
+        self._url, self._method, self._headers, self._body, self._timeout = url, "GET", {}, "", 10.0
+    def method(self, m):
+        self._method = m.upper(); return self
+    def header(self, k, v):
+        self._headers[k] = v; return self
+    def json_body(self, text):
+        self._body = text
+        self._headers["Content-Type"] = "application/json"; return self
+    def timeout(self, seconds):
+        self._timeout = seconds; return self
+    def build(self):
+        if self._body and self._method == "GET":
+            raise ValueError("a GET request cannot have a body")      # a cross-field rule, checked in one place
+        if self._timeout <= 0:
+            raise ValueError("timeout must be positive")
+        return HttpRequest(self._method, self._url, tuple(sorted(self._headers.items())), self._body, self._timeout)
+
+req = RequestBuilder("https://api.example.com/orders").method("post").json_body('{"item": 42}').timeout(5).build()
+print(req)
+try:
+    RequestBuilder("https://api.example.com/orders").json_body("{}").build()
+except ValueError as e:
+    print("rejected:", e)
+try:
+    req.timeout = 1
+except Exception as e:
+    print("immutable result:", type(e).__name__)
+`} />
+
+**Use it** for objects with many optional parts or validation across fields. **Skip it** when keyword arguments and defaults are enough.
+
+## Singleton (creational), and why to be careful
+
+**Problem:** exactly **one instance** of something must exist (a configuration, a connection pool, a clock).
+
+**Idea:** the class (or module) ensures there is only one instance and offers global access to it. The cost is **global mutable state**: any code can change it, tests leak into one another, and dependencies become invisible. Often a better solution is to **create one instance in `main` and pass it in** (dependency injection) so only the wiring code knows there is "one".
+
+<CodeRunner language="python" code={`import threading
+
+# A thread-safe singleton (double-checked locking). Python modules are already singletons, so this is rarely needed.
+class Config:
+    _instance = None
+    _lock = threading.Lock()
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance.values = {}
+        return cls._instance
+
+a, b = Config(), Config()
+print("same object:", a is b)
+
+# The danger: hidden shared state leaks between 'independent' tests.
+def test_one():
+    Config().values["feature_x"] = True
+    return Config().values.get("feature_x", False)
+
+def test_two():
+    # this test assumes a fresh configuration, but test_one already changed the global
+    return Config().values.get("feature_x", False)
+
+print("test_one sees:", test_one(), "| test_two (expects False, a fresh config) sees:", test_two())
+
+# The alternative: create one instance at the entry point and pass it in. No global, no leak.
+class Service:
+    def __init__(self, config): self.config = config
+    def enabled(self, name): return self.config.get(name, False)
+
+print("injected, isolated:", Service({"feature_x": True}).enabled("feature_x"), Service({}).enabled("feature_x"))
+`} />
+
+The second test failed to see a fresh configuration because of **leaked global state**. **Use** a singleton for genuinely process-wide, effectively immutable resources (a logger). **Prefer** one instance created at startup and injected.
+
+## Adapter (structural)
+
+**Problem:** you must use a class whose **interface does not match** the one your code expects (a third-party SDK, a legacy system), and you cannot or should not change it.
+
+**Idea:** wrap it in an **adapter** that implements **your** interface and translates the calls. The rest of the code never learns the foreign API exists, which also keeps vendor lock-in out of your domain.
+
+<CodeRunner language="python" code={`from abc import ABC, abstractmethod
+
+class PaymentGateway(ABC):                      # the interface your application wants
+    @abstractmethod
+    def charge(self, amount_cents: int, currency: str, token: str) -> bool: ...
+
+class LegacyBillingApi:                         # a vendor class you cannot change: different names, units and return type
+    def make_payment(self, dollars: float, card_ref: str) -> dict:
+        if dollars > 1000:
+            return {"status": "DECLINED", "code": 51}
+        return {"status": "OK", "txn": "L-1001"}
+
+class LegacyBillingAdapter(PaymentGateway):
+    def __init__(self, api: LegacyBillingApi):
+        self.api = api
+    def charge(self, amount_cents, currency, token):
+        if currency != "USD":
+            raise ValueError("the legacy API supports only USD")
+        result = self.api.make_payment(amount_cents / 100, token)       # translate units and names
+        return result["status"] == "OK"                                  # translate the response
+
+def checkout(gateway: PaymentGateway, cents):
+    return "paid" if gateway.charge(cents, "USD", "tok_123") else "declined"
+
+gw = LegacyBillingAdapter(LegacyBillingApi())
+print(checkout(gw, 4999), checkout(gw, 250_000))
+`} />
+
+**Use it** at integration boundaries. Replacing the vendor later changes one class.
+
+## Decorator (structural)
+
+**Problem:** add behaviour (logging, caching, retries, compression) to an object **without changing it** and without a combinatorial explosion of subclasses (`LoggingCachingRetryingRepository`).
+
+**Idea:** a **decorator** wraps an object that has the **same interface**, adds behaviour around the delegated call, and can be **stacked**. (Python's `@decorator` syntax on functions is the same idea in a lighter form.)
+
+<CodeRunner language="python" code={`import time
+from abc import ABC, abstractmethod
+
+class ProductRepository(ABC):
+    @abstractmethod
+    def get(self, product_id: int) -> str: ...
+
+class DatabaseRepository(ProductRepository):
+    def __init__(self):
+        self.calls = 0
+    def get(self, product_id):
+        self.calls += 1
+        if self.calls == 1:
+            raise ConnectionError("transient failure")      # the first call fails, as a flaky network would
+        return f"product-{product_id}"
+
+class RetryingRepository(ProductRepository):               # a decorator: same interface, wraps another repository
+    def __init__(self, inner, attempts=3):
+        self.inner, self.attempts = inner, attempts
+    def get(self, product_id):
+        for attempt in range(self.attempts):
+            try:
+                return self.inner.get(product_id)
+            except ConnectionError:
+                if attempt == self.attempts - 1:
+                    raise
+        
+class CachingRepository(ProductRepository):                 # another decorator, independent of the first
+    def __init__(self, inner):
+        self.inner, self.cache, self.hits = inner, {}, 0
+    def get(self, product_id):
+        if product_id in self.cache:
+            self.hits += 1
+            return self.cache[product_id]
+        self.cache[product_id] = self.inner.get(product_id)
+        return self.cache[product_id]
+
+db = DatabaseRepository()
+repo = CachingRepository(RetryingRepository(db))           # stack them in any order, per environment
+print(repo.get(7), repo.get(7), repo.get(7))
+print(f"database calls: {db.calls} (1 failed + 1 retried success), cache hits: {repo.hits}")
+`} />
+
+**Use it** for cross-cutting behaviour. Each decorator is small, testable on its own and composable. Beware of **order** (caching outside retrying behaves differently from the reverse) and of stacks so deep nobody can trace a call.
+
+## Facade (structural)
+
+**Problem:** a subsystem has **many classes and a tricky order of calls**, and most callers want to do one simple thing.
+
+**Idea:** provide a **facade**: a small class with a simple interface that coordinates the subsystem. Callers use the facade; advanced users can still reach the parts.
+
+<CodeRunner language="python" code={`class Inventory:
+    def __init__(self): self.stock = {"book": 3}
+    def reserve(self, item, n):
+        if self.stock.get(item, 0) < n: raise RuntimeError(f"not enough {item}")
+        self.stock[item] -= n
+    def release(self, item, n): self.stock[item] += n
+
+class Payments:
+    def charge(self, amount): return f"charged {amount}"
+
+class Shipping:
+    def schedule(self, item, address): return f"{item} to {address}"
+
+class OrderFacade:
+    """One simple call that hides the sequence and the cleanup rules of three subsystems."""
+    def __init__(self, inventory, payments, shipping):
+        self.inventory, self.payments, self.shipping = inventory, payments, shipping
+    def place_order(self, item, qty, address, price):
+        self.inventory.reserve(item, qty)
+        try:
+            receipt = self.payments.charge(price * qty)
+            label = self.shipping.schedule(item, address)
+        except Exception:
+            self.inventory.release(item, qty)               # the facade owns the compensation logic
+            raise
+        return receipt, label
+
+shop = OrderFacade(Inventory(), Payments(), Shipping())
+print(shop.place_order("book", 2, "12 Lake Road", 15))
+try:
+    shop.place_order("book", 5, "12 Lake Road", 15)
+except RuntimeError as e:
+    print("failed cleanly:", e, "| stock left:", shop.inventory.stock)
+`} />
+
+**Use it** to give a clean entry point to a messy area (this is also how an API gateway or a service client library behaves). Do not let a facade grow into a "god object" holding all the logic.
+
+## Proxy (structural)
+
+**Problem:** control **access** to an object: create it only when needed (lazy loading), check permissions, count or log calls, or hide that it is remote.
+
+**Idea:** a **proxy** has the **same interface** as the real object and stands in for it, deciding whether and when to forward each call. (A decorator **adds behaviour**; a proxy **controls access**, though in code they look alike.)
+
+<CodeRunner language="python" code={`class Report:
+    """An expensive object: loading it takes a long time."""
+    loads = 0
+    def __init__(self, name):
+        Report.loads += 1
+        self.name, self.text = name, f"contents of {name}"
+    def read(self): return self.text
+
+class ReportProxy:
+    """Same interface. Loads lazily, and checks a permission before every read."""
+    def __init__(self, name, user_roles):
+        self.name, self.user_roles, self._real = name, user_roles, None
+    def read(self):
+        if "analyst" not in self.user_roles:
+            raise PermissionError("analyst role required")
+        if self._real is None:
+            self._real = Report(self.name)                  # created only on first use
+        return self._real.read()
+
+p = ReportProxy("q3-sales", {"analyst"})
+print("created the proxy; real loads so far:", Report.loads)
+print(p.read(), "| loads:", Report.loads)
+print(p.read(), "| loads:", Report.loads, "(cached after the first read)")
+try:
+    ReportProxy("q3-sales", {"intern"}).read()
+except PermissionError as e:
+    print("blocked:", e, "| loads:", Report.loads)
+`} />
+
+**Use it** for lazy loading, access control, remote objects (an RPC stub is a proxy) and rate limiting.
+
+## Choosing and combining patterns
+
+| situation | likely pattern |
+| --- | --- |
+| callers should not know which class to build | factory |
+| many optional fields or cross-field validation | builder |
+| need exactly one shared instance | singleton, or better, injection of one instance |
+| foreign interface must fit yours | adapter |
+| add behaviour without changing a class | decorator |
+| simplify a complicated subsystem | facade |
+| control or defer access to an object | proxy |
+
+Real designs combine them: a **factory** builds a **decorated** repository (cache over retries over database) behind a **facade**, with an **adapter** at the vendor boundary.
+
+## Trade-offs
+
+<TradeOffs caption="Using design patterns" rows={[
+  { option: "Plain constructors and functions", pros: "Simplest, most readable", cons: "Creation and variation logic spread across callers as it grows", chooseWhen: "One type, few options" },
+  { option: "Factory or registry", pros: "One place to add types; callers stay generic", cons: "Indirection; registries can hide dependencies", chooseWhen: "Several related implementations chosen at run time" },
+  { option: "Builder", pros: "Readable construction and central validation", cons: "More code than keyword arguments", chooseWhen: "Many optional or interdependent fields" },
+  { option: "Global singleton", pros: "Convenient access", cons: "Hidden global state; hard to test", chooseWhen: "Truly process-wide, effectively immutable resources" },
+  { option: "Injected single instance", pros: "Testable, explicit", cons: "Wiring code", chooseWhen: "Almost always instead of a singleton" },
+  { option: "Adapter", pros: "Isolates vendor or legacy interfaces", cons: "An extra class per integration", chooseWhen: "Any boundary you may need to replace" },
+  { option: "Decorator stack", pros: "Composable cross-cutting behaviour", cons: "Order matters; deep stacks are hard to debug", chooseWhen: "Caching, retries, metrics, auth around a service" },
+  { option: "Facade", pros: "Simple entry point", cons: "Can become a god object", chooseWhen: "Complex subsystems with common use cases" },
+  { option: "Proxy", pros: "Lazy, protected or remote access behind the same interface", cons: "Extra indirection and a place for subtle bugs", chooseWhen: "Expensive, sensitive or remote objects" }
+]} />
+
+## Pitfalls
+
+- Using a pattern because it exists rather than because the code has the problem it solves.
+- Factories for a single class, builders for three-field objects, facades that merely forward calls.
+- Singletons used as a global bag of mutable state.
+- Decorators whose order silently changes behaviour (cache before or after retry).
+- Adapters that leak the foreign interface's types and exceptions into your domain.
+- Proxies that forget to preserve the interface contract (new surprises for callers).
+- Naming classes after the pattern (`UserFactoryManagerHelper`) instead of the domain.
+- Forgetting that Python's functions, modules and dictionaries often replace a whole class hierarchy.
+
+## What would you choose and why?
+
+A notification service must send through two vendors (one with a clunky SOAP-style API), retry on transient failures, cache template lookups, and expose one simple `notify(user, event)` call to 30 other teams. Which patterns would you use and where do they sit relative to each other? Which would you deliberately **not** use, and why?
+
+## Quiz
+
+<Quiz id="sd-m27-structural-creational-patterns" tags={["lld", "design-patterns", "factory", "adapter", "decorator"]} questions={[
+  { type: "mcq", q: "What problem does the Adapter pattern solve?", options: ["Creating objects lazily", "Making a class with an incompatible interface usable through the interface your code expects", "Adding caching", "Ensuring one instance"], answer: 1, explain: "The adapter translates calls and results between your interface and the foreign one." },
+  { type: "mcq", q: "What is the main difference between a decorator and a proxy?", options: ["Decorators work only on functions", "A decorator adds behaviour around the same interface; a proxy controls access (lazy creation, permissions, remoting) behind the same interface", "A proxy changes the interface", "There is none"], answer: 1, explain: "They are structurally similar, but the intent differs: add behaviour versus control access." },
+  { type: "mcq", q: "Why is a global singleton often a poor choice for configuration?", options: ["It is slow", "Hidden shared mutable state leaks between tests and callers; injecting one instance is easier to test", "It cannot be thread safe", "Python forbids it"], answer: 1, explain: "The demo showed one test changing the global and another test unexpectedly seeing the change." },
+  { type: "predict", q: "A caching decorator wraps a retrying decorator that wraps a database whose first call fails. After get(7) is called three times, how many database calls were made?", code: "# first call: the database fails once, the retry succeeds -> 2 database calls\n# the next two get(7) calls are served from the cache -> 0 more\nprint(2 + 0 + 0)", options: ["1", "2", "3", "4"], answer: 1, explain: "One failed call plus one successful retry is two database calls; the cache answers the other two requests." },
+  { type: "multi", q: "Which are good reasons to use a builder?", options: ["Many optional parameters", "Cross-field validation before the object is valid", "A result that should be immutable once built", "The class has a single required argument"], answer: [0, 1, 2], explain: "With one required argument a plain constructor is clearer." },
+  { type: "mcq", q: "What is a sensible default when you need one shared instance?", options: ["A global singleton accessed everywhere", "Create it once at startup and pass it to the code that needs it", "Create a new one on every call", "Store it in a class attribute of every class"], answer: 1, explain: "Dependency injection keeps the 'one instance' decision in the composition root and keeps code testable." }
+]} />
