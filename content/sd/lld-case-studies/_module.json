@@ -1,0 +1,1 @@
+{ "title": "Low-Level Design Case Studies", "level": "Level 4: Low-Level Design", "order": 28, "summary": "Worked class designs from requirements to tested code: parking lot, LRU cache and more, showing how entities, interfaces, patterns, concurrency and extensibility fit together." }
