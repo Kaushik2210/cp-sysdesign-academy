@@ -51,6 +51,7 @@
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-metrics-monitoring-system" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/solid-principles-in-practice" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/creational-and-structural-patterns" },
+    { "kind": "lesson", "ref": "sd/oop-and-design-patterns/behavioral-patterns" },
     { "kind": "external", "title": "Designing Data-Intensive Applications (Martin Kleppmann)", "url": "https://dataintensive.net/", "type": "book", "note": "Read chapters 1 to 9 alongside the lessons. It is the best single book on this subject." },
     { "kind": "external", "title": "The System Design Primer", "url": "https://github.com/donnemartin/system-design-primer", "type": "article", "note": "Free reference with diagrams and practice questions." },
     { "kind": "external", "title": "The Twelve-Factor App", "url": "https://12factor.net/", "type": "article", "note": "Short and practical rules for deployable services." },
