@@ -310,7 +310,7 @@ The output shows each rule at work. **`SmallestFit` places the bike, car and tru
 
 Two entrances can call `park` at the same instant. Without a lock, both could see the same spot as free and both claim it (the check-then-act race). The lock turns **check and claim into one atomic step**. A quick stress test using threads (run it locally with CPython, because the browser runner cannot start threads) shows the guarantee:
 
-\`\`\`python
+```python
 lot = build_lot()
 results = []
 def worker(i):
@@ -324,7 +324,7 @@ threads = [threading.Thread(target=worker, args=(i,)) for i in range(200)]
 [t.join() for t in threads]
 placed = [r for r in results if r]
 print(len(placed), len(set(placed)))      # 6 6
-\`\`\`
+```
 
 On a run of this test, **200 cars competed for the 6 car-sized spots (4 medium plus 2 large); exactly 6 were parked in 6 different spots** and the other 194 were refused. Design notes:
 
