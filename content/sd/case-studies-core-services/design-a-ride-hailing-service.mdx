@@ -1,0 +1,333 @@
+---
+title: "Case Study: Design a Ride-Hailing Service"
+track: sd
+module: case-studies-core-services
+order: 9
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/case-studies-core-services/design-a-chat-system", "sd/databases-2/sharding-and-partitioning", "sd/databases-2/hot-keys-and-hot-partitions", "sd/case-studies-core-services/design-a-payment-system"]
+tags: [case-study, ride-hailing, geospatial, geohash, nearest-neighbor, matching, eta, routing, location-tracking]
+type: case-study
+furtherReading:
+  - title: "Uber Engineering, H3: Uber's Hexagonal Hierarchical Spatial Index"
+    url: https://www.uber.com/blog/h3/
+  - title: "Wikipedia, Geohash"
+    url: https://en.wikipedia.org/wiki/Geohash
+  - title: "Google, S2 Geometry library overview"
+    url: https://s2geometry.io/
+  - title: "Wikipedia, Contraction hierarchies (fast routing on road networks)"
+    url: https://en.wikipedia.org/wiki/Contraction_hierarchies
+---
+
+## The problem
+
+Design a **ride-hailing service** like Uber, Lyft or Ola. A rider opens the app and requests a ride from their location. The system finds **available drivers nearby**, offers the trip to a suitable one, and then tracks the **driver on a map** until the rider is dropped off, with an **estimated arrival time (ETA)** and a price.
+
+This is the standard system-design question about **location**: a million moving points that update every few seconds, and a query "who is closest to this spot right now?" that must answer in a fraction of a second. The interesting parts are the **geospatial index**, the **matching without double-booking a driver**, **routing and ETA**, and the **sheer rate of location updates**.
+
+## 1. Requirements
+
+**Functional**
+
+- A rider requests a ride (pickup, destination) and sees **nearby cars and an ETA and price estimate**.
+- The system **matches** the rider with a nearby driver; the driver can **accept or reject**.
+- **Live tracking** of the driver's location for the rider during pickup and trip.
+- Trip lifecycle: requested, matched, driver arriving, in progress, completed, cancelled; then **payment** ([payment system](/sd/case-studies-core-services/design-a-payment-system/)) and ratings.
+
+**Non-functional**
+
+- **Fast matching** (a few seconds at most from request to driver offer).
+- **A driver must never be assigned two trips at once**, even under concurrent requests (strong consistency for the assignment).
+- **Location data can be slightly stale** (a second or two) for the map display (eventual consistency is fine).
+- High availability in each city; **graceful degradation** (an inaccurate ETA is better than no ride).
+- Handle **hot spots**: airports, stadium exits, New Year's Eve.
+
+## 2. Estimation
+
+Assume 20 million trips a day and 1 million drivers online at the busy hour, each reporting its location every 4 seconds.
+
+<CodeRunner language="python" code={`trips_per_day = 20_000_000
+print(f"trips: {trips_per_day / 1e6:.0f} million a day = {trips_per_day / 86400:,.0f} trip requests per second on average")
+
+drivers_online, interval = 1_000_000, 4
+updates = drivers_online / interval
+print(f"{drivers_online:,} online drivers reporting every {interval} s = {updates:,.0f} location updates per second")
+print(f"at 100 bytes each: {updates * 100 / 1e6:,.0f} MB/s, {updates * 100 * 86400 / 1e12:.1f} TB a day if every update were stored")
+print(f"ratio of location updates to trip requests: {updates / (trips_per_day / 86400):,.0f} to 1")
+`} />
+
+Only **about 230 ride requests a second**, but **250,000 location updates a second**, over 1,000 times more. The trip bookkeeping is a modest problem; the **location pipeline** is the scale problem. Two consequences: keep the **current position of every driver in memory** (a latest-value store) instead of writing every update to a database, and send only a **sampled history** to long-term storage for analytics and machine learning.
+
+## 3. Representing "nearby": spatial indexes
+
+You cannot search a million points by scanning them all for every request. The standard trick is to divide the map into **cells** and index drivers **by cell**. A query looks at the rider's cell and its neighbours.
+
+**Geohash** is a popular scheme: it recursively halves the world by longitude and latitude, interleaves the bits, and writes them in base 32. **Longer strings mean smaller cells, and points in the same cell share a prefix**, so a prefix lookup in a sorted store finds everything in a cell. **S2** (square cells on a sphere) and **H3** (hexagonal cells) are alternatives; hexagons have the useful property that all neighbours are the same distance away.
+
+<CodeRunner language="python" code={`import math, os
+
+BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+
+def geohash_encode(lat, lon, precision):
+    lat_lo, lat_hi, lon_lo, lon_hi = -90.0, 90.0, -180.0, 180.0
+    bits, bit, ch, out, even = [16, 8, 4, 2, 1], 0, 0, "", True
+    while len(out) < precision:
+        if even:
+            mid = (lon_lo + lon_hi) / 2
+            if lon >= mid:
+                ch |= bits[bit]; lon_lo = mid
+            else:
+                lon_hi = mid
+        else:
+            mid = (lat_lo + lat_hi) / 2
+            if lat >= mid:
+                ch |= bits[bit]; lat_lo = mid
+            else:
+                lat_hi = mid
+        even = not even
+        if bit < 4:
+            bit += 1
+        else:
+            out += BASE32[ch]; bit, ch = 0, 0
+    return out
+
+def cell_size_km(precision, lat=0.0):
+    lon_bits, lat_bits = (5 * precision + 1) // 2, (5 * precision) // 2
+    return 360 / 2 ** lon_bits * 111.32 * math.cos(math.radians(lat)), 180 / 2 ** lat_bits * 111.32
+
+print("geohash precision and cell size (at the equator):")
+for p in (4, 5, 6, 7, 8):
+    w, h = cell_size_km(p)
+    print(f"  {p} characters: about {w:7.2f} km x {h:7.2f} km")
+
+def km(lat1, lon1, lat2, lon2):
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+a, b = (51.5072, -0.0001), (51.5072, 0.0001)                  # two points about 14 m apart, straddling the prime meridian
+ga, gb = geohash_encode(*a, 7), geohash_encode(*b, 7)
+print(f"\\ntwo points {km(*a, *b) * 1000:.0f} m apart: geohash {ga} and {gb}, shared prefix length {len(os.path.commonprefix([ga, gb]))}")
+`} />
+
+The table shows the trade-off: **6 characters is about 1.2 km by 0.6 km**, and **7 characters about 150 m**. Choose a cell size close to your **typical search radius**.
+
+The last line shows the **boundary problem** every cell index has: two points only **14 metres apart** that sit on opposite sides of the prime meridian end up in cells with **no common prefix at all**. A query that looks only at the rider's own cell would miss a driver 14 m away. So **a search must always include the neighbouring cells** (the 8 around the rider's cell, or a ring of cells covering the radius), and then filter by true distance.
+
+**Density varies**: a city centre may hold thousands of drivers in a cell while a suburb holds one. Fixed-size cells then give hot cells and empty ones. Remedies: choose a finer level in dense areas (an adaptive **quadtree**, or hierarchical cells in S2/H3), and shard the index by region so one hot cell does not overload one machine.
+
+## 4. Finding the nearest drivers
+
+The program below indexes 40,000 simulated drivers in a city in a **grid of cells about 1.1 km wide**, and finds the 5 nearest to a rider by searching **rings** of cells outward until the k-th best candidate is closer than anything that could still be hiding in an unsearched cell. It checks that the answer equals a brute-force scan of all drivers.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import math, random
+
+def km(lat1, lon1, lat2, lon2):
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+random.seed(3)
+LAT0, LON0, SPAN = 40.70, -74.02, 0.25                        # a city about 28 km x 21 km
+drivers = [(LAT0 + random.random() * SPAN, LON0 + random.random() * SPAN * 1.3) for _ in range(40_000)]
+CELL = 0.01                                                   # about 1.1 km
+
+def cell(lat, lon):
+    return int((lat - LAT0) / CELL), int((lon - LON0) / CELL)
+
+grid = {}
+for i, (la, lo) in enumerate(drivers):
+    grid.setdefault(cell(la, lo), []).append(i)
+
+def nearest_brute(lat, lon, k):
+    return sorted(range(len(drivers)), key=lambda i: km(lat, lon, *drivers[i]))[:k]
+
+def nearest_grid(lat, lon, k):
+    cx, cy = cell(lat, lon)
+    checked, found, ring = 0, [], 0
+    while True:
+        for dx in range(-ring, ring + 1):
+            for dy in range(-ring, ring + 1):
+                if max(abs(dx), abs(dy)) != ring:
+                    continue                                   # only the new outer ring of cells
+                for i in grid.get((cx + dx, cy + dy), []):
+                    checked += 1
+                    found.append((km(lat, lon, *drivers[i]), i))
+        found.sort()
+        # anything in an unsearched cell is at least this far away (a conservative bound, since cells are narrower in longitude)
+        safe_km = ring * CELL * 111.32 * 0.7
+        if len(found) >= k and found[k - 1][0] <= safe_km:
+            return [i for _, i in found[:k]], checked
+        ring += 1
+
+queries = [(LAT0 + random.random() * SPAN, LON0 + random.random() * SPAN * 1.3) for _ in range(10)]
+same, checked_total = 0, 0
+for lat, lon in queries:
+    fast, c = nearest_grid(lat, lon, 5)
+    same += nearest_brute(lat, lon, 5) == fast
+    checked_total += c
+print(f"find the 5 nearest of {len(drivers):,} drivers, {len(queries)} queries:")
+print(f"  scan everyone: {len(drivers):,} distance computations per query")
+print(f"  grid index   : {checked_total / len(queries):,.0f} distance computations per query on average; same answer as the scan in {same} of {len(queries)} queries")
+`} />
+
+The grid index examined **a few hundred drivers per query instead of all 40,000**, and returned the **same top 5 as the full scan in every query**, which is the correctness check that matters. At 1 million drivers the saving is larger still, and a production store (Redis geo commands, an in-memory R-tree or a purpose-built service) does this lookup in well under a millisecond.
+
+## 5. High-level design
+
+<Diagram kind="mermaid" code={`flowchart LR
+  D[Driver app] -->|location every ~4 s| LG[Location gateway]
+  LG --> LS[(Live location index: in memory, sharded by region)]
+  LG --> ST[[Location stream]]
+  ST --> HIST[(History store and analytics)]
+  R[Rider app] --> API[Ride API]
+  API --> MATCH[Matching service]
+  MATCH --> LS
+  MATCH --> ETA[ETA and routing service]
+  MATCH --> DS[(Driver and trip state store)]
+  MATCH --> PUSH[Push to driver]
+  PUSH --> D
+  API --> PRICE[Pricing and surge]
+  API --> TRIP[(Trip store)]
+  TRIP --> PAY[Payment service]
+  R -->|tracking| TRK[Tracking service]
+  TRK --> LS`} caption="Location updates feed an in-memory index; matching queries it, ranks candidates with the routing service and claims a driver atomically" />
+
+- **Location gateway**: long-lived connections (or batched HTTP/UDP) from drivers; updates go to the **live index** and to a **stream** for history.
+- **Live location index**: an in-memory structure keyed by cell, **sharded by geography** (city or cell-prefix ranges) so one region's load and failures stay local. Each driver entry has a **timestamp and a TTL**: a driver who stops reporting disappears from results after a few seconds.
+- **Matching service**: finds candidates, ranks them, and runs the offer protocol.
+- **ETA and routing service**: computes road-network travel times.
+- **Driver and trip state store**: the strongly consistent record of each driver's status and each trip's state, in a replicated database (see [replication](/sd/databases-2/replication/)).
+- **Pricing and surge**: per-region supply and demand to set prices and attract drivers.
+- **Notifications** to driver apps use [push infrastructure](/sd/case-studies-core-services/design-a-notification-system/); trips settle through the [payment system](/sd/case-studies-core-services/design-a-payment-system/).
+
+## 6. Matching without double booking
+
+When a rider requests a ride, the matching service:
+
+1. **Finds candidates**: available drivers within a radius (the cell search above), usually the nearest few dozen.
+2. **Ranks them** by **road ETA to the pickup** (not straight-line distance: a driver across a river may be far by road), plus rating, vehicle type, and the probability that they will accept.
+3. **Offers the trip** to the best driver for a short window (around 10 to 15 seconds). If they reject or time out, offer to the next. Many systems instead **batch** requests over a short interval (for example 2 seconds) and solve an **assignment problem** over all riders and drivers together, which can improve overall wait times (see [bitmask DP and assignment](/cp/dynamic-programming/bitmask-dp/) for the problem; real systems use polynomial algorithms such as the Hungarian method).
+
+The hard guarantee is **one driver, one trip**. Two matching workers serving two riders could pick the same driver at the same moment. The fix is an **atomic claim** on the driver's state, using a conditional update, never "read, check, write":
+
+```sql
+UPDATE drivers
+SET status = 'offered', offer_trip = :trip, offer_expires_at = now() + interval '15 seconds'
+WHERE id = :driver AND status = 'available';          -- succeeds for exactly one worker
+```
+
+If zero rows change, someone else claimed that driver and the worker moves to the next candidate. The offer carries an **expiry (a lease)**, so a driver who never answers returns to `available` automatically (a background sweep or an in-memory TTL). The same pattern appears in the [payment system](/sd/case-studies-core-services/design-a-payment-system/) lesson's overdraft check. The driver state machine is `available` → `offered` → `assigned` → `on_trip` → `available`, with transitions guarded by conditions and idempotent operations, because phones disconnect and retry.
+
+## 7. ETA and routing
+
+An ETA needs the **road network**, not a straight line. Model roads as a **graph** (intersections are nodes, road segments are edges with travel time as the weight) and run a shortest-path search. Travel times change with **traffic**, so the weights are updated from live driver speeds and historical patterns. The program below runs Dijkstra's algorithm ([shortest paths](/cp/graphs/dijkstra-shortest-paths/)) on a 30 by 30 block city, first in free-flowing traffic and then with a congested band across the middle.
+
+<CodeRunner language="python" code={`import heapq
+
+N = 30
+def shortest(weights, src, dst):
+    dist = {src: 0.0}
+    pq = [(0.0, src)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if u == dst:
+            return d
+        if d > dist.get(u, 1e18):
+            continue
+        x, y = u
+        for v in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if 0 <= v[0] < N and 0 <= v[1] < N:
+                nd = d + weights[(u, v)]
+                if nd < dist.get(v, 1e18):
+                    dist[v] = nd
+                    heapq.heappush(pq, (nd, v))
+
+free_flow = {}
+for x in range(N):
+    for y in range(N):
+        for v in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if 0 <= v[0] < N and 0 <= v[1] < N:
+                free_flow[((x, y), v)] = 30.0               # 30 seconds per block
+congested = dict(free_flow)
+for (u, v) in free_flow:                                       # a congested band of streets through the middle of the city
+    if 12 <= u[1] <= 17 and 12 <= v[1] <= 17:
+        congested[(u, v)] = 120.0
+
+corner = (0, 0), (N - 1, N - 1)
+print(f"corner to opposite corner of a {N}x{N} grid:")
+print(f"  free flow                      : {shortest(free_flow, *corner) / 60:5.1f} min")
+print(f"  congested band, best route     : {shortest(congested, *corner) / 60:5.1f} min (the route avoids most of the band)")
+straight = sum(congested[((i, 14), (i + 1, 14))] for i in range(N - 1))
+print(f"  driving straight along the band: {straight / 60:5.1f} min (29 blocks at 4x the normal time)")
+`} />
+
+Free-flow time for the 58 blocks is 29 minutes. With congestion the **best route takes 36.5 minutes** because it detours around the slow band, whereas driving straight along it would take **58 minutes**. Real systems add:
+
+- **Faster algorithms for continent-sized graphs**: plain Dijkstra on millions of nodes is too slow for each request. **Contraction hierarchies** and similar methods preprocess the graph so that a query visits only a few hundred nodes, in milliseconds.
+- **Traffic**: live speeds from driver GPS probes, historical speed profiles by time of day, and machine-learned corrections, because the **ETA** is the sum of segment times plus turn and signal delays and pickup time.
+- **Map matching**: GPS positions are noisy and must be snapped to the correct road.
+- **Caching** ETAs for popular origin/destination cells for short periods, and computing ETAs for many drivers in one batch for ranking.
+
+## 8. The location pipeline
+
+At 250,000 updates a second, the rules are:
+
+- Keep only the **latest position per driver** in memory; each update overwrites the entry (a write to the cell index). This is a **latest-value store**, not a log.
+- **Batch and compress** updates from the app, and **adapt the frequency**: moving drivers every 3 to 5 seconds, idle or parked drivers less often; save battery and bandwidth.
+- Send updates **asynchronously to a stream** ([stream processing](/sd/queues-and-streaming/stream-processing-basics/)) and store a **sampled or compacted history** for analytics, demand forecasting and audits; do not insert 2 TB a day into the operational database.
+- When a driver crosses from one cell to another, the update **moves them between cells** atomically; if the cell lives on another shard, hand off the record.
+- Drivers' devices lose connectivity: use **timestamps and TTLs** so stale drivers stop receiving offers, and make location updates idempotent and order-tolerant (ignore an update older than the one stored).
+
+## 9. Tracking, pricing and reliability
+
+- **Live tracking for the rider** subscribes to the assigned driver's location (over a WebSocket or server-sent events), smoothed and throttled to about once a second ([chat system](/sd/case-studies-core-services/design-a-chat-system/) shows the connection tier).
+- **Surge pricing** compares supply (available drivers) and demand (open requests) per cell over a short window and raises prices smoothly; avoid oscillation by smoothing and by pricing at the level of **regions** rather than single cells.
+- **Partition by city**: each city or region can run its own cluster of the location index and matching, so an outage or hot spot in one city does not affect others. Global services (accounts, payments) sit above them.
+- **Hot spots** (airport queues, event ends): pre-scale, use virtual queues for airport pickup, and make matching tolerate surges by queueing and shedding load gracefully.
+- **Failure handling**: if the live index is lost, **rebuild it from fresh updates** within seconds (drivers keep reporting); if the matching service is down, retry with backoff; if a driver's app disconnects mid-trip, the trip continues from stored state and reconnects.
+- **Safety and trust**: trip sharing, SOS, anonymised phone numbers, identity verification, and fraud detection (GPS spoofing) belong in the design discussion.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the design" rows={[
+  { option: "Geohash or fixed grid cells", pros: "Simple; prefix lookups in ordinary stores; easy sharding", cons: "Boundary problem; uneven density; rectangular cells distort distance", chooseWhen: "A good default; always search neighbouring cells" },
+  { option: "Hexagonal cells (H3) or S2", pros: "Uniform neighbour distances; hierarchical resolutions; good for aggregation", cons: "A library dependency and more concepts", chooseWhen: "Large scale and analytics such as surge and demand maps" },
+  { option: "Quadtree or adaptive index", pros: "Adapts to density", cons: "More complex updates when many points move", chooseWhen: "Very uneven density" },
+  { option: "In-memory latest-value location store", pros: "Handles hundreds of thousands of updates a second at low latency", cons: "Data is lost if a node dies (rebuilt from new updates)", chooseWhen: "Live positions" },
+  { option: "Persist every location update", pros: "Complete history", cons: "Terabytes a day; unnecessary for matching", chooseWhen: "Only sampled or compacted history, for analytics" },
+  { option: "Offer to one driver at a time", pros: "Simple, low wasted effort", cons: "Slow if many drivers decline", chooseWhen: "Lower demand or sparse supply" },
+  { option: "Batch matching over short windows", pros: "Better global assignment, shorter average waits", cons: "A small added delay; heavier computation", chooseWhen: "Dense, busy cities" },
+  { option: "Straight-line distance for ranking", pros: "Very cheap", cons: "Wrong near rivers, highways and one-way streets", chooseWhen: "A coarse first filter only" },
+  { option: "Road-network ETA with live traffic", pros: "Accurate and fair ranking", cons: "Routing infrastructure and data pipelines", chooseWhen: "Ranking and quoted ETAs" }
+]} />
+
+## Pitfalls
+
+- Searching only the rider's own cell, which misses drivers just across a boundary.
+- Scanning all drivers per request instead of using a spatial index.
+- Writing every location update to the main database.
+- Read-check-write assignment of drivers, which double-books them under concurrency.
+- Offers without expiry, so drivers who do not answer stay locked.
+- Ranking by straight-line distance.
+- A single global location index, so one region's load or failure affects everyone.
+- Stale drivers (no TTL) receiving offers they never see.
+- Surge prices that flip rapidly between cells.
+- Treating latitude and longitude as equal-sized units (a degree of longitude is shorter away from the equator).
+
+## What would you choose and why?
+
+The company adds **shared rides** (pooling), where one car serves two or three riders with different pickups and drop-offs, and **scheduled rides** booked days ahead. How do matching, ETAs and the driver state machine change? What new constraints appear (detours, capacity, pickup order), and how do you keep the matching fast enough?
+
+## Quiz
+
+<Quiz id="sd-m17-ride-hailing" tags={["case-study", "ride-hailing", "geospatial", "matching", "routing"]} questions={[
+  { type: "mcq", q: "Why must a nearby-driver search look at the neighbouring cells as well as the rider's own cell?", options: ["Cells are always too small", "Two points can be very close but fall in adjacent cells with no shared prefix, so a single-cell search can miss them", "Neighbouring cells hold more drivers", "It makes the index smaller"], answer: 1, explain: "The geohash example showed two points 14 m apart with no common prefix." },
+  { type: "mcq", q: "How is a driver prevented from being assigned two trips at once?", options: ["By checking the driver's status in the application and then writing it", "By an atomic conditional update that changes the status from available only if it is still available", "By sending both offers and letting the driver choose", "By sorting requests by time"], answer: 1, explain: "Check and change in one statement means exactly one concurrent worker succeeds." },
+  { type: "predict", q: "1,000,000 drivers report every 4 seconds. How many location updates per second?", code: "print(1_000_000 // 4)", options: ["25,000", "250,000", "2,500,000", "4,000,000"], answer: 1, explain: "A million drivers divided by a 4-second interval gives 250,000 updates a second, which is why positions live in memory." },
+  { type: "multi", q: "Which are sensible ways to handle the location update load?", options: ["Keep the latest position per driver in memory", "Send a sampled history to a stream for analytics", "Insert every update into the operational database", "Use TTLs so stale drivers drop out of results"], answer: [0, 1, 3], explain: "Positions are a latest-value store, not a log; history is kept separately and compacted." },
+  { type: "mcq", q: "Why rank candidate drivers by road ETA instead of straight-line distance?", options: ["Straight-line distance is expensive", "A driver close in a straight line may be far by road because of rivers, one-way streets or traffic", "ETA is always shorter", "It avoids the spatial index"], answer: 1, explain: "The simulation showed a congested corridor making the straight route far slower than a detour." },
+  { type: "mcq", q: "Why partition the location index and matching by city or region?", options: ["To use more servers", "Load and failures stay local, and queries touch only nearby data", "Cities have different languages", "To avoid TTLs"], answer: 1, explain: "A hot spot or outage in one city does not affect the others." }
+]} />
