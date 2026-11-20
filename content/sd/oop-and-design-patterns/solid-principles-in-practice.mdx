@@ -1,0 +1,325 @@
+---
+title: SOLID Principles in Practice
+track: sd
+module: oop-and-design-patterns
+order: 1
+difficulty: medium
+estMinutes: 45
+prerequisites: []
+tags: [lld, oop, solid, design-principles, refactoring, testing, dependency-injection, composition]
+type: lesson
+furtherReading:
+  - title: "Robert C. Martin, Design Principles and Design Patterns (the original SOLID paper)"
+    url: https://web.archive.org/web/20150906155800/http://www.objectmentor.com/resources/articles/Principles_and_Patterns.pdf
+  - title: "Barbara Liskov and Jeannette Wing, A Behavioral Notion of Subtyping"
+    url: https://www.cs.cmu.edu/~wing/publications/LiskovWing94.pdf
+  - title: "Wikipedia, SOLID (object-oriented design)"
+    url: https://en.wikipedia.org/wiki/SOLID
+  - title: "Python documentation, typing.Protocol (structural subtyping)"
+    url: https://docs.python.org/3/library/typing.html#typing.Protocol
+---
+
+## Intuition
+
+Code that works today is easy. Code that you can **change next month without breaking something unrelated** is hard. Most real programs live for years and change constantly: a new payment method, a new report format, a new notification channel. **Low-level design** is the craft of arranging classes and functions so that such changes are **small and local**.
+
+The **SOLID** principles are five widely taught guidelines for doing that in object-oriented code:
+
+| letter | principle | one-line meaning |
+| --- | --- | --- |
+| **S** | Single Responsibility | a class should have **one reason to change** |
+| **O** | Open/Closed | add new behaviour by **adding code**, not by editing working code |
+| **L** | Liskov Substitution | a subtype must be usable **anywhere its base type is**, without surprises |
+| **I** | Interface Segregation | many **small, focused interfaces** beat one fat one |
+| **D** | Dependency Inversion | depend on **abstractions**, not on concrete details |
+
+They are **heuristics, not laws**. Each one trades a little extra structure for easier change, and the trade is only worth it where change is actually likely. This lesson shows each principle as a **smell, a refactoring and a payoff**, in code you can run.
+
+## S: Single Responsibility Principle
+
+**A class should have one reason to change.** "Reason to change" means a **kind of stakeholder or concern**: the people who decide business rules, the people who decide how output looks, the people who decide where data is stored.
+
+**The smell:** a class that does several unrelated jobs, so a change to one job risks the others and every test needs everything.
+
+<CodeRunner language="python" code={`# BEFORE: one class computes, formats and saves. Three reasons to change.
+class ReportBefore:
+    def __init__(self, sales):
+        self.sales = sales
+    def total(self):
+        return sum(self.sales)
+    def to_text(self):
+        return f"Total sales: {self.total():.2f}"
+    def save(self, path):
+        with open(path, "w") as f:
+            f.write(self.to_text())
+
+# AFTER: each class has one reason to change.
+class SalesReport:                              # the business rule: what is in the report
+    def __init__(self, sales):
+        self.sales = sales
+    def total(self):
+        return sum(self.sales)
+
+class TextFormatter:                            # how it looks
+    def format(self, report):
+        return f"Total sales: {report.total():.2f}"
+
+class HtmlFormatter:                            # a new format changes only this file
+    def format(self, report):
+        return f"<p>Total sales: <b>{report.total():.2f}</b></p>"
+
+class InMemoryStorage:                          # where it goes (a real one would write a file or a database row)
+    def __init__(self):
+        self.saved = {}
+    def save(self, name, content):
+        self.saved[name] = content
+
+report = SalesReport([120.5, 80.25, 99.25])
+storage = InMemoryStorage()
+for formatter in (TextFormatter(), HtmlFormatter()):
+    storage.save(type(formatter).__name__, formatter.format(report))
+for name, content in storage.saved.items():
+    print(f"{name:14s} {content}")
+print("The total is computed once; adding PDF output or database storage touches neither the rule nor the other formats.")
+`} />
+
+**Payoff:** adding an HTML format changed **no existing class**, and the business rule (`total`) can be tested without touching a file system. **Caution:** do not split a class until there is a real second reason to change. A class with a few related methods is fine; "one method per class" is the over-engineered extreme.
+
+## O: Open/Closed Principle
+
+**Software entities should be open for extension but closed for modification.** Adding a new case should mean **adding a new class or function**, not editing a long chain of `if/elif` in tested code (where each edit risks breaking an old case).
+
+**The smell:** a function that switches on a type name or a flag, and gets another branch every few weeks.
+
+<CodeRunner language="python" code={`# BEFORE: every new customer type means editing this function (and re-testing all branches).
+def discount_before(kind, amount):
+    if kind == "regular":
+        return amount
+    elif kind == "member":
+        return amount * 0.9
+    elif kind == "vip":
+        return amount * 0.8
+    raise ValueError(kind)
+
+# AFTER: each rule is an object with the same interface; new rules are new classes.
+from abc import ABC, abstractmethod
+
+class Discount(ABC):
+    @abstractmethod
+    def apply(self, amount: float) -> float: ...
+
+class NoDiscount(Discount):
+    def apply(self, amount): return amount
+
+class Percent(Discount):
+    def __init__(self, percent): self.factor = 1 - percent / 100
+    def apply(self, amount): return amount * self.factor
+
+class Student(Discount):                        # added later: no existing code was edited
+    def apply(self, amount): return max(0.0, amount - 5.0)
+
+def checkout(amount, discount: Discount):
+    return round(discount.apply(amount), 2)
+
+print("regular  :", checkout(100, NoDiscount()))
+print("member   :", checkout(100, Percent(10)))
+print("vip      :", checkout(100, Percent(20)))
+print("student  :", checkout(100, Student()), " <- a new rule, added without touching checkout() or the others")
+print("same results as the old function:", all(abs(checkout(100, d) - discount_before(k, 100)) < 1e-9 for k, d in (("regular", NoDiscount()), ("member", Percent(10)), ("vip", Percent(20)))))
+`} />
+
+**Payoff:** `checkout` is **closed** (it never changes) while behaviour is **open** to extension. This is the **Strategy pattern**, covered with the other design patterns later in this module. **Caution:** do not build an extension point for variation that may never come. A two-case `if` is fine until a third case appears (a good rule of thumb: **refactor on the third occurrence**).
+
+## L: Liskov Substitution Principle
+
+**If `S` is a subtype of `T`, code that works with a `T` must keep working when given an `S`.** Subclasses must honour the **behavioural contract** of the parent (what it promises, what it accepts), not only its method signatures.
+
+**The smell:** a subclass that throws on a method the parent supports, ignores a guarantee, or needs `isinstance` checks around it. The classic example: a `Square` that inherits from `Rectangle`.
+
+<CodeRunner language="python" code={`# BEFORE: Square "is a" Rectangle in geometry, but not in behaviour.
+class Rectangle:
+    def __init__(self, w, h):
+        self.w, self.h = w, h
+    def set_width(self, w): self.w = w
+    def set_height(self, h): self.h = h
+    def area(self): return self.w * self.h
+
+class Square(Rectangle):
+    def set_width(self, w): self.w = self.h = w          # keeps it square...
+    def set_height(self, h): self.w = self.h = h          # ...but breaks what Rectangle promised
+
+def stretch(rect):
+    """Written against Rectangle's contract: setting the width must not change the height."""
+    rect.set_width(5)
+    rect.set_height(4)
+    return rect.area()                                    # a Rectangle promises 5 * 4 = 20
+
+print("Rectangle:", stretch(Rectangle(1, 1)))
+print("Square   :", stretch(Square(1, 1)), " <- surprise: the contract was broken (expected 20)")
+
+# AFTER: model what the types promise. Both are Shapes with an area; neither pretends to be the other.
+from abc import ABC, abstractmethod
+
+class Shape(ABC):
+    @abstractmethod
+    def area(self) -> float: ...
+
+class Rect(Shape):
+    def __init__(self, w, h): self.w, self.h = w, h
+    def area(self): return self.w * self.h
+
+class Sq(Shape):
+    def __init__(self, side): self.side = side
+    def area(self): return self.side ** 2
+
+def total_area(shapes):
+    return sum(s.area() for s in shapes)
+
+print("any Shape works:", total_area([Rect(5, 4), Sq(3)]))
+`} />
+
+**Payoff:** code written against the base type keeps working with every subtype. Warning signs of an LSP violation: overriding a method to do **nothing** or **raise `NotImplementedError`**, **strengthening preconditions** (accepting less than the parent) or **weakening postconditions** (promising less). The usual cure is **composition** or a **different hierarchy** that reflects behaviour, not real-world taxonomy.
+
+## I: Interface Segregation Principle
+
+**Clients should not be forced to depend on methods they do not use.** Prefer several small interfaces over one large one.
+
+**The smell:** implementers that must stub out methods (`raise NotImplementedError`, or silently do nothing) because the interface demands more than they offer.
+
+<CodeRunner language="python" code={`from typing import Protocol
+
+# BEFORE: one fat interface. A basic printer is forced to claim it can scan and fax.
+class MultiFunctionDevice(Protocol):
+    def print_doc(self, doc: str) -> str: ...
+    def scan(self) -> str: ...
+    def fax(self, doc: str) -> str: ...
+
+class BasicPrinterBefore:
+    def print_doc(self, doc): return f"printed {doc}"
+    def scan(self): raise NotImplementedError("this printer cannot scan")      # a lie in the type
+    def fax(self, doc): raise NotImplementedError("this printer cannot fax")
+
+# AFTER: small roles. Each class implements only what it truly does.
+class Printer(Protocol):
+    def print_doc(self, doc: str) -> str: ...
+
+class Scanner(Protocol):
+    def scan(self) -> str: ...
+
+class BasicPrinter:
+    def print_doc(self, doc): return f"printed {doc}"
+
+class OfficeMachine:
+    def print_doc(self, doc): return f"printed {doc}"
+    def scan(self): return "scanned page"
+
+def print_report(printer: Printer, text):       # depends only on what it needs
+    return printer.print_doc(text)
+
+def archive_paper(scanner: Scanner):
+    return scanner.scan()
+
+print(print_report(BasicPrinter(), "Q3 report"))
+print(print_report(OfficeMachine(), "Q3 report"))
+print(archive_paper(OfficeMachine()))
+print("A type checker such as mypy rejects archive_paper(BasicPrinter()): the mistake shows up in the design, before the code runs.")
+`} />
+
+**Payoff:** functions ask for the **narrowest role** they need (a type checker enforces it), implementers stay honest, and tests need smaller fakes. Python's `Protocol` (structural typing) makes this lightweight: anything with the right methods qualifies, with no inheritance required. In languages with explicit interfaces, the same idea splits `IWorker` into `IRunnable` and `IFeedable`.
+
+## D: Dependency Inversion Principle
+
+**High-level policy should not depend on low-level details; both should depend on abstractions.** Concretely: a class that **creates** its collaborators (`self.mailer = SmtpMailer()`) is welded to them. Instead, it should **receive** something that satisfies an interface (**dependency injection**).
+
+**The smell:** business logic that instantiates a database client, an HTTP client or a clock inside itself, so you cannot test it without the real thing.
+
+<CodeRunner language="python" code={`from typing import Protocol
+
+# BEFORE: the service builds its own mailer, so every test would really send email.
+class SmtpMailer:
+    def send(self, to, body):
+        raise RuntimeError("would contact a real mail server")
+
+class SignupBefore:
+    def __init__(self):
+        self.mailer = SmtpMailer()                  # a hard-wired low-level detail
+    def register(self, email):
+        self.mailer.send(email, "Welcome!")
+
+try:
+    SignupBefore().register("ada@example.com")
+except RuntimeError as e:
+    print("before: cannot test without side effects ->", e)
+
+# AFTER: depend on an abstraction and receive it from outside.
+class Mailer(Protocol):
+    def send(self, to: str, body: str) -> None: ...
+
+class SignupService:
+    def __init__(self, mailer: Mailer):
+        self.mailer = mailer
+    def register(self, email):
+        if "@" not in email:
+            raise ValueError("invalid email")
+        self.mailer.send(email, "Welcome!")
+        return "registered"
+
+class FakeMailer:                                   # a test double: records instead of sending
+    def __init__(self): self.outbox = []
+    def send(self, to, body): self.outbox.append((to, body))
+
+fake = FakeMailer()
+print("after:", SignupService(fake).register("ada@example.com"), fake.outbox)
+print("after: invalid input never reaches the mailer:", end=" ")
+try:
+    SignupService(fake).register("nope")
+except ValueError:
+    print(len(fake.outbox) == 1)
+`} />
+
+**Payoff:** `SignupService` knows nothing about SMTP, queues or vendors. In production you pass an SMTP or queue-backed mailer; in tests, a fake; later, a different provider, with **no change to the service**. The **composition root** (usually `main`) is the one place that decides which concrete classes to wire together. Note the arrow of **source-code dependency** now points from details toward the abstraction, which is the "inversion".
+
+## Putting it together: composition over inheritance
+
+All five principles point toward the same habit: **assemble behaviour from small objects (composition) rather than extending deep class hierarchies (inheritance).** Inheritance couples a subclass to its parent's internals and invites LSP violations; composition lets you swap pieces at runtime. A useful default: **prefer an interface plus composition; use inheritance only for a true "is-a" relationship with a stable contract.**
+
+## How the principles relate to system design
+
+The same ideas appear at larger scale: a **microservice** with one clear responsibility (S), extended by new services rather than edits to a core (O), exposing a narrow API (I) and depending on contracts, not another service's internals (D). The [service boundaries lesson](/sd/microservice-patterns/service-boundaries-and-availability/) is SOLID applied to deployment units.
+
+## Trade-offs
+
+<TradeOffs caption="When to apply the principles" rows={[
+  { option: "Apply SOLID early everywhere", pros: "Flexible code from day one", cons: "Many tiny classes and abstractions nobody needs; slower to read and write", chooseWhen: "Rarely; only for code where change is certain" },
+  { option: "Start simple, refactor when pain appears (rule of three)", pros: "Abstractions are shaped by real variation; less speculative code", cons: "Needs good tests and discipline to refactor", chooseWhen: "The practical default" },
+  { option: "Inheritance for reuse", pros: "Quick to write", cons: "Tight coupling; fragile base classes; LSP risk", chooseWhen: "A stable, genuine is-a relationship" },
+  { option: "Composition with small interfaces", pros: "Swappable, testable parts", cons: "More wiring code", chooseWhen: "Most domain logic" },
+  { option: "Dependency injection by constructor", pros: "Explicit, easy to test", cons: "Longer constructors; wiring in one place", chooseWhen: "Services with external dependencies" },
+  { option: "A DI framework or container", pros: "Automates wiring in large applications", cons: "Magic; harder to trace; startup cost", chooseWhen: "Very large codebases that already pay for the complexity" }
+]} />
+
+## Pitfalls
+
+- Applying every principle everywhere: dozens of one-method classes, interfaces with a single implementation and no second one in sight.
+- Splitting responsibilities by technical layer only when the real axes of change are business concepts.
+- An `if isinstance(...)` ladder around a polymorphic call (a sign of an LSP or OCP problem).
+- Subclasses that override a method to raise or do nothing.
+- Fat interfaces that grow every time a new implementer needs one more method.
+- Hard-wired `new` of databases, clocks, random numbers or network clients inside business logic.
+- Mocking everything: tests that verify call sequences instead of behaviour.
+- Reading the principles as rules rather than as tools for reducing the cost of change.
+
+## What would you choose and why?
+
+You inherit a 600-line `OrderProcessor` class that validates orders, calculates tax with `if country == ...` branches, charges cards through a hard-coded payment SDK, writes to the database and sends emails. Product wants three new countries next quarter and a second payment provider. Which principles do you apply first, in what order, what tests do you write before touching the code, and what do you deliberately leave alone?
+
+## Quiz
+
+<Quiz id="sd-m27-solid" tags={["lld", "oop", "solid"]} questions={[
+  { type: "mcq", q: "What does 'one reason to change' mean in the Single Responsibility Principle?", options: ["A class may have only one method", "A class should serve one concern or stakeholder, so unrelated changes do not touch it", "A class may be edited only once", "A class must be small in lines"], answer: 1, explain: "The unit is a reason (a kind of change), not a method count or line count." },
+  { type: "mcq", q: "Which refactoring best follows the Open/Closed Principle for a growing list of discount types?", options: ["Add another elif branch each time", "Give each rule its own class behind a common interface and pass the rule to the code that uses it", "Copy the function for each type", "Use global variables"], answer: 1, explain: "New rules become new classes; the checkout code never changes." },
+  { type: "predict", q: "A Square subclass of Rectangle sets both sides in set_width and set_height. What does stretch(Square(1, 1)) return if it sets the width to 5, then the height to 4, and returns the area?", code: "class R:\n    def __init__(s, w, h): s.w, s.h = w, h\n    def set_width(s, w): s.w = w\n    def set_height(s, h): s.h = h\n    def area(s): return s.w * s.h\nclass Sq(R):\n    def set_width(s, w): s.w = s.h = w\n    def set_height(s, h): s.w = s.h = h\nr = Sq(1, 1)\nr.set_width(5)\nr.set_height(4)\nprint(r.area())", options: ["20", "16", "25", "9"], answer: 1, explain: "The second call makes both sides 4, giving 16, not the 20 a Rectangle promises: the subclass broke the contract." },
+  { type: "multi", q: "Which are signs of a Liskov Substitution problem?", options: ["A subclass overrides a method to raise NotImplementedError", "Callers need isinstance checks before calling a method on the base type", "A subclass accepts less input than its parent does", "A function accepts the narrowest interface it needs"], answer: [0, 1, 2], explain: "Substitutability means callers cannot tell subtypes apart in their use of the base contract." },
+  { type: "mcq", q: "What does dependency injection achieve?", options: ["It makes code run faster", "A class receives its collaborators from outside, so tests can substitute fakes and implementations can change without editing it", "It removes interfaces", "It makes every class a singleton"], answer: 1, explain: "The class depends on an abstraction supplied by the composition root." },
+  { type: "mcq", q: "When is it sensible to hold back on adding an abstraction?", options: ["Never", "When there is only one case and no sign of change; refactor when a third variation appears", "Only in Python", "Only in small teams"], answer: 1, explain: "SOLID is a set of tools to reduce the cost of change, not a mandate for speculative structure." }
+]} />

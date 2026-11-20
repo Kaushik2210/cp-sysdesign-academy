@@ -1,0 +1,1 @@
+{ "title": "Object-Oriented Design and Patterns", "level": "Level 4: Low-Level Design", "order": 27, "summary": "Designing classes and objects that are easy to change and test: the SOLID principles, composition over inheritance, and the design patterns that come up most often in low-level design interviews and real code." }
