@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("175");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("176");
   });
 });
 
@@ -930,6 +930,7 @@ test.describe("security, observability and case-study modules", () => {
     ["/sd/oop-and-design-patterns/behavioral-patterns/", "Behavioral Design Patterns"],
     ["/sd/lld-case-studies/design-a-parking-lot/", "LLD Case Study: Design a Parking Lot"],
     ["/sd/lld-case-studies/design-an-lru-cache/", "LLD Case Study: Design an LRU Cache"],
+    ["/sd/lld-case-studies/design-a-vending-machine/", "LLD Case Study: Design a Vending Machine"],
   ];
   for (const [path, title] of LESSONS) {
     test(`${title} renders its runnable demos, trade-offs and quiz`, async ({ page }) => {
