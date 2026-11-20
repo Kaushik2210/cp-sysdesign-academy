@@ -1,0 +1,303 @@
+---
+title: "LLD Case Study: Design an LRU Cache"
+track: sd
+module: lld-case-studies
+order: 2
+difficulty: medium
+estMinutes: 45
+prerequisites: ["sd/lld-case-studies/design-a-parking-lot"]
+tags: [lld, case-study, lru-cache, data-structures, eviction, linked-list, hash-map, ttl]
+type: case-study
+furtherReading:
+  - title: "Python documentation, collections.OrderedDict"
+    url: https://docs.python.org/3/library/collections.html#collections.OrderedDict
+  - title: "Python documentation, functools.lru_cache"
+    url: https://docs.python.org/3/library/functools.html#functools.lru_cache
+  - title: "Wikipedia, Cache replacement policies"
+    url: https://en.wikipedia.org/wiki/Cache_replacement_policies
+  - title: "LeetCode, 146. LRU Cache"
+    url: https://leetcode.com/problems/lru-cache/
+---
+
+## The problem
+
+Design a cache with a **fixed capacity** that supports `get(key)` and `put(key, value)` in **O(1)** time. When it is full and a new key arrives, it **evicts the least recently used** entry. This is the classic low-level design question because it looks like a one-liner and then tests whether you can **combine two data structures** so that every operation, including the eviction, is constant time.
+
+## Requirements
+
+- `get(key)` returns the value or `None`, and marks the key as **most recently used**.
+- `put(key, value)` inserts or updates, marks the key as most recently used and evicts the **least recently used** key if the capacity is exceeded.
+- Both are **O(1)**.
+- Capacity is fixed at construction and at least 1.
+- Extensions to discuss: **eviction callback**, **time to live (TTL)**, **thread safety**, other **eviction policies**.
+
+## Why one structure is not enough
+
+| structure | lookup | find the least recently used | reorder on access |
+| --- | --- | --- | --- |
+| Hash map alone | O(1) | O(n) scan | no order at all |
+| List or array alone | O(n) | O(1) at the end | O(n) to move an item |
+| **Hash map plus doubly linked list** | **O(1)** | **O(1) (the tail)** | **O(1) (unlink and relink)** |
+
+The trick: the **map** takes a key straight to its **node** in the list; the **list** keeps nodes in recency order, most recent at the head and least recent at the tail. Because the list is **doubly linked** and we hold the node, we can unlink it in O(1) without searching. **Sentinel** head and tail nodes remove every "empty list" and "single element" edge case.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  subgraph Map["hash map: key to node"]
+    ka["a"]
+    kb["b"]
+    kc["c"]
+  end
+  H(("head sentinel")) <--> NC["c (most recent)"] <--> NA["a"] <--> NB["b (least recent)"] <--> T(("tail sentinel"))
+  kc -.-> NC
+  ka -.-> NA
+  kb -.-> NB`} caption="The map finds the node; the list orders the nodes. Eviction removes the node before the tail sentinel" />
+
+## Class design
+
+- `Node`: key, value, prev, next. The node stores the **key** too, because when we evict the tail we must also delete its key from the map.
+- `LRUCache`: the map, the two sentinels and two private helpers, `_unlink` and `_push_front`. `get` and `put` are **compositions of those two helpers**, which keeps each method short and easy to check.
+- `Cache` (an abstract base): `get` and `put`. A FIFO cache implements the same interface, which lets us **compare policies** and substitute one for another ([Liskov substitution](/sd/oop-and-design-patterns/solid-principles-in-practice/)).
+- `TTLLRUCache`: **inherits** the LRU behaviour and adds expiry. The clock is **injected** (a function) so tests can control time.
+
+## The code, with tests
+
+The program below defines the classes, then **checks the cache against a trusted model**: Python's `OrderedDict` driven by the same 20,000 random operations, comparing the full recency order after **every** step. It then compares LRU with FIFO on three workloads.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+from abc import ABC, abstractmethod
+from collections import OrderedDict
+
+
+class Node:
+    __slots__ = ("key", "value", "prev", "next")
+    def __init__(self, key=None, value=None):
+        self.key, self.value, self.prev, self.next = key, value, None, None
+
+
+class Cache(ABC):
+    @abstractmethod
+    def get(self, key): ...
+    @abstractmethod
+    def put(self, key, value): ...
+
+
+class LRUCache(Cache):
+    """Hash map for O(1) lookup + doubly linked list for O(1) recency order. Head = most recent."""
+    def __init__(self, capacity, on_evict=None):
+        if capacity < 1:
+            raise ValueError("capacity must be at least 1")
+        self.capacity, self.on_evict = capacity, on_evict
+        self._map = {}
+        self._head, self._tail = Node(), Node()      # sentinels remove every edge case
+        self._head.next, self._tail.prev = self._tail, self._head
+
+    def _unlink(self, n):
+        n.prev.next, n.next.prev = n.next, n.prev
+
+    def _push_front(self, n):
+        n.prev, n.next = self._head, self._head.next
+        self._head.next.prev = n
+        self._head.next = n
+
+    def get(self, key):
+        n = self._map.get(key)
+        if n is None:
+            return None
+        self._unlink(n)
+        self._push_front(n)
+        return n.value
+
+    def put(self, key, value):
+        n = self._map.get(key)
+        if n:
+            n.value = value
+            self._unlink(n)
+            self._push_front(n)
+            return
+        if len(self._map) >= self.capacity:
+            victim = self._tail.prev
+            self._unlink(victim)
+            del self._map[victim.key]
+            if self.on_evict:
+                self.on_evict(victim.key, victim.value)
+        n = Node(key, value)
+        self._map[key] = n
+        self._push_front(n)
+
+    def keys_most_recent_first(self):
+        out, n = [], self._head.next
+        while n is not self._tail:
+            out.append(n.key)
+            n = n.next
+        return out
+
+    def __len__(self):
+        return len(self._map)
+
+
+class FIFOCache(Cache):
+    def __init__(self, capacity):
+        self.capacity, self._d = capacity, OrderedDict()
+    def get(self, key):
+        return self._d.get(key)
+    def put(self, key, value):
+        if key not in self._d and len(self._d) >= self.capacity:
+            self._d.popitem(last=False)
+        self._d[key] = value
+
+
+class TTLLRUCache(LRUCache):
+    """LRU plus expiry. Time is injected so tests are deterministic."""
+    def __init__(self, capacity, ttl, clock):
+        super().__init__(capacity)
+        self.ttl, self.clock = ttl, clock
+    def put(self, key, value):
+        super().put(key, (value, self.clock() + self.ttl))
+    def get(self, key):
+        item = super().get(key)
+        if item is None:
+            return None
+        value, expires = item
+        if self.clock() >= expires:
+            self._expire(key)
+            return None
+        return value
+    def _expire(self, key):
+        n = self._map.pop(key)
+        self._unlink(n)
+
+
+def hit_rate(cache, keys):
+    hits = 0
+    for k in keys:
+        if cache.get(k) is not None:
+            hits += 1
+        else:
+            cache.put(k, k)
+    return hits / len(keys)
+
+
+c = LRUCache(3)
+for k in "abc":
+    c.put(k, k.upper())
+c.get("a")
+c.put("d", "D")
+print(c.keys_most_recent_first(), c.get("b"))
+evicted = []
+e = LRUCache(2, on_evict=lambda k, v: evicted.append(k))
+e.put(1, 1); e.put(2, 2); e.get(1); e.put(3, 3)
+print("evicted", evicted)
+
+# differential test: compare with a trusted OrderedDict model after every operation
+rnd = random.Random(7)
+ref, mine = OrderedDict(), LRUCache(5)
+ok = True
+for _ in range(20000):
+    k = rnd.randint(0, 12)
+    if rnd.random() < 0.5:
+        a = mine.get(k)
+        b = ref.get(k)
+        if k in ref: ref.move_to_end(k)
+        ok &= (a == b)
+    else:
+        mine.put(k, k * 2)
+        if k in ref: ref.move_to_end(k)
+        ref[k] = k * 2
+        if len(ref) > 5: ref.popitem(last=False)
+    ok &= list(reversed(list(ref))) == mine.keys_most_recent_first()
+print("matches OrderedDict model over 20000 ops:", ok)
+
+t = [0]
+tc = TTLLRUCache(2, 10, lambda: t[0])
+tc.put("x", 1)
+t[0] = 9; print(tc.get("x"))
+t[0] = 10; print(tc.get("x"), len(tc))
+
+# workloads: LRU against FIFO, cache of 50 entries
+rnd = random.Random(42)
+zipf = [rnd.choices(range(1000), weights=[1 / (i + 1) for i in range(1000)])[0] for _ in range(20000)]
+scan = []
+for i in range(20000):
+    if i % 100 < 70:
+        scan.append(rnd.randint(0, 19))        # hot working set of 20 keys
+    else:
+        scan.append(10000 + i)                 # one-off scan keys
+for name, keys in (("zipf", zipf), ("scan", scan)):
+    print(name, "LRU", round(hit_rate(LRUCache(50), keys), 3), "FIFO", round(hit_rate(FIFOCache(50), keys), 3))
+loop = [i % 51 for i in range(20000)]
+print("loop51 LRU", round(hit_rate(LRUCache(50), loop), 3), "FIFO", round(hit_rate(FIFOCache(50), loop), 3))
+`} />
+
+## What the output shows
+
+- After `put a,b,c`, `get a`, `put d` in a cache of 3, the recency order is **d, a, c** and **b was evicted**: the least recently used key, not the oldest.
+- The **eviction callback** reports that key 2 was evicted when key 3 arrived, after key 1 was touched.
+- The **20,000-operation model check** passes: the hand-built list and map agree with `OrderedDict` on every get result and on the entire recency order after every operation. This is how you gain confidence in pointer code: compare it with a simple, obviously correct model on random input.
+- The **TTL** cache returns the value at time 9 and treats it as expired at time 10 (and removes it).
+- On a **Zipf-like workload** (a few keys are very popular, with a long tail) over 1,000 keys and a cache of 50, **LRU hits 45.6% against FIFO's 40.1%**.
+- On a workload that mixes a **hot set of 20 keys** (70% of accesses) with **one-off scan keys** (30%), **LRU hits 69.4% against 60.1%**: LRU keeps touched keys, FIFO throws them out when they were inserted long ago.
+- On a **loop over 51 keys with a cache of 50** both hit **0%**: with a cyclic pattern one larger than the cache, each key is evicted just before it is needed again. LRU is **not** a universal winner.
+
+The numbers are from one run with fixed random seeds, so they are exactly reproducible, but they describe these synthetic workloads, not your traffic. Always measure with a trace of your own requests.
+
+## Concurrency
+
+`get` **mutates** the structure (it moves a node), so a cache hit is a write. Two threads calling `get` at once can corrupt the pointers. Options:
+
+1. **One lock** around `get` and `put`. Simple and correct, the right first answer. (`functools.lru_cache` in the standard library does this for you.)
+2. **Sharding**: split keys over N independent LRU caches by hash, each with its own lock. Contention drops by roughly N, at the cost of an eviction order that is only approximate across shards (each shard evicts its own least recently used key).
+3. **Approximate LRU**: sample a few random entries and evict the oldest of the sample (Redis does this), or use a clock bit. Cheaper to maintain, slightly worse hit rate.
+4. **Buffered recency updates**: record accesses in a buffer and apply them in batches, so readers do not contend on one lock (the idea behind modern libraries such as Caffeine in Java).
+
+## Extending the design
+
+| requirement | change |
+| --- | --- |
+| **Expiry (TTL)** | store an expiry time with the value; check on `get` (lazy expiry) and optionally sweep in the background so dead entries do not occupy space |
+| **Different eviction policy** | the policy is "who is the victim?". Extract an `EvictionPolicy` interface (LRU, LFU, FIFO, random) and inject it ([strategy](/sd/oop-and-design-patterns/behavioral-patterns/)) |
+| **LFU instead of LRU** | keep a frequency count; use buckets of nodes per frequency to stay O(1) |
+| **Eviction callback** | an `on_evict` hook, used to write dirty entries back or to count evictions |
+| **Weighted entries (size in bytes)** | capacity is a total weight; evict from the tail until the new entry fits |
+| **Write-through or write-back** | a loader and a writer interface around the cache ([cache strategies](/sd/caching/caching-strategies/)) |
+| **Statistics** | hit and miss counters, exposed as metrics ([observability](/sd/observability/logs-metrics-and-traces/)) |
+| **Distributed** | shard keys over machines with [consistent hashing](/sd/databases-2/consistent-hashing/); each node runs a local LRU |
+
+For the policy comparison in more depth see the [eviction policies](/sd/caching/eviction-policies/) lesson.
+
+## Trade-offs
+
+<TradeOffs caption="Eviction policy and implementation choices" rows={[
+  { option: "LRU", pros: "Simple, adapts to recent popularity, great for temporal locality", cons: "A long one-time scan can flush the hot set; poor for cyclic access just larger than the cache", chooseWhen: "Most general-purpose caches" },
+  { option: "FIFO", pros: "Trivial and cheap, no update on read", cons: "Evicts popular entries just because they are old", chooseWhen: "Very cheap caches where reads must not write" },
+  { option: "LFU", pros: "Keeps long-term popular items, resists scans", cons: "Slow to adapt when popularity shifts; more bookkeeping", chooseWhen: "Stable popularity distributions" },
+  { option: "Hand-built map plus linked list", pros: "Full control: callbacks, weights, custom policies", cons: "More code and more pointer bugs", chooseWhen: "Interviews and custom needs" },
+  { option: "OrderedDict (or a LinkedHashMap)", pros: "A few lines, well tested", cons: "Less flexible; the interviewer may ban it", chooseWhen: "Production code in Python" },
+  { option: "One global lock", pros: "Correct and simple", cons: "Contention under heavy parallel load", chooseWhen: "Modest concurrency" },
+  { option: "Sharded caches", pros: "Scales with cores", cons: "Eviction is only approximately global", chooseWhen: "High concurrency" }
+]} />
+
+## Pitfalls
+
+- Forgetting that `get` must **move the node to the front**; without it this is FIFO.
+- Evicting the tail but **not deleting its key from the map** (hence the node stores its key).
+- Updating an existing key by **inserting a second node** instead of updating and moving the first.
+- Evicting when merely **updating** an existing key, or checking the capacity after inserting instead of before.
+- Using `None` both as "missing" and as a stored value; real caches return a sentinel or a pair.
+- Edge cases: capacity 1, updating the key already at the head, a `get` for a missing key.
+- Calling `get` from several threads without a lock, since `get` is a write.
+- Trusting LRU to help against a **sequential scan** or a loop slightly larger than the cache.
+
+## What would you choose and why?
+
+A product page cache holds 100,000 entries. Most traffic hits popular products, but once an hour a crawler requests every product once. You see the hit rate collapse after each crawl. What do you change (policy, admission control, separate segments, ignoring the crawler), and how would you prove with a replay of production traffic that your change helps?
+
+## Quiz
+
+<Quiz id="sd-m28-lru-cache" tags={["lld", "case-study", "lru", "data-structures", "caching"]} questions={[
+  { type: "mcq", q: "Why does LRU use a doubly linked list rather than a singly linked list?", options: ["It uses less memory", "To unlink a node we hold in O(1) we need its predecessor, which a doubly linked list stores", "Singly linked lists cannot be reordered", "Doubly linked lists are sorted"], answer: 1, explain: "With prev and next pointers a node can remove itself without scanning from the head." },
+  { type: "mcq", q: "Why does each node store its key as well as its value?", options: ["For printing", "When the tail node is evicted we must delete its key from the hash map", "To compute hashes", "To support TTL"], answer: 1, explain: "The list gives us a node; the map needs the key to remove the entry." },
+  { type: "predict", q: "Capacity 3. Operations: put a, put b, put c, get a, put d. Which key is evicted?", code: "# recency after the first four operations, most recent first: a, c, b\n# put d evicts the least recently used", options: ["a", "b", "c", "d"], answer: 1, explain: "b was used least recently (get a refreshed a), so b is evicted, not the oldest-inserted key a." },
+  { type: "mcq", q: "A cyclic loop over 51 keys runs against an LRU cache of 50. What hit rate do you expect?", options: ["About 98%", "About 50%", "About 0%, because each key is evicted just before it is requested again", "It depends on the hash function"], answer: 2, explain: "The least recently used key is always the one needed next. The demo shows 0% for both LRU and FIFO." },
+  { type: "multi", q: "Which are valid ways to make an LRU cache safe for many threads?", options: ["Wrap get and put in one lock", "Shard the cache by key hash with a lock per shard", "Use no lock because get only reads", "Approximate LRU with sampling"], answer: [0, 1, 3], explain: "get moves a node, so it writes. Locks, sharding and approximations all work; assuming reads are safe does not." },
+  { type: "mcq", q: "How do you check hand-written pointer code like this with confidence?", options: ["Read it carefully once", "Drive it and a simple trusted model (OrderedDict) with the same random operations and compare after every step", "Test only the example from the problem statement", "Run it once with capacity 1"], answer: 1, explain: "Differential testing against an obviously correct model finds the edge cases you did not think of." }
+]} />
