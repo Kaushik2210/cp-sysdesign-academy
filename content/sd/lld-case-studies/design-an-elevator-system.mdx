@@ -1,0 +1,315 @@
+---
+title: "LLD Case Study: Design an Elevator System"
+track: sd
+module: lld-case-studies
+order: 4
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/lld-case-studies/design-a-vending-machine", "sd/oop-and-design-patterns/behavioral-patterns"]
+tags: [lld, case-study, elevator, scheduling, scan, look, strategy-pattern, simulation, dispatcher]
+type: case-study
+furtherReading:
+  - title: "Wikipedia, Elevator algorithm (SCAN and LOOK)"
+    url: https://en.wikipedia.org/wiki/Elevator_algorithm
+  - title: "Wikipedia, Elevator (vertical transport) control systems"
+    url: https://en.wikipedia.org/wiki/Elevator#Controls
+  - title: "Refactoring Guru, Strategy pattern"
+    url: https://refactoring.guru/design-patterns/strategy
+  - title: "Python documentation, copy: shallow and deep copy operations"
+    url: https://docs.python.org/3/library/copy.html
+---
+
+## The problem
+
+Design the control software for a **bank of elevators** in a building. People press a button on a floor, then press their destination inside a car. The system decides **which car** answers each request and **in what order each car visits floors**. It is a favourite low-level design question because it mixes **state** (each car's floor, direction and stops), **scheduling** (a policy for the order of stops), **assignment** (a policy for which car takes a request) and **time** (everything unfolds over ticks).
+
+The key design insight: there are **two separate decisions**, each with its own interchangeable policy.
+
+1. **Inside one car**: given the stops I must make, which way do I go and where do I stop next? (a scheduling policy)
+2. **Across cars**: a new request arrives; which car should take it? (a dispatch policy)
+
+## Requirements
+
+- A building with **F floors** and **N cars**.
+- A passenger is a request **(origin, destination)**. Cars stop at the origin to pick up, then at the destination to drop off.
+- Each car moves **one floor per tick**, and **opening the doors at a stop takes one tick**.
+- The dispatcher assigns each request to a car when it arrives.
+- Policies must be **swappable**, so we can compare them.
+- We care about **wait time** (request to pickup), **ride time** and **fairness** (the worst wait).
+- **Out of scope**: capacity limits, door obstruction, emergency modes, fire service, express zones (extensions below).
+
+## Inside one car: the LOOK policy
+
+A car that always jumps to the nearest stop can be starved: if requests keep appearing near it, a far request waits forever. The classic fix is the **elevator algorithm**:
+
+- **Keep moving in the current direction**, stopping at every stop on the way.
+- When **no stops remain ahead**, **reverse** if there are stops behind, otherwise go idle.
+
+This is called **LOOK** (the variant that reverses at the last stop rather than at the building's end, which is **SCAN**). Every stop is reached within **at most one sweep up and one sweep down**, so nothing starves. It is the same idea as disk head scheduling.
+
+<Diagram kind="mermaid" code={`stateDiagram-v2
+  [*] --> Idle
+  Idle --> Up: stop above is the nearest
+  Idle --> Down: stop below is the nearest
+  Up --> Up: stops remain above
+  Up --> Down: no stops above, stops below
+  Down --> Down: stops remain below
+  Down --> Up: no stops below, stops above
+  Up --> Idle: no stops left
+  Down --> Idle: no stops left`} caption="A car's direction as a small state machine: it only reverses when nothing is left ahead" />
+
+## Across cars: dispatch as a strategy
+
+The dispatcher is an interface with one method, `choose(cars, passenger, now)`. Two implementations:
+
+- **RoundRobin**: give each request to the next car in turn. Trivial, fair to the cars, blind to where they are.
+- **LeastEta**: for every car, **estimate the ticks until its doors open at the origin floor**, and choose the smallest. The estimate is found by **simulating a copy** of the car forward (a deep copy of its state plus a stand-in passenger), so it automatically accounts for its current direction, stops already queued, and door time. Ties break on the shorter queue, then car id.
+
+Both use the same `Elevator` and `Building`; only the policy object changes ([Strategy pattern](/sd/oop-and-design-patterns/behavioral-patterns/)).
+
+## Classes
+
+| class | responsibility |
+| --- | --- |
+| `Passenger` | origin, destination and the three timestamps (requested, picked up, dropped off) |
+| `Elevator` | floor, direction, set of stops, waiting and riding passengers; `step()` advances one tick; `eta(floor)` predicts |
+| `Dispatcher` (interface) | choose a car for a new request |
+| `Building` | owns the cars and the clock; routes requests through the dispatcher and ticks all cars |
+
+Time is a **parameter** (`now`), not a hidden clock, so the whole simulation is **deterministic** and testable ([parking lot lesson](/sd/lld-case-studies/design-a-parking-lot/) made the same choice).
+
+## The code
+
+First a single car serves two passengers so you can see the LOOK sweep tick by tick; then the two dispatchers face the **same 300 passengers** in a 20-floor building with 3 cars (a busy ground floor draws about a third of the origins), and the program prints the average wait, the worst wait, the average ride and when the last passenger was dropped.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import copy
+import random
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from enum import Enum
+
+
+class Direction(Enum):
+    UP = 1
+    DOWN = -1
+    IDLE = 0
+
+
+@dataclass
+class Passenger:
+    pid: int
+    origin: int
+    dest: int
+    requested_at: int
+    picked_at: int = -1
+    dropped_at: int = -1
+
+
+class Elevator:
+    """One car using the LOOK policy: keep going while there are stops ahead, then reverse."""
+    def __init__(self, eid, floors, start=0):
+        self.eid, self.floors, self.floor = eid, floors, start
+        self.direction = Direction.IDLE
+        self.stops = set()
+        self.waiting = []        # passengers assigned here and not yet picked up
+        self.riding = []
+
+    def assign(self, p):
+        self.waiting.append(p)
+        self.stops.add(p.origin)
+
+    def _ahead(self):
+        d = self.direction.value
+        return any((s - self.floor) * d > 0 for s in self.stops)
+
+    def _behind(self):
+        d = self.direction.value
+        return any((s - self.floor) * d < 0 for s in self.stops)
+
+    def _choose_direction(self):
+        if not self.stops - {self.floor} and self.floor not in self.stops:
+            self.direction = Direction.IDLE
+            return
+        if self.direction == Direction.IDLE:
+            nearest = min(self.stops, key=lambda s: (abs(s - self.floor), s))
+            self.direction = Direction.UP if nearest > self.floor else Direction.DOWN if nearest < self.floor else Direction.IDLE
+        elif not self._ahead() and self._behind():
+            self.direction = Direction.DOWN if self.direction == Direction.UP else Direction.UP
+
+    def step(self, now):
+        """Advance one tick. Returns passengers dropped off this tick."""
+        dropped = []
+        if self.floor in self.stops:                 # a tick spent with doors open
+            self.stops.discard(self.floor)
+            for p in [p for p in self.riding if p.dest == self.floor]:
+                p.dropped_at = now
+                self.riding.remove(p)
+                dropped.append(p)
+            for p in [p for p in self.waiting if p.origin == self.floor]:
+                p.picked_at = now
+                self.waiting.remove(p)
+                self.riding.append(p)
+                self.stops.add(p.dest)
+            return dropped
+        self._choose_direction()
+        if self.direction != Direction.IDLE:
+            self.floor += self.direction.value
+        return dropped
+
+    def eta(self, floor, now=0):
+        """Ticks until this car opens its doors at 'floor', found by simulating a copy."""
+        ghost = copy.deepcopy(self)
+        standin = Passenger(-1, floor, floor, now)             # a pretend passenger waiting at 'floor'
+        ghost.assign(standin)
+        for t in range(1, 10_000):
+            ghost.step(now + t)
+            if standin.picked_at >= 0:
+                return t
+        return 10_000
+
+
+class Dispatcher(ABC):
+    @abstractmethod
+    def choose(self, cars, p, now): ...
+
+
+class RoundRobin(Dispatcher):
+    def __init__(self):
+        self.i = -1
+    def choose(self, cars, p, now):
+        self.i = (self.i + 1) % len(cars)
+        return cars[self.i]
+
+
+class LeastEta(Dispatcher):
+    def choose(self, cars, p, now):
+        return min(cars, key=lambda c: (c.eta(p.origin, now), len(c.stops), c.eid))
+
+
+class Building:
+    def __init__(self, floors, n_cars, dispatcher):
+        self.cars = [Elevator(i, floors, start=0 if i % 2 == 0 else floors - 1) for i in range(n_cars)]
+        self.dispatcher, self.now, self.done = dispatcher, 0, []
+
+    def request(self, p):
+        self.dispatcher.choose(self.cars, p, self.now).assign(p)
+
+    def tick(self):
+        self.now += 1
+        for c in self.cars:
+            self.done += c.step(self.now)
+
+    def busy(self):
+        return any(c.stops or c.waiting or c.riding for c in self.cars)
+
+
+def simulate(dispatcher, n=300, floors=20, cars=3, seed=11):
+    rnd = random.Random(seed)
+    arrivals, t = [], 0
+    for i in range(n):
+        t += rnd.randint(0, 3)
+        o = rnd.choice([0] * 6 + list(range(floors)))        # busy ground floor
+        d = rnd.choice([f for f in range(floors) if f != o])
+        arrivals.append(Passenger(i, o, d, t))
+    b, k = Building(floors, cars, dispatcher), 0
+    while k < len(arrivals) or b.busy():
+        while k < len(arrivals) and arrivals[k].requested_at <= b.now:
+            b.request(arrivals[k]); k += 1
+        b.tick()
+    waits = [p.picked_at - p.requested_at for p in b.done]
+    rides = [p.dropped_at - p.picked_at for p in b.done]
+    assert len(b.done) == n and all(w >= 0 for w in waits)
+    return sum(waits) / n, max(waits), sum(rides) / n, b.now
+
+
+if True:
+    e = Elevator(0, 10)
+    e.assign(Passenger(1, 3, 7, 0))
+    e.assign(Passenger(2, 5, 2, 0))
+    trace, now = [], 0
+    while e.stops or e.waiting or e.riding:
+        now += 1
+        e.step(now)
+        trace.append((now, e.floor, e.direction.name))
+    print(trace)
+    for name, d in (("round robin", RoundRobin()), ("least ETA", LeastEta())):
+        aw, mw, ar, end = simulate(d)
+        print(f"{name:12s} avg wait {aw:.1f} max wait {mw} avg ride {ar:.1f} finished at tick {end}")
+`} />
+
+## What the output shows
+
+**One car, two passengers** (passenger 1: floor 3 to 7; passenger 2: floor 5 to 2, car starts at floor 0). The trace reads (tick, floor, direction): the car climbs to floor 3 and spends one tick there with the doors open (picking up passenger 1), climbs to 5 and opens the doors (picking up passenger 2), continues up to 7 and drops passenger 1, and **only then** reverses and travels down to floor 2 to drop passenger 2. Passenger 2 rode **past their destination and back**: the LOOK sweep serves everyone fairly in two passes but is not shortest-route for each person. Real controllers reduce this by only picking up people who want to go in the car's direction, which is the first extension below.
+
+**Dispatch comparison** (300 passengers, same arrival sequence, fixed seed):
+
+| dispatcher | average wait | worst wait | average ride | all done at tick |
+| --- | --- | --- | --- | --- |
+| RoundRobin | 19.6 | 53 | 17.1 | 493 |
+| LeastEta | 10.0 | 47 | 18.0 | 478 |
+
+Choosing the car that can arrive soonest **halves the average wait** (19.6 to 10.0 ticks) and finishes sooner; the **worst case improves only a little** (53 to 47), and the **average ride gets slightly longer** (17.1 to 18.0) because cars pick up more people on the way. This is the usual shape of an optimisation: it improves the metric you targeted, and costs something elsewhere. Which metric matters is a product decision, so state it before you design.
+
+These are **one synthetic workload with one seed**. The ordering is meaningful (the gap is large) but the exact numbers are not predictions for a real building.
+
+## Extending the design
+
+| requirement | change |
+| --- | --- |
+| **Direction-aware pickups** (hall buttons up and down) | a hall call carries a direction; a car only stops for it when travelling that way, or when it has nothing further ahead |
+| **Capacity limits** | a car refuses to pick up when full; the dispatcher avoids full cars; waiting passengers are re-dispatched |
+| **Peak-time modes** (morning up-peak) | a dispatcher that parks idle cars at the lobby, or a mode switch that changes the policy |
+| **Destination dispatch** (passengers enter the floor on a keypad outside) | the dispatcher groups people with nearby destinations into the same car, which needs requests with destinations known at assignment |
+| **Express and local zones** | each car has a set of floors it serves; the dispatcher filters on it |
+| **Fire service and out-of-service** | a state per car overriding the scheduler ([vending machine states](/sd/lld-case-studies/design-a-vending-machine/)) |
+| **Re-assignment** | if a car breaks or a better car frees up, move waiting passengers to it |
+| **Metrics** | wait and ride histograms published as metrics ([observability](/sd/observability/logs-metrics-and-traces/)) |
+| **Many buildings** | one controller per building with its own state; a backend only aggregates statistics |
+
+## Concurrency and real time
+
+In the real world button presses arrive **while cars are moving**. Two common structures:
+
+- **A single control loop** (an event loop): a queue of events (button press, car arrived, door closed) is processed one at a time by one thread, and all scheduling state is touched by that thread only. No locks, no races. This is the preferred design here and what the tick model represents.
+- **A thread per car** sharing the dispatcher: needs locks around the shared queues and care that the dispatcher reads a **consistent snapshot** of the cars' states. More moving parts for little gain at this scale.
+
+Safety-critical logic (door interlocks, overspeed) lives in **separate hardware controllers**, never only in this software.
+
+## Trade-offs
+
+<TradeOffs caption="Scheduling and dispatch choices" rows={[
+  { option: "LOOK or SCAN inside a car", pros: "No starvation; simple; predictable worst case", cons: "A passenger may ride away from their destination before returning", chooseWhen: "The default for a single car" },
+  { option: "Nearest stop first", pros: "Short average trips at low load", cons: "Far requests can starve under steady load", chooseWhen: "Almost never on its own" },
+  { option: "Round robin dispatch", pros: "Trivial and stateless", cons: "Ignores car positions, so waits are long (19.6 ticks in the demo)", chooseWhen: "A baseline to beat" },
+  { option: "Least estimated time of arrival", pros: "Halves the average wait in the demo", cons: "More computation; ride times grow; ETA depends on a model", chooseWhen: "Most real banks" },
+  { option: "Simulating a copy to estimate", pros: "Reuses the real logic, so it cannot drift from it", cons: "Cost grows with queue length and requests", chooseWhen: "Small and medium banks" },
+  { option: "Closed-form ETA formula", pros: "Constant time", cons: "A second copy of the movement rules that can disagree with the real one", chooseWhen: "Large buildings with measured need" },
+  { option: "Destination dispatch", pros: "Groups riders, fewer stops, higher throughput", cons: "Needs new hardware and a more complex optimiser", chooseWhen: "Tall buildings with heavy peaks" }
+]} />
+
+## Pitfalls
+
+- Mixing the two decisions (per-car order and car assignment) in one class.
+- Hidden clocks and randomness inside the model, which make behaviour untestable.
+- A scheduler that can **starve** a request (always chasing the nearest stop).
+- Forgetting the **door-open tick**, so stopping at a floor takes no time and results look too good.
+- Letting an ETA estimate **mutate** the real car (hence the deep copy).
+- Reversing too early (when there are still stops ahead) or too late (at the building's end instead of the last stop).
+- Optimising only the average wait and ignoring the **worst** wait or ride time.
+- Not stating what to optimise (average wait, worst wait, energy, throughput) before choosing a policy.
+- Putting safety interlocks only in software.
+
+## What would you choose and why?
+
+During the morning rush 80% of the passengers go from the lobby to upper floors, and the evening rush is the reverse. Your LeastEta dispatcher gives a good average all day but the lobby queue gets long at 9am. Which policy or mode would you add (parking idle cars at the lobby, zoning, destination dispatch), what would you measure to confirm that it helps, and how would you detect that you are in a morning rush without hard-coding the time?
+
+## Quiz
+
+<Quiz id="sd-m28-elevator" tags={["lld", "case-study", "elevator", "scheduling", "strategy"]} questions={[
+  { type: "mcq", q: "Why does a car use LOOK rather than always going to the nearest stop?", options: ["It is faster at low load", "Continuing in one direction until nothing is ahead guarantees every stop is served within two sweeps, so no request starves", "It uses less electricity in all cases", "Nearest stop cannot be implemented"], answer: 1, explain: "LOOK bounds the wait of every stop; nearest-first can starve distant requests under continuous load." },
+  { type: "mcq", q: "Which two decisions does the design keep separate?", options: ["Floors and doors", "The order of stops inside one car, and which car takes a new request", "Hardware and software", "Up and down buttons"], answer: 1, explain: "Each has its own interchangeable policy: the scheduling policy in the car and the dispatch strategy across cars." },
+  { type: "predict", q: "A car at floor 0 has stops {3, 5, 7} and starts going up. Passenger A boards at 3 (destination 7), passenger B boards at 5 (destination 2). In what order does the car open its doors?", code: "# LOOK: keep going up while stops remain ahead\n# stops after pickups: {7, 2}", options: ["3, 5, 2, 7", "3, 5, 7, 2", "3, 2, 5, 7", "2, 3, 5, 7"], answer: 1, explain: "The car continues up to 7 first and only then reverses to serve floor 2, as the trace shows." },
+  { type: "mcq", q: "How does LeastEta estimate the time to reach a floor without disturbing the real car?", options: ["It guesses from the distance only", "It deep-copies the car and simulates the real movement rules forward", "It asks the passenger", "It uses the average of all cars"], answer: 1, explain: "Simulating a copy reuses the real rules, so the estimate respects direction, queued stops and door time." },
+  { type: "mcq", q: "In the demo, LeastEta cut the average wait from 19.6 to 10.0 ticks. What got worse?", options: ["Nothing", "The average ride grew slightly (17.1 to 18.0), because cars pick up more people on the way", "The building size", "The number of cars"], answer: 1, explain: "Optimising one metric usually costs another; decide which one the product values." },
+  { type: "multi", q: "Which make this design testable?", options: ["Passing time in as a parameter", "A seeded random generator for arrivals", "Reading the wall clock inside the cars", "Policies behind interfaces so they can be compared on identical input"], answer: [0, 1, 3], explain: "Deterministic input and swappable policies let you compare designs fairly and reproduce results." }
+]} />
