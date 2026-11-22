@@ -1,0 +1,295 @@
+---
+title: "Case Study: Design a Distributed Message Queue"
+track: sd
+module: case-studies-data-and-transactions
+order: 5
+difficulty: hard
+estMinutes: 60
+prerequisites: ["sd/queues-and-streaming/kafka-rabbitmq-sqs", "sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/consensus-and-coordination/raft-log-replication-and-safety"]
+tags: [case-study, message-queue, kafka, partitions, consumer-groups, offsets, replication, delivery-semantics, log]
+type: case-study
+furtherReading:
+  - title: "Apache Kafka documentation, Design (persistence, efficiency, the producer and consumer, replication, log compaction)"
+    url: https://kafka.apache.org/documentation/#design
+  - title: "Jay Kreps, The Log: What every software engineer should know about real-time data's unifying abstraction"
+    url: https://engineering.linkedin.com/distributed-systems/log-what-every-software-engineer-should-know-about-real-time-datas-unifying
+  - title: "Amazon SQS Developer Guide, Visibility timeout"
+    url: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html
+  - title: "Kreps, Narkhede, Rao, Kafka: a Distributed Messaging System for Log Processing (NetDB 2011)"
+    url: https://notes.stephenholiday.com/Kafka.pdf
+---
+
+## The problem
+
+Design a **distributed message queue** (a broker) like Kafka, Pulsar or SQS. **Producers** publish messages to named **topics**; **consumers** read them, possibly many independent applications reading the same stream. The system must be **durable** (an acknowledged message survives a machine failure), **scalable** (millions of messages per second), **ordered where it matters**, and clear about its **delivery guarantees**.
+
+Why build one? Queues **decouple** producers from consumers, **absorb bursts**, and let many consumers process the same data independently (the [why queues](/sd/queues-and-streaming/why-queues/) lesson). This case study is about the broker's insides: how a log, partitions, offsets, consumer groups and replication fit together.
+
+## Requirements
+
+**Functional**
+- Producers **publish** messages to a topic, with an optional **key**.
+- Consumers **subscribe** and read in order; many **consumer groups** can read the same topic independently; consumers in one group **share the work**.
+- Messages are retained for a configurable period (for example 7 days) so consumers can **replay**.
+
+**Non-functional**
+- **Throughput**: about 1 million messages per second, 1 KB each (1 GB/s in).
+- **Durability**: an acknowledged message is not lost if a broker dies.
+- **Availability**: producers and consumers continue through a single broker failure.
+- **Ordering**: messages with the **same key** are read in the order they were published.
+- **Latency**: single-digit milliseconds end to end under normal load.
+
+**Delivery guarantee we will offer:** **at-least-once** by default, with ways to reach effectively-once (explained below).
+
+## Back-of-the-envelope
+
+| quantity | calculation | result |
+| --- | --- | --- |
+| Ingest | 1,000,000 msg/s x 1 KB | 1 GB/s |
+| Retention (7 days) | 1 GB/s x 604,800 s | about 605 TB |
+| With 3 replicas | 605 TB x 3 | about 1.8 PB |
+| Partitions for throughput | 1 GB/s / about 10 MB/s per partition | about 100, so provision about 200 with headroom |
+
+(Assume about 10 MB/s per partition as a safe write rate; real systems differ, so measure.) The storage figure dominates, which is why retention, compression and tiered storage matter. Reads are mostly **sequential**, which disks and the operating system's page cache handle very well; that is the main reason log-structured brokers are fast.
+
+## The core abstraction: the partitioned log
+
+A **partition** is an **append-only log**: messages get consecutive **offsets** (0, 1, 2, ...) and are never modified. A **topic** is split into **partitions** that live on different brokers.
+
+- **Why a log?** Appending and reading sequentially is the fastest thing disks do. A reader only needs to remember **one number**, its offset. Replaying is just "read from offset 0 again".
+- **Why partitions?** One log on one machine is a throughput ceiling. Partitions **spread load** and let consumers **work in parallel**.
+- **Ordering**: only **within a partition**. Across partitions there is no global order (it would need a single point of coordination). Producers choose the partition with `hash(key) mod partitions`, so **all messages of one key land in one partition** and stay ordered.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  P1["Producer A"] --> T
+  P2["Producer B"] --> T
+  subgraph T["Topic orders (4 partitions)"]
+    direction TB
+    L0["partition 0: offsets 0 1 2 3 ..."]
+    L1["partition 1: offsets 0 1 2 3 ..."]
+    L2["partition 2: offsets 0 1 2 3 ..."]
+    L3["partition 3: offsets 0 1 2 3 ..."]
+  end
+  T --> G1["group billing: consumer 1 owns 0 and 2, consumer 2 owns 1 and 3"]
+  T --> G2["group analytics: one consumer owns all four"]`} caption="Each group tracks its own offsets. Inside a group, every partition has exactly one owner" />
+
+## Consumer groups and offsets
+
+- A **consumer group** is a set of consumers that **share** a topic: each partition is assigned to **exactly one** consumer in the group, so a message is processed by one consumer of the group. Different groups are independent and each sees every message.
+- The group's progress is stored as a **committed offset** per partition ("next message to read"). Committing after processing gives **at-least-once**; committing before processing gives **at-most-once** (a crash loses messages).
+- When consumers **join or leave**, partitions are **rebalanced** across the remaining members.
+- **Parallelism limit**: a group can usefully have at most as many consumers as partitions. More consumers than partitions sit idle.
+
+## Replication and durability
+
+Each partition has a **leader** and several **followers** on other brokers. Producers write to the leader; followers copy the log. A write is **acknowledged** when enough replicas have it (the **in-sync replicas**, ISR). If the leader dies, a follower with the full log is **elected** as the new leader (coordinated through a consensus system, see [Raft](/sd/consensus-and-coordination/raft-log-replication-and-safety/)).
+
+| producer setting | meaning | risk |
+| --- | --- | --- |
+| acks = 0 | do not wait | messages can be lost silently |
+| acks = 1 | leader has it | lost if the leader dies before followers copy |
+| acks = all | every in-sync replica has it | slowest, survives a broker failure |
+
+Pair `acks = all` with a **minimum in-sync replicas** setting (for example 2 of 3) so a write is refused rather than accepted with a single copy. This is the standard durability versus availability dial.
+
+## The simulation
+
+The program is a small single-process model of the design: a `Partition` log, a `Broker` that routes by a stable hash of the key, consumer groups with committed offsets and a **rebalance**, and a driver that can **skip a commit** to simulate a consumer crash after processing. It then demonstrates four properties: **per-key ordering**, **at-least-once duplicates**, an **idempotent consumer** that removes them, and **rebalancing**. (It models the logic, not networking, disks or replication.)
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+import zlib
+from collections import defaultdict
+
+
+class Partition:
+    """An append-only log. A message's offset is its index; messages are never modified."""
+    def __init__(self):
+        self.log = []
+
+    def append(self, key, value):
+        self.log.append((key, value))
+        return len(self.log) - 1
+
+    def read(self, offset, max_n):
+        return [(offset + i, k, v) for i, (k, v) in enumerate(self.log[offset:offset + max_n])]
+
+
+class Broker:
+    def __init__(self, n_partitions):
+        self.partitions = [Partition() for _ in range(n_partitions)]
+        self.committed = defaultdict(int)       # (group, partition) -> next offset to read
+        self.members = defaultdict(list)        # group -> sorted consumer ids
+        self.assignment = {}                    # (group, partition) -> consumer id
+
+    def produce(self, key, value):
+        p = zlib.crc32(key.encode()) % len(self.partitions)     # same key -> same partition
+        return p, self.partitions[p].append(key, value)
+
+    # consumer groups: each partition is owned by exactly one consumer of the group
+    def join(self, group, cid):
+        self.members[group] = sorted(self.members[group] + [cid])
+        self._rebalance(group)
+
+    def leave(self, group, cid):
+        self.members[group].remove(cid)
+        self._rebalance(group)
+
+    def _rebalance(self, group):
+        ids = self.members[group]
+        for p in range(len(self.partitions)):
+            self.assignment[(group, p)] = ids[p % len(ids)] if ids else None
+
+    def owned(self, group, cid):
+        return [p for p in range(len(self.partitions)) if self.assignment.get((group, p)) == cid]
+
+    def poll(self, group, cid, max_n=4):
+        out = []
+        for p in self.owned(group, cid):
+            for off, k, v in self.partitions[p].read(self.committed[(group, p)], max_n):
+                out.append((p, off, k, v))
+        return out
+
+    def commit(self, group, p, next_offset):
+        self.committed[(group, p)] = next_offset
+
+
+def drain(broker, group, consumers, handler, crash_every=None):
+    """Run consumers until the log is consumed. Optionally a consumer crashes before committing."""
+    polls = 0
+    while True:
+        progressed = False
+        for cid in list(consumers):
+            batch = broker.poll(group, cid)
+            if not batch:
+                continue
+            progressed = True
+            polls += 1
+            for p, off, k, v in batch:
+                handler(cid, p, off, k, v)
+            if crash_every and polls % crash_every == 0:
+                continue                         # crash after processing, before commit: batch will be redelivered
+            for p in {p for p, *_ in batch}:
+                last = max(off for pp, off, *_ in batch if pp == p)
+                broker.commit(group, p, last + 1)
+        if not progressed:
+            return
+
+
+if True:
+    rnd = random.Random(3)
+    users = [f"user{i}" for i in range(6)]
+    b = Broker(4)
+    sent = {u: [] for u in users}
+    for n in range(60):
+        u = rnd.choice(users)
+        b.produce(u, (u, len(sent[u])))
+        sent[u].append(len(sent[u]))
+    print("messages per partition:", [len(p.log) for p in b.partitions])
+    print("key -> partition:", {u: zlib.crc32(u.encode()) % 4 for u in users})
+
+    # 1. normal consumption by a group of two: order per key preserved
+    b.join("g1", "c1"); b.join("g1", "c2")
+    seen = defaultdict(list)
+    drain(b, "g1", ["c1", "c2"], lambda c, p, o, k, v: seen[k].append(v[1]))
+    print("per-key order preserved:", all(seen[u] == sent[u] for u in users), "| partitions owned:", b.owned("g1", "c1"), b.owned("g1", "c2"))
+
+    # 2. at-least-once: a crash before commit causes duplicates
+    b2 = Broker(4)
+    for n in range(60):
+        u = users[n % 6]
+        b2.produce(u, (u, n))
+    b2.join("g", "c1"); b2.join("g", "c2")
+    got = []
+    drain(b2, "g", ["c1", "c2"], lambda c, p, o, k, v: got.append((p, o)), crash_every=3)
+    print("delivered:", len(got), "distinct:", len(set(got)), "duplicates:", len(got) - len(set(got)))
+
+    # 3. idempotent consumer: dedupe on (partition, offset)
+    applied, done = [], set()
+    def idem(c, p, o, k, v):
+        if (p, o) in done:
+            return
+        done.add((p, o)); applied.append((p, o))
+    b3 = Broker(4)
+    for n in range(60):
+        u = users[n % 6]
+        b3.produce(u, (u, n))
+    b3.join("g", "c1"); b3.join("g", "c2")
+    drain(b3, "g", ["c1", "c2"], idem, crash_every=3)
+    print("with dedupe, applied:", len(applied), "distinct:", len(set(applied)))
+
+    # 4. rebalance when a consumer leaves
+    b3.join("g", "c3")
+    print("3 consumers own:", [b3.owned("g", c) for c in ("c1", "c2", "c3")])
+    b3.leave("g", "c2")
+    print("after c2 leaves:", [b3.owned("g", c) for c in ("c1", "c3")])
+`} />
+
+## What the output shows
+
+- **Partition load is uneven**: 60 messages over 4 partitions landed as **10, 24, 12 and 14**. Two of the six keys (user1 and user3) hash to partition 1, so it carries 24 messages. This is **key skew**: ordering by key means a hot key cannot be spread over partitions. Fixes are a better key, adding a random suffix for keys that need no ordering, or more partitions.
+- **Per-key order is preserved**: with two consumers in one group, each key's messages were consumed in exactly the order they were sent (`True`). Consumer 1 owns partitions 0 and 2, consumer 2 owns 1 and 3.
+- **At-least-once means duplicates**: when a batch is processed but the commit is skipped (a crash before the commit), the same messages are delivered again. **84 deliveries for 60 distinct messages: 24 duplicates.** Nothing was lost, which is the point of committing after processing.
+- **An idempotent consumer fixes the duplicates**: remembering `(partition, offset)` of processed messages, the same run **applied exactly 60 distinct messages**. The processing is *effectively once* even though delivery is at-least-once.
+- **Rebalance**: with three consumers the partitions split as [0, 3], [1] and [2]; when consumer 2 leaves, its partition goes to the others ([0, 2] and [1, 3]).
+
+The duplicate count depends on the simulated crash pattern (every third poll skips its commit), so treat 24 as an illustration of the mechanism, not a rate.
+
+## Delivery semantics, summarised
+
+| guarantee | how | cost |
+| --- | --- | --- |
+| **At-most-once** | commit the offset first, then process | a crash loses messages |
+| **At-least-once** | process, then commit | duplicates after a crash or rebalance, so consumers must be idempotent |
+| **Effectively-once** | at-least-once plus idempotent handling (dedupe by id or offset, or an upsert) | design effort in the consumer |
+| **Transactional exactly-once** | atomic write of output and offset commit, with producer ids for deduplication | complexity and lower throughput; only within the system that supports it |
+
+See [delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/) for the full discussion.
+
+## Other design questions
+
+- **Retention and compaction**: delete by age or size, or **compact** by key (keep only the latest message per key) for changelog topics.
+- **Poison messages and retries**: a message that always fails would block its partition. Use a bounded retry count, a **retry topic** with delay and a **dead-letter topic** ([backpressure, retries and DLQ](/sd/queues-and-streaming/backpressure-retries-and-dlq/)).
+- **Backpressure**: consumers **pull** at their own pace, so a slow consumer falls behind (**lag**) instead of being overwhelmed. Monitor lag per group and partition as the key health metric.
+- **Queue-style systems (SQS, RabbitMQ)** differ: messages are **deleted** after acknowledgement and a **visibility timeout** hides a message while one consumer works on it; there is no replay and ordering is weaker. They suit task distribution; logs suit streams and replay.
+- **Partition count is hard to change**: increasing it changes `hash(key) mod n` and breaks per-key ordering for existing keys. Over-provision partitions at the start.
+- **Large messages**: store the payload in an object store and send a reference.
+
+## Trade-offs
+
+<TradeOffs caption="Log-based broker versus queue-based broker, and key settings" rows={[
+  { option: "Log-based (Kafka style)", pros: "Replay, many independent consumer groups, very high sequential throughput, per-key ordering", cons: "Ordering only per partition; partition count is hard to change; consumers track offsets", chooseWhen: "Event streams, pipelines, analytics, event sourcing" },
+  { option: "Queue-based (SQS or RabbitMQ style)", pros: "Simple task distribution, per-message acknowledgement, visibility timeouts and delays, easy scaling of workers", cons: "No replay once deleted; weaker ordering; one consumer set per queue", chooseWhen: "Background jobs and work queues" },
+  { option: "acks = all with min in-sync replicas", pros: "No acknowledged message lost to a single failure", cons: "Higher latency; writes refused if too few replicas are alive", chooseWhen: "Payments, orders, anything you cannot lose" },
+  { option: "acks = 1", pros: "Lower latency", cons: "A leader failure can lose acknowledged messages", chooseWhen: "Metrics and logs where loss is tolerable" },
+  { option: "Commit after processing (at-least-once)", pros: "Nothing lost", cons: "Duplicates; needs idempotent consumers", chooseWhen: "The default for important data" },
+  { option: "Commit before processing (at-most-once)", pros: "No duplicates, simplest", cons: "Messages lost on crash", chooseWhen: "Lossy telemetry" },
+  { option: "More partitions", pros: "More parallelism and throughput", cons: "More files, longer failover and rebalance, and key ordering breaks if changed later", chooseWhen: "Provision generously up front, within broker limits" }
+]} />
+
+## Pitfalls
+
+- Assuming **global ordering**: it exists only within a partition.
+- A **hot key** that overloads one partition.
+- Committing offsets **before** processing and losing messages on a crash.
+- Non-idempotent consumers behind an at-least-once broker.
+- Changing the partition count and silently **breaking per-key order**.
+- More consumers than partitions, so some are idle.
+- Long processing that exceeds the **session or poll timeout**, triggering rebalances that cause duplicates and more rebalances.
+- No **dead-letter** path, so one poison message blocks a partition forever.
+- Monitoring broker health but not **consumer lag**.
+- Treating the broker as a database: using it as the system of record without understanding retention.
+
+## What would you choose and why?
+
+An e-commerce company wants (1) order events that three teams consume independently, never lost and ordered per order; (2) an image resize job queue where each job should run once on any free worker; and (3) a firehose of page-view events for analytics where losing 0.1% is fine. Which broker style, partition key, acks setting and commit strategy would you use for each, and which of the three would you build on the same cluster?
+
+## Quiz
+
+<Quiz id="sd-m18-distributed-message-queue" tags={["case-study", "message-queue", "kafka", "partitions", "delivery-semantics"]} questions={[
+  { type: "mcq", q: "Where does a log-based broker guarantee message order?", options: ["Across the whole topic", "Within a single partition", "Across all consumer groups", "Only for one consumer"], answer: 1, explain: "Order is per partition; the producer picks the partition from the key so one key stays ordered." },
+  { type: "mcq", q: "Why are messages with the same key sent to the same partition?", options: ["To save space", "So all messages for that key are consumed in the order they were published", "Because hashing is faster", "To balance the load perfectly"], answer: 1, explain: "hash(key) mod partitions keeps a key's messages in one ordered log, at the cost of possible skew." },
+  { type: "mcq", q: "A consumer processes a message and crashes before committing its offset. What happens after it restarts?", options: ["The message is lost", "The message is delivered again, so processing must be idempotent", "The broker deletes the message", "The partition is dropped"], answer: 1, explain: "Commit after processing gives at-least-once: nothing lost, possible duplicates (24 in the demo)." },
+  { type: "predict", q: "A topic has 4 partitions and one consumer group has 6 consumers. How many consumers receive messages?", code: "# each partition is owned by exactly one consumer in the group\npartitions = 4\nconsumers = 6\nprint(min(partitions, consumers))", options: ["6", "4", "2", "1"], answer: 1, explain: "At most one consumer per partition, so two consumers are idle." },
+  { type: "multi", q: "Which settings help a write survive a broker failure?", options: ["acks = all", "A minimum in-sync replica count of 2 out of 3", "acks = 0", "Replication factor of 1"], answer: [0, 1], explain: "Waiting for all in-sync replicas and refusing writes with too few of them keeps acknowledged data safe." },
+  { type: "mcq", q: "Why is increasing the number of partitions later risky?", options: ["It deletes data", "hash(key) mod n changes, so existing keys map to different partitions and per-key ordering breaks", "Consumers cannot read it", "It lowers throughput"], answer: 1, explain: "Over-provision partitions up front, or plan a migration that drains the old topic." }
+]} />
