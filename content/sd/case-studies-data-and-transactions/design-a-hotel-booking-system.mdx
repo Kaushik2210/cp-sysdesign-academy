@@ -1,0 +1,298 @@
+---
+title: "Case Study: Design a Hotel Booking System"
+track: sd
+module: case-studies-data-and-transactions
+order: 6
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/case-studies-data-and-transactions/design-a-ticket-booking-system", "sd/databases-1/acid-and-transactions", "sd/queues-and-streaming/delivery-semantics-and-idempotency"]
+tags: [case-study, hotel-booking, reservations, inventory, date-ranges, transactions, overbooking, idempotency, sharding]
+type: case-study
+furtherReading:
+  - title: "SQLite documentation, Transaction control and conditional updates"
+    url: https://www.sqlite.org/lang_transaction.html
+  - title: "PostgreSQL documentation, Explicit locking and SELECT FOR UPDATE"
+    url: https://www.postgresql.org/docs/current/explicit-locking.html
+  - title: "Stripe documentation, Idempotent requests"
+    url: https://docs.stripe.com/api/idempotent_requests
+  - title: "Wikipedia, Overbooking"
+    url: https://en.wikipedia.org/wiki/Overbooking
+---
+
+## The problem
+
+Design a **hotel booking system** like Booking.com or Expedia: guests **search** for rooms in a city for a range of dates, **book** a room type, and may **cancel**. Hotels manage their rooms and rates.
+
+It resembles the [ticket booking case study](/sd/case-studies-data-and-transactions/design-a-ticket-booking-system/), but the **unit being sold is different**, and that changes the design:
+
+- A ticket booking sells **one seat for one event**. A hotel booking sells **one room for a range of nights**: all nights or none.
+- Rooms of one type are **interchangeable**, so we usually track **counts**, not individual rooms.
+- Hotels **deliberately overbook** because some guests do not show up. Rejecting every booking at 100% is not the goal.
+- **Search is huge and read-heavy**; **booking is small and must be exactly right**.
+
+## Requirements
+
+**Functional**
+- Search hotels by city, dates, guests and filters; see price and availability.
+- Book a room type for a **check-in to check-out** range; get a confirmation.
+- Cancel (with the hotel's policy) so the room becomes available again.
+- Hotels update their inventory and prices.
+
+**Non-functional**
+- **Never sell a night that is not available** (beyond a deliberate overbooking limit). Correctness of booking beats everything else.
+- **Search** can be slightly stale but must be fast (hundreds of milliseconds).
+- A booking must be **all or nothing** across its nights.
+- **Idempotent** booking: a retried request must not book twice.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Bookings | 1.5 million per day | about 17 per second on average |
+| Peak | 10 times average | about 170 per second |
+| Searches | 1,000 per booking | about 17,000 per second on average, 170,000 at peak |
+| Inventory rows | 500,000 hotels x 5 room types x 365 nights | about 912 million rows |
+
+The write rate is **modest**: one well-tuned relational database shard handles hundreds of booking transactions per second. The challenges are **correctness under concurrency**, the **huge read load** for search and the **size** of the inventory table, not raw write throughput. That points to a relational database for bookings and a separate, scalable read path for search.
+
+## Data model: inventory per room type per night
+
+Instead of tracking each physical room, keep a row per **(hotel, room type, night)** with the **total** rooms and how many are **booked**:
+
+| hotel | room type | night | total | booked |
+| --- | --- | --- | --- | --- |
+| 17 | double | 2027-03-01 | 40 | 37 |
+| 17 | double | 2027-03-02 | 40 | 40 |
+
+A stay from check-in to check-out uses **every night from check-in up to, but not including, the check-out day** (a guest leaving on the 4th does not occupy the night of the 4th, so someone else can arrive that day). Assigning a physical room number can wait until check-in.
+
+Why counts rather than rooms? The question "is there at least one double room free on each night of my stay?" is a simple comparison per night. Tracking each room would require finding a **single room free for the whole range**, which is a harder interval-packing problem and unnecessary when rooms of a type are interchangeable.
+
+Tables: `hotel`, `room_type`, `inventory(hotel, room_type, night, total, booked)` with a **constraint `booked <= total`**, and `booking(id, hotel, room_type, check_in, check_out, guest, status, idempotency_key)`.
+
+## The booking transaction
+
+For every night of the stay, run an **atomic conditional update**, and make the whole thing one transaction:
+
+```sql
+BEGIN;
+UPDATE inventory SET booked = booked + 1
+ WHERE hotel = ? AND room_type = ? AND night = ? AND booked < total;   -- once per night
+-- if any update changed 0 rows: ROLLBACK and report "sold out on that night"
+INSERT INTO booking (...) VALUES (...);
+COMMIT;
+```
+
+- The **`WHERE booked < total`** makes **check and claim one atomic step**: two concurrent requests for the last room cannot both succeed, because the database serialises updates to the same row and the second sees `booked = total`. (This is the same idea as the ticket booking lesson's conditional update, applied per night.)
+- The **transaction** gives **all or nothing**: if night 3 of 4 is sold out, the claim already made on night 1 and 2 is rolled back.
+- A **`CHECK (booked <= total)`** constraint is a **safety net**: even if a bug skips the `WHERE` clause, the database refuses to oversell.
+- **Update nights in a consistent order** (ascending date) so two overlapping stays cannot deadlock by locking the same rows in opposite order.
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant G as Guest
+  participant API as Booking service
+  participant DB as Inventory database
+  G->>API: POST /bookings (idempotency key, hotel, room type, dates)
+  API->>DB: BEGIN
+  loop each night, in date order
+    API->>DB: UPDATE inventory SET booked = booked + 1 WHERE booked < total
+    DB-->>API: 1 row changed (or 0 means sold out)
+  end
+  API->>DB: INSERT booking (unique on idempotency key)
+  API->>DB: COMMIT
+  API-->>G: confirmation`} caption="Every night must succeed or the whole booking rolls back" />
+
+## The simulation
+
+The program below uses **SQLite** (a real SQL engine built into Python) to run the design. It books and rejects overlapping stays, proves that a failed booking leaves **no partial hold**, shows that **check-out day is free**, handles a **cancellation**, demonstrates the **read-then-write race** with and without the constraint, and simulates an **overbooking** policy. (It runs in the browser; SQLite is loaded on demand the first time you press Run.)
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+import sqlite3
+from datetime import date, timedelta
+
+
+def nights(check_in, check_out):
+    d = check_in
+    while d < check_out:             # check-out day is NOT a night stayed
+        yield d
+        d += timedelta(days=1)
+
+
+def new_db(capacity, start, days, constraint=True):
+    db = sqlite3.connect(":memory:")
+    db.execute("""CREATE TABLE inventory (
+        room_type TEXT, night TEXT, total INTEGER, booked INTEGER DEFAULT 0,
+        PRIMARY KEY (room_type, night)""" + (", CHECK (booked <= total)" if constraint else "") + ")")
+    db.execute("CREATE TABLE booking (id INTEGER PRIMARY KEY, room_type TEXT, check_in TEXT, check_out TEXT, guest TEXT, status TEXT)")
+    for i in range(days):
+        db.execute("INSERT INTO inventory (room_type, night, total) VALUES ('double', ?, ?)",
+                   ((start + timedelta(days=i)).isoformat(), capacity))
+    return db
+
+
+def book(db, guest, check_in, check_out, room_type="double"):
+    """All nights or none: one atomic conditional update per night inside a transaction."""
+    try:
+        db.execute("BEGIN")
+        for n in nights(check_in, check_out):
+            cur = db.execute(
+                "UPDATE inventory SET booked = booked + 1 WHERE room_type = ? AND night = ? AND booked < total",
+                (room_type, n.isoformat()))
+            if cur.rowcount != 1:
+                raise ValueError(f"sold out on {n}")
+        db.execute("INSERT INTO booking (room_type, check_in, check_out, guest, status) VALUES (?, ?, ?, ?, 'confirmed')",
+                   (room_type, check_in.isoformat(), check_out.isoformat(), guest))
+        db.execute("COMMIT")
+        return True
+    except ValueError as e:
+        db.execute("ROLLBACK")
+        return str(e)
+
+
+def cancel(db, booking_id):
+    row = db.execute("SELECT room_type, check_in, check_out FROM booking WHERE id = ? AND status = 'confirmed'", (booking_id,)).fetchone()
+    if not row:
+        return False
+    rt, ci, co = row
+    db.execute("BEGIN")
+    for n in nights(date.fromisoformat(ci), date.fromisoformat(co)):
+        db.execute("UPDATE inventory SET booked = booked - 1 WHERE room_type = ? AND night = ?", (rt, n.isoformat()))
+    db.execute("UPDATE booking SET status = 'cancelled' WHERE id = ?", (booking_id,))
+    db.execute("COMMIT")
+    return True
+
+
+def free(db, night):
+    t, b = db.execute("SELECT total, booked FROM inventory WHERE night = ?", (night.isoformat(),)).fetchone()
+    return t - b
+
+
+if True:
+    d0 = date(2027, 3, 1)
+    d = lambda k: d0 + timedelta(days=k)
+    db = new_db(2, d0, 7)
+    db.isolation_level = None            # we issue BEGIN and COMMIT ourselves
+    print("stay mar 1 to 4 :", book(db, "ann", d(0), d(3)))
+    print("stay mar 2 to 5 :", book(db, "bob", d(1), d(4)))
+    r = book(db, "cat", d(1), d(3))
+    print("stay mar 2 to 4 :", r)
+    print("free per night after:", [free(db, d(k)) for k in range(7)])
+    before = free(db, d(0))
+    print("stay mar 1 to 4 (eve):", book(db, "eve", d(0), d(3)), "| mar 1 free before/after:", before, free(db, d(0)), "(night 1 was taken, then rolled back)")
+    print("back-to-back stay mar 4 to 6 :", book(db, "dan", d(3), d(5)), "(check-out day is free)")
+    print("cancel ann:", cancel(db, 1), "| free mar 1:", free(db, d(0)))
+
+    # the naive read-then-write race, with the two requests interleaved step by step
+    nv = new_db(1, d0, 2, constraint=False)
+    nv.isolation_level = None
+    def read_free(): return free(nv, d0)
+    a_sees = read_free()
+    b_sees = read_free()               # both read before either writes
+    if a_sees > 0:
+        nv.execute("UPDATE inventory SET booked = booked + 1 WHERE night = ?", (d0.isoformat(),))
+    if b_sees > 0:
+        nv.execute("UPDATE inventory SET booked = booked + 1 WHERE night = ?", (d0.isoformat(),))
+    print("naive read-then-write, no constraint: booked", nv.execute("SELECT booked FROM inventory WHERE night = ?", (d0.isoformat(),)).fetchone()[0], "rooms with capacity 1")
+    guard = new_db(1, d0, 2)
+    guard.isolation_level = None
+    guard.execute("UPDATE inventory SET booked = booked + 1 WHERE night = ?", (d0.isoformat(),))
+    try:
+        guard.execute("UPDATE inventory SET booked = booked + 1 WHERE night = ?", (d0.isoformat(),))
+    except sqlite3.IntegrityError as e:
+        print("same race with CHECK (booked <= total): second write rejected:", e)
+
+    # overbooking policy: sell more than capacity because some guests do not show up
+    rnd = random.Random(8)
+    cap, show_rate, nights_sim = 100, 0.92, 10000
+    for sold in (100, 104, 108):
+        bumped = empty = 0
+        for _ in range(nights_sim):
+            arrivals = sum(rnd.random() < show_rate for _ in range(sold))
+            bumped += max(0, arrivals - cap)
+            empty += max(0, cap - arrivals)
+        print(f"sell {sold}: avg empty rooms {empty / nights_sim:.2f}, avg guests turned away {bumped / nights_sim:.2f}")
+`} />
+
+## What the output shows
+
+- A hotel with **2 rooms**: Ann books March 1 to 4 and Bob books March 2 to 5. Free rooms per night end up as **[1, 0, 0, 1, 2, 2, 2]**: both rooms are taken on the 2nd and 3rd, one on the 1st and on the 4th.
+- **Cat wants March 2 to 4**: rejected with "sold out on 2027-03-02". **Eve wants March 1 to 4**: night 1 has a free room, so her first update succeeds, but night 2 is sold out, so the transaction **rolls back**. March 1 still shows **1 free before and after**: no partial hold is left behind.
+- **Dan books March 4 to 6** and it succeeds: Ann checked out on the 4th, so she does not occupy the night of the 4th, and only Bob holds a room that night (one of two). A booking that **starts on the day another one ends** is the normal back-to-back case that off-by-one errors break.
+- **Cancelling** Ann's booking returns March 1 to **2 free**.
+- **The race**: when two requests both read "1 free" and then both write (the interleaving is replayed step by step here, not run on threads), a table **without** a constraint ends with **2 booked in a hotel of capacity 1**. With the **`CHECK (booked <= total)`** constraint the second write is rejected by the database. This is why the constraint exists even though the conditional update should already prevent the race.
+
+## Overbooking as a business decision
+
+Some guests never show up. A hotel that never overbooks has **empty rooms**; one that overbooks too much **turns guests away** (and pays to relocate them). The simulation sells 100, 104 and 108 bookings for 100 rooms, assuming **92% of guests show up**, over 10,000 nights:
+
+| bookings sold for 100 rooms | average empty rooms | average guests turned away |
+| --- | --- | --- |
+| 100 | 7.99 | 0.00 |
+| 104 | 4.39 | 0.04 |
+| 108 | 1.44 | 0.82 |
+
+Selling 104 **recovers about 3.6 rooms per night** while turning away a guest on only about **1 night in 25** (0.04 per night). Selling 108 **fills the hotel better but turns away almost one guest every night on average**. The right number depends on the **cost of an empty room versus the cost of relocating a guest**, and on the **real show-up rate**, which varies by hotel, season and booking channel. Implement it as a **configurable limit** (`total` is the physical rooms; the sellable limit is `total x (1 + overbooking factor)`), never by editing the room count. The numbers come from one seeded simulation with a fixed 92% show-up rate.
+
+## Search
+
+Search must **not** query the booking database for every request: 170,000 searches per second would overwhelm it. Instead:
+
+- Maintain a **search index** (for example Elasticsearch, see [search systems](/sd/search-systems/inverted-indexes-and-text-analysis/)) of hotels with their attributes, location and a **summary of availability and lowest price per date**, updated from the inventory database through **change events** ([change data capture](/sd/queues-and-streaming/kafka-rabbitmq-sqs/) into a queue).
+- The index is **eventually consistent**: a search result may show a room that was just booked. That is acceptable **because the booking transaction re-checks the real inventory**. The user sees "sorry, that room just sold out" rarely, which is better than making search slow or fragile.
+- **Cache** popular searches (city, dates) for seconds to minutes ([caching strategies](/sd/caching/caching-strategies/)).
+
+## Holds, payment and idempotency
+
+Payment takes time. Two common patterns:
+
+1. **Book, then pay**: create the booking as `pending` (inventory is claimed) with an **expiry** (for example 10 minutes); a payment success event marks it `confirmed`; a **sweeper job** releases expired pending bookings (decrementing `booked`). This is the seat hold pattern from the ticket booking lesson.
+2. **Pay on arrival**: confirm immediately, charge later; simpler but needs a no-show policy.
+
+**Idempotency**: the client sends an **idempotency key** with the booking request and the `booking` table has a **unique constraint** on it. A retry after a timeout returns the existing booking instead of booking again ([delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)). Payment calls use their own idempotency keys; if payment succeeds but the confirmation write fails, a **reconciliation** job repairs the state.
+
+## Scaling the booking database
+
+- **Shard by hotel id**: every booking touches exactly one hotel, so a booking transaction stays on **one shard** with no distributed transaction ([sharding and partitioning](/sd/databases-2/sharding-and-partitioning/)). Hot hotels (a big event in one city) are the skew risk; cache and queue in front, and give very hot inventory its own shard.
+- **Replicas** serve reporting and the guest's "my bookings" view; the booking path reads and writes the **primary** of its shard.
+- **Multi-region**: a hotel's inventory has **one home region** that accepts its bookings, so two regions never sell the same last room. Other regions read replicas and forward writes.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in the hotel booking design" rows={[
+  { option: "Inventory counts per room type per night", pros: "Simple atomic conditional updates; fast availability checks", cons: "Room numbers are assigned later; very large number of rows", chooseWhen: "Interchangeable rooms of a type (most hotels)" },
+  { option: "A row per physical room with date ranges", pros: "Exact room assignment up front; supports unique rooms (suites, villas)", cons: "Interval overlap checks; harder to guarantee with plain updates", chooseWhen: "Few, unique units such as vacation rentals" },
+  { option: "Atomic conditional UPDATE per night in a transaction", pros: "No oversell, all or nothing, simple", cons: "Locks hot rows briefly; needs a consistent order of nights", chooseWhen: "Default" },
+  { option: "Read, check in application code, then write", pros: "Easy to write", cons: "Check-then-act race: double booking", chooseWhen: "Never without a lock or a constraint" },
+  { option: "Pessimistic row locks (SELECT FOR UPDATE)", pros: "Straightforward reasoning", cons: "Longer lock hold times, deadlock risk", chooseWhen: "Complex multi-row rules" },
+  { option: "Eventually consistent search index", pros: "Fast and scalable search", cons: "Occasionally shows stale availability", chooseWhen: "Always for search, with a final check at booking" },
+  { option: "Configurable overbooking limit", pros: "Higher occupancy and revenue", cons: "Some guests are relocated; needs a policy and cost model", chooseWhen: "Hotels with measurable no-show rates" },
+  { option: "Hold with expiry (pending then confirmed)", pros: "Guest can pay without losing the room", cons: "Rooms are tied up by abandoned checkouts; needs a sweeper", chooseWhen: "Online card payment" }
+]} />
+
+## Pitfalls
+
+- **Check-then-act** availability checks without an atomic update or lock.
+- Treating the **check-out day** as a night stayed (or forgetting the first night): off-by-one errors in date ranges.
+- Updating nights in **different orders** in different requests, causing deadlocks.
+- Booking nights in separate transactions, leaving **partial holds** after a failure.
+- No **constraint** (`booked <= total`) as a last line of defence.
+- No **idempotency key**, so a retry double-books and double-charges.
+- **Pending bookings that never expire**, slowly blocking inventory.
+- **Time zones**: nights are dates in the hotel's local time zone, not the guest's.
+- Editing `total` to implement overbooking instead of a separate sellable limit.
+- Sending every search to the booking database.
+
+## What would you choose and why?
+
+A conference with 20,000 attendees opens booking for the same three hotels at 9:00. Thousands of requests per second target the same few inventory rows. What does your system do to keep working (queueing, a waiting room, a hold per attempt, rate limits per hotel), where does fairness come from, and how do you make sure a guest who loses the race learns quickly rather than waiting for a timeout?
+
+## Quiz
+
+<Quiz id="sd-m18-hotel-booking" tags={["case-study", "hotel-booking", "transactions", "inventory", "overbooking"]} questions={[
+  { type: "mcq", q: "Why is the booking written as one transaction over all nights of the stay?", options: ["It is faster", "If any night is sold out, the claims already made on earlier nights must be rolled back so no partial hold remains", "Transactions are required by SQL", "To avoid indexes"], answer: 1, explain: "A stay is all or nothing; the demo shows March 1 returning to 1 free after a failed attempt." },
+  { type: "mcq", q: "What does WHERE booked < total add to the UPDATE?", options: ["Nothing", "It makes the check and the claim one atomic step, so two concurrent requests cannot both take the last room", "It sorts the rows", "It speeds up reads"], answer: 1, explain: "The database serialises updates to the same row; the second request sees booked = total and changes 0 rows." },
+  { type: "predict", q: "A hotel has 1 room. Ann books March 1 to 3 (nights Mar 1 and 2). Dan wants March 3 to 5. Does the booking succeed?", code: "# nights of a stay: check_in <= night < check_out\n# Ann occupies: Mar 1, Mar 2\n# Dan needs: Mar 3, Mar 4", options: ["No, the hotel is full", "Yes, because Ann checks out on March 3 and does not occupy the night of the 3rd", "Only if Ann cancels", "Only with overbooking"], answer: 1, explain: "Check-out day is not a night stayed, so back-to-back stays do not conflict." },
+  { type: "mcq", q: "Why can the search results be eventually consistent while booking cannot?", options: ["Search is unimportant", "The booking transaction re-checks the real inventory, so a stale search result costs at most a rare 'just sold out' message", "Users do not notice", "The search index is always correct"], answer: 1, explain: "Correctness is enforced at the write; search only needs to be fast and roughly right." },
+  { type: "multi", q: "Which help prevent double booking?", options: ["Conditional UPDATE with WHERE booked < total", "A CHECK (booked <= total) constraint", "Updating nights in a consistent order to avoid deadlocks while keeping the transaction", "Reading availability in the application and then writing"], answer: [0, 1, 2], explain: "The last option is the check-then-act race the design exists to avoid." },
+  { type: "mcq", q: "In the overbooking simulation, selling 108 bookings for 100 rooms (92% show-up) did what?", options: ["Left more rooms empty", "Left about 1.4 rooms empty but turned away about 0.8 guests per night on average", "Had no effect", "Always filled the hotel exactly"], answer: 1, explain: "More overbooking fills rooms but increases relocated guests; choose the limit from the relative costs and the real show-up rate." }
+]} />
