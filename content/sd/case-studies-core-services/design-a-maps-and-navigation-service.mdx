@@ -1,0 +1,293 @@
+---
+title: "Case Study: Design a Maps and Navigation Service"
+track: sd
+module: case-studies-core-services
+order: 10
+difficulty: hard
+estMinutes: 60
+prerequisites: ["sd/caching/redis-memcached-and-cdn-caching", "sd/databases-2/sharding-and-partitioning", "sd/queues-and-streaming/stream-processing-basics"]
+tags: [case-study, maps, navigation, routing, dijkstra, a-star, tiles, geospatial, traffic, eta]
+type: case-study
+furtherReading:
+  - title: "OpenStreetMap Wiki, Slippy map tilenames"
+    url: https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
+  - title: "Geisberger, Sanders, Schultes, Delling, Contraction Hierarchies: Faster and Simpler Hierarchical Routing in Road Networks (2008)"
+    url: https://www.cs.cmu.edu/~avrim/451f11/lectures/lect1004.pdf
+  - title: "Hart, Nilsson, Raphael, A Formal Basis for the Heuristic Determination of Minimum Cost Paths (A-star, 1968)"
+    url: https://ieeexplore.ieee.org/document/4082128
+  - title: "Mapbox, Vector tile specification"
+    url: https://github.com/mapbox/vector-tile-spec
+---
+
+## The problem
+
+Design a **maps and navigation service** like Google Maps: show an interactive map you can pan and zoom, find places, compute the **fastest route** between two points, estimate the **arrival time (ETA)** using live traffic, and guide a driver turn by turn, rerouting when they leave the route or traffic changes.
+
+It is a good case study because it joins three different problems, each with its own data structure and scaling story:
+
+1. **Rendering the map**: serve the right picture for any region and zoom level, instantly (**tiles** and caching).
+2. **Routing**: find the best path in a **graph of hundreds of millions of road segments** in milliseconds (**shortest-path algorithms** and **graph partitioning**).
+3. **Traffic**: turn a stream of phone locations into **current road speeds** and feed them back into routing (**stream processing**).
+
+## Requirements
+
+**Functional**
+- Display the map and pan, zoom and rotate smoothly.
+- Search for places and addresses (geocoding).
+- Compute a route (car, walking, cycling, transit) with **distance, ETA and alternatives**.
+- **Turn-by-turn navigation** with rerouting.
+- **Live traffic** shown on the map and used in ETAs.
+
+**Non-functional**
+- Map tiles load in **tens of milliseconds** (served from caches).
+- A route request answers in **well under a second**, even across a continent.
+- Highly available; ETAs should be **accurate** (this is the product).
+- Handles hundreds of millions of users and billions of location updates per day.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Daily active users | 100 million | |
+| Navigation sessions | 20 million per day, 30 minutes each, a GPS fix every 5 seconds | 360 fixes per session, 7.2 billion fixes per day, about 83,000 per second on average |
+| Route requests | 5 per user per day on average | 500 million per day, about 5,800 per second, 30,000 at 5 times peak |
+| Tile pyramid | zoom z has 4 to the power z tiles (2 to the power z on each side) | zoom 15: 1.07 billion tiles; zoom 18: 68.7 billion tiles |
+| Tile size | about 20 KB vector tile (assumption) | most of the ocean and empty land need no tile at all |
+
+Two lessons from the numbers: **tiles** are a huge, **mostly static** key-value dataset that a **CDN** serves, while **location updates** are a high-rate **write stream** that needs a streaming pipeline. Routing sits in between: modest request rate, but each request is a heavy computation.
+
+## Rendering: the tile pyramid
+
+The world is cut into a **pyramid of square tiles**. At zoom 0 the whole world is **1 tile**; each zoom level splits every tile into **4**, so zoom z has 4^z tiles. A tile is addressed by **(zoom, x, y)**, and a client computing which tiles cover the screen simply converts latitude and longitude to tile coordinates (the formula is in the program below; the standard is called Web Mercator).
+
+- **Raster tiles** are pre-rendered images (PNG or JPEG): simple to display, large, and need a different set for each style or language.
+- **Vector tiles** contain geometry and labels (roads, buildings, names) and are **drawn on the device**: smaller, sharp at any scale, restylable (dark mode, language) and rotatable. This is what modern maps use.
+- Tiles are **immutable per version**, so they are ideal for a **CDN** with long cache lifetimes and a version in the URL; updates to the map data produce a new tile version ([CDN caching](/sd/caching/redis-memcached-and-cdn-caching/)).
+- **Pre-generate** popular and low zoom tiles; **render on demand** and cache the long tail of high zoom tiles in sparsely populated areas.
+- Store tiles in an **object store** keyed by `(zoom, x, y, version)` ([blob stores](/sd/storage/blob-stores/)).
+
+## Routing: the road graph
+
+Model the road network as a **graph**: **nodes** are intersections, **edges** are road segments with a **travel time** (length divided by speed, adjusted for traffic, turn penalties and road class). A route is the **cheapest path** from source to destination.
+
+- **Dijkstra** explores outward from the source in all directions until it reaches the destination: correct, but on a continent-sized graph it touches a huge region.
+- **A-star** adds a **heuristic**, an optimistic estimate of the remaining cost (straight-line distance at the top possible speed), so the search is pulled toward the destination and expands far fewer nodes. The heuristic must **never overestimate** (be *admissible*) or the result may not be optimal.
+- **Bidirectional search** runs a search from the source and another backwards from the destination and stops when they meet; each explores a smaller circle than one big circle.
+- **Contraction hierarchies** (used in production routers) **pre-process** the graph: unimportant nodes are "contracted" and replaced by shortcut edges, building a hierarchy where highways sit on top. A query then climbs the hierarchy from both ends and meets at the top, touching only a **tiny** number of nodes. The cost is an expensive pre-processing step and extra work to take **live traffic** into account (the shortcuts were computed for static weights).
+
+### Seeing the difference
+
+The program below builds a synthetic city, a **60 by 60 street grid** (3,600 intersections, 7,080 road segments) with random congestion on every block and a fast highway every tenth row and column. It runs Dijkstra, A-star and bidirectional Dijkstra on **40 random start and destination pairs**, checks that all three return the same travel time, and counts the **intersections each one expanded**. It then jams one highway intersection to show a route change, and prints tile counts and tile coordinates.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import heapq
+import math
+import random
+
+
+def build_city(n, seed=5):
+    """An n x n street grid. Travel time per block is the block length scaled by a random congestion factor.
+    A few 'highways' (fast rows and columns) make the network more realistic."""
+    rnd = random.Random(seed)
+    adj = {(r, c): [] for r in range(n) for c in range(n)}
+    def road(a, b, fast):
+        t = (0.4 if fast else 1.0) * rnd.uniform(1.0, 1.6)          # minutes per block
+        adj[a].append((b, t))
+        adj[b].append((a, t))
+    for r in range(n):
+        for c in range(n):
+            fast_row, fast_col = r % 10 == 0, c % 10 == 0
+            if c + 1 < n:
+                road((r, c), (r, c + 1), fast_row)
+            if r + 1 < n:
+                road((r, c), (r + 1, c), fast_col)
+    return adj
+
+
+MIN_PER_BLOCK = 0.4              # the fastest possible speed anywhere: keeps the A* heuristic admissible
+
+
+def h(a, b):
+    return MIN_PER_BLOCK * (abs(a[0] - b[0]) + abs(a[1] - b[1]))      # Manhattan distance at top speed
+
+
+def dijkstra(adj, s, t):
+    dist, pq, seen = {s: 0.0}, [(0.0, s)], 0
+    done = set()
+    while pq:
+        d, u = heapq.heappop(pq)
+        if u in done:
+            continue
+        done.add(u)
+        seen += 1
+        if u == t:
+            return d, seen
+        for v, w in adj[u]:
+            nd = d + w
+            if nd < dist.get(v, 1e18):
+                dist[v] = nd
+                heapq.heappush(pq, (nd, v))
+    return None, seen
+
+
+def astar(adj, s, t):
+    g, pq, done, seen = {s: 0.0}, [(h(s, t), s)], set(), 0
+    while pq:
+        _, u = heapq.heappop(pq)
+        if u in done:
+            continue
+        done.add(u)
+        seen += 1
+        if u == t:
+            return g[u], seen
+        for v, w in adj[u]:
+            ng = g[u] + w
+            if ng < g.get(v, 1e18):
+                g[v] = ng
+                heapq.heappush(pq, (ng + h(v, t), v))
+    return None, seen
+
+
+def bidirectional(adj, s, t):
+    dist = [{s: 0.0}, {t: 0.0}]
+    pq = [[(0.0, s)], [(0.0, t)]]
+    done = [set(), set()]
+    best, seen = 1e18, 0
+    while pq[0] and pq[1]:
+        side = 0 if pq[0][0][0] <= pq[1][0][0] else 1       # expand the side with the smaller frontier key
+        d, u = heapq.heappop(pq[side])
+        if u in done[side]:
+            continue
+        done[side].add(u)
+        seen += 1
+        if u in dist[1 - side]:
+            best = min(best, d + dist[1 - side][u])
+        for v, w in adj[u]:                                 # the graph is undirected, so the reverse search reuses adj
+            nd = d + w
+            if nd < dist[side].get(v, 1e18):
+                dist[side][v] = nd
+                heapq.heappush(pq[side], (nd, v))
+                if v in dist[1 - side]:
+                    best = min(best, nd + dist[1 - side][v])
+        if pq[0] and pq[1] and pq[0][0][0] + pq[1][0][0] >= best:
+            return best, seen
+    return best, seen
+
+
+def tile(lat, lon, zoom):
+    """Web Mercator tile coordinates (the scheme used by most map tiles)."""
+    n = 2 ** zoom
+    x = int((lon + 180.0) / 360.0 * n)
+    y = int((1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n)
+    return x, y
+
+
+if True:
+    n = 60
+    adj = build_city(n)
+    print("city:", n * n, "intersections,", sum(len(v) for v in adj.values()) // 2, "road segments")
+    rnd = random.Random(9)
+    totals = {"dijkstra": 0, "astar": 0, "bidirectional": 0}
+    agree, trials = True, 40
+    for _ in range(trials):
+        s = (rnd.randrange(n), rnd.randrange(n))
+        t = (rnd.randrange(n), rnd.randrange(n))
+        if s == t:
+            continue
+        d1, a = dijkstra(adj, s, t)
+        d2, b = astar(adj, s, t)
+        d3, c = bidirectional(adj, s, t)
+        agree &= abs(d1 - d2) < 1e-9 and abs(d1 - d3) < 1e-9
+        totals["dijkstra"] += a
+        totals["astar"] += b
+        totals["bidirectional"] += c
+    print("all three return the same travel time:", agree)
+    for k, v in totals.items():
+        print(f"{k:14s} average intersections expanded: {v / trials:7.1f}  ({v / totals['dijkstra'] * 100:5.1f}% of Dijkstra)")
+
+    # a congestion update changes one road; routes through it change
+    s, t = (10, 5), (10, 50)
+    base, _ = dijkstra(adj, s, t)
+    for i, (v, w) in enumerate(adj[(10, 20)]):
+        adj[(10, 20)][i] = (v, w * 8)
+    for u in adj:
+        for i, (v, w) in enumerate(adj[u]):
+            if v == (10, 20):
+                adj[u][i] = (v, w * 8)
+    jam, _ = dijkstra(adj, s, t)
+    print(f"a jam at one highway intersection changes the trip from {base:.1f} to {jam:.1f} minutes")
+
+    print("tiles at zoom 0, 10, 15, 18:", [4 ** z for z in (0, 10, 15, 18)])
+    print("tile of Times Square at zoom 15:", tile(40.758, -73.9855, 15), "| at zoom 18:", tile(40.758, -73.9855, 18))
+`} />
+
+## What the output shows
+
+- All three algorithms return **exactly the same travel time** on every pair (`True`): the speed-ups cost no accuracy, provided the A-star heuristic is admissible (here it is the Manhattan distance at the fastest possible speed, 0.4 minutes per block).
+- **Work done**: Dijkstra expands about **1,823** intersections on average, **A-star** about **779 (43% of Dijkstra)**, **bidirectional** about **1,014 (56%)**. The heuristic and the two-sided search each cut the work roughly in half on this small grid. On a real continental graph the gap is far larger, and the contraction-hierarchy approach shrinks the search by much more, which is why routers pre-process.
+- **A jam** at one highway intersection changes the trip between two points on the same highway from **23.7 to 27.4 minutes**: the route detours around the slow node. That is what live traffic does to edge weights.
+- **Tile counts** grow by 4 each zoom level: 1 tile at zoom 0, 1,048,576 at zoom 10, 1,073,741,824 at zoom 15 and 68,719,476,736 at zoom 18. **Times Square** falls in tile (9649, 12314) at zoom 15 and (77197, 98517) at zoom 18: each zoom level doubles the coordinates, so going from zoom 15 to 18 multiplies each one by 8 (three doublings).
+
+These numbers come from one synthetic grid with fixed seeds. Real road networks are less regular, and the exact percentages depend on the graph and the heuristic, so treat them as an illustration of the mechanism.
+
+## Serving routes at scale
+
+A graph with hundreds of millions of edges does not fit comfortably on one machine in a form that serves 30,000 requests per second, and shortest-path queries are CPU heavy. The design:
+
+- **Partition the graph by geography** (cells of a few hundred kilometres), each partition held in memory by a group of **routing servers**. Short routes use one partition; long routes use a **hierarchical overlay**: a small high-level graph of highways and partition-border crossing points, which stitches the partitions together.
+- **Replicate** each partition for load and availability; route requests are **stateless** and easy to load balance ([load balancing](/sd/load-balancing/balancing-algorithms/)).
+- **Cache** results for popular routes and for the pre-processed hierarchy; ETAs that depend on live traffic are cached for a short time only.
+- Return **alternatives** by penalising edges of the first route and searching again.
+
+## Live traffic and ETAs
+
+1. **Phones report** position and speed periodically (opt-in), producing about 83,000 fixes per second in our estimate.
+2. A **map-matching** step snaps each noisy GPS point to the road segment the vehicle is probably on.
+3. A **stream processor** ([stream processing](/sd/queues-and-streaming/stream-processing-basics/)) aggregates fixes per **segment per time window** (for example the median speed over the last few minutes) and writes the result to a fast store such as Redis.
+4. The **routing service** reads current segment speeds into its edge weights; the **ETA** is the sum of predicted segment times along the route, where "predicted" uses **historical patterns** (this road at this time of week) blended with live data, because traffic will change while you drive.
+5. Privacy matters: aggregate, drop identifiers early, and do not retain individual traces longer than needed.
+
+**Rerouting**: the navigation client detects that it left the route (distance from the path), asks for a new route, and the server also **pushes** a better route when traffic changes substantially on the current one.
+
+## Search and geocoding (briefly)
+
+Place search is a **search system** ([search systems](/sd/search-systems/inverted-indexes-and-text-analysis/)) with an index of places and addresses, ranked by text relevance, distance from the user and popularity. Geospatial lookups ("coffee near me") use a **spatial index** (geohash, quadtree or S2 cells) so that a query touches only nearby cells.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a maps and navigation service" rows={[
+  { option: "Vector tiles", pros: "Small, sharp at every zoom, restylable, rotatable", cons: "Needs client-side rendering; more complex client", chooseWhen: "Modern apps (the default)" },
+  { option: "Raster tiles", pros: "Trivial to display, works everywhere", cons: "Large; one set per style and language; blurry when scaled", chooseWhen: "Simple embeds and static maps" },
+  { option: "Dijkstra", pros: "Simple, always optimal", cons: "Expands a huge area on large graphs", chooseWhen: "Small graphs and as a baseline" },
+  { option: "A-star with an admissible heuristic", pros: "Optimal and explores fewer nodes (43% of Dijkstra in the demo)", cons: "Needs a good heuristic; weak on road graphs with fast highways", chooseWhen: "Medium graphs and interactive tools" },
+  { option: "Contraction hierarchies", pros: "Very fast queries, touching a tiny part of the graph", cons: "Heavy pre-processing; live traffic needs special handling", chooseWhen: "Production-scale routing" },
+  { option: "Static edge weights", pros: "Allows aggressive pre-processing", cons: "ETAs ignore current conditions", chooseWhen: "Offline or long-range planning" },
+  { option: "Live plus historical speeds", pros: "ETAs that reflect both now and typical future traffic", cons: "Needs a streaming pipeline and prediction", chooseWhen: "Navigation products" },
+  { option: "Geographic graph partitions with a highway overlay", pros: "Scales memory and CPU; short routes stay local", cons: "Border handling and overlay maintenance", chooseWhen: "Continental coverage" }
+]} />
+
+## Pitfalls
+
+- A-star with a heuristic that **overestimates** (for example, one that assumes a top speed lower than some roads really allow, so it thinks the remaining trip takes longer than it can): the result may no longer be the fastest route. Keep the heuristic optimistic.
+- Treating **travel distance** as **travel time**.
+- Ignoring **turn costs**, one-way streets and restrictions (modelled by splitting nodes or adding turn edges).
+- Loading the whole world graph into **one** machine.
+- Putting live traffic into a **pre-processed** hierarchy without a plan for updates.
+- Computing ETAs from **current speeds only**, even for a 3-hour drive.
+- Storing raw location traces forever (privacy and cost).
+- Not **versioning tiles**, so stale tiles live in caches after a data update.
+- Re-planning the route **every second** and flipping between near-equal routes (add hysteresis: only switch if the new route is clearly better).
+
+## What would you choose and why?
+
+A delivery company asks you to compute the best order and route for a truck visiting 40 stops with time windows, and to recompute when a road closes. How is this different from the point-to-point routing above, which parts of your design (graph, traffic feed, partitioning) can you reuse, and where do you accept an approximate answer instead of an optimal one?
+
+## Quiz
+
+<Quiz id="sd-m17-maps-navigation" tags={["case-study", "maps", "routing", "a-star", "tiles", "traffic"]} questions={[
+  { type: "mcq", q: "How many map tiles are there at zoom level z?", options: ["2 times z", "z squared", "4 to the power z (each zoom splits every tile into four)", "10 to the power z"], answer: 2, explain: "Zoom 0 is one tile; zoom 15 has 1,073,741,824 tiles." },
+  { type: "mcq", q: "Why is A-star with an admissible heuristic still optimal?", options: ["It guesses well", "The heuristic never overestimates the remaining cost, so the first time the destination is settled the path found is the cheapest", "It ignores edge weights", "It checks every path"], answer: 1, explain: "An overestimate could make the search skip a better path; an optimistic estimate cannot." },
+  { type: "predict", q: "Dijkstra expanded about 1,823 intersections on average and A-star about 779. What fraction of Dijkstra's work did A-star do?", code: "print(round(779.4 / 1823.2 * 100, 1))", options: ["About 4%", "About 43%", "About 78%", "About 100%"], answer: 1, explain: "About 42.7%: the heuristic pulls the search toward the destination, though both returned identical travel times." },
+  { type: "mcq", q: "Why are vector tiles preferred over raster tiles in modern map apps?", options: ["They need no client code", "They are smaller, stay sharp at every zoom and can be restyled and rotated on the device", "They cannot be cached", "They contain satellite images"], answer: 1, explain: "The device draws the geometry, so one tile set serves many styles and languages." },
+  { type: "multi", q: "Which are parts of the live traffic pipeline?", options: ["Map matching of GPS points to road segments", "Stream aggregation of speeds per segment and time window", "Feeding current speeds into the routing edge weights", "Storing every user's full location history forever"], answer: [0, 1, 2], explain: "Aggregate quickly and drop identifiers; retaining raw traces forever is a privacy and cost problem, not a requirement." },
+  { type: "mcq", q: "Why do production routers pre-process the graph (contraction hierarchies)?", options: ["To compress the map images", "So a query touches only a tiny part of the graph by climbing a hierarchy of shortcut edges, at the cost of expensive pre-processing", "To avoid using edge weights", "To remove highways"], answer: 1, explain: "Pre-processing buys query speed; live traffic needs extra care because shortcuts were computed for fixed weights." }
+]} />
