@@ -1,0 +1,310 @@
+---
+title: "Case Study: Design an E-commerce Checkout and Inventory System"
+track: sd
+module: case-studies-data-and-transactions
+order: 7
+difficulty: hard
+estMinutes: 60
+prerequisites: ["sd/case-studies-data-and-transactions/design-a-hotel-booking-system", "sd/distributed-theory/distributed-commit-and-sagas", "sd/case-studies-core-services/design-a-payment-system"]
+tags: [case-study, e-commerce, checkout, inventory, saga, idempotency, flash-sale, reservations, order-state-machine]
+type: case-study
+furtherReading:
+  - title: "microservices.io, Pattern: Saga"
+    url: https://microservices.io/patterns/data/saga.html
+  - title: "Stripe documentation, Idempotent requests"
+    url: https://docs.stripe.com/api/idempotent_requests
+  - title: "Martin Fowler, Event Sourcing"
+    url: https://martinfowler.com/eaaDev/EventSourcing.html
+  - title: "Chris Richardson, Microservices Patterns (book site)"
+    url: https://microservices.io/book
+---
+
+## The problem
+
+Design the **checkout and inventory** parts of an online store like Amazon or Shopify: shoppers **browse** a catalogue, fill a **cart**, **check out**, pay, and the warehouse ships. The hard parts are not the product pages; they are the moments where **money and stock change hands**:
+
+- Never **sell stock you do not have**, even in a flash sale with thousands of buyers for 100 items.
+- Never **charge twice**, and never charge without creating an order.
+- A checkout touches **several services** (inventory, payment, order, shipping), and any step can fail, so we need a plan for **partial failure**.
+- The **price the customer saw** must be the price on the order, even if the catalogue price changes a second later.
+
+## Requirements
+
+**Functional**
+- Browse and search products; view price and availability.
+- Add to a cart (persisting across sessions and devices).
+- Check out: reserve stock, pay, create an order, send a confirmation.
+- Cancel an order before it ships; refunds on cancellation.
+- Order history and status.
+
+**Non-functional**
+- **No overselling**; **exactly-once effect** for charging and ordering (despite retries).
+- Browsing is **highly available and fast**; checkout is **correct first**.
+- Scale to **flash sales**: for example 100x normal traffic on a few products.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Orders | 5 million per day | about 58 per second on average |
+| Peak (sales events) | 20 times average | about 1,200 orders per second |
+| Product page views | 100 per order | about 5,800 per second on average, 116,000 at peak |
+| Flash sale | 100 units, 400,000 shoppers in a minute | about 6,700 attempts per second on one product row |
+
+Most traffic is **reads** that a CDN and caches absorb. The writes that matter, **inventory decrements**, can concentrate on a **single hot row** in a flash sale, which is why that path needs special design.
+
+## Service decomposition
+
+Each service owns its data ([service boundaries](/sd/microservice-patterns/service-boundaries-and-availability/)):
+
+| service | owns | notes |
+| --- | --- | --- |
+| **Catalogue** | product details, images, descriptions | read-heavy; cached and served from a CDN; search index alongside |
+| **Cart** | per-user list of items | key-value store (Redis or a document store); losing a cart is annoying, not fatal |
+| **Inventory** | stock per SKU: on hand and reserved | the strongly consistent core |
+| **Order** | orders, lines and status | the system of record for what was bought and at what price |
+| **Payment** | charges and refunds via a payment provider | idempotent calls ([payment system lesson](/sd/case-studies-core-services/design-a-payment-system/)) |
+| **Fulfilment** | picking, packing, shipping | event-driven, asynchronous |
+
+<Diagram kind="mermaid" code={`sequenceDiagram
+  participant C as Client
+  participant O as Order service
+  participant I as Inventory
+  participant P as Payment
+  participant F as Fulfilment
+  C->>O: checkout (idempotency key, cart)
+  O->>I: reserve stock for every line (atomic)
+  I-->>O: reserved (or sold out: stop, nothing to undo)
+  O->>O: create order PENDING, copy prices
+  O->>P: charge (idempotent)
+  alt payment succeeded
+    P-->>O: paid
+    O->>I: commit reservation (stock leaves)
+    O->>F: order paid event
+  else payment failed or timed out
+    P-->>O: declined
+    O->>I: release reservation (compensation)
+    O->>O: order CANCELLED
+  end`} caption="A saga: each step has a compensating action, so a failure part-way leaves a consistent state" />
+
+## Reserve, then pay
+
+The key design move is a **reservation**. Stock has two numbers per SKU:
+
+- **on hand**: physically in the warehouse,
+- **reserved**: promised to pending orders.
+
+**Available = on hand minus reserved.** Checkout first **reserves** stock with one atomic conditional update (`WHERE on_hand - reserved >= qty`), then charges, and only on payment success **commits** (stock leaves: both counters drop). On failure or timeout the reservation is **released**.
+
+Why not just decrement stock when the order is placed, then charge? Because payment can fail or time out and we would have to put stock back; and why not charge first? Because we might take money for something already sold out. Reserving first means the **only possible failure at the expensive step is a payment failure**, which is handled by the **compensating release**. Reservations also need an **expiry**: a shopper who abandons the payment page must not hold stock forever.
+
+## Distributed transactions: the saga
+
+There is no single database across the inventory, order and payment services, and a two-phase commit across a third-party payment provider is not possible. So we use a **saga**: a sequence of **local transactions**, each with a **compensating action** that undoes its business effect ([sagas](/sd/distributed-theory/distributed-commit-and-sagas/)).
+
+- **Orchestration**: the order service drives the steps and the compensations (clear control flow, easier to reason about; what we show).
+- **Choreography**: services react to each other's events (looser coupling, harder to follow).
+
+Every step must be **idempotent** and the saga must be **recoverable**: store the order's state in the database after each step, so a crashed orchestrator can resume (or compensate) when it restarts. Late or duplicate callbacks (a payment confirmation delivered twice) must be **ignored** once the order has left the state they apply to.
+
+## The order state machine
+
+`PENDING` (stock reserved, awaiting payment) to `PAID` to `SHIPPED` to `DELIVERED`, with `CANCELLED` reachable from `PENDING` and `PAID` (before shipping, with a refund). Allowed transitions are checked in code, and the update is conditional (`WHERE status = 'PENDING'`) so two racing callbacks cannot both transition the order.
+
+## The simulation
+
+The program uses SQLite to run the design: stock with `reserved` and `on_hand`, the reservation, an idempotent checkout, payment success and failure, an expiry sweeper, price snapshots, and finally a **flash sale race** comparing read-then-write with a conditional update. (It runs in the browser; SQLite loads on demand when you press Run.)
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+import sqlite3
+
+db = sqlite3.connect(":memory:")
+db.isolation_level = None            # we issue BEGIN, COMMIT and ROLLBACK ourselves
+db.executescript("""
+CREATE TABLE product (sku TEXT PRIMARY KEY, price_cents INTEGER, on_hand INTEGER, reserved INTEGER DEFAULT 0,
+                      CHECK (reserved >= 0 AND reserved <= on_hand));
+CREATE TABLE orders (id INTEGER PRIMARY KEY, idem_key TEXT UNIQUE, status TEXT, total_cents INTEGER, expires_at INTEGER);
+CREATE TABLE order_item (order_id INTEGER, sku TEXT, qty INTEGER, price_cents INTEGER);
+""")
+
+
+def add_product(sku, price, stock):
+    db.execute("INSERT INTO product (sku, price_cents, on_hand) VALUES (?, ?, ?)", (sku, price, stock))
+
+
+def available(sku):
+    on_hand, reserved = db.execute("SELECT on_hand, reserved FROM product WHERE sku = ?", (sku,)).fetchone()
+    return on_hand - reserved
+
+
+def checkout(cart, idem_key, now, hold_seconds=600):
+    """Reserve every line atomically and create a PENDING order whose prices are copied at this moment."""
+    row = db.execute("SELECT id, status FROM orders WHERE idem_key = ?", (idem_key,)).fetchone()
+    if row:
+        return ("replay", row[0])                       # a retried request gets the same order back
+    db.execute("BEGIN")
+    try:
+        total = 0
+        for sku, qty in sorted(cart.items()):           # consistent order avoids deadlocks
+            cur = db.execute("UPDATE product SET reserved = reserved + ? WHERE sku = ? AND on_hand - reserved >= ?", (qty, sku, qty))
+            if cur.rowcount != 1:
+                raise ValueError(f"not enough stock for {sku}")
+        oid = db.execute("INSERT INTO orders (idem_key, status, expires_at) VALUES (?, 'PENDING', ?)", (idem_key, now + hold_seconds)).lastrowid
+        for sku, qty in cart.items():
+            price = db.execute("SELECT price_cents FROM product WHERE sku = ?", (sku,)).fetchone()[0]
+            db.execute("INSERT INTO order_item VALUES (?, ?, ?, ?)", (oid, sku, qty, price))
+            total += price * qty
+        db.execute("UPDATE orders SET total_cents = ? WHERE id = ?", (total, oid))
+        db.execute("COMMIT")
+        return ("ok", oid)
+    except ValueError as e:
+        db.execute("ROLLBACK")
+        return ("failed", str(e))
+
+
+def _items(oid):
+    return db.execute("SELECT sku, qty FROM order_item WHERE order_id = ?", (oid,)).fetchall()
+
+
+def pay(oid, payment_ok):
+    """Payment result arrives later. Success consumes the stock; failure compensates by releasing it."""
+    status = db.execute("SELECT status FROM orders WHERE id = ?", (oid,)).fetchone()[0]
+    if status != "PENDING":
+        return status                                   # late or duplicate callback: ignore
+    db.execute("BEGIN")
+    for sku, qty in _items(oid):
+        if payment_ok:
+            db.execute("UPDATE product SET on_hand = on_hand - ?, reserved = reserved - ? WHERE sku = ?", (qty, qty, sku))
+        else:
+            db.execute("UPDATE product SET reserved = reserved - ? WHERE sku = ?", (qty, sku))
+    new = "PAID" if payment_ok else "CANCELLED"
+    db.execute("UPDATE orders SET status = ? WHERE id = ? AND status = 'PENDING'", (new, oid))
+    db.execute("COMMIT")
+    return new
+
+
+def expire_holds(now):
+    stale = [r[0] for r in db.execute("SELECT id FROM orders WHERE status = 'PENDING' AND expires_at <= ?", (now,)).fetchall()]
+    for oid in stale:
+        pay(oid, payment_ok=False)
+    return len(stale)
+
+
+if True:
+    add_product("cable", 900, 5)
+    add_product("lamp", 2500, 3)
+    print("1.", checkout({"cable": 2, "lamp": 1}, "k1", now=0))
+    print("2. retry of k1:", checkout({"cable": 2, "lamp": 1}, "k1", now=1))
+    print("3. too many lamps:", checkout({"cable": 1, "lamp": 3}, "k2", now=2), "| cable available still", available("cable"), "(nothing half reserved)")
+    print("4. pay order 1:", pay(1, True), "| duplicate callback:", pay(1, True), "| on_hand", db.execute("SELECT on_hand, reserved FROM product WHERE sku='lamp'").fetchone())
+    ok = checkout({"cable": 3}, "k3", now=10)
+    print("5. order", ok, "payment declined ->", pay(ok[1], False), "| cable available", available("cable"))
+    ok = checkout({"cable": 3}, "k4", now=20, hold_seconds=600)
+    print("6. abandoned checkout holds stock: available", available("cable"), "| expire at t=100:", expire_holds(100), "| at t=700:", expire_holds(700), "| available", available("cable"))
+    db.execute("UPDATE product SET price_cents = 1200 WHERE sku = 'cable'")
+    print("7. price changed to 1200, order 1 still shows:", db.execute("SELECT price_cents FROM order_item WHERE order_id = 1 AND sku = 'cable'").fetchone()[0])
+
+    # flash sale: 100 units, 400 buyers. Naive = read stock, then write, with 10 buyers reading before any writes
+    def flash(naive, seed=4):
+        rnd = random.Random(seed)
+        d = sqlite3.connect(":memory:")
+        d.isolation_level = None
+        d.execute("CREATE TABLE s (stock INTEGER)")
+        d.execute("INSERT INTO s VALUES (105)")
+        sold = 0
+        buyers = list(range(400))
+        rnd.shuffle(buyers)
+        for i in range(0, 400, 10):
+            batch = buyers[i:i + 10]
+            if naive:
+                seen = [d.execute("SELECT stock FROM s").fetchone()[0] for _ in batch]       # all read first
+                for st in seen:
+                    if st > 0:
+                        d.execute("UPDATE s SET stock = stock - 1")
+                        sold += 1
+            else:
+                for _ in batch:
+                    if d.execute("UPDATE s SET stock = stock - 1 WHERE stock > 0").rowcount == 1:
+                        sold += 1
+        return sold, d.execute("SELECT stock FROM s").fetchone()[0]
+    print("flash sale of 105 units, 400 buyers, read-then-write:", flash(True), "(sold, stock left)")
+    print("flash sale of 105 units, 400 buyers, conditional update:", flash(False))
+`} />
+
+## What the output shows
+
+1. The first checkout reserves 2 cables and 1 lamp and creates order 1.
+2. **Retrying the same idempotency key** returns **the same order** ("replay"): a client that timed out and retried does not buy twice.
+3. A cart wanting **3 lamps** (only 2 left after the first order) **fails**, and cables show **3 available**, not 2: the reservation of the cable line was **rolled back** along with the failed line. Nothing is half reserved.
+4. Paying order 1 moves it to **PAID** and consumes the stock (lamp: on hand 2, reserved 0). A **duplicate payment callback** is ignored (it still reports PAID, no double decrement).
+5. A **declined payment** cancels order 2 and **releases** its stock: cable availability returns to 3. That is the **compensation**.
+6. An **abandoned checkout** holds 3 cables (available drops to 0). The sweeper at time 100 finds nothing expired (the hold lasts 600 s); at time 700 it releases it, and **availability returns to 3**.
+7. After the catalogue price changes to 1,200, order 1 **still shows 900**: the order copied the price when it was placed.
+8. **Flash sale**: 105 units, 400 buyers, processed in groups of 10 who read the stock before any of them writes. With **read-then-write** the shop **sold 110 and the stock went to minus 5**: a group that all saw "5 left" all bought. With the **conditional update** (`WHERE stock > 0`) it **sold exactly 105 and ended at 0**.
+
+The flash-sale race is a **replayed interleaving** (the browser runner cannot start threads), a faithful model of what concurrent requests do against a database without row-level protection. The sale size, the group size and the seed are fixed, so the numbers reproduce exactly.
+
+## Flash sales
+
+When thousands of buyers target one SKU, the problem shifts from correctness (the conditional update already gives that) to **throughput and fairness on one hot row**:
+
+- **Admission control**: a **virtual waiting room** or token bucket lets a limited number of shoppers into checkout at a time; the rest see a queue position ([rate limiting](/sd/scalability/rate-limiting-algorithms/)).
+- **Pre-allocate stock into tokens or buckets**: split the 100 units across N counters (or shards) so decrements hit different rows; a counter that is empty falls back to the others.
+- **Queue the purchase attempts** and process them in order from a single consumer per SKU ([message queue case study](/sd/case-studies-data-and-transactions/design-a-distributed-message-queue/)); users get "you got it" or "sold out" asynchronously.
+- **Serve the page from a CDN**, but never show a hard "in stock" claim from the cache: show "limited stock" and decide at reservation.
+- **Fail fast**: once stock reaches zero, mark the SKU sold out in a cache so later requests stop before touching the database.
+
+## Carts
+
+Carts are **write-heavy and low-value**: a key-value store keyed by user or session id, with a TTL, is enough. Do **not** reserve stock when an item is added to a cart (carts are abandoned constantly); show availability as advisory and validate at checkout. On checkout, **re-read prices and stock** and tell the shopper about changes.
+
+## Consistency choices
+
+| data | consistency | why |
+| --- | --- | --- |
+| Inventory counts and reservations | strong (single-row atomic updates) | overselling is unacceptable |
+| Orders and payments | strong, with idempotency | money and legal records |
+| Catalogue and search | eventual | stale for seconds is fine |
+| Cart | eventual, best effort | low cost of loss |
+| "Only 3 left" badges | approximate | advisory only |
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in e-commerce checkout" rows={[
+  { option: "Reserve stock, then pay, with compensation", pros: "Never charge for sold-out items; stock held only briefly", cons: "Needs expiry sweeping and compensation logic", chooseWhen: "Default for limited stock" },
+  { option: "Decrement stock only after payment", pros: "Simpler stock handling", cons: "Can charge for items that sold out meanwhile, forcing refunds", chooseWhen: "Abundant or made-to-order stock" },
+  { option: "Saga with an orchestrator", pros: "Explicit flow, easier debugging and recovery", cons: "Central component to keep correct", chooseWhen: "Most checkouts" },
+  { option: "Saga with choreography (events)", pros: "Loose coupling, no central coordinator", cons: "Control flow is scattered; harder to see and test", chooseWhen: "Many independent reactions to an order" },
+  { option: "Two-phase commit across services", pros: "Atomic across participants", cons: "Blocks, and not possible with external payment providers", chooseWhen: "Rarely across service boundaries" },
+  { option: "Conditional atomic UPDATE on stock", pros: "No oversell, simple", cons: "Hot-row contention in flash sales", chooseWhen: "Always as the correctness base" },
+  { option: "Sharded stock counters or queued attempts", pros: "Throughput for hot SKUs", cons: "More complexity; harder to show exact remaining stock", chooseWhen: "Flash sales and drops" },
+  { option: "Copy price and tax onto the order line", pros: "Orders are immutable records of what was agreed", cons: "Duplicates some catalogue data", chooseWhen: "Always" }
+]} />
+
+## Pitfalls
+
+- **Read-then-write** stock checks (the demo oversold 5 units in one run).
+- Reserving stock on **add to cart**, so abandoned carts starve real buyers.
+- Reservations **without expiry**.
+- No **idempotency key**: retries create duplicate orders or charges.
+- **Compensations that can fail** with no retry, leaving stock reserved forever.
+- Trusting a **payment callback** without checking the current order state (late or duplicate callbacks).
+- Storing only a product id on the order, so the order's price **changes when the catalogue changes**.
+- Showing **exact stock** from a cache and promising it.
+- Doing the saga steps without **persisting state**, so a crash mid-checkout loses track of what to compensate.
+- One **global lock** or table for all stock, making the whole shop contend.
+
+## What would you choose and why?
+
+Marketing wants a "drop" of 5,000 limited sneakers at noon with an expected 2 million shoppers. Describe the path of one shopper (queue, token, reservation, payment), what you do to keep the stock counters correct and fast, how long you hold a reservation, and how you handle the shopper who is told "reserved" and then fails payment three times. How would you load test it, and what number would tell you it is ready?
+
+## Quiz
+
+<Quiz id="sd-m18-e-commerce-checkout" tags={["case-study", "e-commerce", "saga", "inventory", "idempotency"]} questions={[
+  { type: "mcq", q: "Why reserve stock before charging the customer?", options: ["It is faster", "So we never take money for an item that sold out meanwhile; the only failure left at the payment step is a payment failure we can compensate by releasing the reservation", "Payments cannot be reversed", "Reservations are required by banks"], answer: 1, explain: "Reserve, then pay, then commit or release." },
+  { type: "mcq", q: "A checkout request times out and the client retries with the same idempotency key. What should happen?", options: ["A second order is created", "The original order is returned (a replay) and nothing is charged or reserved twice", "The request is rejected as an error", "The first order is cancelled"], answer: 1, explain: "A unique idempotency key lets the server recognise the retry." },
+  { type: "predict", q: "Stock: on_hand 10, reserved 7. A cart asks for 4. With the condition WHERE on_hand - reserved >= qty, what happens?", code: "on_hand, reserved, qty = 10, 7, 4\nprint(on_hand - reserved >= qty)", options: ["The reservation succeeds", "The update changes 0 rows, so the reservation fails (only 3 available)", "Stock becomes negative", "The order is created anyway"], answer: 1, explain: "Available is 3, so the conditional update affects no rows and the checkout reports not enough stock." },
+  { type: "mcq", q: "In the flash-sale demo (105 units, groups of 10 reading together), what did read-then-write do?", options: ["Sold exactly 105", "Sold 110 and left stock at minus 5, because a group that all saw 5 left all bought", "Sold nothing", "Sold 100"], answer: 1, explain: "The conditional update sold exactly 105 and ended at 0." },
+  { type: "multi", q: "Which are valid techniques for a flash sale on one hot product?", options: ["A virtual waiting room limiting concurrent checkouts", "Splitting stock into several counters", "Queuing purchase attempts per SKU", "Reserving stock when items are added to carts"], answer: [0, 1, 2], explain: "Reserving on add-to-cart lets abandoned carts hold the stock and is the opposite of what you want." },
+  { type: "mcq", q: "Why does the order line copy the price at purchase time?", options: ["To save a join", "So the order stays an accurate record of what was agreed even if the catalogue price later changes", "To compress data", "Because prices never change"], answer: 1, explain: "Orders are immutable historical records: the demo shows order 1 still at 900 after the price changed to 1200." }
+]} />
