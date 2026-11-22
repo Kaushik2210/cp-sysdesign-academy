@@ -45,6 +45,13 @@ self.onmessage = async (e) => {
   const start = performance.now();
   let status = "ok";
   try {
+    // Unvendored standard-library modules (sqlite3) and any imported Pyodide package are fetched on demand.
+    // Failure to fetch is not fatal: the import then reports ModuleNotFoundError in the user's output.
+    try {
+      await pyodide.loadPackagesFromImports(code);
+    } catch {
+      /* offline or unknown package: fall through */
+    }
     const globals = pyodide.globals.get("dict")();
     pyodide.runPython(code, { globals });
     globals.destroy();
