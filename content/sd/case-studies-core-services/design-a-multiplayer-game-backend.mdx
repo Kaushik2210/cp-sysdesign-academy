@@ -1,0 +1,285 @@
+---
+title: "Case Study: Design a Multiplayer Game Backend"
+track: sd
+module: case-studies-core-services
+order: 17
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/networking-and-apis/real-time-communication", "sd/case-studies-core-services/design-a-proximity-service", "sd/case-studies-data-and-transactions/design-a-real-time-leaderboard"]
+tags: [case-study, multiplayer-games, matchmaking, game-servers, tick-rate, client-prediction, interest-management, anti-cheat, fleet-management]
+type: case-study
+furtherReading:
+  - title: "Gabriel Gambetta, Fast-Paced Multiplayer (client-side prediction, server reconciliation, entity interpolation, lag compensation)"
+    url: https://www.gabrielgambetta.com/client-server-game-architecture.html
+  - title: "Valve Developer Community, Source Multiplayer Networking"
+    url: https://developer.valvesoftware.com/wiki/Source_Multiplayer_Networking
+  - title: "Glenn Fiedler, Gaffer On Games: Networked Physics and State Synchronization"
+    url: https://gafferongames.com/
+  - title: "Herbrich, Minka, Graepel, TrueSkill: A Bayesian Skill Rating System (NeurIPS 2006)"
+    url: https://www.microsoft.com/en-us/research/publication/trueskilltm-a-bayesian-skill-rating-system/
+---
+
+## The problem
+
+Design the **backend of an online multiplayer game**: millions of players, matches of 2 to 100 people, where **every player sees a shared world that reacts in real time to everyone's actions**. Players expect to be put into a **fair, fast match**, to feel their own controls respond **instantly**, to see others move **smoothly**, to be protected from **cheaters**, and to keep their **progress** (rank, items) safely.
+
+Games are an unusual distributed system: the deadlines are **tens of milliseconds**, the network is unreliable and **different for every player**, the clients are **untrusted** (players modify them), and the interesting state lives in **memory on short-lived servers**, not in a database.
+
+## Requirements
+
+**Functional**
+- Players log in, see their profile, friends and inventory.
+- **Matchmaking**: group players into fair matches quickly, by skill, region and game mode (parties of friends stay together).
+- **Real-time play** inside a match: movement, actions, hit detection, game rules.
+- **Persistence**: ranks, rewards and purchases are saved reliably after a match.
+- Leaderboards, chat, reporting of cheaters, and regular live updates.
+
+**Non-functional**
+- **Latency**: round trip of 100 ms or less for most players; server simulation 20 to 60 times per second.
+- **Fairness**: no player gains an advantage by cheating or by having a better connection than necessary.
+- **Scale**: 1 million concurrent players, with large spikes at launches and events.
+- **Availability and cost**: game servers are expensive compute; idle capacity wastes money, missing capacity creates queues.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Concurrent players | 1,000,000 | |
+| Match size | 100 players | 10,000 matches running at once |
+| Game servers | 20 matches per machine | about 500 machines |
+| Matchmaking requests | average match lasts 20 minutes | 1,000,000 / 1,200 s, about 830 players entering matchmaking per second, 3 times that at peak |
+| State updates | 30 per second, 40 bytes per player | see the simulation: 120 KB/s per player if everyone is sent everything |
+
+Two lessons: the **real-time load is per match** (independent of other matches, so it parallelises perfectly), and **bandwidth per player** is the limit that forces cleverness in what is sent to whom.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  C["Game clients"] --> GW["Gateway and login (HTTPS, authentication)"]
+  GW --> PS[("Player service: profile, inventory, rank")]
+  C --> MM["Matchmaking service"]
+  MM --> Q[("Queues per mode and region")]
+  MM --> FM["Fleet manager: find or start a game server with free capacity in the right region"]
+  FM --> GS["Game server process (authoritative simulation)"]
+  MM -->|"match ticket: server address and one-time token"| C
+  C <-->|"UDP or WebSocket, 20 to 60 updates per second"| GS
+  GS -->|"match result (idempotent)"| RS["Results and rewards service"]
+  RS --> PS
+  RS --> LB[("Leaderboard")]
+  GS --> TEL["Telemetry and anti-cheat analysis"]`} caption="Login and matchmaking are ordinary web services; the match runs on a short-lived authoritative game server" />
+
+- **Stateless services** (login, profile, store, matchmaking API) are built like any web backend: replicated, behind load balancers, with a database for durable data.
+- **Game servers** are **stateful, short-lived processes**: one match runs entirely **in the memory of one process** until it ends. The **fleet manager** starts and stops them, tracks capacity per region, and hands matchmaking a server with room.
+- A **match ticket** gives a client the server address and a **one-time token**, so only matched, authenticated players can connect.
+- After the match the server sends a **result** to the results service: **idempotently** (keyed by match id), so a retry cannot award rewards twice ([delivery semantics](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)).
+
+## Real-time networking inside a match
+
+### Authoritative server
+
+The **server owns the truth**: clients send **inputs** ("move forward, fire"), the server simulates the world and sends back the **state**. A client is never trusted to report its position, health or hits, because the client belongs to the player and can be modified. **Server authority is the foundation of anti-cheat.**
+
+### Tick rate and snapshots
+
+The server advances the world in fixed steps (**ticks**), commonly 20 to 60 per second, and after each tick (or every few) sends each client a **snapshot** of the relevant state. To save bandwidth it sends **deltas** (only what changed since the snapshot the client last confirmed), and a full snapshot occasionally or after packet loss.
+
+### Transport
+
+Games typically use **UDP** (or a reliability layer built on it), not TCP: for fast-changing state, an **old position that arrives late is useless** and TCP's guarantee of in-order delivery would **hold back fresh data behind a lost packet** (head-of-line blocking). Critical events (a purchase, the end of the match) travel over a reliable channel. Browser games use WebSockets or WebRTC data channels ([real-time communication](/sd/networking-and-apis/real-time-communication/)).
+
+### Hiding latency: prediction, interpolation, lag compensation
+
+If the client waited for the server before showing its own movement, every key press would feel delayed by a full round trip. Games use three techniques:
+- **Client-side prediction**: the client **applies its own input immediately** and also sends it; when the server's authoritative state arrives, the client **reconciles**: it re-applies any inputs the server has not yet processed on top of the server's state, and corrects itself if the prediction was wrong.
+- **Entity interpolation**: other players' positions arrive only 20 to 60 times per second, so the client draws them **slightly in the past**, smoothly interpolating between the two latest snapshots instead of jumping.
+- **Lag compensation**: when you shoot, the target you saw was where it was **100 ms ago** on your screen. The server **rewinds** the world to the time the shooter saw it (within a limit) to decide whether the shot hit. This favours the shooter and is a deliberate fairness trade-off.
+
+### Interest management
+
+A match of 100 players does not need to send every player everything. A player only needs the entities **near them** or otherwise relevant (the same idea as the spatial indexes in the [proximity service](/sd/case-studies-core-services/design-a-proximity-service/)). The server keeps a grid or region structure and sends each client only the **nearby** entities. This also hides information the player should not have (enemies behind walls), which reduces **wall-hack cheating**.
+
+## Matchmaking
+
+Putting players together is a **trade-off between quality and wait time**. Match only players of similar **skill** and each waits longer; match anyone and games are lopsided. The standard answer is a **widening search window**: begin strict, and **relax the allowed skill gap the longer a player waits**, up to a limit. Other constraints (region and latency, game mode, party size, role composition, avoiding recently played opponents) apply in the same way.
+
+### The simulation
+
+The program has three parts (standard library only, fixed seeds):
+
+1. **Matchmaking policies** for a 1v1 game: players arrive randomly with a skill rating (average 1500, spread 300). Each second the matchmaker pairs players whose skill difference is within **both** players' allowed window. Three policies: **anyone** (no skill limit); **fixed** (always within 50 points); **expanding** (start at 50 points and widen by 20 points for each second waited, up to 400). Run for 10 minutes at **1 player per second** (a small population) and **10 per second**.
+2. **Bandwidth** for state synchronisation in a 100-player match, with and without interest management.
+3. **Input latency** with and without client-side prediction.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import bisect
+import math
+import random
+
+
+def simulate(rate, seconds, policy, seed):
+    """Players arrive at random with a skill rating (mean 1500, spread 300) and wait to be paired.
+    Every second the matchmaker pairs players whose skill difference is within BOTH players' allowed window."""
+    rnd = random.Random(seed)
+    t_next = rnd.expovariate(rate)
+    waiting, matches, pid = [], [], 0                     # waiting: list of (skill, arrived_at, id)
+    for sec in range(seconds):
+        while t_next <= sec:
+            waiting.append((rnd.gauss(1500, 300), t_next, pid))
+            pid += 1
+            t_next += rnd.expovariate(rate)
+        waiting.sort()
+        used = set()
+        by_wait = sorted(waiting, key=lambda p: p[1])      # the longest-waiting players choose first
+        for skill, arrived, i in by_wait:
+            if i in used:
+                continue
+            w_me = window(policy, sec - arrived)
+            best = None
+            keys = [p[0] for p in waiting]
+            pos = bisect.bisect_left(keys, skill)
+            for j in range(max(0, pos - 6), min(len(waiting), pos + 7)):      # look at the nearest skills only
+                s2, a2, i2 = waiting[j]
+                if i2 == i or i2 in used:
+                    continue
+                if abs(s2 - skill) <= min(w_me, window(policy, sec - a2)):
+                    if best is None or abs(s2 - skill) < abs(best[0] - skill):
+                        best = (s2, a2, i2)
+            if best:
+                used.add(i)
+                used.add(best[2])
+                matches.append((abs(best[0] - skill), sec - arrived, sec - best[1]))
+        waiting = [p for p in waiting if p[2] not in used]
+    return matches, len(waiting), pid
+
+
+def window(policy, waited):
+    if policy == "anyone":
+        return 1e9
+    if policy == "fixed":
+        return 50.0
+    return min(400.0, 50.0 + 20.0 * waited)               # "expanding": start strict, relax by 20 points per second of waiting
+
+
+def report(rate, policy, seconds=600, seed=1):
+    matches, left, total = simulate(rate, seconds, policy, seed)
+    waits = sorted(w for _, a, b in matches for w in (a, b))
+    gaps = sorted(g for g, _, _ in matches)
+    unmatched = left
+    return {
+        "mean_wait": sum(waits) / len(waits), "p95_wait": waits[int(0.95 * len(waits)) - 1],
+        "mean_gap": sum(gaps) / len(gaps), "bad": sum(g > 200 for g in gaps) / len(gaps), "left": unmatched, "players": total,
+    }
+
+
+if True:
+    for rate in (1.0, 10.0):
+        print(f"players arriving at {rate:g} per second for 10 minutes:")
+        for policy in ("anyone", "fixed", "expanding"):
+            r = report(rate, policy)
+            print(f"  {policy:10s}: mean wait {r['mean_wait']:5.1f} s, p95 wait {r['p95_wait']:4.0f} s | mean skill gap {r['mean_gap']:6.1f}, "
+                  f"matches with a gap above 200: {r['bad'] * 100:4.1f}% | still waiting at the end: {r['left']} of {r['players']}")
+
+    # state synchronisation bandwidth for a 100 player match
+    players, tick, bytes_per_player = 100, 30, 40
+    full = players * bytes_per_player * tick
+    print(f"sending every player's state to every player at {tick} ticks per second: {full / 1000:.0f} KB/s per player ({full * 8 / 1e6:.2f} Mbit/s), "
+          f"{full * players / 1e6:.1f} MB/s out of the server")
+    near = 10
+    print(f"with interest management (only the {near} nearest players): {near * bytes_per_player * tick / 1000:.0f} KB/s per player, "
+          f"{near * bytes_per_player * tick * players / 1e6:.2f} MB/s out of the server ({players // near}x less)")
+
+    # how long until the player sees their own action?
+    rtt, tick_ms = 100.0, 1000.0 / 30
+    print(f"round trip {rtt:.0f} ms, server tick {tick_ms:.0f} ms: waiting for the server before showing a move takes about {rtt + tick_ms / 2:.0f} ms on average; "
+          f"with client-side prediction the move shows in one frame (about {1000 / 60:.0f} ms at 60 frames per second)")
+`} />
+
+## What the output shows
+
+**Matchmaking quality against wait time**:
+
+| arrivals | policy | mean wait | p95 wait | mean skill gap | matches with a gap above 200 |
+| --- | --- | --- | --- | --- | --- |
+| 1 per second | anyone | 1.0 s | 3 s | 302.7 | **54.1%** |
+| 1 per second | fixed window of 50 | 9.2 s | **40 s** | 23.7 | 0.0% |
+| 1 per second | **expanding** | **3.9 s** | **12 s** | 58.1 | 1.7% |
+| 10 per second | anyone | 0.6 s | 1 s | 110.7 | 17.2% |
+| 10 per second | fixed window of 50 | 1.5 s | 4 s | 21.2 | 0.0% |
+| 10 per second | expanding | 1.2 s | 3 s | 27.4 | 0.0% |
+
+- **Ignoring skill is fast and unfair**: with a small population more than **half** of matches (54.1%) have a skill gap above 200 points.
+- **A strict fixed window is fair but slow when the population is small**: at 1 arrival per second the mean wait is 9.2 s and the **95th percentile 40 s**, because players at the extremes of the skill range (the rare very strong or weak) have few suitable partners.
+- **An expanding window gets most of both**: at 1 per second a mean wait of **3.9 s** (p95 12 s) with a mean gap of 58 points and only 1.7% of matches above 200. The strict window's long tail is traded for slightly wider gaps.
+- **Population matters more than policy**: with **10 arrivals per second** even the strict window waits only 1.5 s on average. A **bigger pool makes good matches cheap**, which is why small games, off-peak hours and rare skill levels are the hard cases, and why matchmakers adapt thresholds by time of day and mode.
+
+**Bandwidth.** Sending every player's 40-byte state to every player at 30 ticks per second in a 100-player match costs **120 KB per second per player (0.96 Mbit/s)** and **12 MB per second out of the server**. With **interest management** (the 10 nearest players) it is **12 KB per second per player** and **1.2 MB per second** from the server: **10 times less**. Per-match server costs are dominated by this fan-out.
+
+**Latency.** With a 100 ms round trip and a 30 Hz server tick, **waiting for the server before showing a move takes about 117 ms on average**: clearly noticeable. With **client-side prediction** the move shows within a frame (about 17 ms at 60 frames per second); the server's confirmation only corrects rare disagreements.
+
+The player skills, arrival rates and the bandwidth and latency parameters are assumptions; the matchmaking numbers come from one seeded run of a deliberately simple 1v1 model.
+
+## Fleet management
+
+- **Regions**: place servers close to players; a player's **ping to each region** (measured by the client) is an input to matchmaking, which **prefers low latency** and relaxes it only as the wait grows.
+- **Allocation**: a game server **process** is allocated per match (or per few matches) from a **warm pool**, so players do not wait for a machine to boot. The fleet manager scales the pool using **demand forecasts** (daily and weekly cycles, events) and the **matchmaking queue length**, with headroom for launches.
+- **Failure**: if a game server crashes, the match is **lost** (state was only in memory). Mitigations: robust, well-tested server code; **automatic restart** of non-critical modes; **no rank loss** for interrupted matches; periodic **snapshots** to allow resumption for long sessions (rare, costly).
+- **Draining** servers for updates: stop sending new matches, let current ones finish ([safe deployments](/sd/observability/safe-deployments-canaries-and-feature-flags/)).
+- **DDoS**: game servers are attack targets; hide server addresses until match time, use provider protection, and rate-limit packets.
+
+## Persistence and economy
+
+- **Durable data** (profiles, inventory, purchases, rank) lives in **databases** behind the player service, sharded by player id. **Write after the match**, not on every action in it.
+- **Idempotent results and rewards**: keyed by match id and player id so retries cannot duplicate rewards.
+- **Purchases and currency** need **transactions and an audit log**: they are real money. Server-side validation only; the client never decides what it owns.
+- **Leaderboards** use sorted structures ([real-time leaderboard](/sd/case-studies-data-and-transactions/design-a-real-time-leaderboard/)); ranks are updated from validated match results.
+- **Unique ids** for players, matches and items ([unique ID generator](/sd/case-studies-data-and-transactions/design-a-unique-id-generator/)).
+
+## Cheating
+
+- **Never trust the client**: validate movement speed, fire rate, resources and positions on the server.
+- **Interest management** removes information a wall-hack would reveal.
+- **Statistical detection** on telemetry (impossible accuracy, reaction times, movement patterns), reviewed and acted on **after** the match, usually with **delays and waves of bans** so cheat makers cannot tell what was detected.
+- **Client integrity** tools (anti-tamper software) raise the cost of cheating but **cannot be relied on**, since the client is in the attacker's hands; server authority is the real defence.
+- **Report and review** pipelines for human reports, with abuse protection against false mass reporting.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a multiplayer game backend" rows={[
+  { option: "Authoritative server", pros: "Cheating is hard; one source of truth", cons: "Server cost; needs latency hiding", chooseWhen: "Competitive and valuable-economy games (the default)" },
+  { option: "Client-authoritative (peer to peer trust)", pros: "Cheap; no simulation servers", cons: "Trivially cheatable; hard to keep in sync", chooseWhen: "Casual, non-competitive, low-stakes games" },
+  { option: "UDP with a custom reliability layer", pros: "No head-of-line blocking; fresh state wins", cons: "You build reliability, ordering and congestion handling", chooseWhen: "Fast action games" },
+  { option: "TCP or WebSocket", pros: "Simple; works through browsers and firewalls", cons: "Delays fresh data behind lost packets", chooseWhen: "Turn-based and slower games" },
+  { option: "Send all state to all players", pros: "Simplest", cons: "120 KB/s per player in a 100-player match", chooseWhen: "Tiny matches only" },
+  { option: "Interest management", pros: "10 times less bandwidth in the simulation; hides unseen enemies", cons: "More server logic; visibility rules to get right", chooseWhen: "Matches beyond a handful of players" },
+  { option: "Strict skill window", pros: "Fair matches (0.0% large gaps)", cons: "Long tail waits with small populations (p95 40 s)", chooseWhen: "Large populations" },
+  { option: "Expanding window", pros: "Short waits and mostly fair matches (3.9 s mean, 1.7% large gaps at 1 per second)", cons: "Some wider-gap matches; needs tuning per mode and time of day", chooseWhen: "The usual choice" }
+]} />
+
+## Pitfalls
+
+- **Trusting the client** for positions, damage or inventory.
+- **Using TCP for fast state** and suffering stalls after packet loss.
+- **No prediction**: controls feel sluggish by a full round trip (about 117 ms in the example).
+- **Sending everyone everything**: bandwidth and cheating exposure.
+- **Strict matchmaking with a small population**, causing long tail waits.
+- **Matching by skill but ignoring latency**, so the "fair" match is unplayable.
+- **Persisting state on every game action**, overloading the database.
+- **Non-idempotent reward grants**: double rewards on retry.
+- **Cold-starting servers on demand** at peak, so players wait.
+- **Ignoring crashes**: players lose rank for matches the server killed.
+- **Revealing server addresses** early, inviting attacks.
+- **Immediate bans** that teach cheat authors what is detected.
+
+## What would you choose and why?
+
+Your game is launching a new 4-player mode in which a party of friends queues together, and early data shows that players in one region wait over a minute to find a match while another region fills in seconds. What do you change in matchmaking (skill window, latency limits, cross-region fallback, filling the match with bots), what do you measure to know whether the change helps, and how do you protect match quality and fairness while you do it?
+
+## Quiz
+
+<Quiz id="sd-m17-multiplayer-game-backend" tags={["case-study", "multiplayer", "matchmaking", "networking", "anti-cheat"]} questions={[
+  { type: "mcq", q: "Why does the server, not the client, decide hits and positions in a competitive game?", options: ["Servers are faster", "The client belongs to the player and can be modified, so only a server-authoritative simulation can enforce the rules", "Clients have no memory", "It reduces bandwidth"], answer: 1, explain: "Server authority is the foundation of anti-cheat; clients only send inputs." },
+  { type: "mcq", q: "Why do fast action games usually use UDP rather than TCP for state updates?", options: ["UDP is encrypted", "A lost packet in TCP delays all later data until it is retransmitted, but an old position is useless; UDP lets fresh state arrive first", "UDP is always reliable", "TCP cannot carry games"], answer: 1, explain: "Head-of-line blocking hurts real-time state; critical events use a reliable channel on top." },
+  { type: "predict", q: "100 players, 40 bytes of state each, 30 ticks per second. How many KB per second does each player receive if the server sends everyone's state to everyone?", code: "players, bytes_each, tick = 100, 40, 30\nprint(players * bytes_each * tick / 1000)", options: ["12", "120", "1,200", "12,000"], answer: 1, explain: "120 KB/s per player. Sending only the 10 nearest players gives 12 KB/s." },
+  { type: "mcq", q: "At 1 arrival per second, what did a fixed skill window of 50 do compared with an expanding window?", options: ["Shorter waits and fairer matches", "Fairer matches (mean gap 23.7) but a long tail of waiting (p95 40 s against 12 s)", "Identical results", "More unmatched players but shorter waits"], answer: 1, explain: "Expanding the window with waiting time trades slightly wider gaps for much shorter waits." },
+  { type: "multi", q: "Which techniques hide network latency from the player?", options: ["Client-side prediction with server reconciliation", "Interpolating other players' positions between snapshots", "Lag compensation (rewinding for hit detection)", "Waiting for the server before showing the player's own movement"], answer: [0, 1, 2], explain: "Waiting for the server adds a full round trip to every action (about 117 ms in the example)." },
+  { type: "mcq", q: "Why should match results and rewards be recorded idempotently?", options: ["To make servers faster", "Retries after a failure must not award the same rewards twice", "Games have no databases", "To save storage"], answer: 1, explain: "Key by match id and player id so a repeated delivery does nothing the second time." }
+]} />
