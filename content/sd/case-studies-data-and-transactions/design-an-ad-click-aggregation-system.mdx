@@ -1,0 +1,268 @@
+---
+title: "Case Study: Design an Ad Click Aggregation System"
+track: sd
+module: case-studies-data-and-transactions
+order: 9
+difficulty: hard
+estMinutes: 60
+prerequisites: ["sd/queues-and-streaming/stream-processing-basics", "sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/case-studies-data-and-transactions/design-a-distributed-message-queue"]
+tags: [case-study, ad-clicks, stream-processing, windowing, watermarks, exactly-once, deduplication, reconciliation, aggregation]
+type: case-study
+furtherReading:
+  - title: "Akidau et al., The Dataflow Model: A Practical Approach to Balancing Correctness, Latency, and Cost in Massive-Scale, Unbounded, Out-of-Order Data Processing (VLDB 2015)"
+    url: https://www.vldb.org/pvldb/vol8/p1792-Akidau.pdf
+  - title: "Apache Flink documentation, Event time and watermarks"
+    url: https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/
+  - title: "Marz and Warren, Big Data (the Lambda architecture)"
+    url: https://www.manning.com/books/big-data
+  - title: "Jay Kreps, Questioning the Lambda Architecture"
+    url: https://www.oreilly.com/radar/questioning-the-lambda-architecture/
+---
+
+## The problem
+
+Design a system that **counts ad clicks**: advertisers see how many clicks each ad got per minute, the platform **bills** them per click, and fraud analysts watch for abnormal patterns. Billions of click events per day stream in from browsers, apps and partner sites.
+
+It looks like "just count events", and that is the trap. The events arrive **late and out of order**, **some arrive twice** (retries), **some never arrive on time**, the **counts are money**, and a **few ads receive a large share of the traffic**. The design question is how to get **accurate** numbers **quickly** and **cheaply**, and be honest about which of the three you give up where.
+
+## Requirements
+
+**Functional**
+- Aggregate clicks per ad per time window (for example per minute), and query "clicks for ad X in the last N minutes or between two times".
+- Top N ads by clicks over a recent period.
+- Filter out invalid clicks (bots, duplicates).
+- Serve dashboards (seconds of delay is fine) and **billing** (must be exactly right, delay is acceptable).
+
+**Non-functional**
+- **Accuracy**: no click lost, none counted twice, because money depends on it.
+- **Latency**: dashboards within about a minute; final billing numbers within hours.
+- **Scale**: about 10 billion clicks per day, with bursts.
+- **Fault tolerance**: any component can fail without losing or double counting clicks.
+- **Replayable**: we can re-process raw data if we discover a bug.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Clicks | 10 billion per day | about 116,000 per second on average, 350,000 at 3 times peak |
+| Raw event size | about 100 bytes (click id, ad id, user, time, source) | about 1 TB per day, about 11.6 MB/s average |
+| Aggregated rows | 2 million active ads x 1,440 minutes, assuming 10% are active in any minute | about 290 million rows per day |
+| Aggregated size | about 50 bytes per row | about 14 GB per day |
+
+The **raw data is large and kept cheaply** (object storage, for replay and audit); the **aggregates are small** and live in a fast analytical store. The rate, 116,000 to 350,000 events per second, is comfortably handled by a partitioned log and a stream processor, but **correctness under duplication and lateness** is where the work is.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  C["Browsers and apps: click events (click id, ad id, event time)"] --> API["Click collectors (stateless, validate, ack)"]
+  API --> K[("Partitioned log (Kafka style), keyed by ad id")]
+  K --> SP["Stream processor: dedupe by click id, event-time windows, watermarks"]
+  SP --> AGG[("Aggregate store (analytical database): ad, minute, count")]
+  K --> RAW[("Raw event archive in object storage")]
+  RAW --> BATCH["Batch reconciliation (daily or hourly), exact recount"]
+  BATCH --> AGG
+  AGG --> Q["Query API: dashboards, top N"]
+  AGG --> BILL["Billing: reads only reconciled, final windows"]
+  SP --> FR["Fraud and anomaly detection"]`} caption="A fast stream path gives timely approximate numbers; the raw archive and a batch recount give the final, exact ones" />
+
+- **Collectors** are stateless: validate the event, attach a server receive time, write to the **log**, acknowledge only after the write is durable ([message queue case study](/sd/case-studies-data-and-transactions/design-a-distributed-message-queue/)).
+- The log is **partitioned by ad id**, so all clicks of an ad meet in one partition and one processor: simple per-ad state, no coordination.
+- The **stream processor** keeps **windowed counts**, **deduplicates** by click id, and writes to the aggregate store.
+- Every event is also archived to **object storage** ([data lakes and warehouses](/sd/storage/data-lakes-warehouses/)). A **batch job** recounts from the raw data to produce the **exact, final** numbers that billing uses. This is the **lambda architecture**: a fast, approximate path and a slow, exact path. (The alternative, the *kappa* architecture, re-runs the same streaming job over the archived log instead of keeping a separate batch codebase.)
+
+## The three problems the stream job must solve
+
+### 1. Event time versus arrival time
+
+A click happens at 10:00:58 on someone's phone but reaches us at 10:01:07. Counting it in the 10:01 window (**processing time**) is **wrong**: the advertiser's chart for 10:00 is too low and 10:01 too high. We want **event time**: the time the click **happened**.
+
+### 2. Lateness and watermarks
+
+If clicks can arrive up to two minutes late, when is the 10:00 window **complete**? Never, strictly. A **watermark** is the processor's claim "I have seen all events with event time up to T". A window **closes and is emitted** once the watermark passes its end; events arriving after that are **late**. A **watermark delay** (allowed lateness) trades **latency** (we wait longer before emitting) against **completeness** (fewer clicks dropped as late).
+
+### 3. Duplicates
+
+Clients and networks retry, and the log is **at-least-once** ([delivery semantics](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)). Every click carries a unique **click id**; the processor keeps the set of ids it has seen **for as long as late events can still arrive** and ignores repeats. The state is bounded by the watermark delay, not by all history.
+
+## The simulation
+
+The program creates 60,000 real clicks over 10 minutes for 20 ads (a few ads get most clicks) with realistic delivery problems: **90% arrive within 3 seconds, 9% within 3 to 20 seconds, 1% take 20 to 120 seconds**, and **3% are delivered twice**. It computes the **true** count per ad per one-minute window, then compares: **processing-time windows** (naive), and **event-time windows with a watermark delay of 0, 5, 30 and 150 seconds**, each **with and without deduplication**. "Exact cells" is the share of (ad, window) counts that are exactly right; "total error" is the sum of absolute errors as a share of true clicks.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+from collections import Counter
+
+WINDOW = 60                                   # seconds, tumbling windows
+
+
+def make_events(n=60000, ads=20, seconds=600, seed=1):
+    """True clicks with the delay each one suffers before reaching the aggregator, plus duplicate deliveries."""
+    rnd = random.Random(seed)
+    weights = [1 / (i + 1) for i in range(ads)]
+    clicks = []
+    for cid in range(n):
+        t = rnd.uniform(0, seconds)
+        r = rnd.random()
+        delay = rnd.uniform(0, 3) if r < 0.90 else rnd.uniform(3, 20) if r < 0.99 else rnd.uniform(20, 120)
+        clicks.append({"id": cid, "ad": rnd.choices(range(ads), weights)[0], "event_time": t, "arrival": t + delay})
+    arrivals = list(clicks)
+    for c in clicks:
+        if rnd.random() < 0.03:                                  # at-least-once delivery: some clicks arrive twice
+            arrivals.append(dict(c, arrival=c["arrival"] + rnd.uniform(1, 10)))
+    arrivals.sort(key=lambda c: c["arrival"])
+    return clicks, arrivals
+
+
+def truth(clicks):
+    t = Counter()
+    for c in clicks:
+        t[(c["ad"], int(c["event_time"] // WINDOW))] += 1
+    return t
+
+
+def error(result, true):
+    cells = set(result) | set(true)
+    exact = sum(result[k] == true[k] for k in cells)
+    abs_err = sum(abs(result[k] - true[k]) for k in cells)
+    return exact / len(cells), abs_err / sum(true.values())
+
+
+def processing_time(arrivals):
+    """Naive: count each message in the window of the moment it arrives, with no deduplication."""
+    r = Counter()
+    for c in arrivals:
+        r[(c["ad"], int(c["arrival"] // WINDOW))] += 1
+    return r
+
+
+def event_time(arrivals, watermark_delay, dedupe):
+    """Count by the time the click happened. A window is final once the watermark (latest event time seen minus
+    watermark_delay) passes its end; clicks that arrive after that are dropped as too late."""
+    r, closed, seen_ids = Counter(), set(), set()
+    max_et = 0.0
+    late = dups = 0
+    for c in arrivals:
+        max_et = max(max_et, c["event_time"])
+        w = int(c["event_time"] // WINDOW)
+        wm = max_et - watermark_delay
+        for done in range(0, int(wm // WINDOW)):
+            closed.add(done)                                     # windows whose end is before the watermark
+        if w in closed:
+            late += 1
+            continue
+        if dedupe:
+            if c["id"] in seen_ids:
+                dups += 1
+                continue
+            seen_ids.add(c["id"])
+        r[(c["ad"], w)] += 1
+    return r, late, dups
+
+
+if True:
+    clicks, arrivals = make_events()
+    true = truth(clicks)
+    print(f"{len(clicks)} real clicks, {len(arrivals)} deliveries ({len(arrivals) - len(clicks)} duplicates), 20 ads, 10 one-minute windows")
+    ex, ae = error(processing_time(arrivals), true)
+    print(f"processing-time windows, no dedupe:     exact cells {ex * 100:5.1f}%, total error {ae * 100:5.2f}% of true clicks")
+    for dedupe in (False, True):
+        for wd in (0, 5, 30, 150):
+            r, late, dups = event_time(arrivals, wd, dedupe)
+            ex, ae = error(r, true)
+            counted = sum(r.values())
+            print(f"event time, watermark delay {wd:3d}s, dedupe {str(dedupe):5s}: exact cells {ex * 100:5.1f}%, total error {ae * 100:5.2f}%, "
+                  f"too late {late:5d}, counted {counted:5d}" + (" (duplicates included)" if not dedupe else ""))
+`} />
+
+## What the output shows
+
+**60,000 real clicks, 61,767 deliveries (1,767 duplicates).**
+
+| approach | exact cells | total error | clicks dropped as too late |
+| --- | --- | --- | --- |
+| Processing-time windows, no dedupe | 6.1% | 3.52% | none (wrong window instead) |
+| Event time, watermark 0 s, no dedupe | 5.0% | 2.05% | 2,569 |
+| Event time, watermark 5 s, no dedupe | 13.0% | 1.42% | 1,058 |
+| Event time, watermark 30 s, no dedupe | 5.0% | 2.42% | 320 |
+| Event time, watermark 150 s, no dedupe | 1.0% | 2.94% | 0 |
+| Event time, watermark 0 s, **dedupe** | 11.0% | 3.94% | 2,569 |
+| Event time, watermark 5 s, dedupe | 15.5% | 1.58% | 1,058 |
+| Event time, watermark 30 s, dedupe | 41.5% | 0.51% | 320 |
+| Event time, watermark 150 s, **dedupe** | **100.0%** | **0.00%** | 0 |
+
+What this teaches:
+
+1. **Naive processing-time counting is wrong almost everywhere** (only 6.1% of cells exact), even though only 3.5% of clicks are miscounted overall: errors are spread across many cells.
+2. **Waiting longer admits more late clicks** (dropped as too late: 2,569, then 1,058, then 320, then 0 as the watermark delay goes 0, 5, 30, 150 seconds).
+3. **Without deduplication, waiting longer makes the total worse** at the end: with a 150 second watermark nothing is lost but all 1,767 duplicates are counted, giving 2.94% error and only 1.0% exact cells. Late-arrival handling and deduplication must go together.
+4. **With both** a long enough watermark (longer than the worst delay of about 130 seconds including duplicates) **and** deduplication, the result is **exactly right in every cell**.
+5. **The price is latency and state**: with a 150 second watermark each window's final number appears **2.5 minutes after the window ends**, and the processor must remember click ids for that long. With a 5 second watermark results are timely but about **1.6%** off in total, and a 0 second watermark with dedupe is the **worst of the dedupe rows (3.94% error)** because it drops the most real clicks.
+
+In production you do **both**: emit **early, approximate** results with a short watermark for dashboards, **update them** as late clicks arrive within a longer allowed lateness, and let the **batch reconciliation** produce the final number for billing, which has all the data. The simulation's delays are assumptions; measure your real delay distribution (the 99th and 99.9th percentiles) before choosing a watermark.
+
+## Exactly-once: what it really means
+
+You cannot make a network deliver each message exactly once. You can make the **effect** exactly once:
+
+- **At-least-once delivery** from the log plus **deduplication by click id**, as above.
+- **Idempotent writes** to the aggregate store: write results keyed by (ad, window) with an **upsert** ("set the count to 42"), not "add 3", so a replayed write does not double count.
+- **Transactional processing**: the stream processor commits its **input offsets and its output atomically** (checkpointing), so after a crash it resumes from the last checkpoint and its output is as if each event had been processed once.
+- **Reconciliation**: an independent recount from raw data catches anything the stream path got wrong.
+
+## Hot ads
+
+Partitioning by ad id means a **very popular ad** sends a large share of traffic to **one partition and one processor**. Remedies:
+
+- **Two-level aggregation**: spread a hot ad's clicks over several partitions (key = ad id plus a small random suffix), compute **partial counts** there, then **combine** the partials in a second stage. Counting is **associative**, so splitting is safe.
+- **Pre-aggregate in the collectors** (count locally for a second, send the partial sum), which cuts the event rate by a large factor.
+- **Detect hot keys** dynamically and split only those.
+
+## Fraud and invalid clicks
+
+Billing must exclude **bots and click fraud**. Signals: the same user or IP clicking repeatedly, impossible click rates, clicks with no preceding ad impression, known-bad sources. A fraud stage in the stream flags events; flagged clicks are **excluded from billing** and reviewed. Keep the raw events so decisions can be revisited and advertisers refunded.
+
+## Storage and queries
+
+- The **aggregate store** is an analytical (columnar) database with a primary key of (ad id, window start) so a dashboard query is a range scan. **Roll up** old data: minute counts older than a few days become hourly counts ([downsampling in the metrics lesson](/sd/case-studies-data-and-transactions/design-a-metrics-monitoring-system/)).
+- **Top N** over a recent period: maintain per-window counts and merge the heaps of the last N windows, or use an approximate structure (count-min sketch with a heap) when exactness is not required for dashboards.
+- **Billing** reads only **final, reconciled** windows, never the early results.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in click aggregation" rows={[
+  { option: "Event-time windows with watermarks", pros: "Counts land in the right window even for late clicks", cons: "Needs a lateness policy; state held until the watermark passes", chooseWhen: "Always for anything reported by time" },
+  { option: "Processing-time windows", pros: "Trivial and cheap", cons: "Only 6.1% of cells exact in the demo; skews every chart", chooseWhen: "Monitoring where small errors do not matter" },
+  { option: "Short watermark delay", pros: "Results within seconds", cons: "Drops late clicks (1.58% error at 5 s with dedupe)", chooseWhen: "Dashboards, followed by corrections" },
+  { option: "Long watermark delay with dedupe", pros: "Exact counts (100% of cells in the demo)", cons: "Results delayed by the watermark; more state", chooseWhen: "Billing-grade final numbers" },
+  { option: "Deduplicate by click id", pros: "Removes retry duplicates (1,767 in the demo)", cons: "Needs state for the lateness period", chooseWhen: "Always with at-least-once delivery" },
+  { option: "Lambda: stream plus batch reconciliation", pros: "Fast approximate numbers and exact final numbers", cons: "Two code paths to keep consistent", chooseWhen: "Money is involved" },
+  { option: "Kappa: replay the log through one streaming job", pros: "One codebase", cons: "Needs a long-retained log and fast replay", chooseWhen: "When the stream engine is strong enough to reprocess" },
+  { option: "Partition by ad id", pros: "All of an ad's clicks in one place; simple state", cons: "Hot ads overload a partition", chooseWhen: "Default, plus two-level aggregation for hot keys" }
+]} />
+
+## Pitfalls
+
+- Counting by **arrival time** and calling it the click time.
+- **No deduplication** behind an at-least-once log.
+- A **watermark shorter than your real tail delay**: silent undercounting (2,569 clicks dropped in the demo at 0 s).
+- Writing "add 3" to the store (not idempotent) instead of "set to 42".
+- **Unbounded dedupe state**: ids kept forever.
+- Hot ad **overloading one partition**.
+- Using **early, approximate** numbers for billing.
+- No **raw archive**, so a bug cannot be repaired by recounting.
+- Averaging or summing **already-aggregated percentages** in roll-ups instead of the underlying counts.
+- Ignoring **time zones and clock skew** on client devices: use server receive time as a sanity bound on event time.
+
+## What would you choose and why?
+
+An advertiser disputes an invoice: they claim they were billed for 40,000 clicks but their own analytics show 36,000. How do you investigate (raw archive, deduplication, invalid-click filtering, window boundaries, time zones), what do you tell them about early versus final numbers, and what change would you make to the pipeline so this class of dispute is easier to resolve in the future?
+
+## Quiz
+
+<Quiz id="sd-m18-ad-click-aggregation" tags={["case-study", "stream-processing", "windowing", "watermarks", "exactly-once"]} questions={[
+  { type: "mcq", q: "Why count by event time rather than processing time?", options: ["It is faster", "A click should land in the window when it happened, not when it happened to arrive, or every chart is skewed", "Processing time is not available", "It removes duplicates"], answer: 1, explain: "In the demo only 6.1% of (ad, window) cells were exactly right with processing-time windows." },
+  { type: "mcq", q: "What does the watermark delay trade off?", options: ["Memory for disk", "Latency of results against completeness (clicks dropped as too late)", "Accuracy of the clock", "The number of ads"], answer: 1, explain: "A longer delay admits more late clicks but results appear later and state is held longer." },
+  { type: "predict", q: "With a 150 second watermark and no deduplication, the demo counted every click but still had 2.94% error. Why?", code: "# real clicks: 60,000\n# deliveries counted: 61,767", options: ["Late clicks were dropped", "The 1,767 duplicate deliveries were all counted", "Windows were the wrong size", "Ads were mislabelled"], answer: 1, explain: "Waiting for lateness fixes dropped clicks, but at-least-once delivery adds duplicates that must be removed by click id." },
+  { type: "mcq", q: "How is 'exactly-once' achieved in practice?", options: ["The network delivers each message once", "At-least-once delivery plus deduplication, idempotent (upsert) writes and atomic offset-and-output commits, checked by reconciliation", "By disabling retries", "By using one big server"], answer: 1, explain: "You cannot make delivery exactly-once, but you can make the effect exactly-once." },
+  { type: "multi", q: "Which help with a very hot ad?", options: ["Add a random suffix to the key to spread it over partitions, then combine partial counts", "Pre-aggregate in the collectors", "Send all of its clicks to one thread", "Detect hot keys and split only those"], answer: [0, 1, 3], explain: "Counting is associative, so partial counts can be combined safely." },
+  { type: "mcq", q: "Why does billing read only reconciled, final windows?", options: ["Billing is slow", "Early stream results can still change as late clicks arrive, and money requires the exact recount from raw data", "Dashboards are broken", "Regulations ban streaming"], answer: 1, explain: "Dashboards can show early numbers and update them; invoices must use the final, reconciled numbers." }
+]} />
