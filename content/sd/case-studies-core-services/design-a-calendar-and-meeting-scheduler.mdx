@@ -1,0 +1,272 @@
+---
+title: "Case Study: Design a Calendar and Meeting Scheduler"
+track: sd
+module: case-studies-core-services
+order: 16
+difficulty: medium
+estMinutes: 50
+prerequisites: ["sd/case-studies-data-and-transactions/design-a-hotel-booking-system", "sd/case-studies-data-and-transactions/design-a-distributed-job-scheduler", "sd/databases-2/sharding-and-partitioning"]
+tags: [case-study, calendar, recurring-events, time-zones, daylight-saving, free-busy, interval-merging, invitations, reminders]
+type: case-study
+furtherReading:
+  - title: "RFC 5545, Internet Calendaring and Scheduling Core Object Specification (iCalendar), including RRULE"
+    url: https://www.rfc-editor.org/rfc/rfc5545
+  - title: "RFC 4791, Calendaring Extensions to WebDAV (CalDAV)"
+    url: https://www.rfc-editor.org/rfc/rfc4791
+  - title: "IANA Time Zone Database"
+    url: https://www.iana.org/time-zones
+  - title: "Wikipedia, Interval tree"
+    url: https://en.wikipedia.org/wiki/Interval_tree
+---
+
+## The problem
+
+Design a **calendar service** like Google Calendar or Outlook: users create **events** (one-off and **recurring**), **invite** others, see a **day, week or month view** of their own and shared calendars, get **reminders**, book **meeting rooms**, and ask "**when are all of us free?**".
+
+Calendars look simple and are full of traps that are not about scale at all: **time zones and daylight saving**, **recurrence with exceptions** ("every Monday, except this one, and this other one moved to 11:00"), **intervals** (overlap, merge, find gaps), and **permissions** on shared data. The scale problem (hundreds of millions of users) is mostly a **read** problem.
+
+## Requirements
+
+**Functional**
+- Create, edit and delete events; **recurring** events with exceptions (cancel or change a single instance, or "this and all following").
+- Invite attendees, track **RSVPs**, show conflicts.
+- View a calendar for a date range; show **free/busy** for others without revealing details.
+- **Find a time** that suits several people (and a room).
+- Reminders by notification and email.
+- Share calendars with permissions; sync with other clients (iCalendar, CalDAV).
+
+**Non-functional**
+- Calendar views load in **under 200 ms**.
+- **Correct times** everywhere, including across daylight saving changes and time zones.
+- Booking a **room** must never double-book.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Users | 500 million | |
+| Calendar views | 10 per user per day | 5 billion per day, about 58,000 per second, 174,000 at 3 times peak |
+| Event writes | 1 per user per day (create, edit, RSVP) | about 5,800 per second |
+| Stored events | about 200 per user, recurring series stored as one row | about 100 billion rows, about 30 TB at 300 bytes |
+
+The ratio of reads to writes is about 10 to 1, and reads touch **one user's data** (plus the calendars shared with them), so **sharding by user or calendar id** works well and most queries stay on one shard.
+
+## Data model
+
+| table | key fields |
+| --- | --- |
+| **calendar** | id, owner, name, time zone |
+| **event** (series master or single event) | id, calendar id, title, **start**, **end**, **time zone id**, **recurrence rule** (or none), series end date, organiser |
+| **event_exception** | series id, **original start** of the instance, status (cancelled or modified), overriding fields (new start, title, ...) |
+| **attendee** | event id, user, RSVP status |
+| **acl** | calendar id, grantee, permission (free/busy only, read, edit) |
+
+The decisions that matter:
+
+1. **A recurring series is stored as a rule, not as rows per occurrence.** "Every Monday and Wednesday at 09:00, forever" is one row with a recurrence rule (the iCalendar **RRULE** format). Materialising every occurrence is impossible for an unbounded series and expensive to edit. The service **expands** the rule for the requested window at read time.
+2. **Exceptions are separate records**, keyed by the **original start** of the instance they override. Expansion generates the instances, then removes cancelled ones and replaces modified ones.
+3. **One-off events store an absolute instant (UTC) and recurring events store local time plus a time zone id.** Why the difference is the next section.
+
+## Time zones and daylight saving
+
+A meeting "every Monday and Wednesday at 9:00 in New York" means **9:00 on the wall clock in New York**, whatever the offset from UTC is on that date. In winter that is 14:00 UTC, in summer 13:00 UTC. If you convert the first occurrence to UTC once and **repeat that UTC time every week**, the meeting silently **moves by an hour** for everyone when the clocks change.
+
+Rules that avoid this:
+- **Store the rule in the event's own time zone** (as an IANA zone id such as America/New_York, not a fixed offset), and **expand each occurrence in that zone**, converting to UTC only for that instance.
+- Keep the **time zone database current** (governments change rules, sometimes with weeks of notice) by updating it as part of the deployment.
+- Handle **nonexistent local times** (02:30 on the night clocks go forward) and **ambiguous** ones (01:30 happens twice when they go back) with a stated policy, for example shift forward, and use the first occurrence.
+- Display in the **viewer's** time zone, not the organiser's.
+- One-off events can be stored as UTC because they happen once, but keep the original zone for display and for the "this and all following" edit.
+
+## The simulation
+
+The program uses only the Python standard library, including a small rule for the New York daylight saving dates, and runs two experiments:
+
+1. **A weekly meeting** on Mondays and Wednesdays at 09:00 New York time, expanded across the **March 14, 2027** change, with one instance cancelled and one moved. It also shows what happens if the series had been stored as a **fixed UTC time**.
+2. **Finding a common slot**: for 300 random days with 2 to 6 attendees, find the **earliest 60-minute gap** between 09:00 and 18:00 where nobody is busy, with a **sweep over merged busy intervals**, and check every answer against a **brute force** that tries every start minute against every meeting.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+from datetime import date, datetime, timedelta, timezone
+
+
+def nth_weekday(year, month, weekday, n):
+    """The n-th given weekday (Monday=0) of a month."""
+    d = date(year, month, 1)
+    d += timedelta(days=(weekday - d.weekday()) % 7)
+    return d + timedelta(weeks=n - 1)
+
+
+def ny_offset_hours(local_naive):
+    """America/New_York: UTC-5 in winter, UTC-4 from 02:00 on the second Sunday of March to 02:00 on the first Sunday of November."""
+    y = local_naive.year
+    start = datetime.combine(nth_weekday(y, 3, 6, 2), datetime.min.time()) + timedelta(hours=2)
+    end = datetime.combine(nth_weekday(y, 11, 6, 1), datetime.min.time()) + timedelta(hours=2)
+    return -4 if start <= local_naive < end else -5
+
+
+def local_to_utc(local_naive):
+    return (local_naive - timedelta(hours=ny_offset_hours(local_naive))).replace(tzinfo=timezone.utc)
+
+
+def expand_weekly(start_day, weekdays, local_hour, weeks, exceptions=(), moved=None):
+    """Instances of a weekly event stored as 'every Mon and Wed at 09:00 New York time', with exceptions."""
+    moved = moved or {}
+    out = []
+    for w in range(weeks):
+        for wd in weekdays:
+            day = start_day + timedelta(weeks=w, days=(wd - start_day.weekday()) % 7)
+            if day in exceptions:
+                continue                                              # this instance was cancelled
+            local = datetime.combine(day, datetime.min.time()) + timedelta(hours=local_hour)
+            local = moved.get(day, local)                             # this instance was moved to another time
+            out.append((day, local, local_to_utc(local)))
+    return out
+
+
+def merge(intervals):
+    out = []
+    for s, e in sorted(intervals):
+        if out and s <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([s, e])
+    return out
+
+
+def common_slot(busy_lists, day_start, day_end, length):
+    """Earliest gap of at least 'length' minutes in [day_start, day_end) where nobody is busy (a sweep over merged busy time)."""
+    merged = merge([iv for b in busy_lists for iv in b])
+    t = day_start
+    for s, e in merged:
+        if s - t >= length and t + length <= day_end:
+            return t
+        t = max(t, e)
+    return t if day_end - t >= length else None
+
+
+def brute_slot(busy_lists, day_start, day_end, length):
+    """Check every possible start minute against every attendee's every meeting."""
+    for t in range(day_start, day_end - length + 1):
+        if all(not (s < t + length and t < e) for b in busy_lists for s, e in b):
+            return t
+    return None
+
+
+if True:
+    # 1. a weekly 09:00 New York meeting stored as local time, across the March daylight saving change in 2027 (March 14)
+    first = date(2027, 3, 8)                                          # a Monday
+    inst = expand_weekly(first, [0, 2], 9, 3)
+    for day, local, utc in inst:
+        print(f"  {day} {day.strftime('%a')} local {local.strftime('%H:%M')} -> UTC {utc.strftime('%H:%M')} (offset {ny_offset_hours(local)})")
+    fixed_utc = datetime(2027, 3, 8, 14, 0)                          # the same series stored as a fixed 14:00 UTC
+    shown = []
+    for d, _, _ in inst:
+        u = datetime.combine(d, datetime.min.time()) + timedelta(hours=14)
+        # convert the fixed UTC instant back to New York wall-clock time (try both offsets, keep the one that is consistent)
+        local = next(u + timedelta(hours=o) for o in (-4, -5) if ny_offset_hours(u + timedelta(hours=o)) == o)
+        shown.append(local.strftime("%H:%M"))
+    print("  if the series were stored as a fixed 14:00 UTC, attendees would see it at", shown, "local time: it drifts by an hour after the change")
+    inst2 = expand_weekly(first, [0, 2], 9, 3, exceptions={date(2027, 3, 10)}, moved={date(2027, 3, 15): datetime(2027, 3, 15, 11, 0)})
+    print("  with one instance cancelled (Mar 10) and one moved to 11:00 (Mar 15):", [(str(d), l.strftime('%H:%M')) for d, l, _ in inst2][:5])
+
+    # 2. finding a common free slot: sweep over merged busy time against a brute force check of every minute
+    rnd = random.Random(8)
+    agree, found, total_intervals = 0, 0, 0
+    trials = 300
+    for _ in range(trials):
+        attendees = rnd.randint(2, 6)
+        busy = []
+        for _a in range(attendees):
+            meetings = []
+            for _m in range(rnd.randint(2, 8)):
+                s = rnd.randrange(540, 1020, 15)                       # minutes since midnight, 09:00 to 17:00
+                meetings.append((s, s + rnd.choice([30, 45, 60, 90])))
+            busy.append(meetings)
+        total_intervals += sum(len(b) for b in busy)
+        a = common_slot(busy, 540, 1080, 60)
+        b = brute_slot(busy, 540, 1080, 60)
+        agree += a == b
+        found += a is not None
+    print(f"earliest common 60 minute slot, {trials} random days of 2 to 6 attendees: sweep equals brute force in {agree} of {trials}; a slot existed on {found}")
+    print(f"  average meetings per day: {total_intervals / trials:.1f}; sweep looks at each meeting once after sorting, the brute force checks up to 481 start minutes against all of them")
+`} />
+
+## What the output shows
+
+**Daylight saving.** Stored as "09:00 New York time", the meeting converts to **14:00 UTC on March 8 and 10** (offset minus 5) and to **13:00 UTC from March 15** (offset minus 4, after the clocks changed on March 14): the UTC time changes, the wall-clock time does not. Stored as a **fixed 14:00 UTC**, attendees would see **09:00, 09:00, then 10:00 for every later occurrence**: the meeting drifts by an hour, which is exactly the bug users report every spring and autumn.
+
+**Exceptions.** With the Wednesday March 10 instance **cancelled** and the Monday March 15 instance **moved to 11:00**, the expansion yields March 8 at 09:00, **March 15 at 11:00**, March 17, 22 and 24 at 09:00: the cancelled one is gone and the moved one is replaced, while the rest of the series is untouched.
+
+**Free time.** On **300 random days** the sweep gave **the same answer as the brute force in all 300**, and a 60-minute common slot existed on **138** of them (46%: with 2 to 6 busy attendees and about 19 meetings a day in total, shared gaps are scarce). The sweep sorts the busy intervals once, merges overlaps and walks through the gaps: **O(m log m)** for m meetings, instead of testing 481 candidate start minutes against every meeting.
+
+The meeting counts and gaps are synthetic and the daylight saving rule covers only New York in 2027; the lesson is the technique, not the percentage.
+
+## Free/busy and finding a time
+
+- **Free/busy**: for each attendee fetch their **busy intervals** in the window (from their calendars, expanding recurring events), **merge** them (sort by start, join overlapping intervals), and look for **gaps** at least as long as the meeting. For a room, add the room's calendar as another attendee.
+- **Privacy**: other users should see only **busy or free**, not titles. The ACL has a "free/busy only" level, and the free/busy endpoint returns intervals without details.
+- **Speed**: for people who are in many meetings, **cache each user's busy intervals per week** and invalidate when their events change. For large groups (50 attendees) fetch in parallel and merge; consider approximate "best slots" scores ("46 of 50 free") instead of a perfect answer.
+- **Preferences**: working hours, time zones of attendees (avoid 03:00 for someone), and a minimum notice are applied as additional "busy" intervals.
+
+## Storing and querying events
+
+- **Index** events by `(calendar id, start time)` for range scans: "events in the week" fetches rows with `start < window end` and `end > window start`. A plain B-tree on the start time handles **single events** well when you also store a maximum event length or the end time in the index.
+- **Recurring series** cannot be found by their `start` alone (the series started in 2022 and still recurs this week). Store a **series end date** (or "never") and query "series that started before the window end and have not ended before the window start", then **expand** those in memory. The number of series per user is small (dozens), so this is cheap.
+- **Interval trees** answer "which intervals overlap this one?" in O(log n + k) for in-memory conflict checks and free/busy structures.
+- **Shard by calendar or user id**; shared calendars add cross-shard reads, handled by fetching from each owner's shard and merging.
+
+## Invitations, RSVPs and sync
+
+- An invitation creates a **copy** of the event in each attendee's calendar linked to the organiser's event; RSVP updates go back to the organiser. Changes by the organiser are **propagated** to the attendee copies (asynchronously through a queue), except for attendee-specific fields such as their own RSVP and reminders.
+- **External invitations** are emailed as **iCalendar** (.ics) messages with a method (request, reply, cancel); parse and apply incoming replies idempotently ([email service](/sd/case-studies-core-services/design-an-email-service/)).
+- **Sync** with phones and other clients uses **sync tokens** or version numbers: the client asks "what changed since token T?" and receives only the deltas, including deletions (tombstones).
+
+## Reminders
+
+A reminder is "notify me 10 minutes before this event". Compute each upcoming reminder's **trigger time** from the event start (in UTC after expansion) and register it with a **scheduler** ([distributed job scheduler](/sd/case-studies-data-and-transactions/design-a-distributed-job-scheduler/)). Do not schedule an infinite series: **materialise only the next N occurrences' reminders** (for example the next 30 days) and a daily job extends the horizon. When an event changes, **cancel and reschedule** its reminders. Delivery is at-least-once, so the notification handler **deduplicates** by (event, instance, reminder).
+
+## Room booking
+
+A meeting room is a **resource** with its own calendar. Booking must be **atomic**: two people must not both get the 14:00 slot. Reuse the **conditional update** pattern from the [hotel booking case study](/sd/case-studies-data-and-transactions/design-a-hotel-booking-system/): reserve the room for the time slots in one transaction and fail if any slot is taken; or use a database **exclusion constraint** on time ranges where available. Recurring bookings expand into many slots and must be **all or nothing** (or report which instance conflicts).
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a calendar service" rows={[
+  { option: "Store the recurrence rule and expand on read", pros: "One row per series; edits are cheap; unbounded series work", cons: "Needs a correct RRULE engine; expansion on every read", chooseWhen: "Always for recurring events" },
+  { option: "Materialise every occurrence", pros: "Plain range queries on rows", cons: "Impossible for infinite series; edits touch thousands of rows", chooseWhen: "Short finite series only" },
+  { option: "Recurring events as local time plus IANA zone", pros: "Wall-clock time is stable across daylight saving (09:00 stayed 09:00 in the demo)", cons: "Needs a maintained time zone database", chooseWhen: "Always for recurring events" },
+  { option: "Fixed UTC time for a recurring event", pros: "Simple", cons: "Meeting drifts by an hour at daylight saving (09:00 became 10:00 in the demo)", chooseWhen: "Never for human-facing series" },
+  { option: "Exceptions as separate records keyed by original start", pros: "Cancel or change one instance without touching the series", cons: "Expansion must merge exceptions; 'this and all following' splits the series", chooseWhen: "Always" },
+  { option: "Sweep over merged busy intervals", pros: "O(m log m) and exact (300 of 300 matched brute force)", cons: "Needs each attendee's busy intervals first", chooseWhen: "Finding common free time" },
+  { option: "Brute force over every start minute", pros: "Obviously correct, good for testing", cons: "Checks hundreds of candidates against every meeting", chooseWhen: "As a test oracle" },
+  { option: "Per-user weekly busy cache", pros: "Fast scheduling for many attendees", cons: "Invalidation on every change", chooseWhen: "Large organisations" }
+]} />
+
+## Pitfalls
+
+- **Storing recurring events as fixed UTC**: the meeting moves at daylight saving.
+- **Fixed offsets instead of IANA zone ids**; stale time zone data.
+- **Ignoring nonexistent and ambiguous local times** at clock changes.
+- **Materialising infinite series**.
+- **Finding recurring events by their start date alone**.
+- **Off-by-one on end times**: treat an event as the half-open interval from start up to but not including end, so back-to-back meetings do not conflict.
+- **Leaking event details through free/busy**.
+- **Non-atomic room booking** (check, then book).
+- **Scheduling reminders for all future occurrences**.
+- **Showing times in the organiser's zone** to attendees elsewhere.
+- Treating **all-day events** as 24-hour intervals (they are dates, not instants, and span 23 or 25 hours on daylight saving days).
+
+## What would you choose and why?
+
+A company asks for a "scheduling assistant" that proposes the best meeting time for 40 people across five time zones within the next two weeks, respecting working hours and avoiding the lunch period, and then books a room that fits. Which data do you fetch, what do you precompute, how do you rank candidate slots when no perfect one exists, and how do you avoid proposing a time that disappears before the organiser confirms it?
+
+## Quiz
+
+<Quiz id="sd-m17-calendar-scheduler" tags={["case-study", "calendar", "recurring-events", "time-zones", "free-busy"]} questions={[
+  { type: "mcq", q: "Why store a recurring event as a rule instead of one row per occurrence?", options: ["Rules are faster to type", "A series can be unbounded and edits would touch thousands of rows; expanding the rule at read time keeps one row and cheap edits", "Databases cannot store many rows", "Rules avoid time zones"], answer: 1, explain: "The service expands the rule for the requested window and then applies exceptions." },
+  { type: "mcq", q: "A weekly meeting is stored as a fixed 14:00 UTC. What happens when New York daylight saving begins?", options: ["Nothing", "Attendees see it at 10:00 local from then on, so the meeting drifts by an hour", "It is cancelled", "It moves to 13:00 UTC automatically"], answer: 1, explain: "Store the rule as local time plus an IANA zone id and convert each instance separately." },
+  { type: "predict", q: "Busy intervals as (start, end) in minutes: (540, 600) and (570, 660) and (720, 780). After merging overlapping intervals, how many intervals remain?", code: "intervals = [(540, 600), (570, 660), (720, 780)]\n# (540, 600) and (570, 660) overlap and merge into (540, 660)", options: ["1", "2", "3", "0"], answer: 1, explain: "Merged busy time is (540, 660) and (720, 780); the gap between 660 and 720 is a free hour." },
+  { type: "mcq", q: "How did the demo validate the sweep algorithm for common free time?", options: ["By timing it", "By comparing its answer with a brute force over every start minute on 300 random days, matching in all 300", "By reading the code", "By trying one example"], answer: 1, explain: "A simple, obviously correct oracle plus random inputs is the standard way to trust an interval algorithm." },
+  { type: "multi", q: "Which are sound practices for reminders on recurring events?", options: ["Schedule only the next N occurrences and extend the horizon daily", "Cancel and reschedule reminders when an event changes", "Deduplicate notifications because delivery is at-least-once", "Schedule reminders for every future occurrence of an infinite series"], answer: [0, 1, 2], explain: "An infinite series would need infinite scheduled jobs." },
+  { type: "mcq", q: "How should a meeting room booking avoid double booking?", options: ["Check availability, then insert in two separate steps", "Reserve the slots atomically with a conditional update or an exclusion constraint so a conflict fails the whole booking", "Ask users to be careful", "Book rooms only on weekdays"], answer: 1, explain: "Same pattern as hotel nights: all slots or none, with the database enforcing exclusivity." }
+]} />
