@@ -1,0 +1,290 @@
+---
+title: "Case Study: Design a Distributed Job Scheduler"
+track: sd
+module: case-studies-data-and-transactions
+order: 12
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/consensus-and-coordination/leases-locks-and-fencing", "sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/queues-and-streaming/backpressure-retries-and-dlq"]
+tags: [case-study, job-scheduler, cron, timing-wheel, leases, at-least-once, idempotency, retries, sharding]
+type: case-study
+furtherReading:
+  - title: "Varghese and Lauck, Hashed and Hierarchical Timing Wheels (SOSP 1987)"
+    url: https://www.cs.columbia.edu/~nahum/w6998/papers/sosp87-timing-wheels.pdf
+  - title: "Apache Airflow documentation, Scheduler"
+    url: https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/scheduler.html
+  - title: "Kubernetes documentation, CronJob (concurrency policy, missed runs and starting deadline)"
+    url: https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+  - title: "Amazon SQS Developer Guide, Visibility timeout"
+    url: https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html
+---
+
+## The problem
+
+Design a **distributed job scheduler**: users register **one-off jobs** ("run this at 14:00 tomorrow") and **recurring jobs** ("every night at 02:00"), and the system runs them **on time**, on a **fleet of workers**, **reliably** (a job is not silently lost), and **without running forever or twice by accident**. Think of cron, Kubernetes CronJobs, Airflow, or the scheduled-tasks feature of any SaaS product, but for **hundreds of millions of jobs**.
+
+A single-machine cron is easy. The distributed problem is the interplay of three things: **time** (find the due jobs efficiently), **failure** (a scheduler or worker can die at any moment) and **duplicates** (the safe response to a failure is to retry, and retries run things twice).
+
+## Requirements
+
+**Functional**
+- Create, update, pause and delete one-off and recurring (cron expression) jobs.
+- Run each job at its scheduled time on a worker; record the outcome.
+- **Retries** with backoff for failed runs; a **dead-letter** list for permanent failures.
+- Priorities, per-tenant limits, and a way to see history and the next run time.
+
+**Non-functional**
+- **Timeliness**: start jobs within a second or two of their scheduled time (**lateness** is the key metric).
+- **Reliability**: no job is lost; **at-least-once** execution.
+- **Scalability**: 100 million jobs registered, thousands fired per second, a spike on every minute boundary.
+- **No single point of failure**: schedulers and workers can crash and be replaced.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Registered jobs | 100 million | about 100 million rows, 100 bytes each: 10 GB |
+| Executions | 1 billion per day | about 11,600 per second on average |
+| Minute-boundary spike | many jobs are set for "every hour on the hour" and the like; assume 10 times average | about 116,000 starts per second for a few seconds |
+| Execution records | 1 billion per day x 200 bytes | about 200 GB per day (keep a short retention) |
+
+The **job definitions** are small; the **execution history** is the large part and must expire. The central difficulty is the **spike**: jobs cluster on round times, so the scheduler must find and dispatch **tens of thousands of due jobs within a second**.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  U["Users and services"] --> API["Job API"]
+  API --> DB[("Job store: id, schedule, next_run_time, state (sharded by job id)")]
+  S1["Scheduler node A (owns shards 0 to 15, by lease)"] -->|"poll jobs due in the next seconds"| DB
+  S2["Scheduler node B (owns shards 16 to 31)"] -->|"poll"| DB
+  S1 --> W["In-memory timer structure (heap or timing wheel)"]
+  W -->|"due: enqueue run"| Q[("Run queue: visibility timeout, priorities")]
+  Q --> WK["Worker pool"]
+  WK -->|"claim with lease, run, acknowledge"| Q
+  WK --> RES[("Run history (short retention)")]
+  WK -->|"on completion: compute next_run_time"| DB
+  Q -->|"after max retries"| DLQ["Dead-letter queue and alerts"]
+  C["Coordination service: shard leases"] --- S1
+  C --- S2`} caption="Scheduler nodes own shards of the job space through leases, load due jobs into a timer, and hand runs to workers through a queue" />
+
+### Pieces
+
+- **Job store**: the source of truth, sharded by job id. The key column is **`next_run_time`** with an index, so "all jobs due in the next 30 seconds in shard k" is a range scan.
+- **Scheduler nodes**: each owns a **set of shards** by holding a **lease** from a coordination service ([leases and fencing](/sd/consensus-and-coordination/leases-locks-and-fencing/)). It periodically loads the jobs due in the **next window** into an **in-memory timer**, and when one fires it **enqueues a run**. If a scheduler dies, its leases expire and another node takes over its shards. The lease **fencing token** stops a slow, paused ex-owner from enqueueing duplicates.
+- **Run queue**: durable, with **visibility timeouts** and priorities ([message queue case study](/sd/case-studies-data-and-transactions/design-a-distributed-message-queue/)). Decouples **deciding** that a job is due from **executing** it, absorbs the minute-boundary spike, and gives backpressure.
+- **Workers** take a run with a **lease** (the visibility timeout), execute it, and **acknowledge**. They renew the lease for long jobs.
+- **Recurring jobs**: when a run finishes (or when it is dispatched, depending on policy) the next `next_run_time` is computed from the cron expression and written back.
+- **Retries**: a failed run is re-queued with **exponential backoff and jitter**; after a maximum number of attempts it goes to a **dead-letter queue** and raises an alert ([backpressure, retries and DLQ](/sd/queues-and-streaming/backpressure-retries-and-dlq/)).
+
+## Finding due jobs fast: heap versus timing wheel
+
+Inside a scheduler node the timers live in memory. The natural structure is a **priority queue** keyed by due time: **O(log n)** per insertion and per expiry. A **hashed timing wheel** is a circular array of slots, one per tick: a timer goes into slot (due time mod number of slots) with a count of full turns remaining; each tick looks **only at its own slot**. Insertion is **O(1)**, expiry is O(1) amortised, which suits huge numbers of short timers (it is what network stacks and Kafka's delay queues use). **Hierarchical** wheels (seconds, minutes, hours) cover long horizons without re-scanning.
+
+## Executing safely: leases, failures and duplicates
+
+A worker that **crashes after doing the work but before acknowledging** leaves the job's lease to expire, and the queue **gives the job to another worker**. This is the correct, safe behaviour (the alternative loses jobs), and it means **a job can run more than once**. This is **at-least-once** delivery. The effect of running twice (two emails, two charges) is prevented not by the scheduler but by **idempotent jobs**: each run carries a stable **run id** (job id plus scheduled time), and the side effect is recorded under that id so a repeat is recognised and skipped ([delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)).
+
+## The simulation
+
+The program has three parts:
+
+1. **Heap versus timing wheel**: 50,000 timers due within 3,000 ticks, run through a heap (counting every comparison) and through two timing wheels (256 and 4,096 slots), checking that **all three fire exactly the same jobs at exactly the same ticks** and counting the work.
+2. **Lease-based execution with crashing workers**: 2,000 jobs, at most 50 claimed per tick, a lease of 5 ticks. Workers **crash after doing the work but before acknowledging** with probability 0%, 10% or 30%. It runs each case **with and without an idempotent side effect**, counting executions, side effects and jobs affected twice or more.
+3. **Catch-up policies** after a scheduler outage.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import heapq
+import random
+
+
+class CountingKey:
+    """Wraps a due time so that every comparison made by the heap is counted."""
+    comparisons = 0
+    __slots__ = ("t", "job")
+    def __init__(self, t, job):
+        self.t, self.job = t, job
+    def __lt__(self, other):
+        CountingKey.comparisons += 1
+        return (self.t, self.job) < (other.t, other.job)
+
+
+def heap_schedule(timers, horizon):
+    """A priority queue of (due tick, job). Inserting and popping each cost O(log n) comparisons."""
+    CountingKey.comparisons = 0
+    h, fired = [], {}
+    for job, t in timers:
+        heapq.heappush(h, CountingKey(t, job))
+    for tick in range(horizon + 1):
+        while h and h[0].t <= tick:
+            k = heapq.heappop(h)
+            fired.setdefault(tick, []).append(k.job)
+    return fired, CountingKey.comparisons
+
+
+def wheel_schedule(timers, horizon, slots=256):
+    """A hashed timing wheel: slot = due tick mod slots, each timer remembers how many full turns remain.
+    Inserting is one append; each tick looks only at its own slot."""
+    wheel = [[] for _ in range(slots)]
+    ops, fired = 0, {}
+    for job, t in timers:
+        wheel[t % slots].append((t // slots, t, job))
+        ops += 1
+    for tick in range(horizon + 1):
+        slot = wheel[tick % slots]
+        ops += 1                                              # look at one slot
+        keep = []
+        for rounds, t, job in slot:
+            ops += 1
+            if t == tick:
+                fired.setdefault(tick, []).append(job)
+            else:
+                keep.append((rounds, t, job))
+        slot[:] = keep
+    return fired, ops
+
+
+def run_jobs(n_jobs, workers, crash_rate, lease, seed, idempotent):
+    """Lease based execution: a worker claims a job and has 'lease' ticks to acknowledge it. A worker that crashes
+    after doing the work but before acknowledging leaves the job to be claimed again when the lease expires."""
+    rnd = random.Random(seed)
+    state = {j: "ready" for j in range(n_jobs)}                  # ready | leased | done
+    lease_until, executions, effects, done_tick = {}, 0, {}, {}
+    sink_seen = set()
+    tick = 0
+    while any(s != "done" for s in state.values()):
+        tick += 1
+        for j, s in state.items():                                # expired leases make jobs claimable again
+            if s == "leased" and lease_until[j] <= tick:
+                state[j] = "ready"
+        claimed = 0
+        for j, s in state.items():
+            if s == "ready" and claimed < workers:
+                claimed += 1
+                state[j] = "leased"
+                lease_until[j] = tick + lease
+                executions += 1
+                if not idempotent or j not in sink_seen:          # the side effect, e.g. sending an email or charging a card
+                    effects[j] = effects.get(j, 0) + 1
+                    sink_seen.add(j)
+                if rnd.random() < crash_rate:
+                    continue                                      # crashed before acknowledging: the lease will expire
+                state[j] = "done"
+                done_tick[j] = tick
+    return tick, executions, sum(effects.values()), sum(1 for v in effects.values() if v > 1)
+
+
+def catch_up(missed, policy):
+    """A job meant to run every minute; the scheduler was down and missed 'missed' runs."""
+    return {"run every missed run": missed, "run once": 1, "skip to the next slot": 0}[policy]
+
+
+if True:
+    rnd = random.Random(9)
+    n, horizon = 50000, 3000
+    timers = [(j, rnd.randint(1, horizon)) for j in range(n)]
+    fh, comps = heap_schedule(timers, horizon)
+    results = {slots: wheel_schedule(timers, horizon, slots) for slots in (256, 4096)}
+    same = all(sorted(fh.get(t, [])) == sorted(fw.get(t, [])) for fw, _ in results.values() for t in range(horizon + 1))
+    print(f"{n:,} timers due within {horizon:,} ticks: heap and both timing wheels fire exactly the same jobs at the same ticks: {same}")
+    print(f"  heap: {comps:,} comparisons ({comps / n:.1f} per timer)")
+    for slots, (_, ops) in results.items():
+        print(f"  timing wheel with {slots:,} slots: {ops:,} operations ({ops / n:.1f} per timer)")
+
+    print("lease based execution, 2,000 jobs, 50 claims per tick, lease of 5 ticks, workers crash before acknowledging:")
+    for crash in (0.0, 0.1, 0.3):
+        for idem in (False, True):
+            ticks, execs, eff, dup = run_jobs(2000, 50, crash, 5, seed=2, idempotent=idem)
+            print(f"  crash rate {crash:.0%}, idempotent side effect {str(idem):5s}: {execs:5d} executions for 2,000 jobs, "
+                  f"{eff:5d} side effects, {dup:4d} jobs affected twice or more, finished in {ticks} ticks")
+
+    print("a once-a-minute job and a scheduler outage of 90 minutes (90 missed runs):")
+    for p in ("run every missed run", "run once", "skip to the next slot"):
+        print(f"  policy '{p}': {catch_up(90, p)} runs after recovery")
+`} />
+
+## What the output shows
+
+**Timers.** All three structures fired **exactly the same jobs at the same ticks** (`True`). The work differs:
+
+| structure | work per timer |
+| --- | --- |
+| heap | **16.6** comparisons |
+| timing wheel, 256 slots | **7.5** operations |
+| timing wheel, 4,096 slots | **2.1** operations |
+
+A wheel of 256 slots must revisit each timer once per turn of the wheel (due times spread over about 12 turns), which is why it costs more than the 4,096-slot wheel, whose single turn already covers the whole 3,000-tick horizon. The lesson: **a wheel pays off when its size is matched to the timer horizon**, and **hierarchical wheels** give that match for long horizons without a huge array. The heap is simpler and fine for far fewer timers; a counted-operations table is not a timing benchmark.
+
+**Execution with crashes** (2,000 jobs):
+
+| worker crash rate | idempotent side effect | executions | side effects | jobs affected 2 or more times | finished in |
+| --- | --- | --- | --- | --- | --- |
+| 0% | no | 2,000 | 2,000 | 0 | 40 ticks |
+| 10% | no | 2,200 | 2,200 | **183** | 52 ticks |
+| 10% | **yes** | 2,200 | **2,000** | **0** | 52 ticks |
+| 30% | no | 2,828 | 2,828 | **595** | 81 ticks |
+| 30% | **yes** | 2,828 | **2,000** | **0** | 81 ticks |
+
+- **No job was lost** at any crash rate: the lease mechanism guarantees every job eventually completes. That is the **at-least-once** guarantee.
+- The **cost of safety is duplicates**: at a 10% crash rate, **183 jobs** (about 9%) had their side effect applied **twice or more**, and at 30% it was **595** (about 30%).
+- Making the side effect **idempotent** (recording the run id) **removed every duplicate effect** (0 jobs affected twice) even though the same number of **executions** still happened: the work is repeated, but its **effect** is applied once. This is "exactly-once effect" built from at-least-once delivery plus idempotency.
+- **Failures cost time**: finishing takes 40, 52 and 81 ticks as the crash rate rises, because each crash wastes a whole lease period.
+
+The crash model is deliberately simple (independent crashes after the work). Real failures correlate and the lease length is a tuning trade-off: **too short** and healthy slow jobs are taken over and run twice; **too long** and a crashed job waits needlessly.
+
+**Catch-up after an outage.** A once-a-minute job and a 90-minute scheduler outage leaves **90 missed runs**. The policy decides what happens next: **run every missed run** (90 runs: right for backfilling data pipelines, dangerous for "send the daily email"), **run once** (1 run: usually right for "refresh the cache"), or **skip to the next slot** (0 runs: right for time-sensitive jobs where a late run is useless). Make it a **per-job setting** with a **starting deadline** (do not run if later than X).
+
+## Time, cron and daylight saving
+
+- Store schedules and next run times in **UTC**, and keep the **time zone** of the job for evaluating cron expressions.
+- **Daylight saving changes** create local times that **do not exist** (02:30 on the spring-forward night) or **happen twice** (the autumn night). Decide a policy and document it: usually skip or shift the missing run, and run the repeated time once.
+- **Thundering herd at the minute boundary**: millions of jobs at :00. Add **jitter** where the user allows it, **spread dispatch over a few seconds** with the queue as a buffer, and **partition** schedulers so each handles a slice.
+- **Clock skew** between schedulers can make a job fire a little early or late; the **job store's time** (a single authority) is used for deciding "due".
+
+## Other design points
+
+- **Exactly one scheduler per shard**: the lease prevents two schedulers firing the same job, but a **dual-ownership** window after a pause can happen; the **fencing token** plus **conditional updates** on the job row ("claim this run if it is still scheduled") make a double enqueue harmless.
+- **Overlap policy** for recurring jobs: if the previous run is still going when the next is due, **skip**, **queue**, or **allow concurrent runs**.
+- **Priorities and fairness**: separate queues per priority and per-tenant concurrency limits so one tenant's backfill cannot starve others.
+- **Long-running jobs** need **heartbeats** that renew the lease; a job that stops heartbeating is considered dead.
+- **Observability**: **lateness** (actual minus scheduled start), queue depth, run duration, failure rate, and the age of the oldest due-but-unstarted job ([observability](/sd/observability/logs-metrics-and-traces/)).
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a job scheduler" rows={[
+  { option: "At-least-once with leases", pros: "No job lost; simple recovery from worker crashes", cons: "Duplicate executions (183 of 2,000 jobs doubled at a 10% crash rate)", chooseWhen: "Default, with idempotent jobs" },
+  { option: "At-most-once (acknowledge before running)", pros: "No duplicates", cons: "A crash loses the job silently", chooseWhen: "Jobs where a missed run is harmless" },
+  { option: "Idempotent jobs keyed by run id", pros: "Exactly-once effect from at-least-once delivery (0 doubled effects in the demo)", cons: "Needs a dedupe record and care in every job", chooseWhen: "Any job with side effects" },
+  { option: "Priority queue (heap) of timers", pros: "Simple and flexible", cons: "O(log n) per operation (16.6 comparisons per timer in the demo)", chooseWhen: "Moderate numbers of timers" },
+  { option: "Hashed or hierarchical timing wheel", pros: "O(1) insertion and expiry (2.1 operations per timer with a well-sized wheel)", cons: "Resolution fixed by the tick; sizing matters", chooseWhen: "Very large numbers of timers" },
+  { option: "Poll the database for due jobs", pros: "Simple and durable; the store is the truth", cons: "Polling load; latency equal to the poll interval", chooseWhen: "A short look-ahead window feeding an in-memory timer" },
+  { option: "Short lease", pros: "Fast recovery from crashes", cons: "Healthy slow jobs are re-dispatched and run twice", chooseWhen: "Short jobs with heartbeats for long ones" },
+  { option: "Catch-up policy per job", pros: "Correct behaviour after outages for each kind of job", cons: "More configuration", chooseWhen: "Always (run all, run once or skip)" }
+]} />
+
+## Pitfalls
+
+- **Running a job before the work is durable** or acknowledging before running, so crashes lose jobs.
+- **Non-idempotent jobs behind an at-least-once scheduler**: duplicate emails and charges.
+- **No fencing**: a paused old scheduler or worker wakes up and acts on stale ownership.
+- **One scheduler for everything**: a single point of failure and a bottleneck.
+- **Ignoring the minute-boundary spike**: workers and the database overloaded at :00.
+- **Wrong catch-up behaviour** after outages (hundreds of backfilled runs at once).
+- **Local time arithmetic** without time zones and daylight saving rules.
+- **Leases that are too short or too long** for the job duration.
+- **Unlimited retries** without backoff, a retry storm on a failing dependency ([retry amplification](/sd/microservice-patterns/retry-amplification-and-circuit-breakers/)).
+- **Keeping all execution history forever**.
+- Measuring only success, not **lateness**.
+
+## What would you choose and why?
+
+A customer wants a nightly job that charges 500,000 subscriptions at 02:00 in their local time zone, never twice and never silently skipped, even if your scheduler nodes restart during the run. Describe how you split the job into runs, how you make each charge idempotent, what the catch-up and overlap policy is, how you handle daylight saving, and what alert tells you at 02:10 that something is wrong.
+
+## Quiz
+
+<Quiz id="sd-m18-distributed-job-scheduler" tags={["case-study", "job-scheduler", "leases", "idempotency", "timing-wheel"]} questions={[
+  { type: "mcq", q: "A worker finishes a job but crashes before acknowledging it. What happens, and why is that the right behaviour?", options: ["The job is lost", "The lease expires and another worker runs the job again, which is safe only if the job is idempotent but never loses work", "The scheduler deletes the job", "The job runs forever"], answer: 1, explain: "At-least-once execution trades possible duplicates for never losing a job." },
+  { type: "mcq", q: "How did making the side effect idempotent change the results at a 30% crash rate?", options: ["It reduced executions", "Executions stayed at 2,828 but jobs affected twice dropped from 595 to 0, because the run id recorded the first effect", "It made jobs finish faster", "It prevented crashes"], answer: 1, explain: "The work was repeated but the effect was applied once." },
+  { type: "predict", q: "50,000 timers: the heap needed 16.6 comparisons each and the 4,096-slot wheel 2.1 operations each. Roughly how many times fewer operations did the wheel need?", code: "print(round(16.6 / 2.1, 1))", options: ["About 2 times", "About 8 times", "About 80 times", "About 800 times"], answer: 1, explain: "About 7.9 times fewer. These are counted operations, not timings." },
+  { type: "mcq", q: "What is the job of a fencing token when schedulers hold shard leases?", options: ["To encrypt jobs", "To reject actions from a paused former owner that has not noticed its lease expired", "To set the job priority", "To count retries"], answer: 1, explain: "Conditional updates with the latest token make a stale scheduler's enqueue harmless." },
+  { type: "multi", q: "Which are sensible catch-up policies after a 90-minute scheduler outage for a job that runs every minute?", options: ["Run every missed run, for a backfill pipeline", "Run once, for refreshing a cache", "Skip to the next slot, for a time-sensitive job where a late run is useless", "Always run all 90 immediately regardless of the job"], answer: [0, 1, 2], explain: "The right policy depends on the job; make it a per-job setting with a starting deadline." },
+  { type: "mcq", q: "Why should the schedule be stored in UTC with a separate time zone?", options: ["UTC is faster", "Local times can be skipped or repeated at daylight saving changes, so cron expressions are evaluated in the job's zone while next run times are stored unambiguously", "Workers only understand UTC", "Cron requires it"], answer: 1, explain: "Decide and document the policy for the missing and repeated local hours." }
+]} />
