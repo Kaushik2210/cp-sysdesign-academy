@@ -1,0 +1,236 @@
+---
+title: "Case Study: Design a Feature Flag and Experimentation Service"
+track: sd
+module: case-studies-data-and-transactions
+order: 13
+difficulty: medium
+estMinutes: 50
+prerequisites: ["sd/observability/safe-deployments-canaries-and-feature-flags", "sd/networking-and-apis/cdn-and-api-design", "sd/caching/caching-strategies"]
+tags: [case-study, feature-flags, rollout, hashing, experimentation, targeting, kill-switch, sdk, propagation]
+type: case-study
+furtherReading:
+  - title: "Martin Fowler, Feature Toggles (aka Feature Flags)"
+    url: https://martinfowler.com/articles/feature-toggles.html
+  - title: "OpenFeature, the open standard for feature flagging"
+    url: https://openfeature.dev/
+  - title: "Kohavi, Tang, Xu, Trustworthy Online Controlled Experiments (book site)"
+    url: https://experimentguide.com/
+  - title: "Fabijan et al., Diagnosing Sample Ratio Mismatch in Online Controlled Experiments (KDD 2019)"
+    url: https://dl.acm.org/doi/10.1145/3292500.3330722
+---
+
+## The problem
+
+Design a **feature flag service**: engineers wrap new behaviour in a flag, deploy the code switched **off**, then turn it **on** for 1% of users, then 10%, then everyone, and can flip it **off in seconds** if something breaks. The same machinery runs **A/B experiments**: users are split into groups that see different variants and the groups' behaviour is compared.
+
+Flags decouple **deploying** code from **releasing** it ([safe deployments and feature flags](/sd/observability/safe-deployments-canaries-and-feature-flags/)). The design challenge is that every request in every service asks "is this flag on for this user?" **dozens of times**, so the evaluation must be **extremely fast and available**, while the rules behind it change at any moment and must reach every server **quickly**, and it must **not be able to take the product down** if the flag system itself fails.
+
+## Requirements
+
+**Functional**
+- Define flags with variants (on/off, or several values) and **targeting rules**: specific users, user attributes (country, plan), **percentage rollouts**.
+- Update a flag instantly (including a **kill switch**) and see an **audit log**.
+- Evaluate a flag for a user in application code, in web and mobile clients and in backend services.
+- Run **experiments**: assign users to variants consistently, record exposures, report results.
+
+**Non-functional**
+- **Evaluation latency** measured in microseconds, with no network call on the hot path.
+- **Availability**: if the flag service is down, applications keep working with the last known rules or safe defaults.
+- **Fast propagation**: a change reaches clients in seconds.
+- **Consistency for a user**: the same user keeps getting the same variant (sticky), and ramping up never switches anyone off.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Services and instances | 1,000 services, 20,000 instances | |
+| Flag evaluations | 100,000 per second per instance | 2 billion per second overall |
+| Flags | 5,000 flags, about 2 KB of rules each | about 10 MB of rules in total |
+| Rule changes | 100 per day | tiny write load |
+
+**Two billion evaluations per second cannot be network calls**: that is the central observation. The rule set is **small (10 MB)** and changes **rarely**, so the right design **ships the rules to the clients and evaluates locally**. The service becomes a **distribution system for a small, slowly changing document**, not a high-traffic query service.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  E["Engineers: dashboard and API"] --> CP["Control plane: validate, version and audit rule changes"]
+  CP --> DB[("Flag store: versioned rules and audit log")]
+  DB --> PUB["Publisher: builds a ruleset snapshot per environment"]
+  PUB --> CDN[("CDN or object store: ruleset snapshot, version N")]
+  PUB -->|"change notification"| ST["Streaming service (server-sent events)"]
+  CDN --> SDK1["Server SDK: poll every 30 s, keeps rules in memory"]
+  ST --> SDK1
+  CDN --> RELAY["Edge relay for browsers and mobile"]
+  SDK1 --> APP["Application code: variation(flag, user) evaluated locally in microseconds"]
+  APP --> EV["Exposure and metric events (batched)"]
+  EV --> Q[("Event log")]
+  Q --> AN["Analytics: experiment results"]`} caption="Rules are published as a versioned snapshot and evaluated inside each application; events flow back for analysis" />
+
+- The **control plane** validates a change (does the rule parse, does it reference real attributes?), stores it as a **new version**, records **who changed what and why**, and publishes a new **snapshot**.
+- A **snapshot** (all flags of one environment) is a static file on a CDN or object store: cheap, cached, extremely available ([CDN and API design](/sd/networking-and-apis/cdn-and-api-design/)).
+- The **server SDK** downloads the snapshot at startup, keeps it **in memory**, and refreshes it by **polling** (every 10 to 60 seconds) and/or a **streaming connection** that announces a new version so it downloads immediately.
+- **Browsers and mobile apps** do not receive the full rule set (it may contain internal targeting): a server or edge relay **evaluates for that user** and returns only the resulting flag values.
+- Applications call `variation(flag, user, default)`: evaluation is a function over the in-memory rules. **Exposure events** ("user U was shown variant B of experiment X") are **batched** and sent asynchronously.
+- If the snapshot cannot be fetched at startup, the SDK uses a **bootstrap copy** baked into the image or a **cached file**, and the **default value** in the code as a last resort.
+
+## Deterministic percentage rollouts
+
+A rollout to "10% of users" must pick **the same 10% every time**, without storing a per-user decision. The standard trick is **hashing**: compute a **bucket** number from the **flag's key (a salt) and the user id**, for example `hash(salt + ":" + user_id) mod 10,000`, and enable the flag when the bucket is below `percent x 100`.
+
+- **Stable**: the same user and flag always give the same bucket, so a user does not flicker between variants on each request and **no state needs storing**.
+- **Monotonic ramps**: a user enabled at 10% has a bucket below 1,000, which is also below 2,500 and 5,000, so **raising the percentage only adds users**, never removes anyone.
+- **Independent flags**: the salt differs per flag, so being in flag A's 50% says nothing about flag B's 50%. (Reusing a salt makes the two flags move together and **contaminates experiments**.)
+- **Fair spread**: a good hash function (SHA-256, MurmurHash) maps ids uniformly over the buckets.
+- **Which identifier?** The **bucketing key** matters: a logged-in user id keeps a person's experience consistent across devices; a device or session id works for anonymous visitors but changes when cookies are cleared. Pick it per flag, and **never change it mid-experiment**.
+
+### Targeting rules
+
+Rules are evaluated **in a fixed order**, first match wins: **blocked users** (explicitly off), **allowed users** (explicitly on, for testers), **attribute rules** (for example country is Germany, plan is enterprise), then the **percentage rollout**, then the **default**. A clear order makes behaviour predictable and debuggable; the dashboard should show **which rule matched**.
+
+## The simulation
+
+The program implements the bucketing and the rule evaluation, on a population of 30,000 simulated users (a fifth with country DE), and measures: **rollout accuracy** at 1%, 10% and 50%; **uniformity** of the bucket spread over **100 different flags** with a chi-square test; whether **ramping** switches anyone off; the **correlation of two flags** with different and with shared salts; **rule precedence**; and how long it takes clients to notice a change under **polling** (60, 30 and 10 seconds) and **streaming**.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import hashlib
+import random
+
+
+def bucket(user, salt):
+    """A stable number in [0, 10000) for this user and flag. The same inputs always give the same bucket."""
+    h = hashlib.sha256(f"{salt}:{user}".encode()).hexdigest()
+    return int(h[:8], 16) % 10000
+
+
+def evaluate(flag, user):
+    """Rules are checked in order: explicit block, explicit allow, attribute rules, then the percentage rollout."""
+    if user["id"] in flag.get("block", ()):
+        return False
+    if user["id"] in flag.get("allow", ()):
+        return True
+    for attr, values in flag.get("rules", []):
+        if user.get(attr) in values:
+            return True
+    return bucket(user["id"], flag["salt"]) < flag.get("percent", 0) * 100
+
+
+if True:
+    users = [{"id": f"u{i}", "country": "DE" if i % 5 == 0 else "US"} for i in range(30000)]
+
+    # 1. does a 10% rollout reach about 10%, and are buckets spread evenly?
+    for pct in (1, 10, 50):
+        flag = {"salt": "new-checkout", "percent": pct}
+        on = sum(evaluate(flag, u) for u in users)
+        print(f"rollout at {pct:2d}%: {on:6,} of {len(users):,} users enabled ({on / len(users) * 100:.2f}%)")
+    # is the bucket spread even? chi-square over ten equal slices of the bucket range, for 100 different flags on 5,000 users each
+    sample = users[:5000]
+    expected = len(sample) / 10
+    stats = []
+    for k in range(100):
+        counts = [0] * 10
+        for u in sample:
+            counts[bucket(u["id"], f"flag-{k}") // 1000] += 1
+        stats.append(sum((c - expected) ** 2 / expected for c in counts))
+    print(f"chi-square of the bucket spread for 100 flags: average {sum(stats) / len(stats):.1f} (a fair spread averages 9), "
+          f"{sum(x > 16.9 for x in stats)} of 100 above the 95% limit of 16.9 (about 5 are expected by chance)")
+
+    # 2. ramping up never switches anyone off
+    steps = [1, 5, 10, 25, 50, 100]
+    enabled_prev, flips_off = set(), 0
+    for pct in steps:
+        flag = {"salt": "new-checkout", "percent": pct}
+        now = {u["id"] for u in users if evaluate(flag, u)}
+        flips_off += len(enabled_prev - now)
+        enabled_prev = now
+    print(f"ramp {steps}: users who lost the feature at any step: {flips_off}")
+
+    # 3. two flags at 50%: independent salts versus the same salt (a common mistake)
+    a, b_ok, b_bad = {"salt": "flag-a", "percent": 50}, {"salt": "flag-b", "percent": 50}, {"salt": "flag-a", "percent": 50}
+    both_ok = sum(evaluate(a, u) and evaluate(b_ok, u) for u in users)
+    both_bad = sum(evaluate(a, u) and evaluate(b_bad, u) for u in users)
+    print(f"two 50% flags with different salts: {both_ok / len(users) * 100:.1f}% of users get both (independent would be 25%)")
+    print(f"two 50% flags that share a salt:    {both_bad / len(users) * 100:.1f}% of users get both (they move together, which ruins experiments)")
+
+    # 4. rule precedence
+    flag = {"salt": "beta", "percent": 0, "allow": {"u7"}, "block": {"u5"}, "rules": [("country", {"DE"})]}
+    print("precedence:", {u["id"]: evaluate(flag, u) for u in users[:10]})
+
+    # 5. how stale can a client be? 10,000 clients poll every P seconds at random phases; the flag changes at t=0
+    rnd = random.Random(2)
+    for period in (60, 30, 10):
+        delays = sorted(rnd.uniform(0, period) for _ in range(10000))
+        print(f"polling every {period:2d} s: half of the clients see the change within {delays[5000]:.1f} s, 99% within {delays[9900]:.1f} s, the last after {delays[-1]:.1f} s")
+    stream = sorted(rnd.uniform(0.05, 0.4) for _ in range(10000))
+    print(f"streaming updates:     half of the clients see the change within {stream[5000]:.2f} s, 99% within {stream[9900]:.2f} s (assumes 50 to 400 ms of delivery delay)")
+`} />
+
+## What the output shows
+
+- **Rollout accuracy**: a 1% rollout enabled **1.06%** of the 30,000 users (318), 10% enabled **9.74%**, 50% enabled **49.49%**. Hash-based rollouts are exact only on average: with a small population the actual share wobbles around the target (the expected random spread at 10% of 30,000 users is about plus or minus 0.17 percentage points, so 9.74% is about 1.5 standard deviations low). For an experiment, **measure the real split**, do not assume it.
+- **Uniformity**: over **100 different flags**, each tested on 5,000 users, the chi-square statistic averaged **8.7** (a fair spread averages 9) and **4 of 100** exceeded the 95% limit of 16.9 (about 5 are expected by chance): the hash spreads users evenly.
+- **Ramping is safe**: going 1, 5, 10, 25, 50, 100 percent, **0 users lost the feature at any step**.
+- **Independence matters**: two 50% flags with **different salts** gave **25.0%** of users both (independent would be 25%); with the **same salt** it was **49.7%**: the flags move together, so an experiment on one is confounded by the other.
+- **Rule precedence**: with user u5 blocked, u7 allowed, and country DE targeted at 0% rollout, the first ten users show **u0 on (country DE), u7 on (allow list), u5 off (blocked), everyone else off**.
+- **Propagation**: polling every **60 seconds**: half of the clients see a change within **29.8 s**, 99% within **59.4 s**, the last after **60 s**; every **30 s**: **15.0 s**, 29.7 s, 30 s; every **10 s**: **5.0 s**, 9.9 s, 10 s. **Streaming** (assuming 50 to 400 ms delivery delay): half within **0.22 s**, 99% within **0.40 s**. A kill switch wants **streaming**, or at least short polling, plus polling as the safety net if the stream breaks.
+
+The population, seeds and delays are fixed in the program, so these numbers reproduce exactly; the propagation delays for streaming are an assumption, not a measurement.
+
+## Experiments
+
+An A/B test is a flag whose rollout splits users into **variants** (for example 50% control, 50% treatment) plus **measurement**:
+- **Exposure logging**: record the moment a user is actually **shown** the variant (not merely assigned), with the flag version, so analysis compares the users who saw each variant.
+- **Sticky assignment** by the hashing above, with a **fixed salt** for the lifetime of the experiment.
+- **Sample ratio mismatch (SRM)**: if the intended 50/50 split shows up as 51/49 in the data by more than chance allows (tested with a chi-square test on the counts), something is wrong (a bug, bot traffic, a client that fails to load the variant) and **the results must not be trusted**. Check it before reading any result.
+- **Metrics and statistics** (significance, confidence intervals, avoiding peeking) are a separate subject; the platform must at least guarantee **clean assignment and exposure data**.
+- **Mutual exclusion** between experiments that would interfere: put them in a **layer** and assign each user to at most one experiment in the layer using a hash with the layer's salt.
+
+## Failure modes and safety
+
+- **Fail safe**: the default passed to `variation(flag, user, default)` is the behaviour **if anything goes wrong** (usually the old behaviour, off). A flag system outage must never turn features on or break pages.
+- **Guard the guard**: a malformed rule update must not crash every client. The control plane **validates** before publishing; SDKs **ignore** a snapshot they cannot parse and keep the last good one.
+- **Version everything**: each snapshot has a version; clients log which version they use, so "why did user X see this?" is answerable. Roll back by publishing the previous version.
+- **Permissions and review**: changing a production flag is a production change: roles, approvals for critical flags, an audit trail.
+- **Flag debt**: stale flags are dead branches and a source of bugs. Give each flag an **owner, a type and an expiry**; release flags are removed after full rollout; permanent flags (kill switches, entitlements) are marked as such. Test **both** sides of a flag while it exists.
+- **Dependencies between flags** (flag B only meaningful if flag A is on) are a source of confusing states; validate them in the control plane.
+- **Privacy**: SDKs for browsers must not receive other users' data or the full targeting rules; evaluate server-side or send only the result.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a feature flag service" rows={[
+  { option: "Evaluate locally in the SDK from a cached ruleset", pros: "Microsecond latency; works if the service is down; scales to billions of evaluations", cons: "Rules must be distributed; clients hold the full ruleset (server side only)", chooseWhen: "Backend services (the default)" },
+  { option: "Remote evaluation (call the service per check)", pros: "Rules never leave the server; always current", cons: "A network call on every check; the flag service becomes critical to every request", chooseWhen: "Browsers and mobile (through a relay that returns only results)" },
+  { option: "Polling for updates", pros: "Simple, robust, CDN friendly", cons: "Up to the poll interval of staleness (60 s polling: last client at 60 s)", chooseWhen: "A baseline and a fallback" },
+  { option: "Streaming updates", pros: "Changes arrive in a fraction of a second (99% within 0.40 s in the demo)", cons: "Long-lived connections to operate; needs polling as a fallback", chooseWhen: "Kill switches and fast rollouts" },
+  { option: "Hash-based bucketing with a per-flag salt", pros: "Stateless, sticky, monotonic ramps, independent flags (25.0% overlap)", cons: "The split is only approximate on small populations", chooseWhen: "Always for percentage rollouts" },
+  { option: "Storing each user's assignment", pros: "Exact control and one-time decisions", cons: "State to store and sync; no benefit over hashing for most flags", chooseWhen: "Rarely, when assignment must depend on one-time conditions" },
+  { option: "Shared salt across flags", pros: "None worth having", cons: "Flags move together (49.7% overlap): confounded experiments", chooseWhen: "Never" },
+  { option: "Default value in code as the last resort", pros: "A flag outage cannot break the product", cons: "Defaults must be kept correct as code evolves", chooseWhen: "Always" }
+]} />
+
+## Pitfalls
+
+- **Network calls on every flag check**: the flag service becomes a single point of failure and a latency tax.
+- **Reusing one salt** (or hashing only the user id) so flags and experiments correlate.
+- **Changing the bucketing key** or the salt mid-rollout, which reshuffles users and breaks stickiness.
+- **Trusting the intended split** without checking the observed one (sample ratio mismatch).
+- **Sending full targeting rules to browsers**.
+- **No safe default**, or a default that turns the new code on.
+- **Unvalidated rule changes** that crash clients.
+- **No expiry or owner**: hundreds of dead flags and untested code paths.
+- **Evaluating flags deep inside hot loops** with expensive context building.
+- **Using flags as a configuration database** for large or frequently changing values.
+- **Confusing assignment with exposure** in experiment analysis.
+
+## What would you choose and why?
+
+A payments bug appears at 14:03 and the team wants to turn off the new checkout for everyone **now**. Describe each step of what happens from the click on "off" until the last mobile app stops showing the new checkout, what could delay it (clients on 60-second polling, cached ruleset, offline devices, a cached page), what you would build so the worst case is seconds rather than minutes, and how you would test the kill switch regularly.
+
+## Quiz
+
+<Quiz id="sd-m18-feature-flag-service" tags={["case-study", "feature-flags", "hashing", "experimentation", "propagation"]} questions={[
+  { type: "mcq", q: "Why do SDKs evaluate flags locally instead of calling the flag service?", options: ["It is more fun", "There can be billions of evaluations per second, so network calls would be too slow and would make the flag service critical to every request", "Flags are secret", "Networks are unreliable only at night"], answer: 1, explain: "The ruleset is small and changes rarely, so it is shipped to clients and evaluated in memory." },
+  { type: "mcq", q: "How does hashing the flag key plus the user id make a rollout sticky and monotonic?", options: ["It stores each decision", "The bucket is always the same for a user and flag, and raising the percentage only adds users whose bucket is below the new threshold", "It randomises on each call", "It uses the clock"], answer: 1, explain: "In the demo 0 users lost the feature across the ramp from 1% to 100%." },
+  { type: "predict", q: "Two independent 50% flags: roughly what share of users get both?", code: "p_a = 0.5\np_b = 0.5\nprint(p_a * p_b)", options: ["12.5%", "25%", "50%", "100%"], answer: 1, explain: "Independent flags multiply: 25%. The demo gave 25.0% with different salts and 49.7% with a shared salt." },
+  { type: "mcq", q: "Polling every 60 seconds, roughly how long until half the clients have seen a change, and until the last?", options: ["Half after 60 s, last after 120 s", "Half after about 30 s, the last after about 60 s", "All within 1 s", "Half after 5 s, last after 10 s"], answer: 1, explain: "Clients poll at random phases, so staleness is uniform from 0 to the period: median 29.8 s, max 60 s in the demo." },
+  { type: "multi", q: "Which are valid safety practices?", options: ["Pass a safe default value that is used if evaluation fails", "Validate rule changes before publishing and have SDKs ignore unparseable snapshots", "Send the full targeting rules to every browser", "Check for sample ratio mismatch before reading experiment results"], answer: [0, 1, 3], explain: "Browsers should receive only evaluated results, never other users' targeting data." },
+  { type: "mcq", q: "An intended 50/50 experiment shows 51.5% and 48.5% of 200,000 users. What should you do?", options: ["Publish the result", "Test for sample ratio mismatch: a deviation that large is extremely unlikely by chance, so look for a bug in assignment or exposure before trusting any metric", "Ignore it", "Increase the rollout"], answer: 1, explain: "At 200,000 users the random spread of a fair 50% split is only about 0.11 percentage points, so 1.5 points is a strong warning." }
+]} />
