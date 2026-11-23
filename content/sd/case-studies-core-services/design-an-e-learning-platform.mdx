@@ -1,0 +1,264 @@
+---
+title: "Case Study: Design an E-learning Platform"
+track: sd
+module: case-studies-core-services
+order: 18
+difficulty: medium
+estMinutes: 50
+prerequisites: ["sd/case-studies-core-services/design-a-video-streaming-service", "sd/case-studies-data-and-transactions/design-a-data-pipeline", "sd/queues-and-streaming/delivery-semantics-and-idempotency"]
+tags: [case-study, e-learning, video, progress-tracking, quizzes, certificates, spaced-repetition, idempotency, exam-spikes]
+type: case-study
+furtherReading:
+  - title: "Ebbinghaus, Memory: A Contribution to Experimental Psychology (1885), the forgetting curve"
+    url: https://psychclassics.yorku.ca/Ebbinghaus/index.htm
+  - title: "Cepeda et al., Distributed Practice in Verbal Recall Tasks: A Review and Quantitative Synthesis (Psychological Bulletin, 2006)"
+    url: https://psycnet.apa.org/doi/10.1037/0033-2909.132.3.354
+  - title: "Wozniak, Optimization of learning (SuperMemo and the SM-2 algorithm)"
+    url: https://super-memory.com/english/ol/sm2.htm
+  - title: "1EdTech, Learning Tools Interoperability (LTI) and the xAPI learning-record specification"
+    url: https://www.1edtech.org/standards/lti
+---
+
+## The problem
+
+Design an **e-learning platform** like Coursera, Udemy or an internal training system: instructors publish **courses** made of **video lessons, readings and quizzes**; learners **enrol**, watch, answer questions, track their **progress**, earn **certificates**, and interact in discussions and live sessions.
+
+A learning platform combines patterns you have seen elsewhere (video delivery, payments, search, notifications) with a few of its own:
+
+- **Progress must never be lost**: a learner who finished 40 lessons and sees "0% complete" after an outage will leave. Progress is written constantly and from many devices.
+- **Exams create spikes**: thousands of learners start the same timed quiz at the same moment.
+- **Assessment must be trustworthy**: grades and certificates are credentials.
+- The product goal is **learning**, not watching, so some features (review schedules, practice) are designed around **how memory works**.
+
+## Requirements
+
+**Functional**
+- Browse and search a catalogue; **enrol** (free or paid).
+- Watch video lessons with **resume from where you stopped**, on any device; download for offline use.
+- Take **quizzes and exams** with immediate or later grading; practice questions.
+- **Progress** per learner and course; completion rules; **certificates** that can be verified.
+- Discussions, announcements, and **notifications**; instructor dashboards (completion, drop-off points, quiz statistics).
+
+**Non-functional**
+- **Video starts within 2 seconds** on a mediocre connection.
+- **Progress durable** and consistent across devices within seconds.
+- Handle **exam-start spikes** and end-of-term deadline rushes.
+- **Accessible**: captions, transcripts, keyboard navigation, adjustable playback speed.
+- **Privacy**: learner records are sensitive (especially for minors and employers).
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Learners | 20 million registered, 2 million active per day | |
+| Video watched | 40 minutes per active learner per day at an average of 2 Mbit/s | 2 million x 2,400 s x 2 Mbit/s = 9.6 Pbit, about 1.2 PB of delivery per day |
+| Concurrent watchers at peak | 300,000, sending a progress heartbeat every 15 seconds | 20,000 progress writes per second |
+| Exam spike | 50,000 learners start the same exam within one minute | about 830 starts per second, each fetching a question set |
+| Catalogue | 100,000 courses, 2 million lessons | small; entirely cacheable |
+
+Conclusions: **video delivery** dominates bandwidth and is handled by a CDN exactly as in the [video streaming case study](/sd/case-studies-core-services/design-a-video-streaming-service/); the **catalogue is tiny and read-heavy**; the **write path that matters is progress** (20,000 small writes per second), and the **spikes** are where this system can fail.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  L["Learner apps: web, mobile, offline"] --> CDN["CDN: catalogue pages, video segments, captions"]
+  L --> API["API gateway"]
+  API --> CAT["Catalogue and search service"]
+  API --> ENR["Enrolment and payments"]
+  API --> PRG["Progress service"]
+  API --> QZ["Quiz and exam service"]
+  API --> CERT["Certificate service"]
+  I["Instructors"] --> UP["Upload"] --> TR["Transcoding pipeline: bitrates, captions, thumbnails"] --> OBJ[("Object storage")] --> CDN
+  PRG --> PQ[("Progress event log")]
+  PQ --> PDB[("Progress store: latest state per learner and lesson")]
+  PQ --> AN["Analytics pipeline: completion, drop-off, quiz statistics"]
+  QZ --> QDB[("Question bank and attempts")]
+  QZ --> PQ
+  CERT --> SIG["Signing service"]
+  PRG -->|"course completed"| CERT
+  PRG -->|"events"| NOT["Notifications: reminders, review nudges"]`} caption="Content flows through the CDN; progress and quiz results flow as events into a durable log and a latest-state store" />
+
+### Content and video
+
+Instructors upload source video; a **transcoding pipeline** produces **adaptive bitrate** renditions (360p to 1080p), thumbnails, **captions and transcripts** (generated, then edited), and stores segments in **object storage** behind a **CDN**. The player requests small segments and switches quality with the connection. **Offline downloads** are DRM-protected or time-limited encrypted copies. Because lecture content is **popular in bursts** (a course launches, a deadline approaches), the CDN absorbs nearly all of the load.
+
+### Progress tracking
+
+Progress has two parts:
+- **Resume position** per lesson (how many seconds you watched): updated by a **heartbeat** every 10 to 30 seconds. Only the **latest value matters**, so each learner-lesson pair is a small record overwritten in place (last write wins, with a rule that position never goes backwards unless the learner seeks).
+- **Completion events** ("finished lesson 7", "passed quiz 3 with 85%"): important facts that must **never be lost** or duplicated.
+
+The client sends **events with a unique id**, to the progress service, which appends them to a **durable log** and updates the **latest-state store** (sharded by learner id). Properties that make this robust:
+- **Idempotent**: replaying or duplicating an event does not change the result (the same discipline as in the [data pipeline lesson](/sd/case-studies-data-and-transactions/design-a-data-pipeline/)).
+- **Order-insensitive**: each lesson keeps the **best** state (maximum position, completed stays completed), so late or out-of-order events from a phone that was offline are merged correctly.
+- **Offline-first clients**: events are queued on the device and sent when the connection returns; the server accepts events with **old timestamps**.
+- **Batch heartbeats**: to cut write volume, the client buffers and sends the latest position every 15 seconds rather than every second; the server **coalesces** heartbeats and writes **only meaningful changes** to the database.
+- **Derived data from the log**: course completion percentage, streaks and instructor analytics are computed **from events**, so completion rules can change and be recomputed.
+
+A demo in the simulation below shows that processing 20 events in order and the same events shuffled with 8 duplicates produce **identical** progress.
+
+### Quizzes and exams
+
+- **Question banks** with metadata (topic, difficulty); attempts draw questions at random with a fixed per-attempt seed, so refreshing does not change the questions.
+- **Grade on the server**: the client receives the questions but **never the answers** (for auto-graded types); submissions are validated and graded server-side. Store every attempt and answer for audit and appeal.
+- **Timing**: the server records the **start time** and enforces the deadline on **submission** (not on the client clock). Answers are **autosaved** frequently so a connection drop does not lose work.
+- **Spikes**: 50,000 learners starting an exam at 09:00 means about 830 starts per second. Defences: **pre-generate or cache** question sets per exam version; **stagger** start windows; keep the exam path **independent** of heavy features (recommendations, analytics); **queue** non-critical work (certificate generation, emails) rather than doing it inline; load test at the expected peak with headroom.
+- **Integrity**: randomised questions and order, per-attempt time limits, plagiarism and similarity detection on free text, proctoring options for high-stakes exams (privacy-sensitive). For open-book courses, design questions that test understanding, not recall.
+
+### Certificates
+
+A certificate is a **credential**, so it must be **verifiable** and **issued exactly once** per completion:
+- Issuance is triggered by the **completion event** and is **idempotent** (keyed by learner and course) so retries do not produce duplicates.
+- The certificate carries a **unique id** and a **digital signature** (or a stored hash), and a **public verification URL** where an employer can check it ([signatures and keys](/sd/security/tls-encryption-and-key-management/)).
+- Revocation (cheating found later) is a state change in the verification record.
+
+## Designing for learning: spaced repetition
+
+People forget quickly after first learning and more slowly each time they **retrieve** the memory. Reviewing material **just before it would be forgotten** is far more efficient than re-reading it repeatedly or cramming. A learning platform can use this: schedule short **review questions** for each concept, **at increasing intervals**, and **adapt** the interval to how well the learner recalled it.
+
+### The simulation
+
+The program uses a deliberately simple **memory model** (the chance of recalling an item after t days is exp(minus t divided by its stability); each successful review multiplies the stability, by more when the item was nearly forgotten; a failed review cuts it). The constants are **illustrative**, not fitted to real learners. It compares schedules for 400 items learned on day 0 and tested on **day 90**: **cramming** (five quick repetitions on the first day), **daily** review, a **fixed widening schedule** (gaps of 1, 3, 7, 16, 35 and 70 days for everyone), and **adaptive** scheduling that reviews each item when its predicted recall falls to a target (95%, 85%, 70% or 50%). It then checks that **progress events** give the same result when duplicated and shuffled.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import math
+import random
+
+# A simple memory model: the chance of recalling an item t days after the last review is exp(-t / stability).
+# Each successful review makes the memory last longer (more so when the review came after more forgetting),
+# and a failed review makes it much shorter. These constants are illustrative, not fitted to real learners.
+
+
+def recall_probability(days_since, stability):
+    return math.exp(-days_since / stability)
+
+
+def review(stability, days_since, rnd):
+    """Do one review; return the new stability and whether the learner remembered."""
+    r = recall_probability(days_since, stability)
+    if rnd.random() < r:
+        return stability * (1.05 + 3.0 * (1 - r)), True            # remembered: stronger, and more so if it was nearly forgotten
+    return max(1.5, stability * 0.4), False                      # forgot: relearn from a weak memory
+
+
+def simulate(schedule_name, items=400, horizon=90, final_test=90, seed=1):
+    rnd = random.Random(seed)
+    total_reviews = 0
+    final_recall = 0.0
+    for _ in range(items):
+        difficulty = rnd.lognormvariate(0, 0.4)                 # some items are intrinsically harder to remember
+        stability, last = 3.0 * difficulty, 0.0                 # first learned on day 0
+        day, reviews = 0.0, 0
+        while True:
+            if schedule_name == "daily":
+                nxt = day + 1
+            elif schedule_name == "cram":
+                nxt = day + (0.02 if reviews < 5 else 1e9)       # five quick repetitions on the first day, then never again
+            elif schedule_name == "expanding":
+                gaps = [1, 3, 7, 16, 35, 70, 140]                # a fixed, widening schedule, the same for every item
+                nxt = day + gaps[min(reviews, len(gaps) - 1)]
+            else:                                                # "adaptive:0.85": review when the predicted recall falls to 85%
+                target = float(schedule_name.split(":")[1])
+                nxt = day + stability * -math.log(target)
+            if nxt > horizon:
+                break
+            day = nxt
+            stability, _ok = review(stability, day - last, rnd)
+            last = day
+            reviews += 1
+        final_recall += recall_probability(final_test - last, stability)
+        total_reviews += reviews
+    return final_recall / items, total_reviews / items
+
+
+def progress(events):
+    """Course progress from a stream of events that may arrive late, out of order or twice: keep each lesson's best state."""
+    done, watched = set(), {}
+    for e in events:                                            # e = (event_id, lesson, seconds_watched, completed)
+        _, lesson, seconds, completed = e
+        watched[lesson] = max(watched.get(lesson, 0), seconds)
+        if completed:
+            done.add(lesson)
+    return done, watched
+
+
+if True:
+    print("400 flashcard-like items learned on day 0, tested on day 90 (memory model with assumed constants):")
+    for name in ("cram", "daily", "expanding", "adaptive:0.95", "adaptive:0.85", "adaptive:0.70", "adaptive:0.50"):
+        recall, reviews = simulate(name)
+        print(f"  {name:14s}: average chance of recalling an item on day 90 {recall * 100:5.1f}% | reviews per item over 90 days {reviews:5.1f}")
+
+    # progress events: duplicates and out-of-order delivery must not change the answer
+    rnd = random.Random(4)
+    events = [(i, f"lesson-{i % 5}", 60 * (i // 5 + 1), i // 5 == 3) for i in range(20)]
+    shuffled = events + rnd.sample(events, 8)                   # eight duplicates
+    rnd.shuffle(shuffled)
+    a, b = progress(events), progress(shuffled)
+    print(f"progress from 20 events in order versus 28 events shuffled with 8 duplicates: identical result: {a == b}; lessons completed {sorted(a[0])}")
+`} />
+
+## What the output shows
+
+| schedule | average chance of recalling an item on day 90 | reviews per item over 90 days |
+| --- | --- | --- |
+| cramming (5 repetitions on day 0) | **0.0%** | 5.0 |
+| daily review | 100.0% | **90.0** |
+| fixed widening schedule | 13.1% | 5.0 |
+| adaptive, review at 95% predicted recall | 97.4% | 34.4 |
+| adaptive, review at 85% | **92.2%** | **17.7** |
+| adaptive, review at 70% | 84.7% | 14.0 |
+| adaptive, review at 50% | 73.6% | 14.8 |
+
+- **Cramming produces nothing that lasts**: five repetitions at once leave essentially **0%** recall at day 90. Massed practice feels productive and is not.
+- **Daily review works** but costs **90 reviews per item**, five times the 17.7 of an adaptive schedule that reaches **92.2%**. Reviewing items that are still well remembered adds little: the simulation's gain from a review is small when recall is still near 100%.
+- **A fixed widening schedule can be badly matched** to the learner: with these (assumed) memory constants it recovered only **13.1%**, because the gaps were too long for these items and memories were lost between reviews. The right spacing depends on the **item and the learner**, so schedules should **adapt per item** based on performance.
+- **There is a sweet spot**: waiting until recall has fallen to **50%** needed **more** reviews (14.8) than waiting until 70% (14.0) **and** left lower retention (73.6% against 84.7%), because items that were forgotten had to be relearned from a weak memory. Reviewing **too early wastes effort; too late wastes more**.
+- **Retention costs reviews**: the 95% target buys 97.4% recall for 34.4 reviews, the 85% target 92.2% for 17.7: **diminishing returns**, so the target is a product decision about time versus retention.
+- **Progress events**: 20 events in order and the same events with 8 duplicates, shuffled, give **identical** progress (all five lessons completed): the idempotent, order-insensitive merge works.
+
+These numbers come from a **toy memory model** with made-up constants and one random seed: they demonstrate the **shape** of the trade-off (cramming fails, over-reviewing wastes time, too-late reviews backfire), not what a real learner's retention would be. Real systems fit models of this kind to data from millions of reviews.
+
+## Instructor analytics
+
+Instructors want to know **where learners drop off** (which lesson, which minute of which video), **which quiz questions** are too easy or confusing (everyone misses it; nobody misses it; the best learners miss it), and **completion by cohort**. These come from the **event log** through batch jobs and are stored as aggregates; heavy queries run on an **analytics store**, never on the live progress database ([data pipeline](/sd/case-studies-data-and-transactions/design-a-data-pipeline/)).
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in an e-learning platform" rows={[
+  { option: "Heartbeat writes of video position, latest value wins", pros: "Cheap; resume works across devices", cons: "Position may be up to one heartbeat stale", chooseWhen: "Resume points" },
+  { option: "Events appended to a log, state derived from it", pros: "Idempotent and replayable; completion rules can change; analytics for free", cons: "More moving parts than updating a row", chooseWhen: "Completions, quiz results, anything audited" },
+  { option: "Merge by best state (max position, completed is permanent)", pros: "Out-of-order and duplicate events are harmless (identical result in the simulation)", cons: "Cannot represent a deliberate reset without an explicit event", chooseWhen: "Offline-capable apps" },
+  { option: "Grade quizzes on the server", pros: "Answers never leave the server; auditable", cons: "Server load at exam spikes", chooseWhen: "Anything that counts" },
+  { option: "Grade in the client", pros: "Instant, no server load", cons: "Trivially cheated", chooseWhen: "Ungraded practice only" },
+  { option: "Cramming-style repetition", pros: "Feels productive", cons: "0.0% recall at day 90 in the simulation", chooseWhen: "Never for long-term retention" },
+  { option: "Fixed review schedule for everyone", pros: "Simple to build", cons: "Mismatched to individuals (13.1% in the simulation with these constants)", chooseWhen: "A first version" },
+  { option: "Adaptive per-item review scheduling", pros: "About 92% recall with a third of the reviews of daily practice in the simulation", cons: "Needs a memory model and data; more complex", chooseWhen: "Practice and review features" }
+]} />
+
+## Pitfalls
+
+- **Losing progress**: single-copy, non-durable progress writes or non-idempotent updates.
+- **Treating late events as errors** instead of merging them.
+- **Computing completion in the client** only.
+- **Sending quiz answers to the client**, or trusting the client clock for time limits.
+- **Not load testing the exam start**, then watching it fail in front of 50,000 people.
+- **Doing everything inline at submission** (certificate rendering, emails) instead of queueing it.
+- **Duplicate or unverifiable certificates**.
+- **Counting watch time as learning**: measure retrieval and performance, not minutes.
+- **Mass cramming features** (streaks that reward volume over spaced practice).
+- **Ignoring accessibility**: no captions, no keyboard control.
+- **Exposing learner data** to instructors or employers beyond consent.
+
+## What would you choose and why?
+
+A university wants to run a 3-hour online final exam for 40,000 students simultaneously, with randomised questions, autosave, and results within an hour, and the previous year's exam site crashed in the first five minutes. Describe how you would design and test the exam path (what is precomputed and cached, what is queued, what is rate limited, what happens to a student whose connection drops for two minutes, how you detect and handle suspected cheating), and what the abort plan is if capacity runs short.
+
+## Quiz
+
+<Quiz id="sd-m17-e-learning-platform" tags={["case-study", "e-learning", "progress", "idempotency", "spaced-repetition"]} questions={[
+  { type: "mcq", q: "Why are progress events given unique ids and merged by best state?", options: ["To make them larger", "So duplicates and out-of-order delivery (an offline phone syncing late) cannot change the result", "To avoid a database", "Because learners prefer it"], answer: 1, explain: "A progress event stream is replayed and merged, so unique ids and an idempotent merge make the result independent of delivery order and duplicates." },
+  { type: "predict", q: "300,000 learners are watching video at peak and each sends a progress heartbeat every 15 seconds. How many heartbeat writes per second arrive?", code: "watchers = 300_000\ninterval_s = 15\nprint(watchers // interval_s)", options: ["2,000", "20,000", "200,000", "300,000"], answer: 1, explain: "20,000 per second, which is why heartbeats are coalesced and only meaningful changes are written." },
+  { type: "mcq", q: "Why must quiz answers and grading stay on the server?", options: ["Browsers cannot grade", "A client can be inspected and modified, so any answer key or timer on it can be cheated", "Servers grade faster", "To save bandwidth"], answer: 1, explain: "Send questions, never keys, and enforce deadlines using the server's start time." },
+  { type: "mcq", q: "In the memory simulation, why did reviewing at 50% predicted recall need more reviews than reviewing at 70%?", options: ["It is a bug", "Items were often forgotten before review and had to be relearned from a weak memory, so effort was wasted and retention was lower (73.6% against 84.7%)", "Reviews at 50% are free", "Learners reviewed twice"], answer: 1, explain: "Reviewing too early wastes effort; reviewing too late wastes more, because forgetting forces relearning." },
+  { type: "multi", q: "Which help an exam start for 50,000 learners in one minute?", options: ["Pre-generated or cached question sets per exam version", "Queueing certificate generation and emails instead of doing them inline", "Staggering start windows", "Computing analytics on the live exam database during the exam"], answer: [0, 1, 2], explain: "Keep the exam path light and independent of analytics and other heavy features." },
+  { type: "mcq", q: "How should certificate issuance be protected from duplicates?", options: ["Hope retries do not happen", "Make issuance idempotent, keyed by learner and course, with a unique id and a verifiable signature", "Issue two certificates to be safe", "Disable retries"], answer: 1, explain: "A credential must be issued once, and an employer must be able to verify it." }
+]} />
