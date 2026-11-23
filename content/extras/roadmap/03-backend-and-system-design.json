@@ -65,6 +65,7 @@
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-unique-id-generator" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-distributed-job-scheduler" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-feature-flag-service" },
+    { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-data-pipeline" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/solid-principles-in-practice" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/creational-and-structural-patterns" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/behavioral-patterns" },

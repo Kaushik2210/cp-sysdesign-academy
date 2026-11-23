@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 233 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 234 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -70,7 +70,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 15 Security | Complete (4: passwords, sessions and MFA; tokens, OAuth 2.0 and JWT; TLS, encryption at rest and key management; web and API attacks. No lesson on secure software supply chains or cloud IAM yet) | 4 |
 | 16 Observability and reliability | Complete (4: logs, metrics and traces; SLOs, error budgets and burn-rate alerts; safe deployments, canaries and feature flags; backups, disaster recovery and chaos engineering. No incident-management or capacity-testing lesson yet) | 4 |
 | 17 Case studies: core services | Partial (16: URL shortener, distributed key-value store, chat system, notification system, news feed, web crawler, payment system, video streaming, ride-hailing, maps and navigation, social graph and friend recommendations, collaborative editor, email service, web search engine, proximity service, calendar and meeting scheduler; no e-learning or gaming case study yet) | 16 |
-| 18 Case studies: data and transactions | Partial (13: ticket booking, search autocomplete, file storage and sync, metrics and monitoring, distributed message queue, hotel booking, e-commerce checkout and inventory, stock exchange matching engine, ad click aggregation, real-time leaderboard, unique ID generator, distributed job scheduler, feature flag service; no data pipeline case study yet) | 13 |
+| 18 Case studies: data and transactions | Partial (14: ticket booking, search autocomplete, file storage and sync, metrics and monitoring, distributed message queue, hotel booking, e-commerce checkout and inventory, stock exchange matching engine, ad click aggregation, real-time leaderboard, unique ID generator, distributed job scheduler, feature flag service, data pipeline for analytics; no further case studies planned in this module) | 14 |
 | 19-26 (more Level 3 case studies) | Planned | 0 |
 | 27 Object-oriented design and patterns | Complete (3: SOLID principles in practice, creational and structural patterns, behavioural patterns; examples are in Python, so patterns that dissolve into functions there are called out) | 3 |
 | 28 LLD case studies | In progress (4: parking lot, LRU cache, vending machine, elevator system; more designs such as a library system or a rate limiter class are still planned) | 4 |
