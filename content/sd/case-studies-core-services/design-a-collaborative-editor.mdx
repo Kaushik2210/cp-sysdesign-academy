@@ -1,0 +1,293 @@
+---
+title: "Case Study: Design a Collaborative Document Editor"
+track: sd
+module: case-studies-core-services
+order: 12
+difficulty: hard
+estMinutes: 60
+prerequisites: ["sd/networking-and-apis/real-time-communication", "sd/distributed-theory/clocks-and-ordering", "sd/distributed-theory/consistency-models"]
+tags: [case-study, collaborative-editing, crdt, operational-transformation, websockets, convergence, presence, version-history]
+type: case-study
+furtherReading:
+  - title: "Roh, Jeon, Kim, Lee, Replicated abstract data types: Building blocks for collaborative applications (the RGA algorithm, 2011)"
+    url: https://www.sciencedirect.com/science/article/pii/S0743731510002716
+  - title: "Shapiro, Preguica, Baquero, Zawirski, Conflict-free Replicated Data Types (2011)"
+    url: https://pages.lip6.fr/Marc.Shapiro/papers/RR-7687.pdf
+  - title: "Ellis and Gibbs, Concurrency control in groupware systems (operational transformation, 1989)"
+    url: https://dl.acm.org/doi/10.1145/66926.66963
+  - title: "Yjs documentation, a CRDT framework for shared editing"
+    url: https://docs.yjs.dev/
+---
+
+## The problem
+
+Design a **collaborative document editor** like Google Docs: several people open the same document, **type at the same time**, see each other's changes and cursors within a fraction of a second, and everybody ends up with **exactly the same document**, even though edits were made concurrently, possibly offline, with no central referee deciding who "really" went first.
+
+Why this is hard: two people edit the same sentence at once, each on their own screen, and the network delivers their edits in different orders to different people. If edits are described as "insert X at position 7", then after another edit lands the position 7 means something different. Naive handling gives **documents that silently disagree**, the worst outcome for an editor.
+
+## Requirements
+
+**Functional**
+- Many users edit one document at once; changes appear for others in real time.
+- **Convergence**: all users end up with the same text.
+- **Intention preservation**: a user's edit should mean what they meant, even after other edits arrive.
+- Show other users' **cursors and selections (presence)**.
+- **Version history**, undo, and **offline editing** that merges when you reconnect.
+- Permissions: view, comment, edit.
+
+**Non-functional**
+- Local typing feels instant (**no waiting for the server**).
+- Remote edits arrive in **well under 200 milliseconds**.
+- Documents are durable; a server crash loses no acknowledged edit.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Concurrent editing users | 5 million | |
+| Operations per active user | about 1 per second (batched keystrokes) | about 5 million operations per second overall |
+| Users per document | 2 or 3 typically, up to about 100 | per-document load is small |
+| Operation size | about 50 bytes | about 250 MB per second of operation traffic |
+
+The workload is **huge in total but tiny per document**: documents are independent, so the system **shards by document id** and every document's traffic is handled by one server (or a small group), never by a global component. The design problem is therefore **correctness of merging**, not raw throughput.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  A["Client A (local copy)"] <-->|"WebSocket"| G["Gateway"]
+  B["Client B (local copy)"] <-->|"WebSocket"| G
+  G -->|"route by document id"| D["Document server (owns one document session)"]
+  D --> L["Operation log (durable, append-only)"]
+  D --> S["Snapshot store"]
+  D --> P["Presence (cursors), in memory"]
+  D -->|"broadcast operations"| G`} caption="Clients edit a local copy at once and send operations; the document server orders, persists and broadcasts them" />
+
+- Each client keeps a **full local copy** and applies its own edits **immediately** (optimistic, local-first). It sends **operations** to the server over a **WebSocket** ([real-time communication](/sd/networking-and-apis/real-time-communication/)).
+- A **gateway routes by document id** (consistent hashing or a registry) so all collaborators of one document connect to the **same document server**. That server holds the live session in memory.
+- The server **appends operations to a durable log** before acknowledging, **broadcasts** them to the other clients, and periodically writes a **snapshot** so loading a document does not mean replaying its whole history.
+- **Presence** (cursors, selections, who is online) is **ephemeral**: kept in memory, sent over the same connection, never written to the log.
+- On server failure, another server loads the **latest snapshot plus the log tail** and clients reconnect and **resend** operations the server has not acknowledged (operations carry unique ids, so resending is idempotent).
+
+## Two ways to merge concurrent edits
+
+### Operational transformation (OT)
+
+Operations are positional ("insert 'x' at 7"). When two concurrent operations meet, each is **transformed** against the other so it still does the intended thing (if someone inserted a character before position 7, mine becomes position 8). Google Docs uses OT with a **central server that assigns one total order**, which keeps the transformation rules manageable. Pros: compact operations, small documents. Cons: the transformation functions are **notoriously hard to get right** (several published algorithms were later found to be incorrect), and it **needs the central ordering**.
+
+### Conflict-free replicated data types (CRDT)
+
+Give **every character a unique, permanent id**. An insert says "put this character **after the character with id X**", not "at position 7". A delete marks a character with that id as removed (a **tombstone**). Because operations name characters rather than positions, they **commute**: replicas can apply them **in any order** and reach the same result, **with no central server and no transformation**. This is what makes peer-to-peer and offline editing natural.
+
+The ordering rule for two inserts after the same character: place the one with the larger id first (id = a logical clock plus the site id, see [logical clocks](/sd/distributed-theory/clocks-and-ordering/)). Every replica applies the same rule, so they pick the same order. This is the idea of the **RGA** algorithm.
+
+## The simulation
+
+The program is a small RGA-style CRDT. First a hand-made case: **two people type at the same spot at the same time**. Then **300 random sessions**: three editors start from the same text, make **four rounds of concurrent edits** (inserts and deletes, edits made without seeing the others'), and each replica receives the other editors' operations in a **random interleaving** (each editor's own operations stay in order, like separate network connections). For comparison the same sessions are run with **plain index-based operations** applied as they arrive, with no transformation.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+
+
+class Replica:
+    """A sequence CRDT in the style of RGA: every character has a unique id, inserts name the character
+    they go after, deletes leave a tombstone. Operations commute, so replicas converge in any delivery order
+    (as long as an insert is applied after the character it refers to)."""
+    def __init__(self, site):
+        self.site, self.clock = site, 0
+        self.seq = []                # list of [id, char, deleted]
+        self.known = set()           # ids already applied
+        self.pending = []            # operations waiting for their reference character
+
+    # ---- local edits generate operations ----
+    def _visible(self):
+        return [i for i, e in enumerate(self.seq) if not e[2]]
+
+    def local_insert(self, index, ch):
+        vis = self._visible()
+        after = self.seq[vis[index - 1]][0] if index > 0 else None
+        self.clock += 1
+        op = ("ins", (self.clock, self.site), after, ch)
+        self.apply(op)
+        return op
+
+    def local_delete(self, index):
+        target = self.seq[self._visible()[index]][0]
+        op = ("del", target)
+        self.apply(op)
+        return op
+
+    # ---- applying operations (local or remote) ----
+    def apply(self, op):
+        self.pending.append(op)
+        progress = True
+        while progress:
+            progress = False
+            for p in list(self.pending):
+                if self._ready(p):
+                    self._do(p)
+                    self.pending.remove(p)
+                    progress = True
+
+    def _ready(self, op):
+        if op[0] == "ins":
+            return op[1] not in self.known and (op[2] is None or op[2] in self.known)
+        return op[1] in self.known
+
+    def _do(self, op):
+        if op[0] == "ins":
+            _, nid, after, ch = op
+            self.clock = max(self.clock, nid[0])
+            pos = 0 if after is None else next(i for i, e in enumerate(self.seq) if e[0] == after) + 1
+            while pos < len(self.seq) and self.seq[pos][0] > nid:       # skip concurrent siblings with a larger id
+                pos += 1
+            self.seq.insert(pos, [nid, ch, False])
+            self.known.add(nid)
+        else:
+            for e in self.seq:
+                if e[0] == op[1]:
+                    e[2] = True
+
+    def text(self):
+        return "".join(e[1] for e in self.seq if not e[2])
+
+
+def naive_apply(text, op):
+    """Index based operations applied as they arrive, with no transformation."""
+    kind, i, ch = op
+    if kind == "ins":
+        return text[:min(i, len(text))] + ch + text[min(i, len(text)):]
+    return text[:i] + text[i + 1:] if i < len(text) else text
+
+
+def interleave(batches, me, rnd):
+    """Other sites' operations in a random interleaving that keeps each site's own order (like separate network streams)."""
+    queues = [list(b) for t, b in enumerate(batches) if t != me]
+    out = []
+    while any(queues):
+        q = rnd.choice([q for q in queues if q])
+        out.append(q.pop(0))
+    return out
+
+
+def trial(seed, sites=3, rounds=4):
+    rnd = random.Random(seed)
+    reps = [Replica(s) for s in range(sites)]
+    naive = ["hello world"] * sites
+    # a common starting document, typed by site 0 and shared with everyone
+    base_ops = []
+    for ch in "hello world":
+        base_ops.append(reps[0].local_insert(len(reps[0].text()), ch))
+    for r in reps[1:]:
+        for op in base_ops:
+            r.apply(op)
+    for _ in range(rounds):
+        batches, nbatches = [], []
+        for s, r in enumerate(reps):                 # every site edits concurrently, without seeing the others
+            ops, nops, local_naive = [], [], naive[s]
+            for _ in range(rnd.randint(1, 3)):
+                txt = r.text()
+                if txt and rnd.random() < 0.35:
+                    i = rnd.randrange(len(txt))
+                    ops.append(r.local_delete(i)); nops.append(("del", i, ""))
+                else:
+                    i, ch = rnd.randint(0, len(txt)), rnd.choice("abcdefgh")
+                    ops.append(r.local_insert(i, ch)); nops.append(("ins", i, ch))
+            batches.append(ops); nbatches.append(nops)
+        for s, r in enumerate(reps):                 # exchange: every site receives the others' operations in a random order
+            for op in interleave(batches, s, rnd):
+                r.apply(op)
+        for s in range(sites):                       # the naive version: own ops first, then the others', in a random order
+            t = naive[s]
+            for op in nbatches[s]:
+                t = naive_apply(t, op)
+            for op in interleave(nbatches, s, rnd):
+                t = naive_apply(t, op)
+            naive[s] = t
+    texts = {r.text() for r in reps}
+    tomb_total = sum(sum(1 for e in r.seq if e[2]) for r in reps) / sites
+    return len(texts) == 1, len(set(naive)) == 1, tomb_total, len(reps[0].seq), len(reps[0].text())
+
+
+if True:
+    # a hand-made example: two people edit the same spot at the same time
+    a, b = Replica("A"), Replica("B")
+    seed_ops = [a.local_insert(i, ch) for i, ch in enumerate("cat")]
+    for op in seed_ops:
+        b.apply(op)
+    op_a = a.local_insert(3, "s")       # A types "s" at the end: "cats"
+    op_b = b.local_insert(3, "!")       # B types "!" at the end at the same time: "cat!"
+    a.apply(op_b)
+    b.apply(op_a)
+    print("A sees:", a.text(), "| B sees:", b.text(), "| converged:", a.text() == b.text())
+
+    n, crdt_ok, naive_ok, tomb, total, visible = 300, 0, 0, 0.0, 0, 0
+    for seed in range(n):
+        c, v, t, tot, vis = trial(seed)
+        crdt_ok += c
+        naive_ok += v
+        tomb += t
+        total += tot
+        visible += vis
+    print(f"{n} random sessions of 3 editors, 4 rounds of concurrent edits, random interleaving of the other editors' streams:")
+    print(f"  CRDT replicas identical at the end:        {crdt_ok} of {n}")
+    print(f"  index-based operations identical at end:   {naive_ok} of {n}")
+    print(f"  average characters stored {total / n:.1f}, visible {visible / n:.1f}, tombstones per replica {tomb / n:.1f}")
+`} />
+
+## What the output shows
+
+- **The hand-made conflict**: both start with "cat". A types "s" at the end while B types "!" at the end, at the same moment. Each person applies the other's edit and **both see "cat!s"**. Both inserts named the same character ("t") as their predecessor; the tie is broken the same way everywhere by comparing ids, so the order agrees.
+- **300 random sessions**: the CRDT replicas were **identical at the end in all 300**, and the **index-based replicas in none (0 of 300)**: positional operations applied without transformation diverge as soon as edits are concurrent. (A real OT system would transform them and converge; this is the baseline that shows why one of the two techniques is needed.)
+- **The price of a CRDT**: on average each replica stored **about 26.5 characters but only 18.6 were visible**, so **about 7.9 were tombstones**: deleted characters are kept so later operations that refer to them still make sense. Tombstones **grow the data** over time; real systems **garbage collect** them once every replica is known to have seen the delete, and compress runs of characters typed together.
+
+The sessions are small, synthetic and use a fixed seed; the tombstone share depends on how much is deleted. The convergence result is not luck: it follows from the operations being commutative, and the 300 runs are a check of the implementation.
+
+## Presence, undo and history
+
+- **Cursors and selections** attach to **character ids**, not positions, so a remote cursor stays in the right place as text changes around it.
+- **Undo** must undo **your own** last operation, not the last operation overall: store inverse operations per user and transform or rebase them over later edits.
+- **Version history** comes from the log plus snapshots: replay to any point, or diff two snapshots. Attribution (who typed what) comes from the operation's site id.
+- **Rich text** (bold, lists, comments) needs a richer model: formatting is attached to ranges of character ids, and conflicts between formats (one person bolds, another deletes) need their own rules. Tree-shaped documents use CRDT or OT variants for trees.
+
+## Offline editing
+
+A CRDT client keeps editing offline and, on reconnecting, **sends the operations it accumulated and receives the others'**; commutativity does the merging. With OT, the client must transform its local operations over everything it missed, which is more complex and grows with the length of the outage. Offline merges can produce **surprising text** (two people rewrote the same sentence), so show **change attribution** and a **history** that makes it easy to repair.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a collaborative editor" rows={[
+  { option: "Operational transformation with a central server", pros: "Compact operations, mature in production (Google Docs), no tombstone growth", cons: "Hard to implement correctly; needs a central ordering; offline merges are harder", chooseWhen: "A single-vendor product with a central server and strong engineering investment" },
+  { option: "CRDT (RGA, Yjs, Automerge style)", pros: "Convergence by construction, works offline and peer to peer, no transformation functions", cons: "Metadata overhead and tombstones; needs garbage collection; larger documents in memory", chooseWhen: "Offline-first or decentralised products, or teams that want simpler correctness" },
+  { option: "Last writer wins on the whole document", pros: "Trivial", cons: "Concurrent edits destroy each other's work", chooseWhen: "Never for text editing" },
+  { option: "Locking sections", pros: "Simple conflict avoidance", cons: "Blocks collaboration; bad experience", chooseWhen: "Structured forms with clearly owned sections" },
+  { option: "Route every document to one server", pros: "Simple ordering, a single place for the in-memory session", cons: "A document server failure interrupts that document until recovery", chooseWhen: "Default; recover from log and snapshot" },
+  { option: "Snapshot plus operation log", pros: "Fast loads, full history, durable", cons: "Needs compaction and snapshot policy", chooseWhen: "Default" },
+  { option: "Ephemeral in-memory presence", pros: "Cheap, low latency", cons: "Lost on restart (acceptable)", chooseWhen: "Cursors and typing indicators" }
+]} />
+
+## Pitfalls
+
+- **Positional operations without transformation**: documents silently diverge (0 of 300 sessions converged in the demo).
+- Making users **wait for the server** before showing their own keystrokes.
+- Shipping a **hand-written OT** without a model checker or heavy randomised testing.
+- **Unbounded tombstones** with no garbage collection.
+- Using the **wall clock** to order edits: clocks differ; use logical clocks plus a site id.
+- Writing **presence** to the durable log.
+- **Losing acknowledged edits** because the log is written after the broadcast, not before.
+- No **idempotent resend**: a reconnect duplicates operations.
+- **Undo** that reverts other people's edits.
+- Forgetting **permissions** checks on every operation, not only on opening the document.
+
+## What would you choose and why?
+
+You are building a notes app whose users edit mainly on a phone, often on a train with no signal, with one or two collaborators per note, and you have a small team. Which approach do you take (OT or CRDT, and which library or algorithm), where does the server fit, how do you keep the stored size under control, and how do you make a merge that surprised the user easy to undo?
+
+## Quiz
+
+<Quiz id="sd-m17-collaborative-editor" tags={["case-study", "crdt", "operational-transformation", "convergence", "real-time"]} questions={[
+  { type: "mcq", q: "Why do index-based operations diverge when edits are concurrent?", options: ["Computers are unreliable", "Position 7 means something different after another edit has been applied, so applying them in different orders gives different texts", "Strings are immutable", "The network drops them"], answer: 1, explain: "The demo's index-based replicas ended identical in 0 of 300 sessions." },
+  { type: "mcq", q: "What makes CRDT operations safe to apply in any order?", options: ["A central server orders them", "Each character has a unique id and operations refer to ids, not positions, so they commute", "They are encrypted", "They are applied twice"], answer: 1, explain: "Commutative operations produce the same result regardless of delivery order (as long as an insert follows the character it refers to)." },
+  { type: "predict", q: "A replica stores 26.5 characters on average and 18.6 are visible. About how many are tombstones?", code: "stored = 26.5\nvisible = 18.6\nprint(round(stored - visible, 1))", options: ["About 3.9", "About 7.9", "About 18.6", "About 45"], answer: 1, explain: "26.5 - 18.6 = 7.9 deleted characters kept so later operations can still refer to them." },
+  { type: "mcq", q: "Why do operations get appended to a durable log before the server acknowledges them?", options: ["To make the log longer", "So that if the server crashes after acknowledging, no acknowledged edit is lost; clients also resend unacknowledged ones idempotently", "To slow the editor", "Because WebSockets require it"], answer: 1, explain: "Durability before acknowledgement, with unique operation ids so resends are harmless." },
+  { type: "multi", q: "Which statements about presence (cursors) are true?", options: ["It is usually ephemeral and kept in memory", "Cursors should attach to character ids so they stay correct as text changes", "It must be written to the durable log", "It never needs the network"], answer: [0, 1], explain: "Cursors are transient and tied to ids; persisting them is unnecessary cost." },
+  { type: "mcq", q: "What is the main cost of a CRDT compared with OT?", options: ["It cannot work offline", "Metadata and tombstones make the stored document larger, so garbage collection is needed", "It needs a central server", "It loses edits"], answer: 1, explain: "The convergence guarantee is bought with per-character ids and retained deletions." }
+]} />
