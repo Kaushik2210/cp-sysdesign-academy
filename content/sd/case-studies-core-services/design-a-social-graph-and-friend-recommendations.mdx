@@ -1,0 +1,278 @@
+---
+title: "Case Study: Design a Social Graph and Friend Recommendations"
+track: sd
+module: case-studies-core-services
+order: 11
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/databases-2/sharding-and-partitioning", "sd/caching/caching-strategies", "sd/case-studies-core-services/design-a-news-feed"]
+tags: [case-study, social-graph, friend-recommendations, graph, sharding, adjacency-list, celebrity-problem, mutual-friends, triadic-closure]
+type: case-study
+furtherReading:
+  - title: "Bronson et al., TAO: Facebook's Distributed Data Store for the Social Graph (USENIX ATC 2013)"
+    url: https://www.usenix.org/conference/atc13/technical-sessions/presentation/bronson
+  - title: "Adamic and Adar, Friends and neighbors on the Web (Social Networks, 2003)"
+    url: https://www.sciencedirect.com/science/article/pii/S0378873303000091
+  - title: "Liben-Nowell and Kleinberg, The link-prediction problem for social networks (2007)"
+    url: https://www.cs.cornell.edu/home/kleinber/link-pred.pdf
+  - title: "Holme and Kim, Growing scale-free networks with tunable clustering (2002)"
+    url: https://journals.aps.org/pre/abstract/10.1103/PhysRevE.65.026107
+---
+
+## The problem
+
+Design the **social graph** behind a network like Facebook, LinkedIn or Instagram: store **who is connected to whom** for a billion people, answer questions about those connections in milliseconds, and power features such as **"People you may know"**.
+
+The queries are simple to state and hard at scale:
+
+- **Is A a friend of B?** (every page view checks permissions)
+- **List A's friends** (with pagination).
+- **How many friends does A have?** (shown on profiles)
+- **Mutual friends of A and B.**
+- **Recommend people A may know.**
+
+Two shapes of relationship matter: **friendship** (mutual, an undirected edge) and **follow** (one way, a directed edge). The design is nearly the same; the write path differs.
+
+## Requirements
+
+**Functional**: add and remove a friend or follow; list friends and followers; check a relationship; count; mutual friends; recommendations.
+
+**Non-functional**
+- **Reads dominate**: perhaps 1,000 reads per write.
+- **Low latency**: a relationship check or list page in a few milliseconds from cache.
+- **Scale**: one billion users, hundreds of friends each, a few celebrities with **tens of millions** of followers.
+- **Consistency**: after you accept a friend request you should see the friend immediately (read-your-writes); other people may see it a little later.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Users | 1 billion | |
+| Average friends | 200 | 200 billion adjacency entries (each friendship is stored on both sides) |
+| Storage for ids only | 8 bytes per entry | about 1.6 TB |
+| With metadata (timestamp, status) | about 24 bytes per entry | about 4.8 TB |
+| Edge reads | 1,000 per write; assume 100,000 writes per second at peak | about 100 million reads per second |
+
+The graph is **small by modern storage standards** (terabytes), but the **read rate is enormous**, so the design is dominated by **caching, sharding and bounding the cost of expensive queries**, not by capacity.
+
+## Data model and sharding
+
+Store the graph as **adjacency lists**: for each user, the sorted set of their friends.
+
+| user_id | friend_id | created_at |
+| --- | --- | --- |
+| 17 | 4021 | 2026-03-02 |
+| 17 | 99 | 2026-05-11 |
+
+- **Shard by user_id**: all of one user's edges live together, so "list friends" and "is friend" hit **one shard**.
+- A friendship is an edge in **both** lists (17's list has 4021 and 4021's list has 17). The two users are usually on **different shards**, so adding a friend is **two writes**. Make this safe with an **idempotent operation** driven by a durable queue or a transaction log: write A's side, then B's side, retrying B's side until it succeeds. A reconciliation job repairs any asymmetry ([delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)).
+- **Counts** (friend counts) are stored and updated as counters, not computed by scanning.
+- Use a **cache in front** with the application-level pattern from TAO: cached objects and association lists, write-through to the database ([caching strategies](/sd/caching/caching-strategies/)).
+- Storage engine: a sharded relational or key-value store works. A specialised **graph database** helps with multi-hop traversals, but the hot queries here (one hop) fit a key-value store and cache better, and multi-hop work is done **offline**.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  C["Client"] --> A["API servers"]
+  A --> CA["Edge cache (association lists, counts)"]
+  CA --> S1["Shard 1: users 0..N"]
+  CA --> S2["Shard 2: users N..2N"]
+  CA --> S3["Shard 3: ..."]
+  A -->|"friend added"| Q["Durable queue"]
+  Q --> W["Writer: second side of the edge, idempotent"]
+  W --> S2
+  S1 -->|"change events"| R["Recommendation pipeline (offline)"]
+  R --> M["Precomputed suggestions store"]
+  A --> M`} caption="Hot queries read cached adjacency lists; expensive multi-hop recommendation work happens offline" />
+
+## The celebrity problem
+
+A user with 50 million followers has a **hot shard**: every request about them hits the same server, and their adjacency list is enormous. Standard remedies:
+
+- **Do not scan or return the whole list**: paginate with a cursor, and store counts separately.
+- **Replicate hot users' cached data** across many cache nodes, or give celebrities **dedicated cache capacity**.
+- **Split a huge adjacency list** into chunks (by time or by hash of the follower id) so it spans shards.
+- **Cap or sample** in algorithms that expand through a user's neighbours (shown below): there is no point expanding every friend of a celebrity.
+- For **fan-out** problems (notifying 50 million followers of a post) see the [news feed lesson](/sd/case-studies-core-services/design-a-news-feed/): celebrities are handled by **fan-out on read**.
+
+## Mutual friends
+
+Mutual friends of A and B is the **intersection** of two sorted lists: walk both lists in order in time proportional to the sum of their lengths, or probe the larger list's hash set for each member of the smaller one, which costs about the **smaller degree**. For a profile page ("12 mutual friends") compute lazily and cache; for recommendation ranking it is a feature, not a query.
+
+## Friend recommendations
+
+The classic idea, **friend of a friend**: a person is a good suggestion if you share many friends with them. This is the **link-prediction** problem. A pipeline:
+
+1. **Candidate generation (offline)**: expand two hops from each user and **count shared friends** for each candidate. Variants weight shared friends by rarity, add a graph neighbourhood from contacts uploaded, school and workplace, or recent interactions.
+2. **Ranking**: score candidates with a model that combines shared-friend counts with other features (profile overlap, interaction history, how many suggestions the person has already received). The model is trained on past accept and ignore decisions.
+3. **Filtering**: remove blocked users, people already asked, privacy-restricted accounts.
+4. **Serving**: store the top results per user in a key-value store, refreshed periodically and on big events; the request just reads them.
+
+Why offline? Two-hop expansion for a billion users is a large batch graph job (MapReduce, Spark or a graph processing system), far too heavy to run per page view.
+
+### A measured experiment
+
+The program below builds a synthetic network of 3,000 people with a few very popular members (preferential attachment), at two levels of **triadic closure**: the tendency of people to befriend **friends of their friends**. It then runs a standard test: for each of 300 people it **hides one real friendship**, produces 10 suggestions with each method, and checks whether the hidden friend appears. The methods: **random**, **most popular people**, **mutual friends count**, and **Adamic-Adar** (mutual friends, where a shared friend with few friends counts more than a shared celebrity). It also prints how much work the two-hop expansion does, with and without capping a friend's list at 50 entries.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import math
+import random
+from collections import Counter, defaultdict
+
+
+def build_graph(n, m, seed, p_triad=0.0):
+    """Preferential attachment (a few very popular people), optionally with triadic closure:
+    with probability p_triad a new person also befriends a friend of someone they just befriended."""
+    rnd = random.Random(seed)
+    adj = defaultdict(set)
+    for a in range(m + 1):                    # a small starting clique
+        for b in range(a + 1, m + 1):
+            adj[a].add(b)
+            adj[b].add(a)
+    repeated = [v for v in range(m + 1) for _ in range(m)]       # a node appears once per friendship
+    for new in range(m + 1, n):
+        chosen = set()
+        last = rnd.choice(repeated)
+        chosen.add(last)
+        while len(chosen) < m:
+            if rnd.random() < p_triad and adj[last]:
+                cand = rnd.choice(sorted(adj[last]))             # a friend of the previous pick
+            else:
+                cand = rnd.choice(repeated)                      # a popular person
+            if cand not in chosen and cand != new:
+                chosen.add(cand)
+                last = cand
+        for t in chosen:
+            adj[new].add(t)
+            adj[t].add(new)
+            repeated.extend([t, new])
+    return adj
+
+
+def mutual_counts(adj, u):
+    """Friends-of-friends: expand two hops and count how many friends each candidate shares with u."""
+    c, work = Counter(), 0
+    for f in adj[u]:
+        for g in adj[f]:
+            work += 1
+            if g != u and g not in adj[u]:
+                c[g] += 1
+    return c, work
+
+
+def adamic_adar(adj, u):
+    """Like mutual friends, but a shared friend with few friends counts more than a shared celebrity."""
+    c = Counter()
+    for f in adj[u]:
+        w = 1.0 / math.log(len(adj[f]) + 1)
+        for g in adj[f]:
+            if g != u and g not in adj[u]:
+                c[g] += w
+    return c
+
+
+def recommend(scores, k):
+    return [x for x, _ in sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]]
+
+
+def evaluate(p_triad, n=3000):
+    adj = build_graph(n, 5, seed=2, p_triad=p_triad)
+    deg = sorted(len(adj[v]) for v in range(n))
+    print(f"--- triadic closure probability {p_triad}: people {n}, friendships {sum(deg) // 2}, median friends {deg[n // 2]}, most popular person {deg[-1]}")
+
+    # hide one friendship per tested person, then see whether each method brings it back in its top 10
+    rnd = random.Random(7)
+    users = [v for v in range(n) if len(adj[v]) >= 6]
+    sample = rnd.sample(users, 300)
+    hits = {"random": 0, "most popular": 0, "mutual friends": 0, "adamic-adar": 0}
+    pop = sorted(range(n), key=lambda v: (-len(adj[v]), v))
+    work_total = 0
+    for u in sample:
+        hidden = rnd.choice(sorted(adj[u]))
+        adj[u].discard(hidden)
+        adj[hidden].discard(u)
+        candidates = [v for v in range(n) if v != u and v not in adj[u]]
+        hits["random"] += hidden in rnd.sample(candidates, 10)
+        hits["most popular"] += hidden in [v for v in pop if v != u and v not in adj[u]][:10]
+        counts, work = mutual_counts(adj, u)
+        work_total += work
+        hits["mutual friends"] += hidden in recommend(counts, 10)
+        hits["adamic-adar"] += hidden in recommend(adamic_adar(adj, u), 10)
+        adj[u].add(hidden)
+        adj[hidden].add(u)
+    for k, v in hits.items():
+        print(f"{k:15s} brought back the hidden friend in the top 10 for {v / len(sample) * 100:5.1f}% of {len(sample)} people")
+    print(f"two-hop expansion looked at {work_total / len(sample):.0f} friend-of-friend entries per person, versus {n - 1} candidates for all-pairs")
+
+    # the cost of a celebrity: expansion work for a typical person vs one who befriends the most popular node
+    star = max(range(n), key=lambda v: len(adj[v]))
+    fan = next(v for v in range(n) if star in adj[v] and len(adj[v]) <= 6)
+    print("two-hop work for a typical person:", sum(mutual_counts(adj, v)[1] for v in sample[:50]) // 50, "| for a person befriending the top celebrity:", mutual_counts(adj, fan)[1])
+
+    # capping: ignore friends with huge friend lists (or sample them) to bound the work
+    def capped_work(u, cap):
+        return sum(min(len(adj[f]), cap) for f in adj[u])
+    print("with each friend's list capped at 50:", capped_work(fan, 50), "entries")
+
+
+if True:
+    evaluate(0.0)
+    evaluate(0.7)
+`} />
+
+## What the output shows
+
+**With no triadic closure** (people attach to the already popular, without regard to who their friends know) **"most popular" wins: 6.0%** of hidden friends recovered, **mutual friends only 3.0%** and Adamic-Adar 1.7%, random 0.7%. In that world, friends of friends carry no information beyond popularity, so the graph structure is unhelpful.
+
+**With triadic closure (probability 0.7)** the picture reverses sharply: **mutual friends recovers 40.3%**, **Adamic-Adar 47.7%**, while **most popular falls to 4.3%** and random is 1.0%. Real social networks have strong triadic closure (your friends tend to know each other), which is **why "friends of friends" is the standard method**.
+
+Three lessons:
+1. **The method that works depends on how the network is formed.** Measure on a hidden-edge test with realistic data before trusting an algorithm; our first synthetic graph without closure would have told us to recommend celebrities.
+2. **Weighting shared friends by rarity helped** (47.7% against 40.3%): sharing a niche friend says more than sharing a celebrity.
+3. **The expansion work is bounded by degrees, not by the number of people**: about 250 to 300 friend-of-friend entries per person, against 2,999 candidates for an all-pairs comparison. For a person who befriends the top celebrity the work rises to about 470 to 510 entries, and **capping each friend's list at 50 entries cuts it to about 230 to 250**: a cheap way to stop celebrities from dominating the cost.
+
+These are **synthetic graphs, one seed each, 300 sampled people**: the percentages show the mechanism, not what a real network would score. Accuracy numbers for a production system depend on its data and its ranking model.
+
+## Privacy and abuse
+
+- **Respect privacy settings**: suggestions must not reveal connections a user hid, and mutual-friend counts must respect visibility rules.
+- **Blocks** are one-way hard filters in every list and recommendation.
+- **Rate-limit** friend requests to deter spam and scraping of the graph ([rate limiting](/sd/scalability/rate-limiting-algorithms/)).
+- Uploaded **contacts** are sensitive; hash and minimise them and honour deletion.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions for a social graph" rows={[
+  { option: "Adjacency lists in a sharded key-value or relational store, behind a cache", pros: "One-hop queries hit one shard; scales by adding shards; simple", cons: "Multi-hop queries are expensive; each friendship is two writes", chooseWhen: "The default for hot one-hop queries" },
+  { option: "A graph database", pros: "Natural multi-hop traversals and pattern queries", cons: "Harder to scale horizontally for billions of nodes; operational maturity varies", chooseWhen: "Smaller graphs or analytics with deep traversals" },
+  { option: "Shard by user id", pros: "A user's edges are together; simple routing", cons: "Hot celebrities; an edge lives on two shards", chooseWhen: "Default" },
+  { option: "Offline recommendation batch", pros: "Cheap per request; can use heavy models", cons: "Suggestions can be hours old", chooseWhen: "Almost always for friend suggestions" },
+  { option: "Online two-hop expansion", pros: "Always fresh", cons: "Latency and cost grow with degrees; celebrities explode the work", chooseWhen: "Small graphs, or with capping and sampling for a few hot paths" },
+  { option: "Mutual friends count", pros: "Simple, effective when closure is strong", cons: "Over-rewards shared celebrities", chooseWhen: "A first baseline" },
+  { option: "Adamic-Adar or learned ranking", pros: "Better precision (47.7% against 40.3% in the demo)", cons: "More code and training data", chooseWhen: "Once a baseline works" },
+  { option: "Cap or sample high-degree neighbours", pros: "Bounds cost; protects against celebrity blow-ups", cons: "Slightly lower recall", chooseWhen: "Always in graph expansion jobs" }
+]} />
+
+## Pitfalls
+
+- Writing only **one side** of a friendship, or not repairing asymmetry after failures.
+- Computing friend **counts by scanning** lists.
+- Returning **whole adjacency lists** for celebrities.
+- Running **two-hop expansion online** for every page view.
+- Recommending **popular accounts** to everyone when closure, not popularity, is the signal (the first half of the experiment).
+- Ignoring **blocked, hidden and deactivated** users in suggestions.
+- **Evaluating on training edges**: always hide edges and test whether they come back.
+- One **hot shard** for a celebrity, with no replication of its cache.
+- Leaking connections through **mutual friend counts** to people who should not see them.
+
+## What would you choose and why?
+
+Product wants a "suggested follows" feature on a **follow graph** (directed, with a few accounts holding 80% of all follows) where most users follow people they do not know personally (news, creators). Would friend-of-a-friend still be the right candidate generator, what signals would you add, and how would you build the offline test that tells you which one is right before shipping?
+
+## Quiz
+
+<Quiz id="sd-m17-social-graph" tags={["case-study", "social-graph", "recommendations", "sharding", "caching"]} questions={[
+  { type: "mcq", q: "Why does adding a friend normally require two writes?", options: ["A single write is slow", "The friendship is stored in both users' adjacency lists, which usually live on different shards", "It is required by the database", "To double the storage"], answer: 1, explain: "Make the second write idempotent and retried, with a reconciliation job for failures." },
+  { type: "mcq", q: "In the experiment, why did 'most popular' beat mutual friends in the graph with no triadic closure?", options: ["Mutual friends is a bad algorithm", "In that graph, friends of friends carry no extra information, so only popularity predicts new connections", "Popular people have fewer friends", "The test was rigged"], answer: 1, explain: "The best method depends on how the network forms. With closure at 0.7, mutual friends recovered 40.3% against 4.3% for popularity." },
+  { type: "predict", q: "A person has 200 friends and each friend has on average 200 friends. Roughly how many friend-of-friend entries does a plain two-hop expansion look at?", code: "friends = 200\navg_friends_of_friend = 200\nprint(friends * avg_friends_of_friend)", options: ["400", "4,000", "40,000", "40 million"], answer: 2, explain: "200 x 200 = 40,000 entries, before any duplicates. A celebrity friend with millions of friends would blow this up, hence capping." },
+  { type: "mcq", q: "Why is Adamic-Adar often better than a plain mutual friend count?", options: ["It is simpler", "A shared friend with few friends is stronger evidence than a shared celebrity, so it weights shared friends by rarity", "It ignores the graph", "It counts three hops"], answer: 1, explain: "The demo shows 47.7% for Adamic-Adar against 40.3% for mutual friends." },
+  { type: "multi", q: "Which help with celebrity users?", options: ["Paginating their follower lists", "Replicating their cached data across many cache nodes", "Capping or sampling their neighbours in graph expansion", "Returning the whole follower list in one response"], answer: [0, 1, 2], explain: "Returning everything makes the hot spot worse." },
+  { type: "mcq", q: "Why are friend suggestions normally computed offline?", options: ["Offline code is easier to write", "Two-hop expansion and model scoring for a billion users is too heavy for a page view; precomputed results are cheap to serve", "Users do not want fresh suggestions", "Databases cannot read graphs"], answer: 1, explain: "A batch job writes the top suggestions per user to a key-value store; serving is a single read." }
+]} />
