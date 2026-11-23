@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("195");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("196");
   });
 });
 
@@ -943,6 +943,7 @@ test.describe("security, observability and case-study modules", () => {
     ["/sd/case-studies-data-and-transactions/design-a-feature-flag-service/", "Case Study: Design a Feature Flag and Experimentation Service"],
     ["/sd/case-studies-data-and-transactions/design-a-data-pipeline/", "Case Study: Design a Data Pipeline for Analytics"],
     ["/sd/ai-systems/serving-large-language-models/", "Serving Large Language Models: Batching, KV Cache and Cost"],
+    ["/sd/ai-systems/retrieval-augmented-generation/", "Designing a Retrieval-Augmented Generation (RAG) System"],
     ["/sd/oop-and-design-patterns/solid-principles-in-practice/", "SOLID Principles in Practice"],
     ["/sd/oop-and-design-patterns/creational-and-structural-patterns/", "Creational and Structural Design Patterns"],
     ["/sd/oop-and-design-patterns/behavioral-patterns/", "Behavioral Design Patterns"],
