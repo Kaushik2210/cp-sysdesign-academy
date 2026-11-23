@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("197");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("198");
   });
 });
 
@@ -945,6 +945,7 @@ test.describe("security, observability and case-study modules", () => {
     ["/sd/ai-systems/serving-large-language-models/", "Serving Large Language Models: Batching, KV Cache and Cost"],
     ["/sd/ai-systems/retrieval-augmented-generation/", "Designing a Retrieval-Augmented Generation (RAG) System"],
     ["/sd/ai-systems/designing-reliable-ai-agents/", "Designing Reliable AI Agents: Compounding Errors, Checks and Budgets"],
+    ["/sd/ai-systems/evaluating-and-monitoring-llm-systems/", "Evaluating and Monitoring LLM Systems"],
     ["/sd/oop-and-design-patterns/solid-principles-in-practice/", "SOLID Principles in Practice"],
     ["/sd/oop-and-design-patterns/creational-and-structural-patterns/", "Creational and Structural Design Patterns"],
     ["/sd/oop-and-design-patterns/behavioral-patterns/", "Behavioral Design Patterns"],
