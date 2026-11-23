@@ -59,6 +59,7 @@
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-an-e-commerce-checkout" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-stock-exchange-matching-engine" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-an-ad-click-aggregation-system" },
+    { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-real-time-leaderboard" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/solid-principles-in-practice" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/creational-and-structural-patterns" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/behavioral-patterns" },
