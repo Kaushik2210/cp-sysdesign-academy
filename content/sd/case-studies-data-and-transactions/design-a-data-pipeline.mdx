@@ -1,0 +1,314 @@
+---
+title: "Case Study: Design a Data Pipeline for Analytics"
+track: sd
+module: case-studies-data-and-transactions
+order: 14
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/storage/data-lakes-warehouses", "sd/queues-and-streaming/stream-processing-basics", "sd/case-studies-data-and-transactions/design-an-ad-click-aggregation-system"]
+tags: [case-study, data-pipeline, etl, elt, data-lake, idempotency, backfill, orchestration, data-quality, schema-evolution]
+type: case-study
+furtherReading:
+  - title: "Databricks, What is a medallion architecture?"
+    url: https://www.databricks.com/glossary/medallion-architecture
+  - title: "Apache Iceberg documentation, Table format overview (snapshots, schema evolution, partition evolution)"
+    url: https://iceberg.apache.org/docs/latest/
+  - title: "Apache Airflow documentation, Concepts: DAGs, tasks, and idempotency in the best practices guide"
+    url: https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html
+  - title: "Kleppmann, Designing Data-Intensive Applications, chapter 10: Batch Processing"
+    url: https://dataintensive.net/
+---
+
+## The problem
+
+Design the **data pipeline** of a company: data from many **sources** (application databases, event streams, log files, third-party exports) must be **collected, cleaned, joined and aggregated**, and delivered to **analysts, dashboards and machine learning models** as trustworthy tables that are fresh enough to be useful.
+
+Everything that makes a service hard (scale, failure, change) applies, plus a problem unique to data: **a wrong number looks exactly like a right number**. A pipeline can run to completion, with all green status lights, and deliver revenue figures that are doubled, truncated or stale. The design is about **correctness you can verify**, **re-runnable steps** that make recovery boring, and **noticing problems before the CEO does**.
+
+## Requirements
+
+**Functional**
+- **Ingest** from databases (including change streams), event logs, files and APIs.
+- **Transform**: clean, deduplicate, join, aggregate.
+- **Load** curated tables into a warehouse or lake for SQL, dashboards and ML features.
+- **Schedule and orchestrate** dependencies between jobs.
+- **Backfill**: recompute history after a bug fix or a logic change.
+
+**Non-functional**
+- **Freshness** targets (for example "yesterday's numbers by 06:00" for batch, "within 5 minutes" for streaming).
+- **Correctness and repeatability**: re-running a job gives the same result, never duplicates.
+- **Scale**: terabytes per day, petabytes of history, at reasonable cost.
+- **Observability**: know when data is late, missing or wrong.
+- **Governance**: lineage (where did this number come from), access control, retention and deletion.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Raw events | 50 billion per day, about 100 bytes | about 5 TB per day, 1.8 PB per year |
+| Columnar compressed storage | about 5 times smaller than raw rows | about 360 TB per year |
+| Batch window | process yesterday's 5 TB in a few hours | a cluster scanning on the order of 1 GB per second in aggregate |
+| Daily curated tables | thousands of tables, mostly small | the big ones are event-level facts |
+
+The raw data is **huge and mostly read in bulk**, so **cheap object storage with columnar files** (Parquet or ORC) plus a **distributed compute engine** (Spark, Flink, or a cloud warehouse) is the standard answer, not a transactional database.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  subgraph Sources
+    DB[("Application databases")] 
+    EV["Event streams"]
+    FI["Files and third-party exports"]
+  end
+  DB -->|"change data capture"| ING["Ingestion: Kafka, CDC, file loaders"]
+  EV --> ING
+  FI --> ING
+  ING --> RAW[("Raw zone (bronze): immutable, partitioned by arrival date")]
+  RAW --> CL["Clean and conform (batch or streaming)"]
+  CL --> SIL[("Clean zone (silver): deduplicated, typed, partitioned by event date")]
+  SIL --> AG["Aggregate and model"]
+  AG --> GOLD[("Curated zone (gold): business tables and metrics")]
+  GOLD --> WH["Warehouse and BI"]
+  GOLD --> ML["Feature store and ML"]
+  ORCH["Orchestrator: DAGs, schedules, retries, backfills"] -.-> CL
+  ORCH -.-> AG
+  DQ["Data quality checks and lineage catalogue"] -.-> SIL
+  DQ -.-> GOLD`} caption="Immutable raw data feeds layered tables; an orchestrator runs re-runnable jobs; quality checks guard the zones" />
+
+### The layers (sometimes called bronze, silver and gold)
+
+- **Raw (bronze)**: data exactly as it arrived, **never modified**, partitioned by arrival date. It is the **source of truth for reprocessing**: if a transformation is wrong, fix it and rebuild from here. Keep it as long as legal and cost limits allow.
+- **Clean (silver)**: **deduplicated, typed, validated** records, with bad rows quarantined and counted. Partitioned by **event date** (when the thing happened), not arrival date.
+- **Curated (gold)**: **business-level tables**: daily revenue by country, user activity, model features. Modelled for the questions people ask (often as fact and dimension tables).
+
+### ETL versus ELT
+
+**ETL** transforms data **before** loading it into the warehouse; **ELT** loads raw data first and transforms it **inside** the warehouse or lake engine with SQL. ELT dominates today: storage and compute are cheap and elastic, raw data is kept for reprocessing, and analysts can own transformations in SQL. ETL remains useful for filtering, masking sensitive fields or reducing volume **before** data leaves a secure zone.
+
+## The three ideas that make pipelines reliable
+
+### 1. Idempotent, partition-scoped writes
+
+A job that can safely be **run twice** with the same result makes failures cheap: retry until it works. The standard technique is to **write each output partition atomically, replacing whatever was there** (overwrite-partition), keyed by a logical date, instead of **appending**. Modern table formats (Iceberg, Delta, Hudi) provide atomic partition overwrite and **snapshots** so readers never see a half-written partition.
+
+### 2. Immutable inputs and backfills
+
+Because raw data is never changed, any derived table can be **recomputed** by running the same code over a date range. Backfills are a first-class operation: the orchestrator accepts "run this DAG for these dates", and overwrite semantics make them safe.
+
+### 3. Checks as part of the pipeline
+
+Treat data like code: **tests on every run**. Row counts, null rates, uniqueness of keys, accepted value ranges, referential integrity, freshness, and reconciliation against the source ("the warehouse revenue matches the payments system within 0.1%"). A failed check **stops downstream tasks** and alerts the owner, instead of publishing wrong numbers.
+
+## The simulation
+
+The program builds 30 days of order events (day 21 simulates an **upstream outage**: only 40% of the events arrive, and half of those have lost their country), a tiny warehouse that can write a daily table by **appending** or by **overwriting the partition**, and runs four experiments:
+
+1. **A retry**: the job for day 5 runs twice (the first attempt timed out after writing but before reporting success), in each write mode.
+2. **A backfill**: ten days are reloaded with a corrected cleaning step, in each write mode.
+3. **A task graph**: ingest, then clean, then three parallel tasks (revenue, users, fraud), then a report. One task fails once; the retry skips finished tasks.
+4. **Data quality checks** over the 30 days: row count outliers by median and spread, and the share of rows missing their country.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+import statistics
+from collections import defaultdict
+
+
+# ----------------------------------------------------------------- raw data: one list of order events per day
+def make_raw(days=30, seed=4):
+    rnd = random.Random(seed)
+    raw = {}
+    for d in range(days):
+        n = rnd.randint(900, 1100)
+        if d == 21:
+            n = int(n * 0.4)                                     # an upstream outage: only 40% of the events arrived
+        rows = []
+        for i in range(n):
+            amount = round(rnd.uniform(5, 200), 2)
+            country = rnd.choice(["US", "DE", "FR", "JP"])
+            if d == 21 and rnd.random() < 0.5:
+                country = None                                   # and half of the surviving rows lost their country
+            rows.append({"id": f"{d}-{i}", "day": d, "amount": amount, "country": country})
+        raw[d] = rows
+    return raw
+
+
+# ----------------------------------------------------------------- a tiny warehouse with two ways to write a daily table
+class Warehouse:
+    def __init__(self):
+        self.tables = defaultdict(lambda: defaultdict(list))     # table -> partition (day) -> rows
+
+    def append(self, table, day, rows):
+        self.tables[table][day].extend(rows)                     # not safe to retry: running twice stores everything twice
+
+    def overwrite_partition(self, table, day, rows):
+        self.tables[table][day] = list(rows)                     # replaces the whole partition: running twice gives the same result
+
+    def revenue(self, table):
+        return {d: round(sum(r["amount"] for r in rows), 2) for d, rows in sorted(self.tables[table].items())}
+
+
+def transform(rows):
+    """Clean step: drop rows with no country, as a downstream consumer of the raw data might."""
+    return [r for r in rows if r["country"] is not None]
+
+
+# ----------------------------------------------------------------- a DAG of tasks
+def run_dag(tasks, deps, fail_once=None, done=None):
+    """Run tasks in dependency order. A failed task blocks everything downstream. 'done' is the set of tasks already
+    completed by an earlier attempt, which are skipped on a retry (each task is idempotent)."""
+    done = set(done or ())
+    executed, failed, blocked = [], None, []
+    order, seen = [], set()
+    def visit(t):
+        if t in seen:
+            return
+        seen.add(t)
+        for d in deps.get(t, []):
+            visit(d)
+        order.append(t)
+    for t in tasks:
+        visit(t)
+    for t in order:
+        if any(d not in done for d in deps.get(t, [])):
+            blocked.append(t)
+            continue
+        if t in done:
+            continue
+        executed.append(t)
+        if t == fail_once:
+            failed = t
+            continue
+        done.add(t)
+    return executed, failed, blocked, done
+
+
+# ----------------------------------------------------------------- data quality checks
+def quality_report(raw, k=5.0):
+    counts = {d: len(rows) for d, rows in raw.items()}
+    nulls = {d: sum(r["country"] is None for r in rows) / len(rows) for d, rows in raw.items()}
+    med = statistics.median(counts.values())
+    mad = statistics.median(abs(c - med) for c in counts.values())
+    bad_volume = [d for d, c in counts.items() if abs(c - med) > k * 1.4826 * mad]
+    bad_nulls = [d for d, f in nulls.items() if f > 0.05]
+    return med, mad, bad_volume, bad_nulls
+
+
+if True:
+    raw = make_raw()
+    true_revenue = {d: round(sum(r["amount"] for r in rows), 2) for d, rows in raw.items()}
+
+    # 1. retries: the same daily job runs twice for day 5 (a worker timed out after writing but before reporting success)
+    for mode in ("append", "overwrite_partition"):
+        wh = Warehouse()
+        write = getattr(wh, mode)
+        for d in range(10):
+            write("revenue", d, raw[d])
+        write("revenue", 5, raw[5])                              # the retry of day 5
+        rev = wh.revenue("revenue")
+        wrong = [d for d in rev if rev[d] != true_revenue[d]]
+        print(f"{mode:20s}: after a retry of day 5, days with wrong revenue: {wrong} (day 5 is off by {rev[5] - true_revenue[5]:+.2f})")
+
+    # 2. a backfill after a bug fix: recompute days 0 to 9 from raw data with the corrected cleaning step
+    for mode in ("append", "overwrite_partition"):
+        wh = Warehouse()
+        write = getattr(wh, mode)
+        for d in range(10):
+            write("clean", d, raw[d])                            # the original, buggy load kept every row
+        for d in range(10):
+            write("clean", d, transform(raw[d]))                 # the corrected load drops rows without a country
+        rows = sum(len(v) for v in wh.tables["clean"].values())
+        expected = sum(len(transform(raw[d])) for d in range(10))
+        print(f"{mode:20s}: after the backfill the table holds {rows:,} rows, the correct answer is {expected:,}")
+
+    # 3. a DAG: ingest -> clean -> (revenue, users, fraud) -> report; the users task fails on its first attempt
+    tasks = ["report"]
+    deps = {"clean": ["ingest"], "revenue": ["clean"], "users": ["clean"], "fraud": ["clean"], "report": ["revenue", "users", "fraud"]}
+    ex1, failed, blocked, done = run_dag(tasks, deps, fail_once="users")
+    ex2, _, _, done2 = run_dag(tasks, deps, done=done)
+    full, _, _, _ = run_dag(tasks, deps)
+    print(f"DAG attempt 1 ran {ex1}, failed at '{failed}', blocked {blocked}")
+    print(f"DAG retry (finished tasks are skipped) ran {ex2}; a full rerun would run {len(full)} tasks, the retry ran {len(ex2)}")
+
+    # 4. data quality checks over 30 days of raw data (day 21 had the outage)
+    med, mad, bad_volume, bad_nulls = quality_report(raw)
+    print(f"daily row count: median {med:.0f}, typical spread (MAD) {mad:.0f}; days flagged for volume: {bad_volume}; days flagged for missing countries: {bad_nulls}")
+`} />
+
+## What the output shows
+
+- **Retry with append** left **day 5's revenue wrong by exactly the whole day's revenue (+107,604.15)**: the job's rows were stored twice. **Overwriting the partition** left **every day correct** (difference 0.00). Both runs executed the same code the same number of times; the **write mode** decided whether retrying was safe.
+- **Backfill with append** left the table with **19,876 rows when the correct answer is 9,938**: the old rows and the corrected rows were both kept (exactly double). **Overwrite** produced **9,938**, the right number. Without idempotent writes, a backfill needs a manual delete step first, and that step is where mistakes happen.
+- **Task graph**: the first attempt ran ingest, clean, revenue, users and fraud, and **failed at users**; the **report was blocked** (its dependency never finished). The **retry ran only users and report: 2 tasks instead of the 6 a full rerun needs**, because the other tasks had completed and their outputs are idempotent. Failing downstream tasks **should not** run on partial data.
+- **Quality checks**: the daily row count had a **median of 1,002** with a typical spread (median absolute deviation) of **54**. The check, "more than 5 robust standard deviations from the median", flagged **only day 21** among the 30 days (no false alarms on the other 29), and the **missing country** check (more than 5% of rows) flagged **only day 21** as well. Either check alone would have caught the outage; a pipeline without them would have published a revenue figure about 60% too low for that day.
+
+The data are synthetic, the outage is one chosen day, and the thresholds are illustrative: real checks need tuning per table, seasonal baselines (weekends are lower), and a triage process.
+
+## Late data, event time and partitioning
+
+- **Partition by event time** (when it happened) in the clean and curated zones, but ingest by **arrival time** in the raw zone. Late events then land in an **old event-date partition**, and the pipeline must **recompute** that partition (idempotent overwrite makes this simple).
+- Decide a **lateness window** (for example "events can arrive up to 3 days late") and **re-run recent partitions daily** within that window. After it, late events go to a correction process. This is the batch cousin of the watermark in the [ad click aggregation lesson](/sd/case-studies-data-and-transactions/design-an-ad-click-aggregation-system/).
+- **Deduplicate** on a unique event id in the clean step (at-least-once ingestion repeats events).
+
+## Batch, streaming and both
+
+- **Batch** (hourly or daily) is simpler to reason about, cheaper, and easy to re-run.
+- **Streaming** ([stream processing basics](/sd/queues-and-streaming/stream-processing-basics/)) gives minutes or seconds of freshness for the metrics that need it.
+- Many companies run **both** for the same data: a streaming path for fresh approximate numbers and a batch path for the exact final ones (the lambda pattern), or one streaming engine that can also replay history (kappa). Choose per table by **freshness actually needed**, not by fashion.
+
+## Schema evolution and contracts
+
+Sources change: columns are added, renamed, retyped. Pipelines break when they discover this at 3 a.m.
+- **Additive changes** (new optional column) are safe if readers ignore unknown fields. **Renames, type changes and removals are breaking.**
+- Use a **schema registry** or data contracts between producers and the pipeline, with compatibility checks in the producers' CI ([evolving APIs and events](/sd/microservice-patterns/evolving-apis-and-events/)).
+- Table formats such as Iceberg support **schema evolution** (add, rename, reorder columns) without rewriting data.
+- **Detect drift** automatically: compare the incoming schema with the expected one and quarantine or alert.
+
+## Operating the pipeline
+
+- **Orchestration**: a DAG of tasks with dependencies, schedules, retries with backoff, timeouts, backfill commands and clear ownership (Airflow, Dagster, Prefect, or a cloud equivalent).
+- **Lineage and catalogue**: for every table, where it comes from and who uses it, so "what breaks if I change this column?" is answerable.
+- **Freshness monitoring**: alert when a table is not updated on time (the age of the newest partition), not only when a job fails (a job that never started never fails).
+- **Cost control**: partition pruning, columnar formats, compaction of **small files** (thousands of tiny files slow every query), and lifecycle rules that move old data to cheaper storage.
+- **Privacy and deletion**: personal data must be deletable on request even from immutable raw zones: tokenise or encrypt per user and delete keys, or rewrite affected partitions.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a data pipeline" rows={[
+  { option: "Overwrite the partition (idempotent writes)", pros: "Retries and backfills are safe (0.00 error after a retry in the demo)", cons: "Needs partitioned outputs and atomic overwrite support", chooseWhen: "Default for batch outputs" },
+  { option: "Append only", pros: "Simple and fast", cons: "A retry doubled a day's revenue and a backfill doubled the table in the demo", chooseWhen: "Raw landing zones with deduplication downstream" },
+  { option: "ELT (transform in the warehouse)", pros: "Raw data kept; analysts own SQL transformations; elastic compute", cons: "Raw sensitive data lands in the warehouse; warehouse compute cost", chooseWhen: "Most modern stacks" },
+  { option: "ETL (transform before loading)", pros: "Masks or filters data before it reaches the warehouse; reduces volume", cons: "Transformation logic is harder to change; raw data may be lost", chooseWhen: "Sensitive fields and strict data minimisation" },
+  { option: "Batch pipelines", pros: "Simple, cheap, easy to backfill", cons: "Hours of latency", chooseWhen: "Reporting and most analytics" },
+  { option: "Streaming pipelines", pros: "Seconds to minutes of freshness", cons: "More complex state, late data and exactly-once handling", chooseWhen: "Operational dashboards, alerts, real-time features" },
+  { option: "Quality checks that stop downstream tasks", pros: "Wrong data is not published (day 21 caught in the demo)", cons: "Needs tuned thresholds and an on-call process", chooseWhen: "Always for tables people rely on" },
+  { option: "Publish whatever the job produced", pros: "No false alarms", cons: "Silent wrong numbers, like a revenue figure about 60% low", chooseWhen: "Never for business metrics" }
+]} />
+
+## Pitfalls
+
+- **Appending in jobs that can be retried**, creating duplicates.
+- **Mutating raw data**, losing the ability to reprocess.
+- **Partitioning by arrival time** and then computing daily metrics by that partition, so late events land in the wrong day.
+- **No checks**: green pipelines publishing wrong numbers.
+- **Treating "no data arrived" as "no problem"**: alert on missing partitions and stale tables.
+- **Breaking schema changes** discovered in production.
+- **Small-file explosion** from tiny frequent writes.
+- **Unowned tables** with no documented owner or consumer.
+- **Rerunning everything** for a single failure instead of the failed task and its dependents.
+- **Backfills that overwrite production tables without a snapshot** to roll back to.
+- Ignoring **time zones** in daily partitions.
+
+## What would you choose and why?
+
+Finance reports that the daily revenue dashboard showed 12% less than the payments system for three days last week, and nobody noticed until the monthly close. List the checks you would add (and where in the pipeline), how you would find out which days and which stage were affected, how you would repair the numbers without double counting, and how you would make a recurrence page someone within an hour.
+
+## Quiz
+
+<Quiz id="sd-m18-data-pipeline" tags={["case-study", "data-pipeline", "idempotency", "backfill", "data-quality"]} questions={[
+  { type: "mcq", q: "Why is overwriting a whole partition safer than appending for a daily job?", options: ["It is faster", "Running the job twice replaces the partition with the same content instead of storing every row twice", "It compresses better", "It avoids partitioning"], answer: 1, explain: "In the demo a retry of day 5 with append was wrong by a full day of revenue; overwrite left every day correct." },
+  { type: "mcq", q: "Why keep raw data immutable?", options: ["To save storage", "So any derived table can be rebuilt by re-running fixed code over the raw data (backfill)", "To avoid schemas", "Because raw data is always correct"], answer: 1, explain: "The corrected backfill produced 9,938 rows; it is only possible if the raw inputs are still there and unchanged." },
+  { type: "predict", q: "A DAG has 6 tasks. Five finish and one fails; the report depends on the failed task. After a retry that skips completed idempotent tasks, how many tasks run?", code: "# ingest, clean, revenue, fraud finished; users failed; report was blocked\n# retry runs: users, report", options: ["6", "5", "2", "1"], answer: 2, explain: "Only the failed task and its downstream dependents run again." },
+  { type: "mcq", q: "How did the quality check detect the day 21 outage?", options: ["It compared the row count with a fixed number", "It flagged a day whose row count was more than 5 robust standard deviations from the median, and a day with more than 5% missing countries", "It read the logs", "It compared with yesterday only"], answer: 1, explain: "Median 1,002, spread 54: day 21 had about 40% of the normal volume. No other day was flagged." },
+  { type: "multi", q: "Which are good practices for handling late data?", options: ["Partition curated tables by event time", "Re-run recent partitions daily within a lateness window", "Deduplicate by a unique event id", "Ignore any event that arrives after midnight"], answer: [0, 1, 2], explain: "Late events land in old partitions, which idempotent overwrite makes cheap to recompute." },
+  { type: "mcq", q: "Which schema change is typically breaking for downstream readers?", options: ["Adding an optional column", "Renaming a column or changing its type", "Adding a comment to the schema", "Adding a new table"], answer: 1, explain: "Additive changes are usually safe; renames, retyping and removals break consumers and need contracts and compatibility checks." }
+]} />
