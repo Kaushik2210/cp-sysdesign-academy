@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("185");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("186");
   });
 });
 
@@ -933,6 +933,7 @@ test.describe("security, observability and case-study modules", () => {
     ["/sd/case-studies-data-and-transactions/design-a-distributed-message-queue/", "Case Study: Design a Distributed Message Queue"],
     ["/sd/case-studies-data-and-transactions/design-a-hotel-booking-system/", "Case Study: Design a Hotel Booking System"],
     ["/sd/case-studies-data-and-transactions/design-an-e-commerce-checkout/", "Case Study: Design an E-commerce Checkout and Inventory System"],
+    ["/sd/case-studies-data-and-transactions/design-a-stock-exchange-matching-engine/", "Case Study: Design a Stock Exchange Matching Engine"],
     ["/sd/oop-and-design-patterns/solid-principles-in-practice/", "SOLID Principles in Practice"],
     ["/sd/oop-and-design-patterns/creational-and-structural-patterns/", "Creational and Structural Design Patterns"],
     ["/sd/oop-and-design-patterns/behavioral-patterns/", "Behavioral Design Patterns"],
