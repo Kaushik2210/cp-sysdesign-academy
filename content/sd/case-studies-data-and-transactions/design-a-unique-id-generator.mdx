@@ -1,0 +1,266 @@
+---
+title: "Case Study: Design a Unique ID Generator"
+track: sd
+module: case-studies-data-and-transactions
+order: 11
+difficulty: medium
+estMinutes: 45
+prerequisites: ["sd/distributed-theory/clocks-and-ordering", "sd/databases-2/sharding-and-partitioning", "sd/databases-1/indexes-and-query-plans"]
+tags: [case-study, unique-id, snowflake, uuid, clock-skew, k-sortable, sharding, birthday-problem]
+type: case-study
+furtherReading:
+  - title: "Twitter, Announcing Snowflake (the original post on 64-bit time-ordered ids)"
+    url: https://blog.x.com/engineering/en_us/a/2010/announcing-snowflake
+  - title: "RFC 9562, Universally Unique IDentifiers (UUIDs), including version 4 and the time-ordered version 7"
+    url: https://www.rfc-editor.org/rfc/rfc9562
+  - title: "ULID specification"
+    url: https://github.com/ulid/spec
+  - title: "Flickr Engineering, Ticket Servers: Distributed Unique Primary Keys on the Cheap"
+    url: https://code.flickr.net/2010/02/08/ticket-servers-distributed-unique-primary-keys-on-the-cheap/
+---
+
+## The problem
+
+Design a service (or library) that generates **unique identifiers** for rows, messages, orders and tweets, across **many machines**, at **very high rate**, without a coordination step on every request.
+
+On one database an auto-incrementing column is perfect. Once data is **sharded** over many databases, or many services create records concurrently, every one of them needs ids that are **unique everywhere**, ideally **roughly sorted by creation time** (so recent items cluster together and "latest first" is cheap), and **small** (so indexes stay compact).
+
+## Requirements
+
+**Functional**
+- Every id is **unique** across the whole system.
+- Ids are **numeric** and fit in **64 bits**.
+- Ids are **roughly ordered by time** (sortable by creation).
+
+**Non-functional**
+- **High throughput**: 10,000 ids per second per machine, and much more in total.
+- **Low latency**: generating an id is a local computation, not a network call.
+- **Highly available**: no single point of failure.
+- Safe under **clock problems** (skew, steps backwards).
+
+## The candidate designs
+
+| design | how | strengths | weaknesses |
+| --- | --- | --- | --- |
+| **Database auto-increment** | one counter in a database | tiny, perfectly ordered | single point of failure and bottleneck; does not span shards |
+| **Auto-increment per shard with a stride** | shard k hands out k, k+N, k+2N, ... | no coordination | adding shards breaks the stride; ordering across shards is lost |
+| **Ticket server** (Flickr) | a dedicated database hands out id ranges | simple; uses a database | needs redundancy (two servers with odd and even ids); every id or range is a network call |
+| **UUID version 4** (random, 128 bits) | 122 random bits, no coordination | trivial, no infrastructure, effectively collision-free | **128 bits** (twice the space); **random** keys scatter across an index |
+| **UUID version 7 or ULID** (timestamp plus random, 128 bits) | time-ordered prefix, random suffix | sortable and coordination-free | still 128 bits |
+| **Snowflake** (64 bits) | timestamp, worker id and sequence packed in one integer | **64 bits, time-ordered, no per-id coordination** | needs unique worker ids and trustworthy clocks |
+
+The rest of this lesson builds **Snowflake**, the design that meets all the requirements.
+
+## The Snowflake layout
+
+A 64-bit integer (the top bit unused so the value is positive in signed 64-bit systems) is divided into fields:
+
+| field | bits | meaning | capacity |
+| --- | --- | --- | --- |
+| timestamp | 41 | milliseconds since a custom epoch | 2^41 ms is about **69.7 years** |
+| worker id | 10 | which generator produced it | **1,024** workers |
+| sequence | 12 | counter within the same millisecond on one worker | **4,096** ids per millisecond per worker |
+
+Consequences:
+- **Capacity**: one worker issues up to 4,096 ids per millisecond, about **4.1 million per second**; 1,024 workers together about **4.2 billion per second**. Far more than required.
+- **Uniqueness without coordination**: two workers differ in the worker bits; one worker never repeats a (timestamp, sequence) pair, as long as its clock never goes backwards and the sequence is handled correctly.
+- **Time ordering**: the timestamp occupies the **high bits**, so ids sort by time first. Ids made in the same millisecond on different workers sort by worker id (no meaningful order), and clock disagreement between machines can reorder ids by a few milliseconds: ids are **k-sortable** (roughly sorted), not strictly ordered.
+- A **custom epoch** (a recent starting date) rather than 1970 stretches the 69.7 years into the future.
+
+### The generator
+
+1. Read the clock in milliseconds.
+2. If the time equals the last time used, **increment the sequence**. If the sequence overflows (4,096 ids already issued this millisecond), **wait for the next millisecond**.
+3. If the time moved forward, **reset the sequence to 0**.
+4. If the time is **before** the last time used (the clock stepped backwards), **do not issue ids**: wait until it catches up, or fail the request.
+5. Pack the three fields into one integer and return it.
+
+### Assigning worker ids
+
+Ten bits means at most 1,024 concurrent workers, and **two live workers with the same id would generate duplicates**. Common approaches: a **coordination service** (ZooKeeper, etcd) hands each process a **leased** worker id when it starts and reclaims it if the process dies; a **static assignment** per host or pod in configuration; or a database table that allocates ids. The lease must make sure an id is never held by two processes at once, even after a network partition.
+
+## The simulation
+
+The program implements the generator with a **clock that the test controls** (so every run is deterministic) and runs four experiments:
+
+1. **Ten workers whose clocks disagree** by a few milliseconds, **100,000 ids** requested over about 2,500 ms of simulated time: are they unique, do they decode back into their fields, and how well would they work as database index keys compared with random ids?
+2. **Sequence overflow**: one worker asked for 10,000 ids when the clock barely moves.
+3. **The clock stepping back** by one millisecond, with and without the guard.
+4. **Random ids**: how likely are collisions for 32, 48, 64 and 122 random bits?
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+
+EPOCH = 1_700_000_000_000                 # custom epoch in ms (a fixed point in the past)
+TS_BITS, WORKER_BITS, SEQ_BITS = 41, 10, 12
+MAX_SEQ = (1 << SEQ_BITS) - 1
+
+
+class Snowflake:
+    """64-bit ids: 41 bits of milliseconds since the epoch | 10 bits worker id | 12 bits sequence within the millisecond."""
+    def __init__(self, worker, clock, guard=True):
+        self.worker, self.clock, self.guard = worker, clock, guard
+        self.last_ms, self.seq = -1, 0
+        self.waits = 0
+
+    def next_id(self):
+        ms = self.clock() - EPOCH
+        if self.guard and ms < self.last_ms:                    # the clock went backwards: never go back in time
+            while ms < self.last_ms:
+                ms = self.clock() - EPOCH
+                self.waits += 1
+        if ms == self.last_ms:
+            self.seq = (self.seq + 1) & MAX_SEQ
+            if self.seq == 0:                                   # 4096 ids already issued in this millisecond: wait for the next
+                while ms <= self.last_ms:
+                    ms = self.clock() - EPOCH
+                    self.waits += 1
+        else:
+            self.seq = 0
+        self.last_ms = ms
+        return (ms << (WORKER_BITS + SEQ_BITS)) | (self.worker << SEQ_BITS) | self.seq
+
+
+def decode(i):
+    return (i >> (WORKER_BITS + SEQ_BITS)) + EPOCH, (i >> SEQ_BITS) & ((1 << WORKER_BITS) - 1), i & MAX_SEQ
+
+
+class FakeClock:
+    """A clock we control, so the experiments are deterministic. Each call to now() can advance time a little."""
+    def __init__(self, start, tick_every):
+        self.t, self.calls, self.tick_every = start, 0, tick_every
+    def __call__(self):
+        self.calls += 1
+        if self.calls % self.tick_every == 0:
+            self.t += 1
+        return self.t
+
+
+def tail_share(ids):
+    """How well would these ids behave as an index key? For each new id, is it among the largest 1% of the ids so far
+    (a B-tree inserts at the hot right edge) or somewhere in the middle (it touches a random page)?"""
+    import bisect
+    sorted_so_far, hot = [], 0
+    for k, v in enumerate(ids):
+        pos = bisect.bisect_left(sorted_so_far, v)
+        if k >= 100 and pos >= len(sorted_so_far) * 0.99:
+            hot += 1
+        sorted_so_far.insert(pos, v)
+    return hot / (len(ids) - 100)
+
+
+if True:
+    # 1. ten workers whose clocks disagree by up to 3 ms; 100,000 requests spread over about 2,500 ms of real time
+    rnd = random.Random(3)
+    now = [EPOCH + 5000]
+    skew = [rnd.randint(-3, 3) for _ in range(10)]
+    workers = [Snowflake(w, (lambda w=w: now[0] + skew[w])) for w in range(10)]
+    ids = []
+    for k in range(100000):
+        now[0] = EPOCH + 5000 + k // 40                          # 40 requests arrive per millisecond
+        ids.append(workers[rnd.randrange(10)].next_id())
+    print(f"{len(ids):,} ids from 10 workers with clock skews {skew}: unique {len(set(ids)):,}, all fit in 63 bits: {max(ids) < 2 ** 63}")
+    t, w, s = decode(ids[12345])
+    print(f"id {ids[12345]} decodes to timestamp {t} ms, worker {w}, sequence {s}")
+    sample = ids[:20000]
+    rnd2 = random.Random(5)
+    print(f"index friendliness (share of inserts landing in the newest 1% of keys, 20,000 inserts): "
+          f"snowflake {tail_share(sample) * 100:.1f}%, random 63-bit {tail_share([rnd2.getrandbits(63) for _ in range(20000)]) * 100:.1f}%, auto-increment 100.0% (needs one central counter)")
+
+    # 2. one worker asked for 10,000 ids while the clock barely moves: the 12 bit sequence overflows and it must wait
+    slow = Snowflake(1, FakeClock(EPOCH + 9000, tick_every=5000))
+    got = [slow.next_id() for _ in range(10000)]
+    mss = {decode(i)[0] for i in got}
+    per_ms = max(sum(1 for i in got if decode(i)[0] == m) for m in mss)
+    print(f"10,000 ids needed {len(mss)} milliseconds with at most {per_ms} per millisecond (limit {MAX_SEQ + 1}); all distinct: {len(set(got)) == len(got)}; clock reads spent waiting: {slow.waits}")
+
+    # 3. the clock steps back by one millisecond (an NTP correction) and then recovers
+    def run(guard):
+        times = iter([EPOCH + 1000] * 3 + [EPOCH + 999] + [EPOCH + 1000] * 40)
+        g = Snowflake(7, lambda: next(times), guard=guard)
+        return [g.next_id() for _ in range(7)]
+    for guard in (False, True):
+        ids3 = run(guard)
+        print(f"clock stepped back 1 ms, guard {str(guard):5s}: {len(ids3)} ids issued, {len(set(ids3))} distinct, strictly increasing: {all(y > x for x, y in zip(ids3, ids3[1:]))}")
+
+    # 4. why not just random ids? the birthday problem
+    for bits, n in ((32, 100000), (48, 5000000), (64, 5000000), (122, 10 ** 12)):
+        expected = n * (n - 1) / 2 / 2 ** bits
+        if bits <= 32:
+            r = random.Random(bits)
+            seen, collisions = set(), 0
+            for _ in range(n):
+                v = r.getrandbits(bits)
+                collisions += v in seen
+                seen.add(v)
+            print(f"random {bits}-bit ids, {n:,} issued: expected collisions {expected:.2f}, simulated {collisions}")
+        else:
+            print(f"random {bits}-bit ids, {n:,} issued: expected collisions {expected:.2e}")
+`} />
+
+## What the output shows
+
+- **100,000 ids from 10 workers with skews of up to 3 ms: all 100,000 unique**, all within 63 bits. Decoding one id returns its timestamp, worker (4) and sequence (2): the fields really are in the number.
+- **Index friendliness.** Database indexes (B-trees) are fastest when new keys go to the **newest end** of the index, because that page stays in memory and pages fill up in order. In the experiment, **81.9% of Snowflake inserts landed among the newest 1% of keys**, against **1.1% for random 63-bit ids** (about what chance predicts) and 100% for a single auto-increment counter. The missing 18% are ids from workers whose clocks are a few milliseconds behind: **k-sortable** means *close to* time order. Random ids touch **random pages**, causing cache misses and page splits, which is the main practical reason to prefer time-ordered ids for primary keys.
+- **Sequence overflow.** Asked for 10,000 ids while the clock moved only every 5,000 reads, the worker produced them over **3 milliseconds, never more than 4,096 in one**, all distinct; it spent **1,807 clock reads waiting** for the next millisecond when the sequence ran out. The wait is the cost of the guarantee.
+- **The clock stepping back by 1 ms.** **Without the guard**, 7 requests produced **only 4 distinct ids**: when the clock went back and returned, the generator reissued (timestamp, sequence) pairs it had already used, so **3 duplicates**. **With the guard**, all 7 ids are distinct and strictly increasing. This is the most important correctness rule of the design: **never move backwards in time**.
+- **Random ids and the birthday problem.** With **32 random bits**, 100,000 ids are expected to produce about **1.16 collisions** (we saw 2). With **48 bits**, 5 million ids have about a **4.4%** chance of at least one collision. With **64 bits**, 5 million ids: about **7 in 10 million**. With **122 bits** (a version 4 UUID), even **a trillion ids give about 9 in 10^14**. So random ids are safe only when there are **enough bits**; the collision probability grows with the **square** of the number of ids issued.
+
+The skews, rates and seeds are fixed in the program, so these numbers reproduce exactly; the 81.9% figure depends on the chosen skew and request rate.
+
+## Clock problems in practice
+
+Everything depends on the **clock never going backwards on one worker**:
+- **NTP corrections** can step the clock back by milliseconds (or more). The guard in the generator waits for time to catch up; if the step is large (seconds), refuse to issue ids and alert.
+- Use a **monotonic clock** for measuring elapsed time within a process, combined with the wall clock at startup, so the generator itself is immune to wall-clock steps. Persist the **last used timestamp** so that a **restart** after a backwards step cannot reuse the past.
+- **Leap seconds and virtual machine pauses** cause surprises; test them.
+- **Skew between machines** is harmless for uniqueness (worker ids differ) and only affects **ordering** by a few milliseconds.
+
+## Other design points
+
+- **Where does it run?** Best as a **library inside each service instance** (no network call) with a leased worker id. Alternatively a small **ID service** that clients call, which adds a network hop but centralises worker-id management.
+- **Wasted capacity versus bit allocation**: if you have fewer workers but need more throughput, shift bits from the worker field to the sequence (for example 8 worker bits and 14 sequence bits). The layout is a design choice; the constraint is that the **total is 63 bits**.
+- **JavaScript clients**: numbers above 2^53 lose precision in JavaScript. Send 64-bit ids to browsers **as strings**.
+- **Security**: sequential ids leak **volume and timing** (a competitor can count your orders per day) and make **guessing neighbouring ids** possible. Never use ids as secrets or as the only access check; if exposure matters, expose a separate random public id.
+- **Extracting the time**: because the timestamp is embedded, "created after time T" becomes a **range query on the primary key**, with no separate timestamp index.
+- **Sharding by id**: the high bits are time, so partitioning by id range puts all new writes on one shard (a hot shard); hash the id (or the worker and sequence bits) when sharding by id ([sharding](/sd/databases-2/sharding-and-partitioning/)).
+
+## Trade-offs
+
+<TradeOffs caption="Choosing an id scheme" rows={[
+  { option: "Snowflake style 64-bit ids", pros: "Compact, time-ordered, coordination-free per id, high throughput", cons: "Needs unique worker ids and sound clocks; only roughly ordered", chooseWhen: "Large sharded systems that want numeric, sortable ids" },
+  { option: "UUID version 4", pros: "No infrastructure; collisions negligible (about 9e-14 for a trillion ids)", cons: "128 bits; random keys scatter across the index (1.1% hot-edge inserts in the demo)", chooseWhen: "Small systems and public identifiers" },
+  { option: "UUID version 7 or ULID", pros: "Time-ordered like Snowflake and coordination-free", cons: "128 bits; larger indexes and keys", chooseWhen: "You want sortable ids without worker-id management" },
+  { option: "Single database auto-increment", pros: "Simplest; strictly ordered", cons: "Bottleneck and single point of failure; no sharding", chooseWhen: "One database, modest scale" },
+  { option: "Ticket server issuing ranges", pros: "Simple; clients cache a range and issue locally", cons: "Gaps after restarts; ordering only per range", chooseWhen: "When a database is the one dependency you accept" },
+  { option: "Random ids with too few bits", pros: "Short", cons: "Collisions grow with the square of the number issued (about 1 per 100,000 at 32 bits)", chooseWhen: "Never for primary keys" },
+  { option: "Guarded generator (wait on backwards clock)", pros: "No duplicates after NTP steps (7 distinct of 7 in the demo)", cons: "Brief pauses; must handle large steps explicitly", chooseWhen: "Always" },
+  { option: "Unguarded generator", pros: "Slightly simpler", cons: "Silent duplicate ids after a clock step (3 of 7 in the demo)", chooseWhen: "Never" }
+]} />
+
+## Pitfalls
+
+- **Two processes with the same worker id** (after a bad configuration or a lease race): silent duplicates.
+- **Not guarding against clocks stepping backwards**, or forgetting to persist the last timestamp across restarts.
+- **Sequence overflow** not handled: ids wrap and repeat within a millisecond.
+- Using **random ids with too few bits** and trusting luck.
+- Assuming ids are **strictly** time-ordered across machines.
+- Sending 64-bit ids to **JavaScript as numbers**.
+- Treating sequential ids as **secure** or unguessable.
+- Sharding by **raw id range** and sending all new writes to one shard.
+- A **central id service** with no redundancy.
+- Choosing 128-bit ids by default and paying for the doubled index size without needing to.
+
+## What would you choose and why?
+
+An order system must generate ids for 200 million orders a day across three regions. The orders table is sharded by customer, order ids appear in URLs and support tickets, and the finance team wants "orders created between two timestamps" to be a cheap query. Which scheme do you pick, how do you assign worker ids across regions and containers that restart often, what do you do about public exposure of ids, and how would you monitor for clock problems in production?
+
+## Quiz
+
+<Quiz id="sd-m18-unique-id-generator" tags={["case-study", "unique-id", "snowflake", "clock-skew", "uuid"]} questions={[
+  { type: "mcq", q: "Why is the timestamp placed in the high bits of a Snowflake id?", options: ["It saves space", "So ids sort by creation time and new keys land at the newest end of an index", "To hide the worker id", "Because the sequence must come last"], answer: 1, explain: "81.9% of the demo's Snowflake inserts hit the newest 1% of keys, against 1.1% for random ids." },
+  { type: "mcq", q: "What must the generator do if the clock steps backwards?", options: ["Keep issuing ids with the older time", "Wait until the clock catches up (or refuse), because reusing past timestamps with a reset sequence can duplicate ids", "Reset the worker id", "Use random numbers"], answer: 1, explain: "Without the guard, 3 of 7 ids were duplicates in the demo." },
+  { type: "predict", q: "How many ids can one worker issue per second at most, with a 12-bit sequence that resets every millisecond?", code: "per_ms = 2 ** 12\nprint(per_ms * 1000)", options: ["4,096", "40,960", "4,096,000", "4,096,000,000"], answer: 2, explain: "4,096 per millisecond times 1,000 milliseconds is about 4.1 million per second per worker." },
+  { type: "mcq", q: "Why are 32-bit random ids unsafe for 100,000 records?", options: ["Random numbers repeat in order", "The birthday problem: expected collisions grow with the square of the number of ids, giving about 1.2 expected collisions at 100,000", "They are too long", "They cannot be stored"], answer: 1, explain: "The demo expected 1.16 collisions and observed 2. At 122 bits the probability is negligible." },
+  { type: "multi", q: "Which problems can break uniqueness in a Snowflake system?", options: ["Two live workers sharing a worker id", "A clock stepping back without a guard", "Unhandled sequence overflow within a millisecond", "Two workers having different clock skews"], answer: [0, 1, 2], explain: "Skew between workers only affects approximate ordering; their worker bits differ, so ids stay unique." },
+  { type: "mcq", q: "Why send 64-bit ids to browsers as strings?", options: ["Strings sort faster", "JavaScript numbers are doubles that lose precision above 2^53", "Strings are shorter", "Browsers cannot parse digits"], answer: 1, explain: "A large id converted to a JavaScript number can be silently rounded to a different id." }
+]} />
