@@ -1,0 +1,280 @@
+---
+title: "Case Study: Design a Proximity Service for Nearby Places and Friends"
+track: sd
+module: case-studies-core-services
+order: 15
+difficulty: medium
+estMinutes: 50
+prerequisites: ["sd/databases-2/sharding-and-partitioning", "sd/caching/redis-memcached-and-cdn-caching", "sd/networking-and-apis/real-time-communication"]
+tags: [case-study, proximity, geohash, quadtree, geospatial, nearby-search, location-updates, grid-index]
+type: case-study
+furtherReading:
+  - title: "Wikipedia, Geohash"
+    url: https://en.wikipedia.org/wiki/Geohash
+  - title: "Google, S2 Geometry Library: the S2 cells"
+    url: http://s2geometry.io/
+  - title: "Uber, H3: Uber's hexagonal hierarchical spatial index"
+    url: https://h3geo.org/
+  - title: "Redis documentation, Geospatial indexes (GEOADD and GEOSEARCH)"
+    url: https://redis.io/docs/latest/develop/data-types/geospatial/
+---
+
+## The problem
+
+Design a **proximity service**: given a location, find the **places** (restaurants, shops, petrol stations) within a radius, and, in a second flavour, find which of my **friends are nearby** right now. The same building block, a **spatial index**, appears in ride hailing, delivery, dating apps and games.
+
+Two very different workloads hide inside this problem:
+
+- **Static places**: hundreds of millions of businesses whose locations **rarely change**. Read-heavy; the index can be rebuilt offline.
+- **Moving users**: people whose locations change **every few seconds**. Write-heavy; the index must absorb constant updates and forget stale ones.
+
+## Requirements
+
+**Functional**
+- Search places within a radius of a point (for example "coffee within 1 km"), filtered by category, ordered by distance.
+- Add, update and remove places.
+- **Nearby friends**: show friends within some distance, updating as people move.
+
+**Non-functional**
+- Search under 100 milliseconds; high availability.
+- Handle skewed density (a dense city centre versus empty countryside).
+- Location updates must scale to millions of active users.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Places | 200 million | about 200 million rows, tens of GB |
+| Place searches | 100,000 per second at peak | read-heavy; most results can be cached by cell |
+| Active users sharing location | 10 million, each updating every 30 seconds | about 333,000 location updates per second |
+| Nearby friends fan-out | 400 friends each, a fraction online and close | each update must reach only the few friends who are near |
+
+The places table is **small** and the places workload is a **read problem**. The user locations are a **write problem**: 333,000 writes per second of small, short-lived records.
+
+## Why not just query the database?
+
+The first idea is two numbers per place, `latitude` and `longitude`, with a query "latitude between a and b AND longitude between c and d" (a bounding box), then filter by true distance. An index on latitude finds a **band across the whole world**, an index on longitude finds another band, and the database must **intersect two huge sets**. A normal B-tree handles one dimension; geography has two. We need an index that **maps two dimensions to one while keeping nearby points near each other**.
+
+## Spatial indexes
+
+### Geohash: a grid you can sort
+
+A **geohash** encodes a location as a short string by **repeatedly halving** the longitude and latitude ranges and interleaving the bits (5 bits per character). Each extra character makes the cell about 32 times smaller. Cells sharing a **prefix** are nested: "dr5ru" contains "dr5ru7". A prefix lookup (`LIKE 'dr5ru%'`) on an ordinary indexed column therefore returns everything in a cell. That makes geohash easy: **no special database needed**.
+
+### Other indexes
+
+- **Quadtree**: recursively split a map region into four quadrants **only where there are too many points** (for example more than 100 places), so dense cities get small cells and the countryside large ones. Built in memory from the data. Good for **uneven density**; needs rebuilding or careful updates for moving points.
+- **S2 and H3**: cells on a **sphere** (squares in S2, hexagons in H3), hierarchical like geohash but without its distortions near the poles and with more uniform neighbours. Used by large production systems.
+- **R-trees** (in PostGIS and others): bounding rectangles organised in a tree; excellent for general geometry inside one database.
+
+## The boundary problem
+
+A cell is a **fixed rectangle**; the search circle is not. Two problems:
+
+1. A query point near the **edge of its cell** has nearby places in the **neighbouring cell**, so you must search the cell **and its 8 neighbours**.
+2. That works only if **the cell is at least as large as the search radius**. If cells are smaller than the radius, even the 8 neighbours do not cover the circle, and you must look further out (or choose a coarser precision).
+
+After fetching candidates from the cells, **filter by true distance** (the haversine great-circle formula), because a cell is only an approximation of a circle.
+
+## The simulation
+
+The program implements geohash encoding and decoding, finds the **8 neighbours** of a cell, and runs a real experiment: **10,000 places** scattered over about 100 by 100 kilometres, **100 random query points**, a **1 km** radius. For each query it compares the exact answer (checking every place) with a **cell-only lookup** and a **cell-plus-8-neighbours lookup**, at two geohash precisions, counting how many queries returned an **incomplete** result and how many candidates had to be checked.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import math
+import random
+from collections import defaultdict
+
+BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz"
+
+
+def geohash(lat, lon, precision):
+    """Interleave longitude and latitude bits (longitude first), 5 bits per character."""
+    lat_lo, lat_hi, lon_lo, lon_hi = -90.0, 90.0, -180.0, 180.0
+    bits, even, out, ch = 0, True, "", 0
+    while len(out) < precision:
+        if even:
+            mid = (lon_lo + lon_hi) / 2
+            if lon >= mid:
+                ch = ch * 2 + 1
+                lon_lo = mid
+            else:
+                ch = ch * 2
+                lon_hi = mid
+        else:
+            mid = (lat_lo + lat_hi) / 2
+            if lat >= mid:
+                ch = ch * 2 + 1
+                lat_lo = mid
+            else:
+                ch = ch * 2
+                lat_hi = mid
+        even = not even
+        bits += 1
+        if bits == 5:
+            out += BASE32[ch]
+            bits, ch = 0, 0
+    return out
+
+
+def cell_size_km(precision, lat=0.0):
+    """Width and height of a geohash cell in kilometres at a latitude."""
+    bits = precision * 5
+    lon_bits, lat_bits = (bits + 1) // 2, bits // 2
+    h = 180.0 / 2 ** lat_bits * 111.19
+    w = 360.0 / 2 ** lon_bits * 111.19 * math.cos(math.radians(lat))
+    return w, h
+
+
+def decode_bounds(h):
+    lat_lo, lat_hi, lon_lo, lon_hi, even = -90.0, 90.0, -180.0, 180.0, True
+    for c in h:
+        v = BASE32.index(c)
+        for i in range(4, -1, -1):
+            bit = (v >> i) & 1
+            if even:
+                mid = (lon_lo + lon_hi) / 2
+                lon_lo, lon_hi = (mid, lon_hi) if bit else (lon_lo, mid)
+            else:
+                mid = (lat_lo + lat_hi) / 2
+                lat_lo, lat_hi = (mid, lat_hi) if bit else (lat_lo, mid)
+            even = not even
+    return lat_lo, lat_hi, lon_lo, lon_hi
+
+
+def neighbours(h):
+    """The cell itself and its 8 neighbours, found by stepping one cell width or height from the cell centre."""
+    lat_lo, lat_hi, lon_lo, lon_hi = decode_bounds(h)
+    dlat, dlon = lat_hi - lat_lo, lon_hi - lon_lo
+    clat, clon = (lat_lo + lat_hi) / 2, (lon_lo + lon_hi) / 2
+    out = set()
+    for a in (-1, 0, 1):
+        for b in (-1, 0, 1):
+            la, lo = clat + a * dlat, clon + b * dlon
+            if -90 < la < 90:
+                out.add(geohash(la, ((lo + 180) % 360) - 180, len(h)))
+    return out
+
+
+def distance_km(a, b):
+    """Great-circle distance (haversine)."""
+    la1, lo1, la2, lo2 = map(math.radians, (a[0], a[1], b[0], b[1]))
+    d = math.sin((la2 - la1) / 2) ** 2 + math.cos(la1) * math.cos(la2) * math.sin((lo2 - lo1) / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(d))
+
+
+if True:
+    print("geohash of Times Square (40.758, -73.9855):", [geohash(40.758, -73.9855, p) for p in (4, 5, 6, 7)])
+    for p in (4, 5, 6, 7):
+        w, h = cell_size_km(p, 40.758)
+        print(f"  precision {p}: cell about {w:.2f} km wide and {h:.2f} km high at this latitude")
+
+    # 10,000 places scattered over a region of roughly 100 km x 100 km around a city
+    rnd = random.Random(6)
+    n, trials, radius = 10000, 100, 1.0
+    places = [(40.0 + rnd.uniform(-0.45, 0.45), -74.0 + rnd.uniform(-0.6, 0.6)) for _ in range(n)]
+    queries = [(40.0 + rnd.uniform(-0.3, 0.3), -74.0 + rnd.uniform(-0.4, 0.4)) for _ in range(trials)]
+    truths = [{i for i, p in enumerate(places) if distance_km(q, p) <= radius} for q in queries]      # brute force, once
+    print(f"brute force finds on average {sum(len(t) for t in truths) / trials:.1f} places within {radius:.0f} km of a query point")
+    for precision in (5, 6):
+        index = defaultdict(list)
+        for i, p in enumerate(places):
+            index[geohash(p[0], p[1], precision)].append(i)
+        wrong_cell_only, wrong_with_neighbours, scanned = 0, 0, 0
+        for q, truth in zip(queries, truths):
+            own = index.get(geohash(q[0], q[1], precision), [])
+            cell_only = {i for i in own if distance_km(q, places[i]) <= radius}
+            cand = [i for c in neighbours(geohash(q[0], q[1], precision)) for i in index.get(c, [])]
+            found = {i for i in cand if distance_km(q, places[i]) <= radius}
+            scanned += len(cand)
+            wrong_cell_only += cell_only != truth
+            wrong_with_neighbours += found != truth
+        w, h = cell_size_km(precision, 40.0)
+        print(f"precision {precision} (cell about {w:.1f} x {h:.1f} km), {radius:.0f} km search, {trials} queries over {n:,} places:")
+        print(f"  own cell only: incomplete results in {wrong_cell_only} queries | own cell plus 8 neighbours: incomplete in {wrong_with_neighbours} | "
+              f"average candidates checked {scanned / trials:,.0f} (instead of {n:,})")
+`} />
+
+## What the output shows
+
+- **The geohash** of Times Square at precisions 4 to 7 is dr5r, dr5ru, dr5ru7, dr5ru7v: each longer string is a **prefix extension** of the previous one, i.e. a smaller cell inside it.
+- **Cell sizes at this latitude**: precision 5 is about **3.7 by 4.9 km**, precision 6 about **0.93 by 0.61 km**, precision 7 about 0.12 by 0.15 km. (Cell width shrinks with latitude because longitude lines converge.)
+- Brute force finds on average **3.1 places** within 1 km of a query point.
+- **Precision 5** (cells larger than the 1 km radius):
+  - **own cell only** gave an **incomplete** result in **34 of 100** queries (the query was near the cell's edge and some places were in the next cell);
+  - **own cell plus 8 neighbours** was **complete in all 100**, checking **about 160 candidates instead of 10,000**.
+- **Precision 6** (cells **smaller** than the radius: 0.93 by 0.61 km against 1 km):
+  - **own cell only** was incomplete in **92 of 100** queries;
+  - **even with the 8 neighbours**, **21 of 100** were still **incomplete**, because the 3 by 3 block of cells (about 2.8 by 1.8 km) does not always reach a full kilometre in every direction from a point near the edge of the centre cell. This checked only about 5 candidates, which is cheap and wrong.
+
+The lesson is a rule, not a number: **choose the cell size at least as large as the search radius, then search the cell and its 8 neighbours, then filter by true distance.** For several radii, either keep one index per precision or search more rings of cells at a finer precision. The counts come from one seeded random data set; the rule does not depend on it.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  U["Client"] --> LB["Load balancer"]
+  LB --> LS["Location service (nearby search)"]
+  LB --> PS["Place service (add, update, details)"]
+  LS --> RC[("Cache: cell id to place ids")]
+  LS --> GI[("Geo index: place id, geohash, category")]
+  PS --> DB[("Places database (primary plus replicas)")]
+  PS -->|"changes"| GI
+  U2["Moving users"] --> WS["WebSocket servers"]
+  WS --> MI[("In-memory location store: cell to users, with expiry")]
+  WS --> PUB["Pub/sub channel per user"]
+  MI --> WS`} caption="Static places go through a cached cell index; moving users are written to an in-memory store and delivered over channels" />
+
+### Static places
+
+- Store each place with its **geohash at a chosen precision** (or several precisions) in an indexed column or a separate **geo index table** (`geohash`, `place_id`).
+- A search computes the query's cell and its **8 neighbours**, fetches the places in those 9 cells (an indexed lookup each), filters by exact distance and category, ranks and returns. Cache **cell id to list of place ids**: a given cell and category is requested again and again, and the data changes rarely.
+- **Shard** the index by geohash prefix (spatial locality: a query touches one or two shards) but beware **hot cells** in dense cities; use finer cells or split dense areas ([sharding](/sd/databases-2/sharding-and-partitioning/)). Replicas serve the read traffic.
+- Place updates (new business, closed business) flow to the database first, then to the index; the index tolerates a short delay.
+
+### Moving users and nearby friends
+
+- Each client sends its location every few seconds over a **WebSocket** ([real-time communication](/sd/networking-and-apis/real-time-communication/)).
+- The server stores the **latest location** per user in an **in-memory store with a time-to-live** (about a minute): a user who stops reporting disappears automatically. A durable database is not needed for current locations; keep history only if a feature requires it.
+- **Nearby friends** is a fan-out problem: when a user moves, the server looks up that user's **friends who are online** (a small subset of 400), checks distances, and **publishes** the new location to the **channels of friends who are within the radius**. Do not scan all users; start from the **friend list**, which is small.
+- **Reduce update traffic**: send an update only if the user moved more than a threshold or enough time passed; clients can batch.
+- For general "who is near me" among strangers (ride hailing, dating), keep an in-memory **cell to users** map: add a user to the cell of their current location and remove them from the previous one when the cell changes ([ride-hailing case study](/sd/case-studies-core-services/design-a-ride-hailing-service/)).
+
+## Trade-offs
+
+<TradeOffs caption="Choosing a spatial index" rows={[
+  { option: "Geohash in an ordinary indexed column", pros: "Trivial to build; works in any database; prefix queries; easy sharding by prefix", cons: "Rectangular cells distort near the poles; boundary handling needed; uneven density", chooseWhen: "A first version, key-value stores, Redis" },
+  { option: "Quadtree", pros: "Adapts to density: small cells in cities, large in the countryside", cons: "Mostly in-memory; moving points need updates or rebuilds", chooseWhen: "Heavily skewed static data" },
+  { option: "S2 or H3 cells", pros: "Uniform neighbours, good on a sphere, hierarchical, widely proven", cons: "A library dependency and a new concept", chooseWhen: "Global products at large scale" },
+  { option: "R-tree (PostGIS)", pros: "Rich geometry queries inside the database", cons: "Harder to scale horizontally than a key lookup", chooseWhen: "Moderate scale and complex geometry" },
+  { option: "Bounding box on two B-trees", pros: "No new concepts", cons: "Intersects two huge ranges; slow at scale", chooseWhen: "Tiny datasets only" },
+  { option: "Cell no smaller than the radius, plus 8 neighbours", pros: "Complete results with few candidates (160 against 10,000 in the demo)", cons: "More candidates than a tight search; precision must match the radius", chooseWhen: "Always as the rule of thumb" },
+  { option: "Cell smaller than the radius with only 8 neighbours", pros: "Very few candidates", cons: "Incomplete results (21 of 100 queries in the demo)", chooseWhen: "Never without searching more rings" },
+  { option: "In-memory store with TTL for moving users", pros: "Handles 333,000 updates per second; stale users vanish", cons: "Not durable (and does not need to be)", chooseWhen: "Current locations" }
+]} />
+
+## Pitfalls
+
+- Searching **only the query's own cell** (34 of 100 incomplete in the demo at the best precision).
+- Choosing cells **smaller than the radius** and still trusting the 8 neighbours.
+- Forgetting the **final exact distance filter**.
+- Treating **cells as equal-sized everywhere** (they shrink towards the poles) or as uniformly populated (a city centre cell can hold a million places).
+- Handling **antimeridian and pole** wrap-around incorrectly when finding neighbours.
+- Writing every moving-user update to a **durable database**.
+- Scanning **all users** to find nearby friends instead of starting from the friend list.
+- No **expiry** for stale locations.
+- Mixing **degrees and kilometres** (a degree of longitude is shorter than a degree of latitude except at the equator).
+- Exposing **precise locations** of users without privacy controls.
+
+## What would you choose and why?
+
+Product wants "show restaurants within 5 km of me" in a country where Tokyo has a million restaurants in a small area and the north has almost none, and also "show who is within 500 metres of me" for a nearby-chat feature. Which index and cell size do you use for each, how do you handle the dense-city hot cells, and what privacy rules do you put on location sharing before launch?
+
+## Quiz
+
+<Quiz id="sd-m17-proximity-service" tags={["case-study", "geohash", "proximity", "spatial-index", "location"]} questions={[
+  { type: "mcq", q: "Why is a bounding box query on separate latitude and longitude indexes slow at scale?", options: ["SQL cannot compare numbers", "Each B-tree index finds a huge band across the world and the database must intersect two large sets", "Latitude is not indexable", "It returns wrong distances"], answer: 1, explain: "Two-dimensional data needs a spatial index that maps nearby points to nearby keys, such as geohash." },
+  { type: "mcq", q: "Why must a nearby search look at the neighbouring cells as well as the query's own cell?", options: ["For redundancy", "A query point near a cell's edge has close places in the adjacent cell (34 of 100 queries were incomplete with the own cell only)", "Neighbouring cells are cached", "Geohash requires it"], answer: 1, explain: "The cell is a fixed rectangle and the search area is a circle that crosses cell boundaries." },
+  { type: "predict", q: "A geohash cell is about 0.93 km by 0.61 km and the search radius is 1 km. Is the cell plus its 8 neighbours guaranteed to cover the search circle?", code: "# 3 x 3 block of cells: about 2.8 km x 1.8 km\n# query point may be near the edge of the centre cell\n# distance from the point to the block's far edge can be less than 1 km", options: ["Yes, always", "No: the demo missed places in 21 of 100 queries; use cells at least as large as the radius", "Only at the equator", "Only for category searches"], answer: 1, explain: "Choose the precision so that cell size is at least the search radius, then search the 3 x 3 block and filter by distance." },
+  { type: "mcq", q: "Why store moving users' latest locations in an in-memory store with a time-to-live?", options: ["Because disks are slow to install", "Updates arrive at hundreds of thousands per second, only the latest location matters, and users who stop reporting should disappear automatically", "To keep history forever", "To avoid WebSockets"], answer: 1, explain: "Current locations are short-lived data that do not need durable storage." },
+  { type: "multi", q: "Which are sound steps for the nearby friends feature?", options: ["Start from the user's friend list, not from all users", "Publish a location update only to friends who are online and within the radius", "Send an update only when the user moved by more than a threshold", "Scan every user in the system on each update"], answer: [0, 1, 2], explain: "Fan-out from a small friend list keeps work proportional to the friends, not to the whole user base." },
+  { type: "mcq", q: "When is a quadtree a better fit than a fixed geohash grid?", options: ["When the data is uniformly spread", "When density is very uneven, since it splits only crowded areas into smaller cells", "When data changes every second", "When there is no memory"], answer: 1, explain: "A quadtree adapts cell size to density; a fixed grid gives a dense city centre cells with a million places." }
+]} />
