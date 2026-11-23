@@ -1,0 +1,306 @@
+---
+title: "Case Study: Design a Real-Time Leaderboard"
+track: sd
+module: case-studies-data-and-transactions
+order: 10
+difficulty: medium
+estMinutes: 50
+prerequisites: ["sd/caching/redis-memcached-and-cdn-caching", "sd/databases-2/sharding-and-partitioning", "sd/case-studies-data-and-transactions/design-an-ad-click-aggregation-system"]
+tags: [case-study, leaderboard, ranking, sorted-set, redis, fenwick-tree, skip-list, sharding, top-k]
+type: case-study
+furtherReading:
+  - title: "Redis documentation, Sorted sets"
+    url: https://redis.io/docs/latest/develop/data-types/sorted-sets/
+  - title: "Pugh, Skip Lists: A Probabilistic Alternative to Balanced Trees (1990)"
+    url: https://epaperpress.com/sortsearch/download/skiplist.pdf
+  - title: "Fenwick, A New Data Structure for Cumulative Frequency Tables (1994)"
+    url: https://onlinelibrary.wiley.com/doi/10.1002/spe.4380240306
+  - title: "cp-algorithms, Fenwick Tree"
+    url: https://cp-algorithms.com/data_structures/fenwick.html
+---
+
+## The problem
+
+Design a **real-time leaderboard** for a game or app with a hundred million players: show the **top 100**, show **any player's rank**, show the **players just above and below me**, and update everything within a second or two of a score change. Variants: daily, weekly and all-time boards, boards among **friends**, and boards per country.
+
+It sounds like "sort the players by score", and the trap is that **sorting is too slow and a database query is too slow**: "what is my rank?" means counting everyone with a higher score, and a million players changing scores every minute make any scan-based approach collapse. The design question is choosing a **data structure that answers rank, top-K and neighbours in logarithmic time**, and deciding when one machine is enough.
+
+## Requirements
+
+**Functional**
+- Update a player's score (set, or add points).
+- **Top K** players (for example 100) with their scores.
+- **Rank of a player** (1 is best); players with equal scores share a rank or are ordered by a tie-break rule.
+- **Players around me**: the 5 above and 5 below.
+- Several boards: all-time, daily, weekly, by country, among friends.
+
+**Non-functional**
+- Updates visible in **under 2 seconds**; reads in **milliseconds**.
+- Handle bursts (a tournament ends and everybody's scores change).
+- Durable: a cache failure must not lose scores.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Players | 100 million | |
+| Entry size | 8 bytes id + 8 bytes score, about 100 bytes with in-memory structure overhead | about 1.6 GB raw, about 10 GB in a typical in-memory sorted set |
+| Score updates | 50,000 per second at peak | one in-memory node handles on the order of 100,000 operations per second |
+| Reads | 200,000 per second at peak (top lists are cached) | read replicas |
+
+The key observation: **a whole leaderboard of 100 million players fits in the memory of one ordinary server** (about 10 GB). The first design is therefore **one in-memory sorted structure** with replicas, not a sharded database. Sharding is for **more boards, more players or more traffic than one node can handle**.
+
+## The data structure is the design
+
+What operations must be fast? **Update a score**, **rank of a player**, **top K**, **range around a rank**. Three approaches, compared in the simulation below:
+
+| structure | rank query | score update | notes |
+| --- | --- | --- | --- |
+| **Scan everyone** (hash map of scores) | O(n): count players with a higher score | O(1) | what a naive SQL "count where score greater than mine" does |
+| **Sorted array** | O(log n) by binary search | **O(n)**: inserting shifts the tail | fine for a read-only board |
+| **Balanced tree or skip list with order statistics** | O(log n) | O(log n) | the general answer; **Redis sorted sets** use a **skip list plus a hash map** |
+| **Fenwick tree over score buckets** | O(log S) | O(log S) | when scores are **bounded integers** (S distinct values); cost independent of the number of players |
+
+A **Fenwick tree** (binary indexed tree) stores, for each score, how many players have it, so that "how many players have a score above mine" is a **prefix sum** computed by walking about log2(S) tree nodes. A score update is two such walks (remove at the old score, add at the new). The number of players does not appear in the cost at all. It needs **bounded integer scores**; for floating point or huge ranges, use a skip list or tree, or bucket the scores.
+
+<Diagram kind="mermaid" code={`flowchart LR
+  G["Game servers"] -->|"score events"| K[("Durable log")]
+  K --> W["Leaderboard writer (idempotent, ordered per player)"]
+  W --> R[("In-memory sorted set: board:all, board:2026-11-23, board:week-47")]
+  K --> DB[("Database of record: player scores")]
+  R -->|"replicate"| RR["Read replicas"]
+  API["Leaderboard API"] --> RR
+  API --> C["Cache: top 100 for 1 second"]
+  DB -.->|"rebuild after failure"| R`} caption="Scores are durable in a log and a database; the in-memory sorted set is a fast, rebuildable index" />
+
+## The simulation
+
+The program implements the three approaches (the scan, a sorted list, and a Fenwick tree) behind the same interface and does three things:
+1. **Cross-checks them**: 2,000 players, 5,000 random score changes, comparing rank and top-5 answers across all three every ten changes.
+2. **Counts the work**: 20,000 players with scores up to one million; then 1,000 rank queries and 1,000 score updates on each structure. "Steps" are comparisons, shifted list elements and tree nodes touched.
+3. **Merges a sharded top 10**: players are hashed over 8 shards, each shard keeps its own best 10, and the merged answer is compared with the global one.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import bisect
+import heapq
+import math
+import random
+import zlib
+
+
+class NaiveBoard:
+    """A dictionary of scores. Rank = count how many players have a higher score: a scan of everyone."""
+    def __init__(self):
+        self.score = {}
+        self.steps = 0
+    def set(self, user, s):
+        self.score[user] = s
+        self.steps += 1
+    def rank(self, user):
+        me = self.score[user]
+        self.steps += len(self.score)
+        return 1 + sum(1 for v in self.score.values() if v > me)
+    def top(self, k):
+        self.steps += len(self.score)
+        return sorted(self.score, key=lambda u: (-self.score[u], u))[:k]
+
+
+class SortedListBoard:
+    """Keys (-score, user) kept in a sorted list. Rank is a binary search, but an insert shifts the tail of the list."""
+    def __init__(self):
+        self.keys, self.score = [], {}
+        self.steps = 0
+    def set(self, user, s):
+        if user in self.score:
+            i = bisect.bisect_left(self.keys, (-self.score[user], user))
+            self.steps += math.ceil(math.log2(len(self.keys) + 1)) + (len(self.keys) - i)
+            del self.keys[i]
+        self.score[user] = s
+        j = bisect.bisect_left(self.keys, (-s, user))
+        self.steps += math.ceil(math.log2(len(self.keys) + 1)) + (len(self.keys) - j)       # elements shifted by the insert
+        self.keys.insert(j, (-s, user))
+    def rank(self, user):
+        self.steps += math.ceil(math.log2(len(self.keys) + 1))
+        return 1 + bisect.bisect_left(self.keys, (-self.score[user], ""))                   # players with a strictly higher score
+    def top(self, k):
+        self.steps += k
+        return [u for _, u in self.keys[:k]]
+
+
+class FenwickBoard:
+    """Scores are integers in [0, max_score]. A Fenwick tree counts players per score, so the number of players
+    above a score is a prefix sum: O(log max_score) for rank and for each update, whatever the number of players."""
+    def __init__(self, max_score):
+        self.size = max_score + 2
+        self.tree = [0] * (self.size + 1)
+        self.score, self.by_score = {}, {}
+        self.steps = 0
+    def _add(self, s, d):
+        i = self.size - 1 - s + 1                              # flip so a prefix sum counts the HIGHER scores
+        while i <= self.size:
+            self.tree[i] += d
+            self.steps += 1
+            i += i & -i
+    def _prefix(self, s):                                      # players with score strictly above s
+        i, total = self.size - 1 - s, 0
+        while i > 0:
+            total += self.tree[i]
+            self.steps += 1
+            i -= i & -i
+        return total
+    def set(self, user, s):
+        if user in self.score:
+            old = self.score[user]
+            self._add(old, -1)
+            self.by_score[old].discard(user)
+        self.score[user] = s
+        self._add(s, +1)
+        self.by_score.setdefault(s, set()).add(user)
+    def rank(self, user):
+        return 1 + self._prefix(self.score[user])
+    def top(self, k):
+        out = []
+        for s in sorted(self.by_score, reverse=True):
+            self.steps += 1
+            for u in sorted(self.by_score[s]):
+                out.append(u)
+                if len(out) == k:
+                    return out
+        return out
+
+
+if True:
+    rnd = random.Random(4)
+    # 1. do the three implementations agree? 2,000 players, 5,000 score changes, rank queries checked as we go
+    boards = [NaiveBoard(), SortedListBoard(), FenwickBoard(10000)]
+    users = [f"p{i}" for i in range(2000)]
+    agree, checks = True, 0
+    for step in range(5000):
+        u, s = rnd.choice(users), rnd.randint(0, 10000)
+        for b in boards:
+            b.set(u, s)
+        if step % 10 == 0:
+            q = rnd.choice(list(boards[0].score))
+            ranks = {b.rank(q) for b in boards}
+            tops = {tuple(b.top(5)) for b in boards}
+            agree &= len(ranks) == 1 and len(tops) == 1
+            checks += 1
+    print(f"naive, sorted list and Fenwick agree on {checks} rank and top-5 checks: {agree}")
+
+    # 2. how much work does each do? 20,000 players, then 1,000 rank queries and 1,000 score updates
+    n = 20000
+    sl, fw = SortedListBoard(), FenwickBoard(1000000)
+    for i in range(n):
+        s = rnd.randint(0, 1000000)
+        sl.set(f"p{i}", s)
+        fw.set(f"p{i}", s)
+    for name, b in (("naive scan", None), ("sorted list", sl), ("fenwick tree", fw)):
+        q = [f"p{rnd.randrange(n)}" for _ in range(1000)]
+        up = [(f"p{rnd.randrange(n)}", rnd.randint(0, 1000000)) for _ in range(1000)]
+        if b is None:
+            print(f"{name:13s} rank query: {n:>7,} steps | score update: 1 step (but every rank needs a full scan)")
+            continue
+        b.steps = 0
+        for u in q:
+            b.rank(u)
+        r = b.steps / 1000
+        b.steps = 0
+        for u, s in up:
+            b.set(u, s)
+        print(f"{name:13s} rank query: {r:>7,.1f} steps | score update: {b.steps / 1000:>9,.1f} steps")
+
+    # 3. a sharded top-K: each shard keeps only its own best K and the results are merged
+    K, shards = 10, 8
+    scores = {f"p{i}": rnd.randint(0, 1000000) for i in range(n)}
+    parts = [dict() for _ in range(shards)]
+    for u, s in scores.items():
+        parts[zlib.crc32(u.encode()) % shards][u] = s
+    local = [heapq.nlargest(K, p.items(), key=lambda kv: (kv[1], kv[0])) for p in parts]
+    merged = heapq.nlargest(K, [kv for part in local for kv in part], key=lambda kv: (kv[1], kv[0]))
+    exact = heapq.nlargest(K, scores.items(), key=lambda kv: (kv[1], kv[0]))
+    print(f"sharded top {K}: merged result equals the global top {K}: {merged == exact} (examined {shards * K} candidates instead of {n:,} players)")
+`} />
+
+## What the output shows
+
+- **All three agree** on 500 rank and top-5 checks: the fast structures compute the same answers as the obviously correct scan.
+- **Work per operation** with 20,000 players:
+
+| structure | steps per rank query | steps per score update |
+| --- | --- | --- |
+| scan everyone | 20,000 | 1 (but every rank query needs the full scan) |
+| sorted list | 15.0 | **20,360.2** |
+| Fenwick tree | **9.9** | **20.0** |
+
+- The **sorted list** answers rank queries cheaply (a binary search, 15 steps) but every **update shifts, on average, about as many elements as there are players** (20,360 steps), so it cannot absorb 50,000 updates per second at scale. (A list shift is a fast memory move, so it is much cheaper in time than 20,000 comparisons, but it still grows linearly with the number of players.)
+- The **Fenwick tree** needs about **10 steps per rank query and 20 per update** and **would not change if there were 200 million players**; its cost depends on the **number of distinct score values** (one million here, so about 20 levels), not on the number of players.
+- **Sharded top 10**: each of 8 shards returned its best 10, and **merging those 80 candidates gave exactly the global top 10** (`True`), instead of examining all 20,000 players. This works because **the global top K is always contained in the union of the shards' top Ks**.
+
+The steps are counted operations, not measured times, and the data are random; real timings depend on memory layout and implementation.
+
+## Production design with Redis
+
+A **Redis sorted set** (a skip list plus a hash table) provides exactly these operations in O(log n):
+- `ZADD board score player` to set a score, and `ZINCRBY` to add points.
+- `ZREVRANGE board 0 99 WITHSCORES` for the top 100.
+- `ZREVRANK board player` for a player's rank.
+- Players around me: take the rank, then `ZREVRANGE` over rank minus 5 to rank plus 5.
+
+Design details:
+- **Ties**: a sorted set orders equal scores by member name, which is arbitrary. To rank ties fairly (the player who reached the score first ranks higher), **encode the tie-break into the score**, for example score times 2^20 plus (a maximum timestamp minus the time reached), as one number.
+- **Several boards**: separate keys per period (`board:daily:2026-11-23`, `board:weekly:47`); old keys expire or are deleted. A new period starts empty; **all-time** is a separate key updated alongside.
+- **Friends board**: fetch the player's friends' scores (`ZSCORE` per friend, or a pipeline) and sort a few hundred values in the application; do not build a sorted set per user.
+- **Country boards**: one sorted set per country (and a global one), updated together.
+- **Durability**: the sorted set is a **rebuildable index**. Scores live in the durable log and the database; after a failure, rebuild the board from the database (a few minutes for 100 million rows) or restore a snapshot and replay the log tail. Make the writer **idempotent** so replay does not double count points ([delivery semantics](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)).
+- **Cache the top 100** for a second or two: it is the hottest read, and every client in the world asks for the same list.
+
+## When one node is not enough
+
+If a single sorted set cannot hold or serve the board, shard it. Two options:
+
+| sharding | rank query | top K | updates |
+| --- | --- | --- | --- |
+| **By player (hash)** | needs a count from every shard: sum of the number of players above the score in each shard (scatter-gather) | merge each shard's top K (as in the simulation) | one shard per update, spread evenly |
+| **By score range** | exact: the shard owning the score range, plus the **total counts** of the shards above it | read the top shard (and the next if needed) | a player may move between shards when their score crosses a range; hot top shard if scores bunch up |
+
+For a **very large** board, an **approximate rank** is often acceptable: keep a **histogram of players per score bucket** (cheap and shardable) and report "you are in the top 3%" or a rank estimate for everyone outside the top few thousand, with **exact** ranks only for the top. Players do not care whether they are 4,201,337th or 4,201,402nd.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions for a leaderboard" rows={[
+  { option: "One in-memory sorted set with replicas", pros: "Simple; O(log n) for everything; fits 100 million players in about 10 GB", cons: "A single write node; bounded by one machine", chooseWhen: "The default design" },
+  { option: "SQL query: count players with a higher score", pros: "No new system", cons: "O(n) per rank query; collapses under load", chooseWhen: "Small boards (thousands of players)" },
+  { option: "Sorted array rebuilt periodically", pros: "Trivial and cheap reads", cons: "Not real time; O(n) shifts if updated in place", chooseWhen: "Boards refreshed every few minutes" },
+  { option: "Fenwick tree over score buckets", pros: "Cost independent of the number of players (about 20 steps per update in the demo)", cons: "Needs bounded integer scores; no ordering among players inside a bucket by itself", chooseWhen: "Bounded scores, very large boards, custom engines" },
+  { option: "Shard by player id", pros: "Even write load", cons: "Rank needs a scatter-gather sum; top K needs a merge", chooseWhen: "Write volume beyond one node" },
+  { option: "Shard by score range", pros: "Exact rank from shard counts; top K from one shard", cons: "Resharding as scores drift; hot top shard", chooseWhen: "Stable score distributions" },
+  { option: "Exact rank for the top, approximate for the rest", pros: "Cheap at huge scale; matches what players need", cons: "Displayed ranks are estimates", chooseWhen: "Boards with tens of millions of players" },
+  { option: "Cache top 100 for a second", pros: "Absorbs the hottest read", cons: "Up to a second of staleness", chooseWhen: "Always for public top lists" }
+]} />
+
+## Pitfalls
+
+- **Ranking by scanning** or sorting on every request.
+- Using a **sorted array with in-place inserts** under heavy updates.
+- Treating the in-memory structure as the **only copy** of the scores.
+- **Non-idempotent updates** ("add 10 points") replayed after a failure, double counting.
+- **Ties** broken arbitrarily, so players swap places between refreshes.
+- Building a **sorted set per user** for friends boards.
+- Forgetting to **expire old period boards**, filling memory.
+- Computing **exact global rank** for 50 million players when an approximation would do.
+- Hot **top shard** when sharding by score range and scores bunch together.
+- **Clock skew** in the tie-break timestamps from different servers: use a server-assigned sequence.
+
+## What would you choose and why?
+
+A tournament with 20 million players ends, and for ten minutes every player's score changes once and everyone refreshes their rank. Your current single sorted set handles the writes but the rank reads saturate it. What do you change (read replicas, caching, approximate ranks, a precomputed rank per score bucket), what stays exact, and how do you make sure the final results shown at the awards ceremony are correct and frozen?
+
+## Quiz
+
+<Quiz id="sd-m18-real-time-leaderboard" tags={["case-study", "leaderboard", "sorted-set", "ranking", "sharding"]} questions={[
+  { type: "mcq", q: "Why is 'count the players with a higher score' in SQL a poor way to get a player's rank at scale?", options: ["SQL cannot count", "It is O(n) per query: every rank request scans all players, so load grows with the number of players and requests", "Ranks are not stored", "It returns the wrong number"], answer: 1, explain: "The demo's scan needed 20,000 steps per rank query against about 10 for the Fenwick tree." },
+  { type: "mcq", q: "What is the weakness of a plain sorted array for a leaderboard with many updates?", options: ["Binary search is impossible", "Each insert shifts the tail of the array, so an update costs O(n) (20,360 steps per update in the demo)", "It cannot hold 20,000 players", "It loses scores"], answer: 1, explain: "Rank is cheap, updates are not. A skip list, tree or Fenwick tree makes both logarithmic." },
+  { type: "predict", q: "A Fenwick tree over scores 0 to 1,000,000 needs roughly how many tree nodes per prefix walk?", code: "import math\nprint(math.ceil(math.log2(1_000_001)))", options: ["About 20", "About 1,000", "About 1,000,000", "About 100,000,000"], answer: 0, explain: "A Fenwick walk touches at most about log2(S) nodes, here about 20, regardless of the number of players." },
+  { type: "mcq", q: "Why is the merged top K of per-shard top Ks equal to the global top K?", options: ["By luck", "A player in the global top K must also be in the top K of the shard that holds them, so the global top K is within the union of shard top Ks", "Shards are sorted by player id", "Merging sorts everything"], answer: 1, explain: "The simulation merged 80 candidates and matched the exact global top 10." },
+  { type: "multi", q: "Which are sound practices for a Redis based leaderboard?", options: ["Keep scores in a durable store and treat the sorted set as a rebuildable index", "Encode a tie-break in the score so equal scores rank fairly", "Cache the top 100 for a short time", "Create one sorted set per user for friends boards"], answer: [0, 1, 2], explain: "Friends boards are better served by fetching the friends' scores and sorting a few hundred values in the application." },
+  { type: "mcq", q: "When is an approximate rank acceptable?", options: ["Never", "For players far from the top on very large boards, where being 4,201,337th or 4,201,402nd makes no practical difference", "Only for the top 10", "Only for friends boards"], answer: 1, explain: "A bucket histogram gives a cheap, shardable estimate; keep exact ranks for the top few thousand." }
+]} />
