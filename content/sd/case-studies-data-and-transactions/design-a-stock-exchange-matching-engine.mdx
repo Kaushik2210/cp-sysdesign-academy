@@ -1,0 +1,312 @@
+---
+title: "Case Study: Design a Stock Exchange Matching Engine"
+track: sd
+module: case-studies-data-and-transactions
+order: 8
+difficulty: hard
+estMinutes: 60
+prerequisites: ["sd/case-studies-data-and-transactions/design-a-distributed-message-queue", "sd/consensus-and-coordination/raft-log-replication-and-safety", "sd/microservice-patterns/cqrs-and-event-sourcing"]
+tags: [case-study, matching-engine, order-book, exchange, event-sourcing, determinism, price-time-priority, low-latency, replication]
+type: case-study
+furtherReading:
+  - title: "Martin Fowler, The LMAX Architecture (a single-threaded, event-sourced trading engine)"
+    url: https://martinfowler.com/articles/lmax.html
+  - title: "Wikipedia, Order book"
+    url: https://en.wikipedia.org/wiki/Order_book
+  - title: "Wikipedia, Order matching system (price-time priority and other algorithms)"
+    url: https://en.wikipedia.org/wiki/Order_matching_system
+  - title: "Schneider, Implementing fault-tolerant services using the state machine approach (1990)"
+    url: https://www.cs.cornell.edu/fbs/publications/SMSurvey.pdf
+---
+
+## The problem
+
+Design the **matching engine** at the heart of a stock exchange: traders submit **buy and sell orders** for a security; the engine **matches** compatible orders into **trades** under strict, published rules, and publishes the results. It is one of the rare systems where **fairness, determinism and correctness** matter as much as speed, and where the usual scaling reflex (add threads, add locks) is exactly wrong.
+
+*(This is a system design exercise about the software, not investment advice.)*
+
+## Concepts in one minute
+
+- A **limit order** says "buy up to 100 shares at no more than 101.00" or "sell at no less than 101.00". If it cannot be matched immediately it **rests** in the order book.
+- A **market order** says "buy 100 shares at the best available price now". It **never rests**: whatever cannot be filled immediately is dropped (or cancelled).
+- The **order book** has two sides: **bids** (buy orders, best = highest price) and **asks** (sell orders, best = lowest price). The book is **uncrossed**: the best bid is always strictly below the best ask; if they met, a trade would already have happened.
+- **Price-time priority**: a new order is matched against the best-priced resting orders first; among orders at the same price, the **earliest** arrival goes first (**FIFO**). A trade executes at the **resting** order's price.
+- Orders can be **partially filled**, and resting orders can be **cancelled**.
+
+## Requirements
+
+**Functional**
+- Accept limit and market orders; cancel resting orders.
+- Match by price-time priority; report fills to both sides.
+- Publish **market data** (best bid and ask, depth, trades).
+- Keep a complete, auditable record.
+
+**Non-functional**
+- **Deterministic**: the same input sequence always produces the same trades, because regulators and traders must be able to verify fairness.
+- **Low latency**: microseconds per order inside the engine, predictable (low variance matters more than the average).
+- **Durable and highly available**: no acknowledged order is lost; failover in seconds without losing or reordering orders.
+- **Fair**: strictly first come, first served within a price.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Orders | 1 million messages per second at peak across all symbols (orders and cancels, most orders are cancelled or modified) | |
+| Message size | about 50 bytes | 50 MB per second, about 4.3 TB per day of log |
+| Symbols | 5,000, very unevenly traded | a handful of symbols carry a large share of the traffic |
+| Per symbol | the busiest symbol, 50,000 messages per second | one thread can process this: at 1 microsecond per message it would use 5% of a core |
+
+Two conclusions drive the design. **The data is small and the work per message is tiny**, so a **single thread per symbol** with everything in memory is fast enough. **Throughput comes from sharding by symbol**, not from parallelism inside one order book.
+
+## Why single-threaded
+
+A matching engine looks like a perfect candidate for multithreading, but in practice:
+
+- **Matching is inherently sequential per book**: each order's outcome depends on the exact state left by the previous one. Parallelising it needs locks, and locks add latency variance, contention and nondeterminism.
+- A **single thread** does one thing at a time, **never blocks**, keeps its data in the CPU cache, and is **deterministic**: the same ordered input gives the same output.
+- Speed comes from **doing little per message**: no database, no network calls and no allocation on the hot path. Everything in memory; disk and network I/O live in other threads and processes.
+- Different symbols are independent, so they run on different threads, cores or machines: **partition by symbol**.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  T["Traders"] --> G["Gateways: authentication, rate limits, pre-trade risk checks"]
+  G --> S["Sequencer: assigns a global sequence number"]
+  S --> L[("Replicated input log")]
+  L --> E1["Matching engine, symbols A to M (single thread)"]
+  L --> E2["Matching engine, symbols N to Z (single thread)"]
+  L -.->|"same log, replayed"| B["Hot standby engine"]
+  E1 --> O["Outputs: acks, fills, market data"]
+  E2 --> O
+  O --> T
+  O --> MD["Market data publishers (snapshot plus incremental)"]
+  O --> CL["Clearing and settlement, audit store"]`} caption="Every order gets a sequence number and is logged before matching; the engine is a deterministic function of the log" />
+
+- **Gateways** authenticate traders, rate-limit, and run **pre-trade risk checks** (buying power, position limits, "fat finger" price checks) so bad orders never reach the engine.
+- The **sequencer** gives every message a **monotonically increasing sequence number**. That number **is** the time priority: arrival order is defined by the sequencer, not by clocks.
+- The **input log** is **replicated** (a consensus group or synchronous primary and backup, [Raft](/sd/consensus-and-coordination/raft-log-replication-and-safety/)) before the order is acknowledged: no acknowledged order is lost.
+- The **engine** reads the log in order and produces outputs. Its state is an **in-memory function of the log**: **event sourcing** ([CQRS and event sourcing](/sd/microservice-patterns/cqrs-and-event-sourcing/)).
+- A **hot standby** consumes the same log and keeps an identical book. On failure it takes over; because the engine is deterministic, it is guaranteed to be in the same state as the primary was at the same log position. This is **state machine replication**.
+- **Snapshots** of the book plus the log position make restarts fast: load the latest snapshot and replay the tail.
+
+## The order book data structure
+
+Needs: **insert** a resting order, find the **best** price, **remove** the best, **cancel** by order id, all fast.
+
+- Two **priority queues** (heaps), one per side, keyed by price (negated for bids) and then by sequence number, give **O(log n)** insert and removal and **O(1)** best price. The code below uses exactly this.
+- **Cancel** is awkward in a heap, so the code uses **lazy deletion**: a cancelled order is removed from a dictionary of live orders and the stale heap entry is discarded when it surfaces at the top.
+- Production engines use **price levels**: a sorted structure of price levels, each holding a **FIFO queue** of orders (a linked list), plus a hash map from order id to its place. Insert at an existing level and best-price lookup are O(1); cancel is O(1). Memory is pre-allocated to avoid garbage collection pauses.
+
+## The simulation
+
+The program implements the book with heaps and checks it three ways: a **hand-made scenario** (partial fills, price-time priority, a market order sweeping the book, a cancel), then **200 random sessions of up to 300 events** (limit orders, a few market orders, cancels) in which every session is compared with a **slow brute-force matcher** that scans all resting orders for each incoming order, and checked for two **invariants**: the book is never crossed, and **quantity is conserved**.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import heapq
+import random
+from dataclasses import dataclass
+
+
+@dataclass
+class Order:
+    oid: int
+    side: str             # "buy" or "sell"
+    price: int            # in cents; None for a market order
+    qty: int
+    seq: int = 0          # arrival sequence number, assigned by the engine: this is the time priority
+
+
+class OrderBook:
+    """Price-time priority. Bids: highest price first; asks: lowest price first; ties by arrival sequence."""
+    def __init__(self):
+        self.bids, self.asks = [], []            # heaps of (price key, seq, order)
+        self.live = {}                           # oid -> order still resting in the book
+        self.seq = 0
+        self.trades = []                         # (taker id, maker id, price, qty)
+
+    def _push(self, o):
+        key = -o.price if o.side == "buy" else o.price
+        heapq.heappush(self.bids if o.side == "buy" else self.asks, (key, o.seq, o.oid))
+        self.live[o.oid] = o
+
+    def _best(self, heap):
+        while heap and heap[0][2] not in self.live:          # lazily drop cancelled orders
+            heapq.heappop(heap)
+        return self.live[heap[0][2]] if heap else None
+
+    def submit(self, side, price, qty, oid):
+        self.seq += 1
+        o = Order(oid, side, price, qty, self.seq)
+        book = self.asks if side == "buy" else self.bids
+        while o.qty > 0:
+            best = self._best(book)
+            if best is None:
+                break
+            crosses = o.price is None or (o.price >= best.price if side == "buy" else o.price <= best.price)
+            if not crosses:
+                break
+            fill = min(o.qty, best.qty)
+            self.trades.append((o.oid, best.oid, best.price, fill))      # trades happen at the resting order's price
+            o.qty -= fill
+            best.qty -= fill
+            if best.qty == 0:
+                del self.live[best.oid]
+                heapq.heappop(book)
+        if o.qty > 0 and o.price is not None:                # an unfilled limit order rests; a market order does not
+            self._push(o)
+        return o
+
+    def cancel(self, oid):
+        o = self.live.pop(oid, None)
+        return 0 if o is None else o.qty                      # the quantity that was still resting
+
+    def best_bid(self):
+        b = self._best(self.bids)
+        return b.price if b else None
+
+    def best_ask(self):
+        a = self._best(self.asks)
+        return a.price if a else None
+
+
+def brute_force(events):
+    """A slow, obviously correct matcher: scan every resting order for each incoming order."""
+    resting, trades, seq = [], [], 0
+    for ev in events:
+        if ev[0] == "cancel":
+            resting = [r for r in resting if r["oid"] != ev[1]]
+            continue
+        _, oid, side, price, qty = ev
+        seq += 1
+        left = qty
+        while left > 0:
+            opp = [r for r in resting if r["side"] != side and (price is None or (price >= r["price"] if side == "buy" else price <= r["price"]))]
+            if not opp:
+                break
+            best = min(opp, key=lambda r: ((r["price"] if side == "buy" else -r["price"]), r["seq"]))
+            fill = min(left, best["qty"])
+            trades.append((oid, best["oid"], best["price"], fill))
+            left -= fill
+            best["qty"] -= fill
+            if best["qty"] == 0:
+                resting.remove(best)
+        if left > 0 and price is not None:
+            resting.append({"oid": oid, "side": side, "price": price, "qty": left, "seq": seq})
+    return trades
+
+
+if True:
+    b = OrderBook()
+    b.submit("sell", 10100, 50, 1)
+    b.submit("sell", 10100, 30, 2)         # same price, later: queues behind order 1
+    b.submit("sell", 10200, 100, 3)
+    b.submit("buy", 9900, 40, 4)
+    print("book: best bid", b.best_bid(), "best ask", b.best_ask())
+    b.submit("buy", 10100, 60, 5)          # takes 50 from order 1, then 10 from order 2
+    print("after a buy of 60 at 10100:", b.trades)
+    b.submit("buy", None, 200, 6)          # a market order sweeps the book and the rest is dropped
+    print("after a market buy of 200:", b.trades[2:], "| ask side now", b.best_ask())
+    print("cancel order 4:", b.cancel(4), "| cancel again:", b.cancel(4), "| best bid", b.best_bid())
+
+    # randomised check: the heap based engine against the brute force matcher, plus conservation of quantity
+    rnd = random.Random(12)
+    sessions, n_events = 200, 300
+    same, never_crossed, conserved, total_trades, total_qty = 0, 0, 0, 0, 0
+    for _ in range(sessions):
+        eng, events, submitted, cancelled, dropped = OrderBook(), [], 0, 0, 0
+        for i in range(n_events):
+            if eng.live and rnd.random() < 0.1:
+                oid = rnd.choice(sorted(eng.live))
+                events.append(("cancel", oid))
+                cancelled += eng.cancel(oid)
+            else:
+                side = rnd.choice(["buy", "sell"])
+                price = None if rnd.random() < 0.05 else rnd.randint(9950, 10050)
+                qty = rnd.randint(1, 40)
+                events.append(("new", i, side, price, qty))
+                submitted += qty
+                o = eng.submit(side, price, qty, i)
+                if price is None:
+                    dropped += o.qty
+        same += eng.trades == brute_force(events)
+        never_crossed += (eng.best_bid() is None or eng.best_ask() is None or eng.best_bid() < eng.best_ask())
+        traded = sum(t[3] for t in eng.trades)
+        resting = sum(o.qty for o in eng.live.values())
+        conserved += submitted == 2 * traded + resting + cancelled + dropped
+        total_trades += len(eng.trades)
+        total_qty += traded
+    print(f"{sessions} random sessions of up to {n_events} events ({total_trades} trades, {total_qty} units traded):")
+    print(f"  identical trades to the brute force matcher: {same} of {sessions}")
+    print(f"  best bid always below best ask at the end:   {never_crossed} of {sessions}")
+    print(f"  quantity conserved (submitted = 2 x traded + resting + cancelled + dropped market remainder): {conserved} of {sessions}")
+`} />
+
+## What the output shows
+
+**The scenario.** Three sell orders rest: 50 at 101.00 (order 1), 30 at 101.00 (order 2, later), 100 at 102.00 (order 3). A buy at 99.00 rests as the best bid. The book shows best bid 9900 and best ask 10100 (prices are in cents).
+- A **buy of 60 at 101.00** matches **50 against order 1 first** (earlier arrival), then **10 against order 2**: **price-time priority**. Both trades happen at **10100**, the resting orders' price.
+- A **market buy of 200** takes the **remaining 20 from order 2** at 10100, then **100 from order 3** at 10200. The remaining 80 of the market order is **dropped**, and the ask side is now empty.
+- **Cancelling** order 4 returns the 40 shares that were still resting; cancelling it again returns 0 (it is gone), and the best bid disappears.
+
+**The randomised check.** Over **200 sessions (39,619 trades and 423,856 units traded)**:
+- The heap engine produced **trades identical to the brute-force matcher in 200 of 200** sessions: same trades, same order, same prices, same quantities.
+- The book was **never crossed** at the end of any session (200 of 200).
+- **Quantity was conserved** in all 200: every unit submitted is accounted for as traded (counted once on each side), still resting, cancelled, or the dropped remainder of a market order.
+
+This is the right way to gain trust in a matching engine: compare it against an obviously correct slow model on random input, and check invariants that must always hold. The test shows **correctness**, not speed: the demo makes no claim about latency, and a Python heap is far from a production engine.
+
+## Determinism in practice
+
+For the engine to be a pure function of its input log:
+- **No wall-clock time** in the matching path: timestamps are attached by the sequencer and passed in as data.
+- **No randomness, no iteration over unordered hash maps** where order affects results, no floating-point money (use integer cents or fixed-point).
+- **No dependence on thread scheduling**: single-threaded by design.
+- **Identical code and configuration** on primary and standby, and tests that replay the same log on both and compare outputs byte for byte.
+
+## Fairness and other rules
+
+- **Sequence numbers define priority**, and the log is the single source of truth. Gateways are made equidistant in latency (equal cable lengths in the exchange's data centre) so physical location does not buy priority.
+- **Other order types** (stop, iceberg, fill-or-kill, immediate-or-cancel, auction) are variations on the matching loop and on when an order rests or expires. **Auctions** at open and close batch orders and compute a single clearing price.
+- **Circuit breakers** halt trading in a symbol when prices move too fast; the engine receives a halt command through the same log so it is applied deterministically.
+- **Market data**: publish each change as an **incremental** message with a sequence number, plus periodic **snapshots**; a subscriber that detects a **sequence gap** requests a snapshot and resumes ([message queue lesson](/sd/case-studies-data-and-transactions/design-a-distributed-message-queue/) for the same idea).
+- **Clearing and settlement** happen after matching, asynchronously, with their own reconciliation.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a matching engine" rows={[
+  { option: "Single thread per symbol, in memory", pros: "Deterministic, no locks, minimal latency variance, simple to reason about and test", cons: "One symbol cannot use more than a core; needs careful engineering to stay fast", chooseWhen: "The standard design" },
+  { option: "Multithreaded matching with locks", pros: "Looks like it uses more cores", cons: "Contention, latency spikes, nondeterminism, subtle bugs", chooseWhen: "Almost never for a single book" },
+  { option: "Shard by symbol", pros: "Scales throughput; independent failure domains", cons: "Cross-symbol features (spreads, portfolio risk) need coordination", chooseWhen: "Always, for scale" },
+  { option: "Event-sourced input log with a hot standby", pros: "Failover without loss; exact replay for audit and testing", cons: "The log is on the latency path; needs fast replication", chooseWhen: "Always for a regulated venue" },
+  { option: "Heap based order book", pros: "Simple; O(log n) operations", cons: "Awkward cancels (lazy deletion); allocation overhead", chooseWhen: "Teaching and moderate volumes" },
+  { option: "Price levels with FIFO lists and a hash map", pros: "O(1) best, insert at a known level and cancel; predictable", cons: "More code; needs pre-allocation and care", chooseWhen: "Production engines" },
+  { option: "Synchronous replication before acknowledging", pros: "No acknowledged order lost on failure", cons: "Adds replication latency to every order", chooseWhen: "Durability is mandatory" },
+  { option: "Asynchronous replication", pros: "Lowest latency", cons: "Can lose the last orders on failover", chooseWhen: "Not acceptable for an exchange; fine for simulators" }
+]} />
+
+## Pitfalls
+
+- **Floating-point prices or quantities**: rounding breaks equality and money. Use integers.
+- **Timestamps from the wall clock** deciding priority: clocks disagree. Use sequence numbers.
+- **Locks in the matching path**, or any blocking I/O (a database write per order).
+- **Garbage collection pauses** or memory allocation on the hot path.
+- **Nondeterminism** (hash iteration order, threads, time) that makes the standby diverge.
+- Matching at the **incoming order's price** instead of the **resting order's price**.
+- Forgetting **time priority within a price level** after partial fills (a partially filled order keeps its place).
+- **Leaving a crossed book** after processing an order (a bug the invariant test catches).
+- Acknowledging an order **before** it is durably sequenced and logged.
+- Testing only **happy paths**: no random comparison against a slow reference.
+
+## What would you choose and why?
+
+The exchange wants to add **a new order type that rests until a trigger price is reached** (a stop order), **a daily opening auction**, and **a second data centre** that can take over if the first one fails. Which parts of the design absorb each change without breaking determinism, how do you replicate the log across data centres without adding unacceptable latency to every order, and how would you prove, before launch, that the standby produces byte-identical output?
+
+## Quiz
+
+<Quiz id="sd-m18-matching-engine" tags={["case-study", "matching-engine", "order-book", "determinism", "event-sourcing"]} questions={[
+  { type: "mcq", q: "What does price-time priority mean?", options: ["Orders are matched at random", "Better prices match first, and among equal prices the earliest order matches first", "Large orders go first", "The newest order goes first"], answer: 1, explain: "In the scenario the buy of 60 matched order 1 (earlier) for 50 before order 2 for 10." },
+  { type: "mcq", q: "At which price does a trade execute when a buy at 102.00 meets a resting sell at 101.00?", options: ["102.00", "101.00, the resting order's price", "101.50", "The average of the day"], answer: 1, explain: "The taker gets price improvement; trades happen at the resting order's price." },
+  { type: "predict", q: "The ask side has 20 shares at 101.00 and 100 shares at 102.00. A market buy for 200 arrives. How many shares remain unfilled (and are dropped)?", code: "available = 20 + 100\nordered = 200\nprint(ordered - available)", options: ["0", "80", "120", "200"], answer: 1, explain: "The sweep fills 120 and the remaining 80 of a market order does not rest in the book." },
+  { type: "mcq", q: "Why is the matching engine single-threaded per symbol?", options: ["Developers prefer it", "Matching is inherently sequential per book; a single thread avoids locks and latency variance and is deterministic, while throughput comes from sharding by symbol", "Multicore CPUs do not exist in data centres", "It makes the code longer"], answer: 1, explain: "Work per message is tiny; contention and nondeterminism cost far more than parallelism would gain." },
+  { type: "multi", q: "Which statements are required for the hot standby to stay identical to the primary?", options: ["Both apply the same ordered log of inputs", "The matching code uses no wall-clock time or randomness", "The standby may reorder orders for speed", "Money is stored as integers"], answer: [0, 1, 3], explain: "Determinism plus identical input gives identical state; reordering would break it." },
+  { type: "mcq", q: "How did the demo check the heap-based engine for correctness?", options: ["By timing it", "By comparing its trades with a slow brute-force matcher on 200 random sessions and checking the book is never crossed and quantity is conserved", "By reading the code", "By running it once"], answer: 1, explain: "A slow, obviously correct reference plus invariants is the standard way to trust such an engine." }
+]} />
