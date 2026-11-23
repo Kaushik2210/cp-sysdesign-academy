@@ -51,6 +51,7 @@
     { "kind": "lesson", "ref": "sd/case-studies-core-services/design-an-email-service" },
     { "kind": "lesson", "ref": "sd/case-studies-core-services/design-a-web-search-engine" },
     { "kind": "lesson", "ref": "sd/case-studies-core-services/design-a-proximity-service" },
+    { "kind": "lesson", "ref": "sd/case-studies-core-services/design-a-calendar-and-meeting-scheduler" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-ticket-booking-system" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-search-autocomplete-system" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-file-sync-service" },
