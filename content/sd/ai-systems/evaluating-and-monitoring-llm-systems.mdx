@@ -1,0 +1,246 @@
+---
+title: "Evaluating and Monitoring LLM Systems"
+track: sd
+module: ai-systems
+order: 4
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/ai-systems/retrieval-augmented-generation", "sd/ai-systems/designing-reliable-ai-agents", "sd/observability/slos-error-budgets-and-alerting"]
+tags: [llm-evaluation, evals, llm-as-judge, statistics, confidence-intervals, regression-testing, monitoring, cost, drift]
+type: lesson
+furtherReading:
+  - title: "Zheng et al., Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena (2023), including position and verbosity bias"
+    url: https://arxiv.org/abs/2306.05685
+  - title: "Miller, Adding Error Bars to Evals: A Statistical Approach to Language Model Evaluations (2024)"
+    url: https://arxiv.org/abs/2411.00640
+  - title: "Kohavi, Tang, Xu, Trustworthy Online Controlled Experiments (book site)"
+    url: https://experimentguide.com/
+  - title: "Google SRE Book, Monitoring Distributed Systems (symptoms, not causes)"
+    url: https://sre.google/sre-book/monitoring-distributed-systems/
+---
+
+## Why evaluation is the central skill
+
+A traditional program is **deterministic**: given the same input it gives the same output, so a unit test either passes or fails. A system built on a language model is **probabilistic**, its outputs are **free text** that can be right in many ways and wrong in subtle ways, and **a change that improves one kind of question quietly breaks another**. There is no compiler error for "the assistant became slightly less helpful on refund questions."
+
+So in AI products, **evaluation (evals) plays the role that tests, monitoring and code review play elsewhere**. Teams that ship good AI features are usually the ones with the **best measurement**, not the best prompts. This lesson covers the machinery: **building test sets**, **reading results honestly** (statistics), **using models as graders** without being fooled by their biases, **monitoring in production**, and **watching cost**.
+
+## The layers of evaluation
+
+| layer | what it answers | cost and speed |
+| --- | --- | --- |
+| **Programmatic checks** | Is the output valid JSON? Does the code compile and pass tests? Does the answer contain the required citation? | cheap, instant, exact |
+| **Reference-based scoring** | Does the answer match a known correct answer (exact match, extracted fields, retrieved passage ids)? | cheap, needs labels |
+| **Model-graded evaluation (LLM as judge)** | Is this answer helpful, faithful to the sources, polite? Which of two answers is better? | moderate, scales, **biased** |
+| **Human review** | Is it actually good? Calibrates everything above. | slow and expensive, the gold standard |
+| **Online experiments** | Do real users succeed more? Do they come back? | slow, needs traffic, measures what matters |
+| **Production monitoring** | Is quality holding up **today**, on real traffic? | continuous |
+
+Use the cheap layers **often** (every code change) and the expensive layers **sparingly** (before releases, and on samples). Each layer **calibrates** the one above it: model graders are checked against human labels; offline scores are checked against online results.
+
+## Building the evaluation set
+
+- **Start from real traffic** (with privacy handling): sample actual questions, and include the **hard and weird ones**, not only typical ones.
+- **Add every production failure**: each bug report becomes a test case, so the same failure cannot return unnoticed (a regression suite).
+- **Cover the dimensions** that matter: topics, languages, lengths, adversarial inputs, questions that **should be refused**, questions the system **cannot answer** (it should say so).
+- **Define "correct" before measuring**: a written rubric or a programmatic check. Disagreement among human labelers is information: measure it and fix the rubric.
+- **Keep a held-out set** that is **never used to tune prompts**, to detect over-fitting to the evaluation set. Treat leaks (test questions appearing in training or in few-shot examples) as contamination.
+- **Version it** like code, with a changelog; a score only means something relative to a specific set.
+
+## Reading results honestly: noise
+
+Every score is an **estimate** from a **sample** of questions. With 100 test questions and a true accuracy of 80%, the 95% confidence interval is about **plus or minus 7.8 percentage points** (1.96 x the square root of 0.8 x 0.2 / 100): a measured 74% and a measured 86% are statistically indistinguishable. To measure accuracy to within plus or minus 3 points needs roughly **680 questions**. Improvements are usually **small** (a few points), so evaluation sets must be **large enough** or the comparison is a coin flip.
+
+### The simulation
+
+The program has four parts (standard library only, fixed seeds):
+
+1. **Can an evaluation notice a 3-point improvement?** Two systems, B better than A by exactly 3 points on average (B fixes 15% of A's errors). Each question has its own difficulty, so both systems fail the same hard questions. For test sets of 300, 1,000 and 3,000 questions, 120 repeated experiments each, count how often a 5% test declares B better: scoring the systems on **different random questions** versus on the **same questions** (a **paired** comparison, which uses only the questions where they differ).
+2. **A model judge with a position bias.** A judge picks the better of two answers but favours whichever is shown **first** by 10 points. Compare judging each pair in one order with judging in **both orders** and averaging.
+3. **Watching production quality.** Each day a sample of answers is graded; an alarm fires when the accuracy looks lower than the 90% baseline. Exact probabilities (computed from the binomial distribution) of a **false alarm** and of **catching a drop** to 85% or 80%, for daily samples of 50 to 1,000.
+4. **The cost tail**: per-request cost with a heavy tail (log-normal), at two levels of spread.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import math
+import random
+
+
+def boosted(s):
+    """System B fixes 15% of the cases that system A would get wrong, which is 3 points better on average (0.15 x 0.2)."""
+    return s + 0.15 * (1 - s)
+
+
+def experiment(n_items, paired, rnd):
+    """Score system A and system B on test questions. Each question has its own difficulty, so both systems tend
+    to fail the same hard questions. Returns the z statistic for 'B is better than A'."""
+    a_right = b_right = a_only = b_only = 0
+    for _ in range(n_items):
+        s = rnd.betavariate(1.6, 0.4)                       # chance that A answers this question correctly (mean 0.8)
+        a = rnd.random() < s
+        if paired:
+            b = rnd.random() < boosted(s)                   # B answers the very same question
+        else:
+            b = rnd.random() < boosted(rnd.betavariate(1.6, 0.4))     # B is scored on its own, different questions
+        a_right += a
+        b_right += b
+        a_only += a and not b
+        b_only += b and not a
+    if paired:
+        d = a_only + b_only
+        return (b_only - a_only) / math.sqrt(d) if d else 0.0       # only questions where they differ carry information
+    pa, pb = a_right / n_items, b_right / n_items
+    se = math.sqrt(pa * (1 - pa) / n_items + pb * (1 - pb) / n_items)
+    return (pb - pa) / se if se else 0.0
+
+
+def detection_power(n, p0, p1, z_crit):
+    """Exact chance that a one-sided test on n sampled answers flags a drop, when the true accuracy is p1."""
+    sd0 = math.sqrt(p0 * (1 - p0) / n)
+    total = 0.0
+    for k in range(n + 1):
+        z = (k / n - p0) / sd0
+        if z < -z_crit:
+            total += math.comb(n, k) * p1 ** k * (1 - p1) ** (n - k)
+    return total
+
+
+def judge_pairs(n, p_a_better, position_bias, rnd, swap):
+    """A judge model compares two answers. It favours whichever answer is shown FIRST by 'position_bias'."""
+    a_wins = 0.0
+    for _ in range(n):
+        a_truly_better = rnd.random() < p_a_better
+        # order 1: A first
+        p_first_wins = min(1.0, max(0.0, (1.0 if a_truly_better else 0.0) * 0.8 + 0.1 + position_bias))
+        w1 = rnd.random() < p_first_wins                     # True means A (shown first) was chosen
+        if not swap:
+            a_wins += w1
+        else:
+            p_first_wins2 = min(1.0, max(0.0, (0.0 if a_truly_better else 1.0) * 0.8 + 0.1 + position_bias))
+            w2 = rnd.random() < p_first_wins2                # now B is shown first; True means B was chosen
+            a_wins += (w1 + (1 - w2)) / 2                    # average the two verdicts for A
+    return a_wins / n
+
+
+if True:
+    # 1. does a 3 point improvement show up in a test set? power of a 5% test, 120 repeated experiments
+    rnd = random.Random(1)
+    print("system B is truly 3 points better than system A. How often does the evaluation notice (z above 1.96)?")
+    for n in (300, 1000, 3000):
+        res = {}
+        for paired in (False, True):
+            hits = sum(experiment(n, paired, rnd) > 1.96 for _ in range(120))
+            res[paired] = hits / 120
+        print(f"  {n:5d} test questions: scoring the two systems on different random questions {res[False] * 100:5.1f}% | on the SAME questions (paired) {res[True] * 100:5.1f}%")
+
+    # 2. an automatic judge with a position bias of 10 points
+    rnd = random.Random(2)
+    for p, label in ((0.5, "answers equally good"), (0.55, "A better in 55% of pairs")):
+        one = judge_pairs(20000, p, 0.10, rnd, swap=False)
+        two = judge_pairs(20000, p, 0.10, rnd, swap=True)
+        print(f"judge with position bias, {label}: A shown first only -> A wins {one * 100:5.1f}% | each pair judged in both orders -> A wins {two * 100:5.1f}%")
+
+    # 3. watching production quality: grade n sampled answers per day, alarm when accuracy looks lower than 90%
+    z_crit = 2.326                                           # one-sided 1% false alarm level per day
+    print("daily sample of graded answers, baseline accuracy 90%, alarm level 1% per day:")
+    for n in (50, 100, 300, 1000):
+        fa = detection_power(n, 0.90, 0.90, z_crit)
+        d85 = detection_power(n, 0.90, 0.85, z_crit)
+        d80 = detection_power(n, 0.90, 0.80, z_crit)
+        print(f"  {n:5d} graded per day: false alarms {fa * 100:4.1f}% of days | a drop to 85% is caught on {d85 * 100:5.1f}% of days | a drop to 80% on {d80 * 100:5.1f}% of days")
+
+    # 4. cost per request has a heavy tail (log-normal: sigma 1.0 is moderate, 1.5 is heavier, as with long agent runs)
+    for sigma in (1.0, 1.5):
+        rnd = random.Random(3)
+        costs = sorted(rnd.lognormvariate(0, sigma) for _ in range(100000))
+        total = sum(costs)
+        print(f"cost per request, spread {sigma}: mean {total / len(costs):.2f}, median {costs[50000]:.2f}, 99th percentile {costs[99000]:.2f} (units of the median request); "
+              f"the most expensive 1% of requests cause {sum(costs[99000:]) / total * 100:.0f}% of the cost, the top 10% cause {sum(costs[90000:]) / total * 100:.0f}%")
+`} />
+
+## What the output shows
+
+**1. Small improvements need big test sets** (how often a 3-point real improvement is detected):
+
+| test questions | different questions for A and B | the same questions (paired) |
+| --- | --- | --- |
+| 300 | 16.7% | 19.2% |
+| 1,000 | 45.8% | 58.3% |
+| 3,000 | 84.2% | 94.2% |
+
+- With **300 questions the evaluation misses a real 3-point improvement about 5 times out of 6**: "no significant difference" often means "not enough data". With **1,000** it is a coin flip. Only at **3,000** does it become reliable.
+- **Comparing on the same questions helps** (58.3% against 45.8% at 1,000, and 94.2% against 84.2% at 3,000), because the shared difficulty of questions cancels out and only the cases where the systems differ carry the signal. **Always compare systems on the same set**, and use a paired test.
+- The converse risk: with many variants and many metrics, **some will look significantly better by chance** (about 1 in 20 at a 5% level). Pre-decide the primary metric, and confirm surprising wins on fresh data.
+
+**2. Judge bias.** The judge favours the first-shown answer by 10 points, and this is **not harmless**:
+- When the two answers are **equally good**, showing A first makes A "win" **60.0%** of the time. Judging both orders and averaging gives **50.0%**.
+- When A is **truly better in 55%** of pairs, a single-order judge reports **64.0%** (an overstatement of 9 points, larger than the real effect you wanted to measure), while the two-order average reports **54.1%**, close to the truth.
+- Other known judge biases: **verbosity** (longer answers preferred), **self-preference** (a model favours its own style), and sensitivity to formatting. Mitigations: **randomise or swap order**; **score against a rubric and a reference answer** instead of open comparison; use a **different model family** for judging; and **calibrate the judge against human labels** on a sample (measure its agreement, and stop trusting it where it disagrees).
+
+**3. Production monitoring.** With a baseline accuracy of 90% and a target false alarm level of 1% per day:
+
+| graded answers per day | false alarms | drop to 85% caught | drop to 80% caught |
+| --- | --- | --- | --- |
+| 50 | 2.5% of days | 20.9% of days | 55.6% |
+| 100 | 2.1% | 32.8% | 80.8% |
+| 300 | 1.1% | 65.1% | 99.6% |
+| 1,000 | 1.0% | 99.4% | 100.0% |
+
+- **Sample size sets how fast you notice.** A 5-point quality drop is caught on only one day in five with 50 graded answers per day, and **on two days out of three** with 300. A silent regression can run for **days** under a small sample.
+- **Small samples also misbehave**: the alarm meant to fire 1% of days fires on **2.5%** of days at 50 samples (the normal approximation is poor for small counts). Use exact binomial or sequential tests for small samples, and expect noisy alerts.
+- So decide **what size of drop matters**, then **budget the grading** (human or model) to detect it within an acceptable time, and **stratify** (by topic, language, customer) so a collapse in one segment is not averaged away.
+
+**4. Cost has a tail.** With a moderate spread, the **mean request costs 1.64 times the median** and the **most expensive 1% of requests cause 9% of the total cost** (the top 10% cause 39%). With a heavier tail (as with long agent runs or very long documents) the mean is **3.06 times the median**, the 99th percentile is **32 times the median**, and **the top 1% of requests cause 21% of the cost** (the top 10% cause 59%). Budgeting from the **median** request badly underestimates the bill, and a **handful of requests or users** can dominate it: **alert on cost percentiles and per-user and per-feature totals**, not on the average.
+
+The simulated systems, judge and costs are idealised and the probabilities are assumptions: they demonstrate **why** evaluation statistics matter, not the numbers you will see for your product.
+
+## Putting evaluation into the engineering process
+
+- **A regression gate in continuous integration**: every change to a prompt, model version, retriever or tool runs the programmatic evals (fast) and, before release, the larger model-graded set. **Block** changes that cross agreed thresholds on any critical segment, and show **confidence intervals**, not single numbers.
+- **Release carefully**: **shadow** new versions on live traffic and compare outputs offline; **canary** to a small share of users; use **A/B tests** for user-facing quality; keep the **old version** available for instant rollback ([safe deployments and flags](/sd/observability/safe-deployments-canaries-and-feature-flags/)). **Model providers update their models**: pin versions, and re-run your evals when a version changes or is retired.
+- **Close the loop**: sample production traffic for grading, review the failures weekly, **turn failures into test cases**, fix the root cause (retrieval, tool, prompt, data) and confirm the fix in the suite.
+- **Guardrail metrics next to the target metric**: improving "helpfulness" while **refusal rate, latency, cost per request or safety violations** worsen is not an improvement.
+- **Track input drift**: new topics, languages, longer prompts or new document types can degrade quality without any change on your side. Monitor the **distribution of inputs** (topic mix, length, language) and the **share of low-confidence or abstained answers**.
+- **Online signals**: thumbs, edits, regeneration, copy, abandonment and escalation rates are **noisy and biased** (only some users give feedback), but they are measured on real work; use them to find where to look, and to validate offline metrics.
+- **Privacy**: evaluation data contains real user text. Apply the same retention, access and anonymisation rules as production data.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in LLM evaluation" rows={[
+  { option: "Programmatic checks and reference answers", pros: "Cheap, exact, run on every change", cons: "Cover only what can be checked mechanically", chooseWhen: "Wherever a correct answer or validator exists (always start here)" },
+  { option: "Model-graded evaluation", pros: "Scales to open-ended quality; fast and cheap relative to humans", cons: "Biased (position bias inflated A to 60.0% in the simulation); needs calibration", chooseWhen: "Open-ended tasks, with swapped orders and calibration against human labels" },
+  { option: "Human review of samples", pros: "The gold standard; reveals what metrics miss", cons: "Slow, costly, itself noisy", chooseWhen: "Calibrating graders and before major releases" },
+  { option: "Small evaluation set (a few hundred questions)", pros: "Cheap to build and run", cons: "Misses real 3-point gains about 5 times in 6 (16.7% detection at 300)", chooseWhen: "Smoke tests and detecting large regressions" },
+  { option: "Large, stratified evaluation set (thousands)", pros: "Detects small improvements (84.2% at 3,000 questions, 94.2% paired)", cons: "Labelling and run cost", chooseWhen: "Choosing between close candidates" },
+  { option: "Paired comparison on identical questions", pros: "Removes shared difficulty; more power (58.3% against 45.8% at 1,000)", cons: "Requires running both systems on the same set", chooseWhen: "Always when comparing two versions" },
+  { option: "Online A/B test", pros: "Measures real user outcomes", cons: "Needs traffic and time; harm to users if the variant is bad", chooseWhen: "Final validation of user-facing changes" },
+  { option: "Production sampling and grading", pros: "Detects regressions and drift on real traffic", cons: "Small daily samples catch drops slowly (a 5-point drop on 20.9% of days at 50 samples)", chooseWhen: "Always, sized to the smallest drop you care about" }
+]} />
+
+## Pitfalls
+
+- **Judging quality by looking at a few examples** ("vibes") and shipping.
+- **Comparing two versions on different test questions**, or on a set too small to show a few-point difference.
+- **Treating "not significant" as "no difference"**.
+- **Testing many variants and reporting the best**, without a held-out confirmation.
+- **Using a model judge without checking it against humans**, or with a fixed answer order.
+- **Tuning prompts on the evaluation set** until it saturates, then trusting its score.
+- **Averaging over topics** so a collapse in one segment is invisible.
+- **No regression suite** from past failures.
+- **Ignoring cost and latency** in evaluation, then discovering the bill.
+- **Budgeting from the average request** when the tail dominates.
+- **Letting a provider's silent model update** change behaviour without re-running evals.
+- **Collecting user feedback without privacy controls**.
+
+## What would you choose and why?
+
+Your support assistant is scored by a model judge on 200 test questions. A prompt change lifts the score from 78% to 82% and the team wants to ship it today. List what you would check before agreeing (the size and uncertainty of the difference, whether both versions were scored on the same questions in both orders, which segments moved, what the human-graded sample says, what happened to refusals, latency and cost), what extra data or experiment you would request, and how you would roll the change out so that a hidden problem is caught within a day.
+
+## Quiz
+
+<Quiz id="sd-m29-llm-evaluation" tags={["llm-evaluation", "statistics", "llm-as-judge", "monitoring", "regression-testing"]} questions={[
+  { type: "predict", q: "An assistant scores 80% on a test set of 100 questions. About how wide is the 95% confidence interval (plus or minus, in percentage points)?", code: "import math\np, n = 0.8, 100\nprint(round(1.96 * math.sqrt(p * (1 - p) / n) * 100, 1))", options: ["About 0.8", "About 3.9", "About 7.8", "About 20"], answer: 2, explain: "Plus or minus 7.8 points: a measured 74% and 86% on 100 questions are statistically indistinguishable." },
+  { type: "mcq", q: "Why did comparing the two systems on the same questions detect the improvement more often (58.3% against 45.8% at 1,000 questions)?", options: ["The questions were easier", "Shared question difficulty cancels, so only the questions where the systems differ carry signal, reducing noise", "Paired tests always give a significant result", "The systems were identical"], answer: 1, explain: "Always run both versions on the same set and use a paired analysis." },
+  { type: "mcq", q: "A model judge favours the first-shown answer. A and B are equally good. What does a single-order evaluation (A always first) report, and what fixes it?", options: ["50%; nothing is needed", "About 60% for A; judge each pair in both orders and average, which gave 50.0%", "About 40% for A; use a larger judge", "0%; remove the judge"], answer: 1, explain: "Position bias turned a tie into a 60/40 'win'; swapping orders cancels it. Also calibrate against human labels." },
+  { type: "mcq", q: "You grade 50 production answers a day. Quality drops from 90% to 85%. How likely is the daily alarm to notice on a given day, per the simulation?", options: ["Almost always", "About 21% of days", "About 99% of days", "Never"], answer: 1, explain: "Small samples detect drops slowly; 300 per day catches it on about 65% of days and 1,000 on about 99%." },
+  { type: "multi", q: "Which are good practices for evaluation in an AI product?", options: ["Turn each production failure into a regression test case", "Keep a held-out set that is never used to tune prompts", "Report only the single best score among many variants tried", "Re-run evals when the provider updates the model version"], answer: [0, 1, 3], explain: "Reporting the best of many variants capitalises on chance; confirm wins on held-out data." },
+  { type: "mcq", q: "With a heavy-tailed cost distribution, why alert on cost percentiles and per-user totals rather than the average?", options: ["Averages cannot be computed", "A small share of requests or users can cause a large share of the bill (the top 1% caused 21% in the heavier-tailed simulation), which the average hides until the invoice arrives", "Percentiles are cheaper to store", "The median is always zero"], answer: 1, explain: "The mean was 3.06 times the median and the 99th percentile 32 times the median in the heavy-tailed case." }
+]} />
