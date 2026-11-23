@@ -47,6 +47,7 @@
     { "kind": "lesson", "ref": "sd/case-studies-core-services/design-a-ride-hailing-service" },
     { "kind": "lesson", "ref": "sd/case-studies-core-services/design-a-maps-and-navigation-service" },
     { "kind": "lesson", "ref": "sd/case-studies-core-services/design-a-social-graph-and-friend-recommendations" },
+    { "kind": "lesson", "ref": "sd/case-studies-core-services/design-a-collaborative-editor" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-ticket-booking-system" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-search-autocomplete-system" },
     { "kind": "lesson", "ref": "sd/case-studies-data-and-transactions/design-a-file-sync-service" },
