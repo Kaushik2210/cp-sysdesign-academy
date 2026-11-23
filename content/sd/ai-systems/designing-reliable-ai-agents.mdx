@@ -1,0 +1,276 @@
+---
+title: "Designing Reliable AI Agents: Compounding Errors, Checks and Budgets"
+track: sd
+module: ai-systems
+order: 3
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/ai-systems/serving-large-language-models", "sd/queues-and-streaming/delivery-semantics-and-idempotency", "sd/microservice-patterns/retry-amplification-and-circuit-breakers"]
+tags: [ai-agents, reliability, tool-use, verification, idempotency, budgets, human-in-the-loop, sandboxing, evaluation]
+type: lesson
+furtherReading:
+  - title: "Anthropic, Building effective agents (workflows versus agents, and when to use each)"
+    url: https://www.anthropic.com/engineering/building-effective-agents
+  - title: "Yao et al., ReAct: Synergizing Reasoning and Acting in Language Models (2022)"
+    url: https://arxiv.org/abs/2210.03629
+  - title: "Hardy, The Confused Deputy (or why capabilities might have been invented), 1988"
+    url: https://dl.acm.org/doi/10.1145/54289.871709
+  - title: "OWASP Top 10 for Large Language Model Applications (excessive agency and prompt injection)"
+    url: https://owasp.org/www-project-top-10-for-large-language-model-applications/
+---
+
+## What an agent is, and why reliability is the whole problem
+
+An **AI agent** is a language model **running in a loop with tools**: it reads a goal, decides on an action (search, read a file, run code, call an API, send a message), sees the result, and decides the next action, until it thinks it is done. Compared with a single question and answer, an agent can do **multi-step work**: fix a bug, research a topic, process a refund, book a trip.
+
+The difficulty is not making an agent that **sometimes** works in a demo. It is that every step can go wrong, the steps **depend on each other**, some actions have **real-world side effects** that cannot be undone, and the loop can **run away**. Classical reliability engineering (retries, idempotency, budgets, least privilege, observability) applies directly; this lesson shows **how much** it matters with numbers.
+
+## Compounding errors
+
+Suppose each step of a task (a model call plus a tool call) comes out right **95%** of the time, which sounds excellent. A task needs all its steps right, so success is **0.95 to the power of the number of steps**:
+
+| steps | chance the whole task succeeds |
+| --- | --- |
+| 5 | 77.4% |
+| 10 | 59.9% |
+| 20 | 35.8% |
+
+An agent that is "95% accurate per step" **fails two times out of three on a 20-step task**. This is why long autonomous agents are hard, and why the main design question is **how to stop errors from accumulating**: make **tasks shorter**, **steps more reliable**, and **errors detectable and recoverable**.
+
+## Design principles
+
+1. **Prefer a workflow to an open-ended agent whenever the steps are known.** If you can write the sequence (classify, retrieve, draft, validate), implement it as **code** that calls the model at each stage. Reserve a free-running agent for tasks where the path **cannot** be known in advance. Fewer model-chosen decisions means fewer places to be wrong.
+2. **Make each step small and checkable.** One clear instruction, a constrained output format (a schema), and a validator that can **reject** the result.
+3. **Verify with something other than the model's opinion.** Run the **tests**, the **compiler**, the **schema validator**, the **database constraint**, a **diff of what changed**; a model asked "are you sure?" shares the original's blind spots.
+4. **Bound everything**: steps, tokens, time and money per task.
+5. **Make actions reversible or confirmed**: idempotent tools, dry runs, and a **human approval** for irreversible or costly actions.
+6. **Give the minimum authority** (least privilege), run risky actions in a **sandbox**, and treat all text the agent reads as **untrusted**.
+7. **Record everything** so failures can be understood and fixed.
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart TB
+  U["User goal"] --> O["Orchestrator: plan, step budget, state store"]
+  O --> M["Model: choose the next action"]
+  M --> P["Policy layer: permission and risk check for the proposed tool call"]
+  P -->|"low risk"| T["Tool runner (sandboxed, idempotent, timeouts)"]
+  P -->|"high risk"| H["Human approval"]
+  H --> T
+  T --> V["Verifier: schema, tests, constraints, a second model for fuzzy checks"]
+  V -->|"ok"| S[("State and checkpoints, trace log")]
+  V -->|"rejected"| M
+  S --> O
+  O -->|"done, over budget, or stuck"| R["Final answer, partial result with a report, or escalation to a human"]`} caption="Every proposed action passes a policy check and every result passes a verifier, inside a budgeted loop with persisted state" />
+
+- The **orchestrator** owns the loop: it enforces **budgets**, persists **state after every step** (so a crash resumes instead of restarting, and the full trace exists), and decides when to stop.
+- The **policy layer** classifies a proposed tool call (read a file: low risk; send an email, spend money, delete data: high risk) and applies rules independent of what the model says, such as requiring **approval**.
+- The **tool runner** executes with **timeouts**, in a **sandbox** (restricted file system, no network except allowed hosts, limited credentials), and with **idempotency keys**.
+- The **verifier** checks results before the agent builds on them.
+
+## The simulation
+
+The program uses only the standard library and **independent random events** with stated probabilities (the assumptions are printed at the top). It runs four experiments:
+
+1. **Three strategies for a task of 5, 10 or 20 steps** (20,000 simulated tasks each): **no checks**; **check every step** with a checker that catches 90% of wrong steps but also wrongly flags 5% of right ones, redoing a flagged step up to twice; and **check only the final result**, restarting the whole task up to twice if it is flagged. A check costs 30% of a step.
+2. **Retried tool calls**: 10,000 calls where 5% succeed but the reply is lost, so the agent retries; with and without an idempotent tool.
+3. **Runaway loops**: a task of 10 steps where each step has a 2% chance of entering a loop that ends only by luck (5% chance to escape per iteration); with and without a **step budget** of 40.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+
+P_STEP = 0.95          # chance one step (a model call plus a tool call) comes out right
+DETECT = 0.90          # a checker flags a wrong step with this probability
+FALSE_ALARM = 0.05     # and wrongly flags a correct step with this probability
+CHECK_COST = 0.3       # a check costs this fraction of a step
+
+
+def run_plain(n, rnd):
+    """No checking: the task is right only if every step is right."""
+    ok = all(rnd.random() < P_STEP for _ in range(n))
+    return ok, float(n)
+
+
+def run_step_checks(n, rnd, retries=2):
+    """Check every step; on a flag, redo the step (up to 'retries' times) and accept the last result."""
+    cost = 0.0
+    for _ in range(n):
+        for attempt in range(retries + 1):
+            right = rnd.random() < P_STEP
+            cost += 1 + CHECK_COST
+            flagged = rnd.random() < (DETECT if not right else FALSE_ALARM)
+            if not flagged or attempt == retries:
+                break
+        if not right:
+            return False, cost                                      # a wrong step slipped through
+    return True, cost
+
+
+def run_end_to_end(n, rnd, restarts=2):
+    """Only check the final result; if it is flagged, restart the whole task (up to 'restarts' times)."""
+    cost = 0.0
+    for attempt in range(restarts + 1):
+        right = all(rnd.random() < P_STEP for _ in range(n))
+        cost += n + CHECK_COST * n                                  # the final check is as expensive as checking every step
+        flagged = rnd.random() < (DETECT if not right else FALSE_ALARM)
+        if not flagged or attempt == restarts:
+            return right, cost
+    return False, cost
+
+
+def monte_carlo(fn, n, trials, seed):
+    rnd = random.Random(seed)
+    results = [fn(n, rnd) for _ in range(trials)]
+    return sum(r for r, _ in results) / trials, sum(c for _, c in results) / trials
+
+
+def duplicate_side_effects(calls, p_lost, idempotent, seed):
+    """A tool call that succeeds but whose reply is lost looks like a failure, so the agent retries it."""
+    rnd = random.Random(seed)
+    effects = 0
+    seen = set()
+    for call in range(calls):
+        for attempt in range(3):
+            if idempotent and call in seen:
+                break                                               # the tool recognises the request key and does nothing again
+            effects += 1
+            seen.add(call)
+            if rnd.random() >= p_lost:
+                break                                               # the reply arrived, no retry
+    return effects
+
+
+def task_cost(trials, cap, seed, base_steps=10, p_loop=0.02, p_escape=0.05):
+    """Steps used by a task: base_steps, plus an occasional loop (a retry cycle that ends only by luck)."""
+    rnd = random.Random(seed)
+    costs, capped = [], 0
+    for _ in range(trials):
+        steps = 0
+        for _ in range(base_steps):
+            steps += 1
+            if rnd.random() < p_loop:
+                while rnd.random() >= p_escape:
+                    steps += 1
+                    if cap and steps >= cap:
+                        break
+            if cap and steps >= cap:
+                steps = cap
+                capped += 1
+                break
+        costs.append(steps)
+    costs.sort()
+    return sum(costs) / trials, costs[int(0.99 * trials) - 1], costs[-1], capped / trials
+
+
+if True:
+    trials = 20000
+    print(f"one step is right {P_STEP:.0%} of the time; a checker catches {DETECT:.0%} of wrong steps and wrongly flags {FALSE_ALARM:.0%} of right ones")
+    for n in (5, 10, 20):
+        print(f"task of {n} steps (theory without checks: {P_STEP ** n * 100:.1f}% succeed):")
+        for name, fn in (("no checks", run_plain), ("check every step, up to 2 redos", run_step_checks), ("check only the end, up to 2 restarts", run_end_to_end)):
+            ok, cost = monte_carlo(fn, n, trials, seed=n)
+            print(f"  {name:38s}: success {ok * 100:5.1f}%, cost {cost:5.1f} step-equivalents ({cost / n:.2f}x the plain cost)")
+
+    base = 10000
+    for idem in (False, True):
+        e = duplicate_side_effects(base, 0.05, idem, seed=3)
+        print(f"{base:,} tool calls with a 5% chance that the reply is lost, idempotent tool: {str(idem):5s} -> {e:,} real side effects ({e - base:+,} extra)")
+
+    for cap in (0, 40):
+        mean, p99, worst, share = task_cost(20000, cap, seed=5)
+        print(f"step budget {'none' if not cap else cap:>4}: mean {mean:5.1f} steps, 99th percentile {p99:4d}, worst {worst:5d}, tasks stopped by the budget {share * 100:4.1f}%")
+`} />
+
+## What the output shows
+
+**Strategies.** The simulated success rates match the theory for the plain agent (77.0%, 60.3%, 35.2% against 77.4%, 59.9%, 35.8%), then:
+
+| steps | no checks | check every step (redo up to 2) | check only the end (restart up to 2) |
+| --- | --- | --- | --- |
+| 5 | 77.0% at cost 5.0 | **97.0%** at cost 7.1 (1.42 times) | 95.9% at cost 8.5 (1.69 times) |
+| 10 | 60.3% at cost 10.0 | **94.4%** at cost 14.0 (1.40 times) | 88.5% at cost 20.0 (2.00 times) |
+| 20 | 35.2% at cost 20.0 | **89.0%** at cost 27.1 (1.36 times) | 66.4% at cost 51.0 (2.55 times) |
+
+- **Checking every step turns a coin flip into a working system**: success on 20-step tasks rises from **35.2% to 89.0%** at only **1.36 times the cost**. A wrong step is caught while it is cheap to redo, before later steps build on it.
+- **Checking only the end is worse and costlier**: it catches an error only after all the work, and restarting repeats everything: at 20 steps it reached just **66.4% at 2.55 times the cost**. **Check early and often**, and **checkpoint** so that recovery resumes from the failing step.
+- **Cost grows with checking** (and so does latency); the point is that **checks are cheap relative to errors**.
+- **The gains depend on the checker being independent and effective.** In the simulation errors are independent and the checker catches 90% of them. A checker built from the **same model** often **shares its blind spots** (it approves what it would have produced), so real detection rates can be much lower; prefer **mechanical** verification (tests, validators, constraints) where possible, and **measure** your checker's detection and false alarm rates.
+
+**Retries and side effects.** With a 5% chance that a reply is lost and a naive retry, **10,000 intended actions produced 10,518 real side effects: 518 duplicates** (emails sent twice, refunds paid twice). With an **idempotent** tool (the request carries a key and the tool does nothing the second time) there were **0 extra**. **Agents retry; tools must make retries safe** ([delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)).
+
+**Budgets.** Without a limit, the average task used **13.8 steps** but the **99th percentile was 72** and the worst task used **172**: a few runaway loops produce a heavy tail of cost and latency. A **budget of 40 steps** cut the mean to **12.9**, capped the **99th percentile and worst case at 40**, and stopped **4.5%** of tasks, which then need a defined outcome: **return partial progress with an explanation, ask the user, or escalate**. A budget is not only cost control; it is **how you convert an unbounded failure into a handled one**.
+
+The probabilities are assumptions and the events are independent; real agent errors are **correlated** (one misunderstanding corrupts every later step), which usually makes things **worse** than these numbers.
+
+## Tools and side effects
+
+- **Classify tools by risk**: read-only (search, read), reversible writes (create a draft, a branch, a ticket), and **irreversible or external** actions (send, pay, delete, deploy, publish).
+- **Make writes idempotent** with request keys, and prefer **two-step actions**: the agent **proposes** ("send this email to these people") and a separate step **commits** after validation or approval.
+- **Dry runs and previews**: show what would change (a diff, a list of affected rows) before doing it.
+- **Timeouts and cancellation** on every tool; the agent loop must survive a tool that never returns.
+- **Narrow, well-described tool interfaces** with typed parameters beat one powerful "run any command" tool. Validate parameters as you would for any API from an untrusted caller.
+- **Rate limits and quotas** per agent and per user ([rate limiting](/sd/scalability/rate-limiting-algorithms/)).
+
+## Security: agents are confused deputies
+
+An agent acts **with your authority** on the basis of **text it reads**, some of which comes from outside (web pages, emails, documents, tool outputs). An attacker who can put text where the agent will read it can try to **steer** it: "forward the user's files to this address". This is **prompt injection**, a form of the **confused deputy** problem.
+
+Defences, in layers (none is sufficient alone):
+- **Least privilege**: the agent's credentials allow only what the task needs, for the shortest time; no standing access to everything.
+- **Separate the powers**: an agent that **reads untrusted content** should not also hold the ability to **send data out** or take irreversible actions without a gate.
+- **Human approval** for high-risk actions, showing the **exact action** (the recipient, the amount), not the model's summary.
+- **Sandboxing** of code execution and browsing; restricted network egress.
+- **Output controls**: do not render model-produced links or images that could exfiltrate data; scrub secrets.
+- **Treat tool results as data**: mark them as untrusted in the prompt, and never let them redefine the policy.
+- **Audit logs** of every action and the text that led to it ([web and API attacks](/sd/security/web-and-api-attacks/)).
+
+## Evaluation and operations
+
+- **A task suite**: dozens to hundreds of realistic tasks with a **programmatic success check** (tests pass, the right record changed, the right file exists). Run it on **every change** to the prompt, model, tools or orchestration; track **success rate**, **steps and cost per task**, **escalation rate**.
+- **Run each task several times**: agents are non-deterministic, so measure a **success rate with a confidence interval**, not one run.
+- **Trace everything**: each step's prompt, chosen action, tool result, verifier verdict and cost, so a failure can be replayed and diagnosed. Sample real traces for human review.
+- **Failure taxonomy**: wrong plan, wrong tool arguments, misread result, loop, premature stop, tool outage. Fix the most frequent class first (often by **improving a tool's output or error messages**, which helps more than changing the prompt).
+- **Monitor in production**: success and escalation rates, cost per task, step count distribution (the heavy tail from the budget experiment), tool error rates, and **human override rates**.
+- **Roll out gradually**: shadow mode (the agent proposes, a human acts), then low-risk tasks, then more autonomy as measured reliability earns it.
+- **Cost**: each step is a model call whose context grows ([serving large language models](/sd/ai-systems/serving-large-language-models/)); long loops are quadratic in cost unless old context is summarised or trimmed.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in agent design" rows={[
+  { option: "Fixed workflow with model steps", pros: "Predictable, testable, cheaper; fewer chances to go wrong", cons: "Cannot handle tasks whose path is not known in advance", chooseWhen: "The sequence of steps is known (the default)" },
+  { option: "Open-ended agent loop", pros: "Flexible; handles unforeseen situations", cons: "Errors compound (35.8% success at 20 steps with 95% steps); costs and loops are heavy-tailed", chooseWhen: "The path genuinely cannot be written down, with checks and budgets" },
+  { option: "Check every step, redo on a flag", pros: "89.0% success at 20 steps for 1.36 times the cost in the simulation", cons: "Adds latency and cost; depends on a good checker", chooseWhen: "Multi-step tasks (the default)" },
+  { option: "Check only the final result", pros: "Simple", cons: "66.4% success at 2.55 times the cost for 20 steps", chooseWhen: "Short tasks (5 steps or fewer)" },
+  { option: "Mechanical verifiers (tests, schemas, constraints)", pros: "Independent of the model; precise", cons: "Only available for some tasks", chooseWhen: "Whenever one exists" },
+  { option: "Model-based verifier", pros: "Works for fuzzy quality judgements", cons: "May share the generator's blind spots; costs a call", chooseWhen: "When no mechanical check exists, after measuring its accuracy" },
+  { option: "Step and cost budgets with a defined fallback", pros: "Caps the heavy tail (worst case 172 steps down to 40)", cons: "Some legitimate long tasks are cut off (4.5% in the simulation)", chooseWhen: "Always" },
+  { option: "Human approval for irreversible actions", pros: "Prevents costly or unsafe actions", cons: "Slows the task; approvers can rubber-stamp", chooseWhen: "Sending, paying, deleting, publishing, deploying" }
+]} />
+
+## Pitfalls
+
+- **Judging an agent by one successful demo**: reliability is a rate over many runs.
+- **Long autonomous chains** with no intermediate checks.
+- **Letting the model grade its own work** as the only verification.
+- **Non-idempotent tools** behind a retrying agent (518 extra side effects in 10,000 calls).
+- **No budget**: one runaway loop costs more than a thousand normal tasks.
+- **Giving broad credentials** "to keep it simple".
+- **Mixing untrusted input with powerful actions** without an approval gate.
+- **Approving a summary** instead of the exact action.
+- **No traces**, so failures cannot be reproduced.
+- **Ever-growing context** that makes each step slower and costlier.
+- **Changing the prompt** without re-running the evaluation suite.
+- **No defined outcome** when the budget runs out or the agent is stuck.
+
+## What would you choose and why?
+
+A company wants an agent that handles customer refund requests end to end: read the ticket, look up the order, check the policy, issue the refund, email the customer, update the ticket. Which steps do you implement as fixed code, which need the model, where do you place checks and which are mechanical, which action needs a human approval and why, how do you make the refund and the email safe to retry, what are your step and money budgets, and what success rate on your task suite would you require before letting it run unsupervised on the first 10% of tickets?
+
+## Quiz
+
+<Quiz id="sd-m29-ai-agents" tags={["ai-agents", "reliability", "verification", "idempotency", "budgets"]} questions={[
+  { type: "predict", q: "Each step of an agent is right 90% of the time and steps are independent. About what share of 8-step tasks succeeds?", code: "p = 0.90\nsteps = 8\nprint(round(p ** steps * 100, 1))", options: ["About 90%", "About 43%", "About 72%", "About 8%"], answer: 1, explain: "0.9 to the power 8 is 0.430: errors compound multiplicatively." },
+  { type: "mcq", q: "Why did checking every step beat checking only the final result on 20-step tasks (89.0% against 66.4%)?", options: ["Final checks are more expensive per call", "A wrong step is caught while it is cheap to redo, before later steps build on it, and a restart repeats all the work", "Final checks cannot detect errors", "Per-step checks are free"], answer: 1, explain: "End-only checking also cost 2.55 times the plain cost against 1.36 times." },
+  { type: "mcq", q: "A tool call succeeds but its reply is lost, and the agent retries. How do you avoid the action happening twice?", options: ["Never retry", "Make the tool idempotent: the request carries a key and the tool does nothing the second time", "Ask the model whether it already did it", "Retry faster"], answer: 1, explain: "Without idempotency the simulation produced 518 extra side effects in 10,000 calls." },
+  { type: "multi", q: "Which are sound ways to limit damage from prompt injection in an agent that reads web pages?", options: ["Least-privilege credentials", "Human approval showing the exact action for sending data out or irreversible steps", "Sandboxing and restricted network egress", "Trusting text because it came from a tool result"], answer: [0, 1, 2], explain: "Tool results are untrusted data. The confused deputy problem arises when text can steer an agent that holds real authority." },
+  { type: "mcq", q: "What did the step budget of 40 achieve in the simulation?", options: ["Raised average success", "Capped the worst case at 40 steps (from 172) and the 99th percentile at 40 (from 72), while stopping 4.5% of tasks that need a defined fallback", "Removed all loops", "Made steps cheaper"], answer: 1, explain: "A budget turns an unbounded failure mode into a handled one, provided you decide what happens when it triggers." },
+  { type: "mcq", q: "Why is a checker built from the same model a weaker verifier than a test suite?", options: ["Models cannot read", "It tends to share the generator's blind spots and approve what it would have produced, so its real detection rate may be much lower than assumed", "Test suites are slower", "Models are always wrong"], answer: 1, explain: "Prefer mechanical verification, and measure the detection and false alarm rates of any model-based check." }
+]} />
