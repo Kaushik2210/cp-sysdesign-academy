@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 235 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 236 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -74,7 +74,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 19-26 (more Level 3 case studies) | Planned | 0 |
 | 27 Object-oriented design and patterns | Complete (3: SOLID principles in practice, creational and structural patterns, behavioural patterns; examples are in Python, so patterns that dissolve into functions there are called out) | 3 |
 | 28 LLD case studies | In progress (4: parking lot, LRU cache, vending machine, elevator system; more designs such as a library system or a rate limiter class are still planned) | 4 |
-| 29 Designing AI-powered systems | In progress (1: serving large language models with a batching and cost simulation; retrieval-augmented generation, agents and evaluation lessons planned) | 1 |
+| 29 Designing AI-powered systems | In progress (2: serving large language models with a batching and cost simulation; retrieval-augmented generation with a chunking and hybrid-retrieval experiment; agent reliability and evaluation lessons planned) | 2 |
 
 ## Known gaps and caveats
 
