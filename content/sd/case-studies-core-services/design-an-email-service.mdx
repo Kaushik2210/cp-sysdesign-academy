@@ -1,0 +1,314 @@
+---
+title: "Case Study: Design an Email Service"
+track: sd
+module: case-studies-core-services
+order: 13
+difficulty: hard
+estMinutes: 55
+prerequisites: ["sd/networking-and-apis/dns", "sd/queues-and-streaming/backpressure-retries-and-dlq", "sd/search-systems/inverted-indexes-and-text-analysis"]
+tags: [case-study, email, smtp, spam-filtering, dkim, retries, mailbox-storage, threading, search]
+type: case-study
+furtherReading:
+  - title: "RFC 5321, Simple Mail Transfer Protocol"
+    url: https://www.rfc-editor.org/rfc/rfc5321
+  - title: "RFC 6376, DomainKeys Identified Mail (DKIM) Signatures"
+    url: https://www.rfc-editor.org/rfc/rfc6376
+  - title: "RFC 7208, Sender Policy Framework (SPF)"
+    url: https://www.rfc-editor.org/rfc/rfc7208
+  - title: "RFC 7489, Domain-based Message Authentication, Reporting, and Conformance (DMARC)"
+    url: https://www.rfc-editor.org/rfc/rfc7489
+---
+
+## The problem
+
+Design an **email service** like Gmail or Outlook.com: users **receive** mail from anywhere on the internet, **send** mail to anywhere, keep a **mailbox** with folders or labels, **search** it, see messages grouped into **conversations**, and are protected from **spam and phishing**.
+
+Email is a good case study because it is a **federated, decades-old protocol** (SMTP): you cannot change how other servers behave, they may be down for hours, nothing in the protocol proves who sent a message, and a large share of all traffic is hostile. The design is about **reliable delivery through unreliable parties**, **authenticating** senders after the fact, and **storing and searching a huge per-user archive**.
+
+## Requirements
+
+**Functional**
+- Receive mail for the service's domains; send mail to other domains.
+- Mailbox per user: inbox, labels or folders, read state, attachments.
+- Conversation threading, search, drafts, and notifications of new mail.
+- Spam and phishing filtering; bounce messages when delivery fails.
+
+**Non-functional**
+- **Never lose accepted mail**: once we answer "250 OK" to a sender, the message must be durably stored.
+- **Reliable outbound delivery** despite temporarily failing destinations.
+- Fast mailbox access and search (hundreds of milliseconds).
+- Resist abuse: spam, forged senders, a compromised account used to spam.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Users | 500 million | |
+| Inbound attempts | 40 per user per day, about half of them spam rejected early | 20 billion attempts per day, 10 billion messages stored per day |
+| Rate | 20 billion / 86,400 s | about 231,000 inbound messages per second |
+| Stored size | about 20 KB per message body (attachments stored separately and deduplicated) | about 200 TB per day, about 73 PB per year before compression and replication |
+
+Two conclusions: **filtering early** is essential (rejecting half of all traffic before storage halves the cost), and the **archive is large and mostly cold** (users read recent mail), so storage tiers matter ([durability, backups and tiering](/sd/storage/durability-backups-tiering/)).
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart LR
+  S["Sending servers on the internet"] -->|"SMTP"| MX["Inbound SMTP gateways (MX hosts)"]
+  MX --> F["Checks: reputation, SPF, DKIM, DMARC, spam score"]
+  F -->|"reject"| X["Refused during the SMTP conversation"]
+  F -->|"accept"| Q["Durable inbound queue"]
+  Q --> D["Delivery workers"]
+  D --> M[("Mailbox store: metadata by user")]
+  D --> B[("Blob store: bodies and attachments")]
+  D --> I["Search indexer"]
+  D --> N["Push and IMAP notifications"]
+  U["Web, mobile and IMAP clients"] --> API["Mailbox API"]
+  API --> M
+  API --> I
+  API --> OUT["Outbound queue"]
+  OUT --> R["Outbound SMTP senders (retry, backoff, signing)"]
+  R -->|"SMTP"| T["Destination servers"]`} caption="Inbound mail is checked and queued durably before acknowledgement; outbound mail waits in a queue with retries" />
+
+### Receiving
+
+- **MX records in DNS** tell the world which hosts accept mail for our domains ([DNS](/sd/networking-and-apis/dns/)). Many stateless SMTP gateways sit behind them, scaled horizontally.
+- During the **SMTP conversation** the gateway can **reject cheaply**: unknown recipient, blocklisted sending IP, failed authentication policy, obvious spam. Rejecting *before* accepting the message means the sender is told, and we store nothing.
+- **Accept only after durable write**: the gateway answers "250 OK" only once the message is on a replicated queue or store. Before that, a crash simply makes the sender retry (SMTP is built around retries).
+- Delivery workers then **write the body to a blob store**, **metadata to the user's mailbox shard**, update the **search index**, and notify clients.
+
+### Mailbox storage
+
+- **Metadata** (sender, subject, labels, read flag, thread id, date, pointer to the body) lives in a **store sharded by user id**, in a wide-column or relational database, so a user's mailbox listing is a **range scan on one shard**.
+- **Bodies and attachments** live in a **blob store**, keyed by content hash, so an attachment sent to 1,000 recipients is stored **once** (deduplication) ([blob stores](/sd/storage/blob-stores/)).
+- **Labels, not folders**: a message has a set of labels; "move to folder" just changes labels, and a message can be in several places.
+- **Search**: a **per-user inverted index** ([inverted indexes](/sd/search-systems/inverted-indexes-and-text-analysis/)) built by the indexer from each delivered message. Per-user indexes keep queries fast (they scan only your mail) and make privacy and deletion simple.
+
+### Sending
+
+Outbound mail goes into a **durable queue** and an **outbound sender** pool delivers it by SMTP to the recipient's MX host. Destinations are often unreachable or slow, so the sender uses **retries with backoff** and finally a **bounce** (a non-delivery message) to the sender. Outbound senders also **sign** messages (DKIM) and respect **per-destination rate limits** so large providers do not throttle us.
+
+## The simulation
+
+The program models four mechanisms with the Python standard library only:
+
+1. **Delivery retries**: 10,000 messages per row, comparing **3 quick retries (give up after 15 minutes)** with **exponential backoff (5, 10, 20 ... 640 minutes, about 21 hours in all)**, first when the destination is **independently** up or down at each attempt, and then when **outages last a while** (30% of sends meet an outage averaging 3 hours).
+2. **Message signing** in the spirit of DKIM, showing that editing the body or a signed header in transit breaks verification. (Real DKIM uses **public-key signatures** published in DNS so anyone can verify; this toy uses a shared-secret HMAC to stay in the standard library, which only the signer and verifier could share.)
+3. **Threading** by following reply links between messages.
+4. A **naive Bayes spam filter** trained on ten hand-written messages.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import hashlib
+import hmac
+import math
+import random
+import re
+from collections import defaultdict
+
+# ---------------------------------------------------------------- 1. delivery queue with retries
+def deliver_all(n_messages, p_up, schedule, seed):
+    """Each message is retried on the given schedule (minutes after the previous try) until the receiving
+    server is reachable. The destination is up with probability p_up at each attempt, independently."""
+    rnd = random.Random(seed)
+    delivered, delays, attempts = 0, [], []
+    for _ in range(n_messages):
+        t, tries = 0, 0
+        for wait in [0] + list(schedule):
+            t += wait
+            tries += 1
+            if rnd.random() < p_up:
+                delivered += 1
+                delays.append(t)
+                attempts.append(tries)
+                break
+    return delivered, delays, attempts
+
+
+def deliver_outages(n_messages, schedule, seed, p_down=0.3, mean_outage=180):
+    """Outages last for a while: with probability p_down the destination is down when we send, for an
+    exponentially distributed number of minutes. Every attempt before the outage ends fails."""
+    rnd = random.Random(seed)
+    delivered, delays = 0, []
+    for _ in range(n_messages):
+        outage = rnd.expovariate(1 / mean_outage) if rnd.random() < p_down else 0
+        t = 0
+        for wait in [0] + list(schedule):
+            t += wait
+            if t >= outage:
+                delivered += 1
+                delays.append(t)
+                break
+    return delivered, delays
+
+
+# ---------------------------------------------------------------- 2. signing, in the spirit of DKIM (a teaching toy)
+KEYS = {"example.com": b"example-domain-secret"}          # a real DKIM uses public-key signatures published in DNS
+
+def canonical(headers, body, signed=("from", "to", "subject")):
+    nl = chr(10)                                   # a newline (no backslash escapes in this program)
+    h = nl.join(f"{k}:{headers[k].strip()}" for k in signed)
+    return h + nl + hashlib.sha256(body.encode()).hexdigest()
+
+def sign(domain, headers, body):
+    return hmac.new(KEYS[domain], canonical(headers, body).encode(), hashlib.sha256).hexdigest()
+
+def verify(domain, headers, body, sig):
+    return hmac.compare_digest(sign(domain, headers, body), sig)
+
+
+# ---------------------------------------------------------------- 3. threading by Message-ID / References
+def thread(messages):
+    """Group messages into conversations by following In-Reply-To links (union-find over message ids)."""
+    parent = {m["id"]: m["id"] for m in messages}
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for m in messages:
+        if m.get("in_reply_to") in parent:
+            parent[find(m["id"])] = find(m["in_reply_to"])
+    groups = defaultdict(list)
+    for m in messages:
+        groups[find(m["id"])].append(m["id"])
+    return sorted(groups.values())
+
+
+# ---------------------------------------------------------------- 4. a tiny naive Bayes spam filter
+def words(text):
+    return re.findall(r"[a-z']+", text.lower())
+
+class Bayes:
+    def __init__(self):
+        self.count = {"spam": defaultdict(int), "ham": defaultdict(int)}
+        self.docs = {"spam": 0, "ham": 0}
+    def train(self, text, label):
+        self.docs[label] += 1
+        for w in set(words(text)):
+            self.count[label][w] += 1
+    def spam_probability(self, text):
+        vocab = set(self.count["spam"]) | set(self.count["ham"])
+        log = {}
+        for label in ("spam", "ham"):
+            lp = math.log(self.docs[label] / sum(self.docs.values()))
+            for w in set(words(text)):
+                if w in vocab:
+                    lp += math.log((self.count[label][w] + 1) / (self.docs[label] + 2))     # Laplace smoothing
+            log[label] = lp
+        m = max(log.values())
+        e = {k: math.exp(v - m) for k, v in log.items()}
+        return e["spam"] / (e["spam"] + e["ham"])
+
+
+if True:
+    # 1. how a retry schedule changes delivery when the receiving server is down half the time
+    quick = [5, 5, 5]                                     # give up after 15 minutes
+    backoff = [5, 10, 20, 40, 80, 160, 320, 640]          # doubling, about 21 hours in total
+    for name, sched in (("3 quick retries (15 min)", quick), ("exponential backoff (about 21 h)", backoff)):
+        for p_up in (0.5, 0.2):
+            d, delays, att = deliver_all(10000, p_up, sched, seed=1)
+            med = sorted(delays)[len(delays) // 2] if delays else None
+            print(f"{name:34s} server up {p_up:.0%}: delivered {d / 100:5.1f}% | median delay {med} min | average attempts {sum(att) / len(att):.2f}")
+
+    for name, sched in (("3 quick retries (15 min)", quick), ("exponential backoff (about 21 h)", backoff)):
+        d, delays = deliver_outages(10000, sched, seed=1)
+        print(f"{name:34s} outages of about 3 h on 30% of sends: delivered {d / 100:5.1f}%")
+
+    # 2. signatures detect tampering
+    h = {"from": "alice@example.com", "to": "bob@mail.net", "subject": "Invoice 42"}
+    body = "Please pay 100 euros to account A."
+    sig = sign("example.com", h, body)
+    print("untouched message verifies:", verify("example.com", h, body, sig))
+    print("body edited in transit verifies:", verify("example.com", h, body.replace("100", "900"), sig))
+    print("subject edited in transit verifies:", verify("example.com", {**h, "subject": "Invoice 43"}, body, sig))
+
+    # 3. threading
+    msgs = [{"id": "a"}, {"id": "b", "in_reply_to": "a"}, {"id": "c", "in_reply_to": "b"}, {"id": "d"}, {"id": "e", "in_reply_to": "d"}, {"id": "f", "in_reply_to": "zzz"}]
+    print("conversations:", thread(msgs))
+
+    # 4. spam filter on a tiny hand-written corpus
+    b = Bayes()
+    spam = ["win a free prize now", "free money click now", "cheap pills free shipping", "claim your free prize today", "urgent money transfer click here"]
+    ham = ["meeting moved to friday", "lunch tomorrow with the team", "please review the attached report", "invoice for last month attached", "thanks for the notes from the meeting"]
+    for t in spam:
+        b.train(t, "spam")
+    for t in ham:
+        b.train(t, "ham")
+    for t in ("free prize click now", "report for the friday meeting", "free lunch at the meeting"):
+        print(f"P(spam) = {b.spam_probability(t):.3f} for: {t}")
+`} />
+
+## What the output shows
+
+**Retries, independent failures.** When the destination is up half the time at each attempt, 3 quick retries deliver **93.6%** and backoff **99.8%** (4 attempts give 1 minus 0.5^4 = 93.75% in theory, 9 attempts give 99.8%). When it is up 20% of the time, quick retries deliver **59.6%** against **87.0%** for backoff, with a median delay of **15 minutes** instead of 5.
+
+**Retries, realistic outages.** Real outages are **correlated**: a server that is down now is probably down in five minutes too. With 30% of sends meeting an outage of about 3 hours, quick retries deliver only **72.5%** (they give up before the outage ends) while exponential backoff delivers **100.0%**. The independent model **understates** how much backoff matters, because retrying again immediately is wasted when the cause lasts hours. This is why real mail servers keep retrying for **days** (commonly 4 to 5) before sending a bounce. The trade-off is that spread-out retries make a successful message take longer, and the queue holds more messages.
+
+**Signing.** The untouched message **verifies**; changing "100" to "900" in the body, or the subject from "Invoice 42" to "Invoice 43", makes verification **fail**: a signature lets the receiver detect tampering after the fact. It does not stop someone from sending as their **own** domain; that is what SPF and DMARC policies are for (below).
+
+**Threading.** Following reply links groups six messages into conversations [a, b, c], [d, e] and [f]: f replies to a message we never received, so it starts its own conversation. Real systems also fall back on subject lines and references headers when links are missing.
+
+**Spam filter.** After training on ten messages, "free prize click now" scores **0.993** spam probability, "report for the friday meeting" **0.007**, and "free lunch at the meeting" **0.172**: it contains the spammy word "free" but mostly meeting words, so it stays on the ham side. This is a **toy** with ten training messages; production filters use millions of messages and many signals, and adversaries adapt.
+
+The retry percentages come from 10,000 simulated messages per row with fixed seeds; they match the theory in the independent case and show the mechanism for the outage case, but the outage length and share are assumptions.
+
+## Authenticating senders: SPF, DKIM, DMARC
+
+SMTP lets anyone write any "From" address, so receivers check:
+
+- **SPF**: the domain publishes in DNS which IP addresses may send for it. The receiver checks the connecting IP.
+- **DKIM**: the sender signs selected headers and the body with a private key; the public key is in DNS. Receivers verify the signature (tampering fails, as in the demo).
+- **DMARC**: the domain says what to do if SPF and DKIM do not **align** with the visible From domain (none, quarantine, reject) and where to send reports.
+
+Together they make **forging a domain that publishes a strict DMARC policy** hard; they do not prove a message is *good*, since spammers can authenticate their own domains. Reputation, content analysis and user feedback remain essential.
+
+## Spam and abuse
+
+Layered defences, cheapest first:
+
+1. **Connection level**: IP and domain **reputation**, blocklists, rate limits per sender, greylisting.
+2. **Authentication**: SPF, DKIM and DMARC results as features.
+3. **Content**: a classifier (naive Bayes as above, then gradient boosted trees or neural models) over words, URLs, header patterns, attachments; **link and attachment scanning**.
+4. **Behaviour and feedback**: "report spam" clicks from many users feed back into reputation within minutes.
+5. **Outbound controls**: rate limits per account, detection of sudden volume changes, and quarantine of **compromised accounts**, to protect our own **sending reputation** (if we send spam, other providers block us).
+
+False positives (good mail in spam) are costlier than false negatives, so thresholds err towards delivering and filing in a spam folder rather than rejecting.
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in an email service" rows={[
+  { option: "Reject during the SMTP conversation", pros: "Sender is told immediately; nothing stored; cheap", cons: "Only possible for decisions made before the body is read; a false rejection loses mail visibly", chooseWhen: "Clear policy violations and blocklisted senders" },
+  { option: "Accept then classify into spam folder", pros: "Safer for false positives; user can recover", cons: "Spam consumes storage and processing", chooseWhen: "Content-based decisions" },
+  { option: "Quick retries only", pros: "Fast failure feedback; small queues", cons: "Loses mail during multi-hour outages (72.5% delivered in the demo)", chooseWhen: "Never as the only policy" },
+  { option: "Exponential backoff over days", pros: "Survives long outages (100% in the demo)", cons: "Slow bounce feedback; larger queues", chooseWhen: "Standard for SMTP delivery" },
+  { option: "Per-user mailbox shard", pros: "Listing and search touch one shard; isolates users", cons: "Heavy users make hot shards; cross-user features are harder", chooseWhen: "Default" },
+  { option: "Blob store with content hashing", pros: "Deduplicates attachments sent to many users; cheap cold tier", cons: "Needs reference counting for deletion", chooseWhen: "Bodies and attachments" },
+  { option: "Per-user search index", pros: "Fast, private, easy to delete", cons: "Many small indexes to manage", chooseWhen: "Personal mail search" },
+  { option: "Labels instead of folders", pros: "A message can belong to several groups; moves are metadata only", cons: "IMAP clients expect folders, so a mapping layer is needed", chooseWhen: "Modern mail products" }
+]} />
+
+## Pitfalls
+
+- Answering "250 OK" **before** the message is durably stored.
+- **Short retry windows**: mail lost during an outage that lasts hours.
+- Treating SMTP failures as independent when outages are **correlated**.
+- **Bouncing spam** to forged sender addresses (backscatter) instead of rejecting during the conversation.
+- Storing each attachment **once per recipient**.
+- A single global search index, so every query scans everyone's mail.
+- **Trusting the From header** without SPF, DKIM and DMARC checks.
+- Ignoring our **outbound reputation**: one compromised account can get the whole service blocklisted.
+- Scoring spam with a model trained once: spammers adapt, so the filter needs continual retraining and feedback.
+- Deleting a message without removing it from the **index, blob references and backups** according to the retention policy.
+
+## What would you choose and why?
+
+A large customer wants to send 5 million marketing emails in an hour from your platform, and their previous provider got blocked by two big mailbox providers last month. How do you onboard them (authentication, dedicated sending addresses, warm-up, rate limits per destination, bounce and complaint handling), what do you monitor to protect other customers' reputation, and when do you pause the campaign automatically?
+
+## Quiz
+
+<Quiz id="sd-m17-email-service" tags={["case-study", "email", "smtp", "spam", "retries"]} questions={[
+  { type: "mcq", q: "When should the SMTP gateway answer '250 OK'?", options: ["As soon as the connection opens", "Only after the message is durably stored or queued, because the sender will not retry once it is acknowledged", "After the user reads it", "After spam scoring finishes"], answer: 1, explain: "Until then a crash just makes the sender retry; after the 250 the service owns the message." },
+  { type: "mcq", q: "Why did exponential backoff beat 3 quick retries so clearly under realistic outages (100.0% against 72.5%)?", options: ["Backoff sends faster", "Outages last hours, so retries that give up after 15 minutes fail while spread-out retries eventually find the server up", "Quick retries are not allowed", "Backoff uses different servers"], answer: 1, explain: "Failures are correlated in time; retrying immediately is wasted when the cause lasts." },
+  { type: "predict", q: "A destination is up 50% of the time at each independent attempt. With 4 attempts, what share of messages is delivered?", code: "p_fail = 0.5\nattempts = 4\nprint(1 - p_fail ** attempts)", options: ["50%", "75%", "93.75%", "100%"], answer: 2, explain: "1 - 0.5^4 = 0.9375, matching the demo's 93.6% for four tries." },
+  { type: "mcq", q: "What does a DKIM signature protect against?", options: ["A sender using their own domain to send spam", "Undetected modification of the signed headers or body in transit, and forging a domain that signs its mail", "Spam of all kinds", "Slow delivery"], answer: 1, explain: "It does not prove a message is good; spammers can sign their own domains. DMARC ties authentication to the visible From domain." },
+  { type: "multi", q: "Which are sensible spam defences?", options: ["Reject known-bad IPs during the SMTP conversation", "Use authentication results (SPF, DKIM, DMARC) as classifier features", "Use user 'report spam' clicks as feedback", "Bounce every suspected spam message to its From address"], answer: [0, 1, 2], explain: "Bouncing to forged senders causes backscatter and harms innocent third parties." },
+  { type: "mcq", q: "Why are attachments stored in a content-addressed blob store?", options: ["To make them load slower", "So an attachment sent to thousands of recipients is stored once and referenced many times", "Because databases cannot store files", "To avoid indexing"], answer: 1, explain: "Deduplication by content hash saves a large share of storage in an archive this size." }
+]} />
