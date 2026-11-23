@@ -69,6 +69,7 @@
     { "kind": "lesson", "ref": "sd/ai-systems/serving-large-language-models" },
     { "kind": "lesson", "ref": "sd/ai-systems/retrieval-augmented-generation" },
     { "kind": "lesson", "ref": "sd/ai-systems/designing-reliable-ai-agents" },
+    { "kind": "lesson", "ref": "sd/ai-systems/evaluating-and-monitoring-llm-systems" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/solid-principles-in-practice" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/creational-and-structural-patterns" },
     { "kind": "lesson", "ref": "sd/oop-and-design-patterns/behavioral-patterns" },
