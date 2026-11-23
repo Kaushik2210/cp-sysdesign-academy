@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("198");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("199");
   });
 });
 
@@ -928,6 +928,7 @@ test.describe("security, observability and case-study modules", () => {
     ["/sd/case-studies-core-services/design-a-web-search-engine/", "Case Study: Design a Web Search Engine"],
     ["/sd/case-studies-core-services/design-a-proximity-service/", "Case Study: Design a Proximity Service for Nearby Places and Friends"],
     ["/sd/case-studies-core-services/design-a-calendar-and-meeting-scheduler/", "Case Study: Design a Calendar and Meeting Scheduler"],
+    ["/sd/case-studies-core-services/design-a-multiplayer-game-backend/", "Case Study: Design a Multiplayer Game Backend"],
     ["/sd/case-studies-data-and-transactions/design-a-ticket-booking-system/", "Case Study: Design a Ticket Booking System"],
     ["/sd/case-studies-data-and-transactions/design-a-search-autocomplete-system/", "Case Study: Design a Search Autocomplete System"],
     ["/sd/case-studies-data-and-transactions/design-a-file-sync-service/", "Case Study: Design a File Storage and Sync Service"],
