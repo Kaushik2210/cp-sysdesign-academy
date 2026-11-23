@@ -1,0 +1,248 @@
+---
+title: "Case Study: Design a Web Search Engine"
+track: sd
+module: case-studies-core-services
+order: 14
+difficulty: hard
+estMinutes: 60
+prerequisites: ["sd/case-studies-core-services/design-a-web-crawler", "sd/search-systems/ranking-tf-idf-and-bm25", "sd/search-systems/scatter-gather-search-and-tail-latency"]
+tags: [case-study, search-engine, pagerank, indexing, ranking, link-analysis, spam, sharding, freshness]
+type: case-study
+furtherReading:
+  - title: "Brin and Page, The Anatomy of a Large-Scale Hypertextual Web Search Engine (1998)"
+    url: https://research.google/pubs/the-anatomy-of-a-large-scale-hypertextual-web-search-engine/
+  - title: "Page, Brin, Motwani, Winograd, The PageRank Citation Ranking: Bringing Order to the Web (1999)"
+    url: http://ilpubs.stanford.edu:8090/422/
+  - title: "Gyongyi, Garcia-Molina, Pedersen, Combating Web Spam with TrustRank (VLDB 2004)"
+    url: https://www.vldb.org/conf/2004/RS15P3.PDF
+  - title: "Dean, Challenges in building large-scale information retrieval systems (WSDM 2009 keynote)"
+    url: https://research.google/pubs/challenges-in-building-large-scale-information-retrieval-systems/
+---
+
+## The problem
+
+Design a **web search engine**: it **crawls** billions of pages, builds an **index**, and answers a typed query with the ten most **relevant** results in a fraction of a second, while staying **fresh** (news appears within minutes) and resisting people who manipulate the rankings.
+
+Earlier lessons built the parts: the [web crawler](/sd/case-studies-core-services/design-a-web-crawler/) fetches pages, [inverted indexes](/sd/search-systems/inverted-indexes-and-text-analysis/) map words to documents, [BM25](/sd/search-systems/ranking-tf-idf-and-bm25/) scores text relevance, and [scatter-gather](/sd/search-systems/scatter-gather-search-and-tail-latency/) fans a query over shards. This case study connects them and adds what is specific to the **whole web**: using the **link graph** as a quality signal (PageRank), **adversarial spam**, and **tiered indexes** that make the enormous index affordable.
+
+## Requirements
+
+**Functional**
+- Crawl and index web pages continuously.
+- Return ranked results for a text query, with titles and snippets.
+- Handle typos, synonyms and different languages.
+- Support freshness: new and changed pages become searchable quickly.
+
+**Non-functional**
+- Median latency under 200 ms; high availability.
+- **Relevance** is the product: results should be useful, trustworthy and hard to game.
+- Scale to tens of billions of pages and hundreds of thousands of queries per second.
+
+## Estimation
+
+| quantity | assumption | result |
+| --- | --- | --- |
+| Indexed pages | 50 billion | |
+| Index size | about 10 KB of postings per page (assumption, after compression) | about 500 TB |
+| Queries | 8.6 billion per day | about 100,000 per second on average, 300,000 at peak |
+| Result cache | about 40% of queries repeat and are served from a cache | about 180,000 per second reach the index at peak |
+| Shards | document-partitioned, about 500 GB per shard | about 1,000 shards, and **every uncached query visits every shard** |
+
+The last row is the central difficulty: with a **document-partitioned** index each shard holds a slice of all documents, so each query must ask **all** shards. Throughput then means **many replicas of every shard**, which is expensive. The remedies are **caching** (above), **tiered indexes**, and **early termination** (stop scanning a postings list once the best results can no longer change).
+
+## Architecture
+
+<Diagram kind="mermaid" code={`flowchart TB
+  subgraph Offline["Offline and near-real-time pipeline"]
+    CR["Crawler (priority and politeness)"] --> PR["Parse, extract links, detect duplicates"]
+    PR --> DS[("Document store")]
+    PR --> LG[("Link graph")]
+    LG --> PRK["PageRank and spam analysis (batch)"]
+    DS --> IX["Index builder (batch plus incremental)"]
+    PRK --> IX
+    IX --> T1[("Tier 1 index: best pages, small and hot")]
+    IX --> T2[("Tier 2 index: the long tail")]
+  end
+  subgraph Online["Serving"]
+    Q["Query"] --> QU["Query understanding: spelling, synonyms, intent"]
+    QU --> C{"Result cache"}
+    C -->|"hit"| R["Results"]
+    C -->|"miss"| SG["Scatter to shards of tier 1, then tier 2 if needed"]
+    SG --> RK["Rank: text score + link score + many signals, then re-rank top 100"]
+    RK --> R
+  end
+  T1 --> SG
+  T2 --> SG`} caption="An offline pipeline builds tiered indexes and link scores; the serving path fans out to shards, ranks and caches" />
+
+## Indexing pipeline
+
+1. **Parse** the HTML: extract text, title, headings, anchors and outgoing links; detect the language.
+2. **Deduplicate**: the web is full of copies. Exact duplicates are caught by hashing the content; **near duplicates** (same article with a different sidebar) by a similarity fingerprint such as SimHash. Keep one canonical page and credit it with the links of the copies.
+3. **Build the inverted index**: for every term, a sorted **postings list** of documents (with positions and fields). Built as a **batch job** (MapReduce style) over the whole corpus, plus an **incremental** path for fresh pages.
+4. **Shard by document**, so a shard owns an independent slice and can rank locally; replicate each shard for availability and throughput.
+5. **Tier** the index. Put the **best pages** (high quality, frequently clicked, high link score) in a small, fast **tier 1**; the vast **long tail** goes in a cheaper **tier 2** consulted only when tier 1 gives too few good results. Most queries are answered from tier 1, so the expensive hardware serves a small fraction of the corpus.
+6. **Freshness**: a separate small **real-time index** for newly crawled pages and news, merged with the main results at query time, and rebuilt into the main index periodically.
+
+## The link graph and PageRank
+
+Text matching alone is easy to manipulate: stuff a page with the right words. Links are a harder-to-fake signal of **quality**: a page that many good pages link to is probably good. **PageRank** formalises this with a **random surfer**: with probability d (the *damping factor*, typically 0.85) the surfer follows a random outgoing link, otherwise jumps to a random page. The page's rank is the long-run fraction of time the surfer spends there, computed by **power iteration**: start with equal ranks and repeatedly redistribute each page's rank among the pages it links to, until the values stop changing. Rank flows from page to page, and pages with no links send theirs to the random jump.
+
+At web scale the iteration is a **distributed batch job** over the link graph (each iteration is one pass over all links), run periodically.
+
+### The experiment
+
+The program below builds a synthetic web of 2,000 pages (10,245 links) where popular pages attract more links, runs PageRank, and then attacks it with a **link farm**: 200 worthless pages that all link to one target page and to each other. It compares plain PageRank with a **trust-biased** variant in which the random jump goes **only to 10 trusted seed pages** (the idea behind TrustRank).
+
+<CodeRunner language="python" timeoutMs={60000} code={`import random
+
+
+def make_web(n, seed):
+    """A synthetic web: every page links to 3 to 8 pages, favouring pages that already have many links in."""
+    rnd = random.Random(seed)
+    out = {p: [] for p in range(n)}
+    pool = list(range(10))                      # a few early, well known pages
+    for p in range(n):
+        for _ in range(rnd.randint(3, 8)):
+            q = rnd.choice(pool)
+            if q != p and q not in out[p]:
+                out[p].append(q)
+                pool.append(q)                  # being linked to makes a page more likely to be linked again
+        pool.append(p)
+    return out
+
+
+def pagerank(out, damping=0.85, tol=1e-10, teleport=None):
+    """Power iteration. A random surfer follows a link with probability 'damping', otherwise jumps to a page
+    chosen by 'teleport' (uniform by default). Pages with no links send their rank to the teleport distribution."""
+    n = len(out)
+    tele = teleport or {p: 1.0 / n for p in out}
+    rank = dict(tele)
+    for it in range(1, 1000):
+        new = {p: (1 - damping) * tele[p] for p in out}
+        dangling = sum(rank[p] for p in out if not out[p])
+        for p, links in out.items():
+            if links:
+                share = damping * rank[p] / len(links)
+                for q in links:
+                    new[q] += share
+        for p in out:
+            new[p] += damping * dangling * tele[p]
+        diff = sum(abs(new[p] - rank[p]) for p in out)
+        rank = new
+        if diff < tol:
+            return rank, it
+    return rank, 1000
+
+
+def position(rank, page):
+    order = sorted(rank, key=lambda p: -rank[p])
+    return order.index(page) + 1
+
+
+if True:
+    n = 2000
+    web = make_web(n, seed=3)
+    rank, iters = pagerank(web)
+    top = sorted(rank, key=lambda p: -rank[p])[:5]
+    print(f"{n} pages, {sum(len(v) for v in web.values())} links; converged in {iters} iterations; total rank {sum(rank.values()):.6f}")
+    print("top 5 pages:", top, "with shares", [round(rank[p] * 100, 2) for p in top], "percent")
+    for d in (0.5, 0.85, 0.99):
+        print(f"damping {d}: {pagerank(web, damping=d)[1]} iterations to converge")
+
+    # a link farm: 200 worthless pages that all link to one target page and to each other
+    target = 1500
+    before = position(rank, target)
+    farm = list(range(n, n + 200))
+    spam = {p: list(web[p]) for p in web}
+    for f in farm:
+        spam[f] = [target] + [q for q in farm if q != f][:10]
+    seeds = list(range(10))                                    # a small set of pages we trust
+    def trust(graph):
+        tele = {p: (1.0 / len(seeds) if p in seeds else 0.0) for p in graph}
+        return pagerank(graph, teleport=tele)[0]
+
+    r2, _ = pagerank(spam)
+    print(f"farm that no real page links to, plain PageRank: target position {before} -> {position(r2, target)}, farm holds {sum(r2[f] for f in farm) * 100:.1f}% of all rank")
+    t2 = trust(spam)
+    print(f"  same graph, trust-biased rank (jumps only to 10 trusted seeds): target position {position(t2, target)}, farm holds {sum(t2[f] for f in farm) * 100:.1f}%")
+
+    # the farm gets a few links from real pages (comment spam, hacked sites)
+    for p in (5, 77, 400, 901, 1200):
+        spam[p] = spam[p] + [farm[0]]
+    r3, _ = pagerank(spam)
+    t3 = trust(spam)
+    print(f"5 real pages link into the farm, plain PageRank: target position {position(r3, target)}, rank share {r3[target] * 100:.3f}% (was {rank[target] * 100:.3f}%), farm holds {sum(r3[f] for f in farm) * 100:.1f}%")
+    print(f"  same graph, trust-biased: target position {position(t3, target)}, farm holds {sum(t3[f] for f in farm) * 100:.1f}%")
+`} />
+
+## What the output shows
+
+- **Convergence**: PageRank converges in **31 iterations** at damping 0.85, and the ranks add up to 1. A lower damping factor converges faster (**18 iterations at 0.5**) and a higher one slower (**40 at 0.99**), because rank has to travel further along link chains. Real systems stop after a few dozen iterations.
+- **Top pages**: the five most linked-to pages hold between about 8.5% and 13.6% of all rank each, together roughly 60%: link-based importance is extremely **concentrated** in a few pages, as on the real web.
+- **The link farm works against plain PageRank**: even though **no real page links to the farm**, the target page jumps from position **1553 to 12** and the farm holds **6.0%** of all rank. Why? Every page, including the 200 farm pages, receives a share of the **uniform random jump**, and the farm's internal links **trap** that rank and funnel it to the target.
+- **Trust-biased rank removes it, when the farm is isolated**: with jumps only to 10 trusted seeds, the unlinked farm holds **0.0%** and the target falls back to position **1501**.
+- **But a few real links bring it back**: when just **5 real pages link into the farm** (think hacked sites or comment spam), plain PageRank puts the target at position **11** with **0.941%** of all rank (it had 0.008%). Trust-biased rank is better but not enough: the target is at **12** and the farm still holds **8.0%** of rank, because once rank gets in, the farm's loops **keep it**.
+
+So a single signal can always be attacked. Production systems add: ignoring links from known-bad or low-trust sources (**spam mass** estimation compares ordinary and trust-biased ranks), **nofollow** annotations on user-generated links, detecting **dense closed link clusters**, limiting the influence of any one site, and many independent signals so that gaming one barely helps.
+
+The graph is synthetic and the numbers come from one seed; they show the mechanism, not the behaviour of the real web.
+
+## Ranking
+
+A query is answered in stages, each cheaper and more precise than the last:
+
+1. **Query understanding**: tokenise, fix spelling, expand synonyms, detect intent and language.
+2. **Retrieval** from the inverted index in each shard: documents containing the terms, scored by a fast function ([BM25](/sd/search-systems/ranking-tf-idf-and-bm25/)) plus the **static** document score (link-based rank, quality).
+3. **Local top K** per shard (for example 1,000), merged centrally ([scatter-gather](/sd/search-systems/scatter-gather-search-and-tail-latency/)).
+4. **Re-ranking** of the top few hundred with a **learned model** over hundreds of signals: text match in title and anchors, link score, page quality, freshness, click behaviour, location and language, page speed, and **semantic similarity** from embeddings ([vector search](/sd/search-systems/vector-search-and-ann/)).
+5. **Snippets and presentation**: pick the passage matching the query; assemble the result page.
+
+The learned ranker is trained on **human relevance ratings** and **click data**, evaluated with metrics such as **NDCG** and with online **A/B tests**.
+
+## Serving at low latency
+
+- **Cache** whole result pages for frequent queries; a skewed query distribution makes caching very effective.
+- **Tier 1 first**: answer from the small tier; consult tier 2 only if needed.
+- **Early termination**: postings are sorted by static score, so a shard can stop once the remaining documents cannot enter the top K.
+- **Tail latency**: the query waits for the slowest shard, so use **timeouts, hedged requests** (a second request to another replica after a short wait) and return **partial results** rather than waiting ([tail latency](/sd/search-systems/scatter-gather-search-and-tail-latency/)).
+
+## Trade-offs
+
+<TradeOffs caption="Key decisions in a web search engine" rows={[
+  { option: "Document-partitioned index", pros: "Each shard ranks locally; easy to add documents; failures lose a slice, not whole terms", cons: "Every query visits every shard", chooseWhen: "Default for web search" },
+  { option: "Term-partitioned index", pros: "A query touches only the shards holding its terms", cons: "Long postings must be shipped between shards; hot terms overload a shard; harder updates", chooseWhen: "Rarely at web scale" },
+  { option: "Tiered index (hot tier and long tail)", pros: "Most queries served from a small, fast tier", cons: "Choosing the tiers; a miss in tier 1 costs more", chooseWhen: "Very large corpora" },
+  { option: "PageRank as one signal", pros: "Hard to fake in bulk; captures quality from the link graph", cons: "Can be attacked (link farms); stale between runs; biased towards old popular pages", chooseWhen: "One of many signals, with spam defences" },
+  { option: "Plain uniform random jump", pros: "Simple and well understood", cons: "Gives every page, including spam farms, a share (6.0% to a farm in the demo)", chooseWhen: "A baseline" },
+  { option: "Trust-biased jump from seed pages", pros: "Removes unreachable spam (0.0% in the demo)", cons: "Misses spam that real pages link to (8.0% in the demo); seeds must be curated", chooseWhen: "As a spam-detection signal alongside others" },
+  { option: "Batch index plus real-time index", pros: "Cheap bulk building and fresh news", cons: "Two paths to keep consistent; merge at query time", chooseWhen: "When freshness matters" },
+  { option: "Learned re-ranking of the top results", pros: "Combines hundreds of signals", cons: "Needs training data, careful evaluation and guardrails against manipulation", chooseWhen: "Final ranking stage" }
+]} />
+
+## Pitfalls
+
+- Ranking on **text match alone** (trivially stuffed with keywords).
+- Trusting **one link-based signal**: a link farm lifted a worthless page from position 1553 to 12 in the demo.
+- **Visiting every shard** for every query with no cache, tiers or early termination.
+- Waiting for the **slowest shard** with no timeout or hedging.
+- No **near-duplicate** detection: results full of copies and split link credit.
+- Treating the index as **static**: new pages and breaking news arrive late.
+- Evaluating changes by intuition instead of **human ratings and A/B tests**.
+- Letting **personalisation** or location dominate without guardrails.
+- Ignoring **crawl politeness** and robots rules ([web crawler lesson](/sd/case-studies-core-services/design-a-web-crawler/)).
+- Not measuring **tail latency** (p99), only the average.
+
+## What would you choose and why?
+
+A new site claims a rival's pages are being pushed down by thousands of automatically generated pages that link to the rival's competitors. Which signals would you examine to decide whether this is a link spam attack, what would you change in the link-based part of your ranking, how would you avoid punishing legitimate sites that were linked to without their consent, and how would you test your fix before releasing it to all users?
+
+## Quiz
+
+<Quiz id="sd-m17-web-search-engine" tags={["case-study", "search-engine", "pagerank", "indexing", "ranking", "spam"]} questions={[
+  { type: "mcq", q: "Why does a document-partitioned index make every query visit every shard?", options: ["Because of caching", "Each shard holds a slice of all documents, so any shard may contain results for the query", "Shards cannot rank", "Because of replication"], answer: 1, explain: "That is why caching, tiers and early termination are essential to control cost." },
+  { type: "mcq", q: "In PageRank, what does the damping factor control?", options: ["The page size", "The probability the surfer follows a link rather than jumping to a random page; it also affects how many iterations are needed", "The crawl rate", "The number of shards"], answer: 1, explain: "The demo needed 18, 31 and 40 iterations for damping 0.5, 0.85 and 0.99." },
+  { type: "predict", q: "Plain PageRank gave the farm 6.0% of all rank and trust-biased rank gave it 0.0% (isolated farm). After 5 real pages link into the farm, trust-biased rank gives the farm 8.0%. What does that say?", code: "# farm share with trust-biased jumps\n# isolated farm: 0.0%\n# 5 real pages link in: 8.0%", options: ["Trust-biased rank is useless", "It removes isolated spam, but rank that enters a closed link cluster is kept there, so extra defences are still needed", "Links never matter", "The farm became trustworthy"], answer: 1, explain: "No single signal is sufficient; production systems combine several defences." },
+  { type: "mcq", q: "What is the purpose of a tiered index?", options: ["To store every page twice", "To answer most queries from a small, fast tier of the best pages and consult the large long-tail tier only when needed", "To avoid crawling", "To remove spam"], answer: 1, explain: "Most queries do not need the long tail, so the expensive hardware serves a small share of the corpus." },
+  { type: "multi", q: "Which help control tail latency in scatter-gather search?", options: ["Per-shard timeouts with partial results", "Hedged requests to another replica", "Waiting for every shard however long it takes", "Early termination in postings scans"], answer: [0, 1, 3], explain: "The slowest shard sets query latency, so bound the wait and reduce per-shard work." },
+  { type: "mcq", q: "Why re-rank only the top few hundred results with a learned model?", options: ["The model is inaccurate", "Hundreds of signals and a heavy model are too expensive to run on every matching document, so a cheap first stage narrows the candidates", "Users only want 100 results", "It avoids using links"], answer: 1, explain: "A cascade of cheap-to-expensive stages keeps latency low while using rich signals where they matter." }
+]} />
