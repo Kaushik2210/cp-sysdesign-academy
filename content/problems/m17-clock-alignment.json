@@ -1,0 +1,135 @@
+{
+  "id": "m17-clock-alignment",
+  "title": "Clock Alignment",
+  "source": {
+    "name": "Original exercise; classic technique (Chinese remainder theorem for moduli that need not be coprime)"
+  },
+  "rating": 1700,
+  "tags": [
+    "number-theory",
+    "chinese-remainder-theorem",
+    "extended-euclid",
+    "congruence"
+  ],
+  "statement": "A machine has `k` gears. Gear `i` shows a position `r_i` after the machine has run for `x` ticks exactly when `x mod m_i = r_i`. Find the **smallest number of ticks `x ≥ 0`** after which all `k` gears show their required positions at the same time, or `-1` if no such `x` exists. The moduli `m_i` are **not** guaranteed to be pairwise coprime.\n\n**Input.** The first line holds `k`. Each of the next `k` lines holds `r_i m_i`.\n\n**Output.** The smallest valid `x`, or `-1`.",
+  "constraints": [
+    "1 ≤ k ≤ 20",
+    "1 ≤ m_i ≤ 10^6 and 0 ≤ r_i < m_i",
+    "The least common multiple of all m_i is at most 10^12, so the answer is below 10^12 and every intermediate product fits in a signed 64-bit integer (use BigInt in JavaScript)"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "3\n2 3\n3 5\n2 7\n",
+      "output": "23\n",
+      "hidden": false
+    },
+    {
+      "input": "2\n1 2\n0 4\n",
+      "output": "-1\n",
+      "hidden": false
+    },
+    {
+      "input": "2\n2 6\n8 10\n",
+      "output": "8\n",
+      "hidden": true
+    },
+    {
+      "input": "1\n0 1\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "1\n4 9\n",
+      "output": "4\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n0 4\n0 6\n0 10\n",
+      "output": "0\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n1 2\n2 3\n3 4\n4 5\n5 6\n",
+      "output": "59\n",
+      "hidden": true
+    },
+    {
+      "input": "1\n2 8\n",
+      "output": "2\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n3 6\n2 7\n",
+      "output": "9\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n4 12\n0 12\n3 9\n1 2\n4 5\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n2 4\n0 2\n",
+      "output": "2\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n4 7\n7 8\n2 6\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "5\n5 12\n3 5\n6 8\n6 11\n1 5\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "11\n0 2\n0 3\n0 5\n0 7\n1 11\n11 13\n6 17\n9 19\n20 23\n8 29\n23 31\n",
+      "output": "51428149290\n",
+      "hidden": true
+    },
+    {
+      "input": "3\n328252 999983\n188 1000\n582 777\n",
+      "output": "60591298188\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n1 999983\n2 999979\n",
+      "output": "249990750086\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n1 1000000\n3 999999\n",
+      "output": "2000001\n",
+      "hidden": true
+    },
+    {
+      "input": "2\n5 1000000\n6 999998\n",
+      "output": "-1\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "Searching x = 0, 1, 2, ... up to the least common multiple could take 10^12 steps. Try combining two congruences into one.",
+    "Write x = r + m * t for the solutions of the first congruences and substitute into the next one: m * t ≡ r2 - r (mod m2). Let g = gcd(m, m2): this has a solution only if g divides r2 - r.",
+    "Divide by g to make the coefficient invertible (extended Euclid), solve for t modulo m2 / g, and replace the pair (r, m) by (r + m * t, lcm(m, m2)). Repeat for every congruence."
+  ],
+  "editorial": "Maintain the full set of solutions of the congruences processed so far as a single congruence `x ≡ r (mod m)`; initially `r = 0`, `m = 1` (everything). To add the congruence `x ≡ r2 (mod m2)`, write `x = r + m * t` and require `r + m * t ≡ r2 (mod m2)`, that is `m * t ≡ r2 - r (mod m2)`. Let `g = gcd(m, m2)`. This linear congruence in `t` is solvable only when `g` divides `r2 - r`, otherwise the system has no solution and the answer is `-1`. When it is solvable, divide by `g`: `(m/g) * t ≡ (r2 - r)/g (mod m2/g)`, where `m/g` and `m2/g` are coprime. The extended Euclidean algorithm for `(m, m2)` gives `p` with `m * p + m2 * q = g`, so `(m/g) * p ≡ 1 (mod m2/g)` and `t ≡ ((r2 - r)/g) * p (mod m2/g)`. The new solution set is `x ≡ r + m * t (mod lcm(m, m2))` with `lcm = m / g * m2`; reduce `r` modulo it so `r` is the smallest non-negative solution. After all `k` congruences, `r` is the answer. Each merge costs `O(log m)`. The classic formula that multiplies by inverses of `M / m_i` requires pairwise coprime moduli; the step-by-step merge handles every case, including contradictions such as `x ≡ 1 (mod 2)` together with `x ≡ 0 (mod 4)`. All intermediate products stay below about `10^18` when the least common multiple is at most `10^12` and each modulus is at most `10^6`.",
+  "complexity": {
+    "time": "O(n log n)",
+    "space": "O(1)"
+  },
+  "starter": {
+    "python": "import sys\n\ndata = sys.stdin.read().split()\nk = int(data[0])\n# congruence i is r_i = data[1 + 2 * i], m_i = data[2 + 2 * i]\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(BigInt);   // BigInt: products reach 10^18\nconst k = Number(tok[0]);\n// congruence i is tok[1 + 2 * i], tok[2 + 2 * i]\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int k = sc.nextInt();\n        // each congruence: long r, m\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int k;\n    scanf(\"%d\", &k);\n    // each congruence: long long r, m\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\n\ndef ext_gcd(a, b):\n    x0, y0, x1, y1 = 1, 0, 0, 1\n    while b:\n        q = a // b\n        a, b = b, a - q * b\n        x0, x1 = x1, x0 - q * x1\n        y0, y1 = y1, y0 - q * y1\n    return a, x0, y0\n\ndata = sys.stdin.read().split()\nk = int(data[0])\nr, m = 0, 1                                   # all solutions so far are x = r (mod m)\nfor i in range(k):\n    r2, m2 = int(data[1 + 2 * i]), int(data[2 + 2 * i])\n    g, p, _ = ext_gcd(m, m2)\n    if (r2 - r) % g:\n        print(-1)                             # the congruences contradict each other\n        sys.exit()\n    t = ((r2 - r) // g * p) % (m2 // g)       # x = r + m * t must equal r2 (mod m2)\n    new_m = m // g * m2                       # the combined modulus is lcm(m, m2)\n    r = (r + m * t) % new_m\n    m = new_m\nprint(r)\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(BigInt);\nfunction extGcd(a, b) {\n  let x0 = 1n, y0 = 0n, x1 = 0n, y1 = 1n;\n  while (b !== 0n) {\n    const q = a / b;\n    [a, b] = [b, a - q * b];\n    [x0, x1] = [x1, x0 - q * x1];\n    [y0, y1] = [y1, y0 - q * y1];\n  }\n  return [a, x0, y0];\n}\nconst k = Number(tok[0]);\nlet r = 0n, m = 1n;\nlet ok = true;\nfor (let i = 0; i < k && ok; i++) {\n  const r2 = tok[1 + 2 * i], m2 = tok[2 + 2 * i];\n  const [g, p] = extGcd(m, m2);\n  const diff = r2 - r;\n  if (diff % g !== 0n) { ok = false; break; }\n  const mod = m2 / g;\n  let t = ((diff / g) * p) % mod;\n  if (t < 0n) t += mod;\n  const newM = (m / g) * m2;\n  r = (r + m * t) % newM;\n  m = newM;\n}\nconsole.log(ok ? r.toString() : '-1');\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    static long coef;                                   // Bezout coefficient of the first argument\n    static long extGcd(long a, long b) {\n        long x0 = 1, x1 = 0;\n        while (b != 0) {\n            long q = a / b;\n            long t = a - q * b; a = b; b = t;\n            t = x0 - q * x1; x0 = x1; x1 = t;\n        }\n        coef = x0;\n        return a;\n    }\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int k = sc.nextInt();\n        long r = 0, m = 1;\n        for (int i = 0; i < k; i++) {\n            long r2 = sc.nextLong(), m2 = sc.nextLong();\n            long g = extGcd(m, m2);\n            long diff = r2 - r;\n            if (diff % g != 0) { System.out.println(-1); return; }\n            long mod = m2 / g;\n            long t = ((diff / g) % mod) * (coef % mod) % mod;      // each factor is below 10^6 after reduction\n            if (t < 0) t += mod;\n            long newM = m / g * m2;\n            r = (r + m * t) % newM;\n            m = newM;\n        }\n        System.out.println(r);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\nll coef;\nll extGcd(ll a, ll b) {\n    ll x0 = 1, x1 = 0;\n    while (b != 0) {\n        ll q = a / b;\n        ll t = a - q * b; a = b; b = t;\n        t = x0 - q * x1; x0 = x1; x1 = t;\n    }\n    coef = x0;\n    return a;\n}\nint main() {\n    int k;\n    scanf(\"%d\", &k);\n    ll r = 0, m = 1;\n    for (int i = 0; i < k; i++) {\n        ll r2, m2;\n        scanf(\"%lld %lld\", &r2, &m2);\n        ll g = extGcd(m, m2);\n        ll diff = r2 - r;\n        if (diff % g != 0) { printf(\"-1\\n\"); return 0; }\n        ll mod = m2 / g;\n        ll t = ((diff / g) % mod) * (coef % mod) % mod;\n        if (t < 0) t += mod;\n        ll newM = m / g * m2;\n        r = (r + m * t) % newM;\n        m = newM;\n    }\n    printf(\"%lld\\n\", r);\n    return 0;\n}\n"
+  }
+}
