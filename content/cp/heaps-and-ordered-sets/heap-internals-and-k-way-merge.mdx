@@ -1,0 +1,296 @@
+---
+title: Heap Internals and k-way Merge
+track: cp
+module: heaps-and-ordered-sets
+order: 1
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/greedy/greedy-with-heaps, cp/sorting-and-searching/binary-search]
+tags: [heap, priority-queue, k-way-merge, top-k, heapify]
+type: lesson
+problems: [m16-merge-sorted-streams]
+furtherReading:
+  - title: CLRS, Chapter 6, Heapsort (heaps, building a heap in linear time)
+    url: https://mitpress.mit.edu/9780262046305/introduction-to-algorithms/
+  - title: Python documentation, heapq (heap queue algorithm)
+    url: https://docs.python.org/3/library/heapq.html
+  - title: LeetCode, Merge k Sorted Lists
+    url: https://leetcode.com/problems/merge-k-sorted-lists/
+---
+
+## Intuition
+
+A **priority queue** answers one question fast: *what is the smallest (or largest) item right now?*, while allowing items to be added and the smallest one to be removed. A sorted array answers it instantly but inserting is slow; an unsorted array inserts instantly but finding the smallest takes a scan. A **binary heap** sits in the middle: it keeps the items only **partially ordered**, just enough that the smallest is always at the top, and both inserting and removing the top cost `O(log n)`.
+
+You have already used heaps for greedy choices. This lesson looks **inside** the heap, so you understand why the operations cost what they do, can write one when the language has none (JavaScript), and can apply it to two more patterns: **merging many sorted sources** and **keeping the best k of a large stream**.
+
+## Definition
+
+A **binary min-heap** is a *complete binary tree* (every level full except possibly the last, which fills from the left) in which **every node is at most its children**. That is the **heap property**. It does not say anything about left versus right, or about nodes on different branches: only that the parent is not larger than its children, so the **root is the minimum**.
+
+Because the tree is complete, it is stored in a plain **array** with no pointers. For a 0-indexed array:
+
+```text
+parent(i)      = (i - 1) // 2
+left child(i)  = 2 * i + 1
+right child(i) = 2 * i + 2
+```
+
+Two repair operations keep the heap property:
+
+- **Sift up** (after adding at the end): while the item is smaller than its parent, swap them. At most the height of the tree, `log2 n`, swaps.
+- **Sift down** (after replacing the root): while the item is larger than its smaller child, swap with that child. Again at most `log2 n` swaps.
+
+| operation | how | cost |
+| --- | --- | --- |
+| peek the minimum | read `a[0]` | `O(1)` |
+| push | append, sift up | `O(log n)` |
+| pop the minimum | take `a[0]`, move the last item to the root, sift down | `O(log n)` |
+| build from `n` items | sift down every non-leaf from the last to the first | **`O(n)`** |
+| pop everything | `n` pops | `O(n log n)` (this is **heap sort**) |
+
+### Why building is linear
+
+Pushing `n` items one by one is `O(n log n)` in the worst case. Building the heap in place by sifting down is `O(n)`: half of the nodes are leaves and need no work, a quarter are one level above the leaves and move at most one step, an eighth at most two steps, and so on. The total is `n/4 x 1 + n/8 x 2 + n/16 x 3 + ...`, which sums to at most `n`. Most nodes are near the bottom, where sifting is cheap.
+
+### Heaps in each language
+
+| language | structure | order | notes |
+| --- | --- | --- | --- |
+| Python | `heapq` functions on a list | **min-heap** | for a max-heap push negated values; push tuples to carry extra data (compared left to right) |
+| C++ | `priority_queue<T>` | **max-heap** by default | min-heap: `priority_queue<T, vector<T>, greater<T>>`; works with `pair` and `tuple` |
+| Java | `PriorityQueue<T>` | **min-heap** | max-heap: `new PriorityQueue<>(Collections.reverseOrder())`; custom order with a comparator |
+| JavaScript | none built in | | write the sift loops yourself (about 25 lines), as in the solution to the practice problem |
+
+None of these supports **decrease-key** or **delete an arbitrary item** efficiently. The standard workaround is **lazy deletion**: leave stale entries in the heap and skip them when they surface (used in Dijkstra's algorithm and in the next lessons).
+
+## Experiment: how the costs really behave
+
+The program below writes a heap from scratch and **counts comparisons**, to check three claims: building is linear, pushing is cheap on random data but expensive in the worst case, and a heap of size `k` finds the top `k` far faster than sorting.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import heapq
+import random
+
+
+class MinHeap:
+    """A binary min-heap stored in a list; counts every comparison it makes."""
+    def __init__(self):
+        self.a = []
+        self.comparisons = 0
+
+    def _less(self, i, j):
+        self.comparisons += 1
+        return self.a[i] < self.a[j]
+
+    def _sift_up(self, i):
+        while i > 0:
+            parent = (i - 1) // 2
+            if self._less(i, parent):
+                self.a[i], self.a[parent] = self.a[parent], self.a[i]
+                i = parent
+            else:
+                break
+
+    def _sift_down(self, i):
+        n = len(self.a)
+        while True:
+            smallest, l, r = i, 2 * i + 1, 2 * i + 2
+            if l < n and self._less(l, smallest):
+                smallest = l
+            if r < n and self._less(r, smallest):
+                smallest = r
+            if smallest == i:
+                return
+            self.a[i], self.a[smallest] = self.a[smallest], self.a[i]
+            i = smallest
+
+    def push(self, x):
+        self.a.append(x)
+        self._sift_up(len(self.a) - 1)
+
+    def pop(self):
+        top = self.a[0]
+        last = self.a.pop()
+        if self.a:
+            self.a[0] = last
+            self._sift_down(0)
+        return top
+
+    def heapify(self, items):
+        self.a = list(items)
+        for i in range(len(self.a) // 2 - 1, -1, -1):          # sift down every non-leaf, from the last one up to the root
+            self._sift_down(i)
+
+
+def is_heap(a):
+    return all(a[(i - 1) // 2] <= a[i] for i in range(1, len(a)))
+
+
+if True:
+    rnd = random.Random(2)
+    data = [rnd.randint(0, 10**9) for _ in range(10000)]
+
+    one_by_one = MinHeap()
+    for x in data:
+        one_by_one.push(x)
+    built = MinHeap()
+    built.heapify(data)
+    print(f"10,000 random numbers: {one_by_one.comparisons:,} comparisons with 10,000 pushes, {built.comparisons:,} with heapify "
+          f"(n log2 n would be {10000 * 13.3:,.0f}); both are valid heaps: {is_heap(one_by_one.a)} {is_heap(built.a)}")
+
+    worst = sorted(data, reverse=True)                          # every new value is the smallest so far: it sifts all the way up
+    w_push = MinHeap()
+    for x in worst:
+        w_push.push(x)
+    w_build = MinHeap()
+    w_build.heapify(worst)
+    print(f"the same numbers in decreasing order (the worst case for pushes): {w_push.comparisons:,} comparisons with pushes, {w_build.comparisons:,} with heapify")
+
+    out = [built.pop() for _ in range(len(data))]
+    print("popping everything gives the numbers in sorted order (heap sort):", out == sorted(data))
+
+    ours, library = MinHeap(), []
+    ok = True
+    for _ in range(20000):
+        if library and rnd.random() < 0.4:
+            ok &= ours.pop() == heapq.heappop(library)
+        else:
+            x = rnd.randint(-50, 50)
+            ours.push(x)
+            heapq.heappush(library, x)
+    print("20,000 random pushes and pops agree with heapq:", ok)
+
+    # a top-k query with a heap of size k does far fewer comparisons than sorting everything
+    k = 10
+    big = [rnd.randint(0, 10**9) for _ in range(100000)]
+    h = MinHeap()
+    for x in big[:k]:
+        h.push(x)
+    for x in big[k:]:
+        h.comparisons += 1
+        if x > h.a[0]:
+            h.pop()
+            h.push(x)
+    print(f"the 10 largest of 100,000 numbers with a heap of size 10: correct {sorted(h.a) == sorted(big)[-k:]}, about {h.comparisons:,} comparisons "
+          f"(sorting needs about {100000 * 16.6:,.0f})")
+`} />
+
+Reading the output:
+
+- On **10,000 random numbers**, 10,000 pushes need **22,798 comparisons** (about 2.3 each: a random new value usually stays near the bottom, so it rarely climbs far) and heapify needs **18,821**. Both are far below `n log2 n` (about 133,000).
+- On the **same numbers in decreasing order**, which is the worst case for pushing (every new value is the smallest so far and rises to the root), the pushes cost **113,631 comparisons**, about 11 each, while heapify still needs only **19,982**. So heapify is the safe way to build a heap from data you already have.
+- Popping everything returns the sorted order (**heap sort**), and the hand-written heap agrees with Python's `heapq` over 20,000 random pushes and pops.
+- Finding the **10 largest of 100,000 numbers** with a heap that never holds more than 10 items needs about **100,551 comparisons**, against roughly 1.66 million for sorting everything: about 16 times fewer.
+
+These counts are from one seeded run; the averages depend on the data, the worst-case claims do not.
+
+## Pattern 1: top k of a large collection
+
+To find the `k` largest values of a stream, keep a **min-heap of size `k`**. For each new value: if the heap has fewer than `k` items, push it; otherwise, if it is larger than the heap's minimum (the smallest of the current top `k`), replace the minimum. Cost `O(n log k)` and **`O(k)` memory**, which matters when the data does not fit in memory. (For the `k` smallest, use a max-heap.) Note the direction: the **smallest** of the best `k` is the one at risk of being displaced, so that is what the heap must expose.
+
+## Pattern 2: k-way merge
+
+You have `k` lists, each already sorted, and want the merged order (or only its first `M` values). The next value of the merged sequence is always the smallest of the **current heads** of the lists. Keep those heads in a min-heap together with where each came from:
+
+```text
+heap = [(first value of list i, i, 0) for every non-empty list i]
+repeat M times:
+    (value, i, j) = pop the smallest
+    output value
+    if list i has an element at position j + 1: push (that element, i, j + 1)
+```
+
+The heap never holds more than `k` entries, so each output costs `O(log k)` and the whole job `O(k + M log k)` (building the initial heap with heapify). Compare with concatenating and sorting, `O(N log N)` for `N` total values: the merge wins when `M` is small, and it works for **streams too large for memory**, for example merging sorted log files from many servers, or the external-sort step of a database. Merging two lists is the special case `k = 2`, and it is the combine step of merge sort.
+
+The same shape solves "the k smallest pairs `a + b`" and "the k-th smallest in a sorted matrix": treat each row as a sorted list whose next element you generate on demand, and push only the successor of what you popped.
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import heapq
+heap = [(lst[0], i, 0) for i, lst in enumerate(lists) if lst]
+heapq.heapify(heap)                       # O(k), not O(k log k)
+out = []
+while heap and len(out) < m:
+    value, i, j = heapq.heappop(heap)
+    out.append(value)
+    if j + 1 < len(lists[i]):
+        heapq.heappush(heap, (lists[i][j + 1], i, j + 1))
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+typedef tuple<long long, int, int> T;     // value, list, position
+priority_queue<T, vector<T>, greater<T>> pq;
+for (int i = 0; i < k; i++) if (!lists[i].empty()) pq.push(T(lists[i][0], i, 0));
+vector<long long> out;
+while (!pq.empty() && (int)out.size() < m) {
+    auto [v, i, j] = pq.top();
+    pq.pop();
+    out.push_back(v);
+    if (j + 1 < (int)lists[i].size()) pq.push(T(lists[i][j + 1], i, j + 1));
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+PriorityQueue<long[]> pq = new PriorityQueue<>((x, y) -> Long.compare(x[0], y[0]));
+for (int i = 0; i < k; i++) if (lists[i].length > 0) pq.add(new long[]{lists[i][0], i, 0});
+while (!pq.isEmpty() && taken < m) {
+    long[] top = pq.poll();               // {value, list, position}
+    // output top[0]
+    int i = (int) top[1], j = (int) top[2];
+    if (j + 1 < lists[i].length) pq.add(new long[]{lists[i][j + 1], i, j + 1});
+}
+```
+
+</Tab>
+</Tabs>
+
+## When a heap is not the right tool
+
+- You need the **median** or the **k-th smallest of a changing set** with deletions: a plain heap exposes only one end. Use two heaps (next lesson) or a Fenwick tree (the lesson after).
+- You need to **search for an arbitrary value** or **delete a specific item**: use a balanced tree, a hash set with a heap and lazy deletion, or an indexed heap.
+- The data is **small and static**: sorting once is simpler.
+- You need the **top k of an array just once**: Python's `heapq.nlargest(k, data)`, C++ `nth_element` (expected linear), or a partial sort are shorter than a hand-made heap.
+
+## Pitfalls
+
+1. **Using a max-heap where a min-heap is needed (and the reverse).** For the top `k` largest keep a *min*-heap of size `k`; for `k` smallest, a *max*-heap. In Python negate; in C++ choose `greater`.
+2. **Forgetting that `priority_queue` is a max-heap** and `heapq` and `PriorityQueue` are min-heaps.
+3. **Comparing items that cannot be compared.** In Python, tuples with equal first fields compare the second: if it is an object without ordering the program crashes. Put an index or counter as the second field.
+4. **Building with `n` pushes when you have all the data**: use `heapify` / the `priority_queue` range constructor (`O(n)`).
+5. **Popping from an empty heap.** Guard with an emptiness test; the k-way merge loop must stop when the heap empties.
+6. **Overflow of sums or costs**: merge costs and distances need 64-bit integers.
+7. **Pushing the whole list into the heap** instead of its head in a k-way merge: that defeats the point (the heap should hold at most `k` items).
+8. **Assuming the heap is sorted.** Reading `a[1]` is not the second smallest; only `a[0]` is guaranteed. To iterate in order you must pop.
+
+## Practice
+
+<Problem id="m16-merge-sorted-streams" />
+
+### Problem ladder
+
+- [Merge k Sorted Lists](https://leetcode.com/problems/merge-k-sorted-lists/) (LeetCode, hard): the same technique on linked lists.
+- [Kth Largest Element in an Array](https://leetcode.com/problems/kth-largest-element-in-an-array/) (LeetCode, medium): a heap of size `k`.
+- [Top K Frequent Elements](https://leetcode.com/problems/top-k-frequent-elements/) (LeetCode, medium): count first, then a heap on counts.
+- [Find K Pairs with Smallest Sums](https://leetcode.com/problems/find-k-pairs-with-smallest-sums/) (LeetCode, medium): a k-way merge over implicit sorted lists.
+- [Kth Smallest Element in a Sorted Matrix](https://leetcode.com/problems/kth-smallest-element-in-a-sorted-matrix/) (LeetCode, medium): rows as sorted lists.
+
+## Quiz
+
+<Quiz id="cp-m16-heap-internals" tags={["heap", "priority-queue", "k-way-merge"]} questions={[
+  { type: "mcq", q: "In a 0-indexed array heap, where are the children of the node at index 3?", options: ["Indices 6 and 7", "Indices 7 and 8", "Indices 4 and 5", "Indices 1 and 2"], answer: 1, explain: "Children of i are 2i + 1 and 2i + 2, so for i = 3 they are 7 and 8." },
+  { type: "mcq", q: "Why does building a heap from n items with sift-down cost O(n) while n pushes can cost O(n log n)?", options: ["Sift-down is cheaper per swap", "Half the nodes are leaves and need no work, and most others sit near the bottom where they move only a step or two", "Pushes cannot be done in place", "The compiler optimises it"], answer: 1, explain: "The sum n/4 x 1 + n/8 x 2 + n/16 x 3 + ... is at most n. In the experiment, decreasing input needed 113,631 comparisons for pushes and 19,982 for heapify." },
+  { type: "predict", q: "What does this print?", code: "import heapq\nh = []\nfor x in [5, 1, 4, 2, 3]:\n    heapq.heappush(h, x)\nprint(heapq.heappop(h), heapq.heappop(h), h[0])", options: ["1 2 3", "1 2 4", "5 4 3", "1 2 5"], answer: 0, explain: "The two smallest pops are 1 and 2; the minimum of what remains (3, 4, 5) is 3." },
+  { type: "mcq", q: "To find the 10 largest of a stream of millions of numbers in O(k) memory, which structure do you keep?", options: ["A max-heap of size 10", "A min-heap of size 10", "A sorted array of everything", "A hash set"], answer: 1, explain: "The smallest of the current best 10 is the one a larger newcomer would replace, so it must be at the top: a min-heap." },
+  { type: "multi", q: "Which statements about a k-way merge with a heap are true?", options: ["The heap holds at most k entries", "Each output value costs O(log k)", "It needs all lists to fit in memory", "It works when the lists are sorted streams"], answer: [0, 1, 3], explain: "Only the current head of each list is in the heap, so the lists can be read lazily from disk or the network." },
+  { type: "mcq", q: "Why put a list index in the tuple (value, list, position) rather than just the value?", options: ["To make the heap faster", "To know which list to take the next value from once this one is popped", "Heaps require tuples", "To avoid duplicates"], answer: 1, explain: "After popping a value you must push its successor from the same list, so the heap entry has to carry that origin." }
+]} />

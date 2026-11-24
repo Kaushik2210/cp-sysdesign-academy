@@ -1,0 +1,1 @@
+{ "title": "Heaps and Ordered Sets", "level": "Level 2: Core Algorithms", "order": 16, "summary": "Priority queues from the inside, k-way merging, two heaps for medians, and order statistics in changing collections with Fenwick trees." }

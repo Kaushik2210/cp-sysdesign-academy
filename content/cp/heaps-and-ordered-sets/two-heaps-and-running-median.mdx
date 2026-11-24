@@ -1,0 +1,268 @@
+---
+title: Two Heaps and the Running Median
+track: cp
+module: heaps-and-ordered-sets
+order: 2
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/heaps-and-ordered-sets/heap-internals-and-k-way-merge]
+tags: [heap, two-heaps, median, lazy-deletion, sliding-window, online]
+type: lesson
+problems: [m16-running-median]
+furtherReading:
+  - title: LeetCode, Find Median from Data Stream
+    url: https://leetcode.com/problems/find-median-from-data-stream/
+  - title: LeetCode, Sliding Window Median
+    url: https://leetcode.com/problems/sliding-window-median/
+  - title: Python documentation, heapq (priority queue implementation notes)
+    url: https://docs.python.org/3/library/heapq.html
+---
+
+## Intuition
+
+The **median** is the middle value: half of the numbers are at most it and half at least it. A single heap exposes only one end of the data (the minimum, or the maximum). But the median sits in the **middle**, between two ends: it is the largest value of the **lower half** *and* it is next to the smallest value of the **upper half**.
+
+So keep **two heaps**, one for each half, arranged so that the two values at the boundary are exactly the ones on top:
+
+- the **lower half** in a **max-heap** (its top is the largest of the small values),
+- the **upper half** in a **min-heap** (its top is the smallest of the large values).
+
+Every value in the lower half is at most every value in the upper half, and the sizes stay equal (or the lower half has one more). The median is then read from the top of a heap in `O(1)`, and each new number is inserted in `O(log n)`.
+
+## Definition
+
+Maintain the **invariants**:
+
+1. `max(low) <= min(high)` (every lower value is at most every upper value).
+2. `len(low) == len(high)` or `len(low) == len(high) + 1`.
+
+Then for a count of `c` numbers, `low` holds `ceil(c / 2)` of them and the **lower median** is `max(low)`. For an odd count it is *the* median; for an even count it is the smaller of the two middle values (the average of `max(low)` and `min(high)` if you need the mean of the two).
+
+### Inserting `x`
+
+1. **Place it:** if `x` is larger than `max(low)` it belongs in `high`, otherwise in `low`. This keeps invariant 1 true.
+2. **Rebalance with at most one move:** if `low` has more than one extra element, move its maximum to `high`; if `high` has more elements than `low`, move its minimum to `low`. This restores invariant 2.
+
+Python's `heapq` and Java's `PriorityQueue` are min-heaps, so for the lower half **store negated values** (Python) or give a reversed comparator (Java). C++ `priority_queue` is a max-heap by default, so the lower half needs no trick there.
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+import heapq
+low, high = [], []                         # low holds negated values: a max-heap
+for x in stream:
+    if low and x > -low[0]:
+        heapq.heappush(high, x)
+    else:
+        heapq.heappush(low, -x)
+    if len(low) > len(high) + 1:
+        heapq.heappush(high, -heapq.heappop(low))
+    elif len(high) > len(low):
+        heapq.heappush(low, -heapq.heappop(high))
+    median = -low[0]                       # the lower median
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+priority_queue<long long> low;                                           // max-heap: the smaller half
+priority_queue<long long, vector<long long>, greater<long long>> high;   // min-heap: the larger half
+for (long long x : stream) {
+    if (!low.empty() && x > low.top()) high.push(x); else low.push(x);
+    if (low.size() > high.size() + 1) { high.push(low.top()); low.pop(); }
+    else if (high.size() > low.size()) { low.push(high.top()); high.pop(); }
+    long long median = low.top();
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+PriorityQueue<Long> low = new PriorityQueue<>(Collections.reverseOrder());
+PriorityQueue<Long> high = new PriorityQueue<>();
+for (long x : stream) {
+    if (!low.isEmpty() && x > low.peek()) high.add(x); else low.add(x);
+    if (low.size() > high.size() + 1) high.add(low.poll());
+    else if (high.size() > low.size()) low.add(high.poll());
+    long median = low.peek();
+}
+```
+
+</Tab>
+</Tabs>
+
+## What a sorted array costs, and a window of values
+
+Keeping a sorted array and inserting with binary search finds the position in `O(log n)`, but **inserting shifts every later element**: `O(n)` per number, `O(n^2)` overall. For `n = 20000` random numbers the shifts add up to about **99 million moves**, against roughly **900,000 steps** for the heaps (3 heap operations of about 15 steps per number).
+
+The two-heap idea also answers the **median of a sliding window** (the last `k` values), but there a value must be **removed** when it leaves the window, and a heap cannot delete from the middle. The standard answer is **lazy deletion**:
+
+- Keep a table `delayed[value]` counting expired copies that are still inside a heap.
+- When a value leaves the window, **do not search for it**. Increase its delayed count, and decrease the **valid size** of the half it belongs to (decide the half by comparing with `max(low)`).
+- Whenever a heap's top is an expired value, **pop and discard it** ("prune") and decrement its count.
+- After any insertion or expiry, **rebalance** using the valid sizes, pruning after each move so the tops are always real.
+
+Expired values are never removed from the middle: they sink to the top over time and are discarded there. Each value is pushed once and popped at most once, so the total remains `O(n log n)`.
+
+### Experiment
+
+The program below implements both versions in Python and checks them against brute force: the running median against a sorted list, and the sliding window median against sorting every window.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import bisect
+import heapq
+import random
+
+
+def running_medians(xs):
+    """Two heaps: low holds the smaller half (negated, so heapq acts as a max-heap), high the larger half."""
+    low, high, out = [], [], []
+    for x in xs:
+        if low and x > -low[0]:
+            heapq.heappush(high, x)
+        else:
+            heapq.heappush(low, -x)
+        if len(low) > len(high) + 1:
+            heapq.heappush(high, -heapq.heappop(low))
+        elif len(high) > len(low):
+            heapq.heappush(low, -heapq.heappop(high))
+        out.append(-low[0])                                      # lower median
+    return out
+
+
+def window_medians(a, k):
+    """Median of every window of k consecutive values, with two heaps and LAZY deletion:
+    an expired value is not removed from the middle of a heap; it is only noted, and discarded when it reaches the top."""
+    low, high = [], []
+    delayed = {}                                                 # value -> how many copies are expired but still inside a heap
+    ls = hs = 0                                                  # the number of VALID values in each half
+    max_stale = 0
+
+    def prune(heap, sign):
+        while heap and delayed.get(sign * heap[0], 0) > 0:
+            v = sign * heap[0]
+            delayed[v] -= 1
+            heapq.heappop(heap)
+
+    def rebalance():
+        nonlocal ls, hs
+        if ls > hs + 1:
+            heapq.heappush(high, -heapq.heappop(low))
+            ls, hs = ls - 1, hs + 1
+            prune(low, -1)
+        elif ls < hs:
+            heapq.heappush(low, -heapq.heappop(high))
+            ls, hs = ls + 1, hs - 1
+            prune(high, 1)
+
+    out = []
+    for i, x in enumerate(a):
+        if not low or x <= -low[0]:
+            heapq.heappush(low, -x)
+            ls += 1
+        else:
+            heapq.heappush(high, x)
+            hs += 1
+        rebalance()
+        if i >= k:                                               # the value that just left the window
+            y = a[i - k]
+            delayed[y] = delayed.get(y, 0) + 1
+            if y <= -low[0]:
+                ls -= 1
+                if y == -low[0]:
+                    prune(low, -1)
+            else:
+                hs -= 1
+                if high and y == high[0]:
+                    prune(high, 1)
+            rebalance()
+        max_stale = max(max_stale, len(low) + len(high) - ls - hs)
+        if i >= k - 1:
+            out.append(-low[0])
+    return out, max_stale
+
+
+def brute_window_medians(a, k):
+    return [sorted(a[i:i + k])[(k - 1) // 2] for i in range(len(a) - k + 1)]
+
+
+if True:
+    rnd = random.Random(5)
+
+    # 1. running median: two heaps against keeping a sorted list
+    xs = [rnd.randint(-10**9, 10**9) for _ in range(20000)]
+    seen, shifted, brute = [], 0, []
+    for x in xs:
+        pos = bisect.bisect_left(seen, x)
+        shifted += len(seen) - pos                               # the items a sorted list must move to make room
+        seen.insert(pos, x)
+        brute.append(seen[(len(seen) - 1) // 2])
+    print(f"running median of 20,000 numbers: two heaps agree with the sorted list: {running_medians(xs) == brute}")
+    print(f"  the sorted list moved {shifted:,} items to make room (about n^2/4 = {20000 * 20000 // 4:,}); the heaps need at most about 3 heap operations of 15 steps per number, roughly {20000 * 3 * 15:,} steps")
+
+    # 2. sliding window median with lazy deletion
+    ok, worst_stale, trials = True, 0, 300
+    for _ in range(trials):
+        n = rnd.randint(1, 40)
+        a = [rnd.randint(-5, 5) for _ in range(n)]
+        k = rnd.randint(1, n)
+        got, stale = window_medians(a, k)
+        ok &= got == brute_window_medians(a, k)
+        worst_stale = max(worst_stale, stale)
+    print(f"sliding window median, {trials} random small cases (many equal values): matches the brute force: {ok}")
+    a = [rnd.randint(0, 10**6) for _ in range(5000)]
+    got, stale = window_medians(a, 100)
+    print(f"5,000 values, window of 100: matches the brute force: {got == brute_window_medians(a, 100)}; "
+          f"at most {stale} expired values were waiting inside the heaps at once (the window holds 100)")
+`} />
+
+What it shows:
+
+- The two-heap running median **agrees with the sorted list** on 20,000 random numbers, and the sorted list moved **99,468,011** items (close to `n^2 / 4`, the expected shifting) to do so.
+- The lazy-deletion sliding window median **matches the brute force** on 300 random small cases with many equal values (the hard case for deletion, since several copies of a value can sit in either heap) and on a 5,000-value run with a window of 100.
+- Lazy deletion has a **memory cost**: in the 5,000-value run **up to 3,598 expired values were waiting inside the heaps at once**, although the window holds only 100. They only leave when they reach a top. So the heaps can grow towards `O(n)` entries rather than `O(k)`. If that matters, rebuild both heaps from the live window whenever the stale entries exceed the valid ones (an `O(k)` rebuild amortised over `k` steps).
+
+The counts come from one seeded run; the checks against brute force are what establishes correctness.
+
+## Related patterns
+
+- **Median of a changing multiset with arbitrary deletions**, or the **k-th smallest** for any `k`: two heaps are awkward; use the Fenwick-tree order statistics of the next lesson.
+- **Balancing a sum**: the same two-heap structure maintains "the sum of the `k` smallest values" with insertions (keep `k` values in the lower heap and track its sum), a common ingredient of greedy problems.
+- **Minimising the sum of absolute deviations**: the optimal point is the median, so maintaining the running median gives running optimal costs (for example the cost of moving all items to one location).
+- **IPO-style selection** (pick the best available item, then unlock more by sorting on another key): sort by one key and keep a heap on the other, as in the greedy-with-heaps lesson.
+
+## Pitfalls
+
+1. **Placing the new value without comparing to the boundary.** Comparing `x` with the wrong heap's top breaks the invariant `max(low) <= min(high)`. Always compare with `max(low)`.
+2. **Rebalancing by size only, then reading the wrong top.** After inserting, restore the size invariant before reading the median.
+3. **Off-by-one in which half is larger.** Decide once whether `low` or `high` takes the extra element, and keep that convention; the median accessor must match.
+4. **Forgetting to negate** the values going in and out of the max-heap in Python.
+5. **Even counts.** "The median" may mean the lower, the upper, or the average of the two middle values. Read the statement; take the average with floating point or integers carefully.
+6. **Lazy deletion with sizes counted from the heap.** After lazy deletion `len(heap)` includes expired entries. Keep separate valid-size counters, and prune before reading a top.
+7. **Deciding which heap an expired value is in by equality** when equal values live in both heaps: compare with `max(low)` (values `<= max(low)` are counted as being in `low`), exactly as the insertion rule does.
+8. **Quadratic fallbacks**: a sorted-list insertion is fine for `n` in the thousands and fails at `10^5` and above.
+
+## Practice
+
+<Problem id="m16-running-median" />
+
+### Problem ladder
+
+- [Find Median from Data Stream](https://leetcode.com/problems/find-median-from-data-stream/) (LeetCode, hard): this problem with the average of the two middle values.
+- [Sliding Window Median](https://leetcode.com/problems/sliding-window-median/) (LeetCode, hard): two heaps with lazy deletion, or a Fenwick tree.
+- [IPO](https://leetcode.com/problems/ipo/) (LeetCode, hard): sort by one key and keep a max-heap of the other.
+
+## Quiz
+
+<Quiz id="cp-m16-two-heaps" tags={["heap", "two-heaps", "median"]} questions={[
+  { type: "mcq", q: "In the two-heap median structure, which kind of heap holds the smaller half?", options: ["A min-heap", "A max-heap, so its top is the largest of the small values", "A sorted array", "Either, it does not matter"], answer: 1, explain: "The median is at the boundary, so the lower half must expose its maximum." },
+  { type: "predict", q: "After inserting 5, 15, 1, 3 (in that order) with the lower median convention, what is the median after the last insertion?", code: "xs = sorted([5, 15, 1, 3])\nprint(xs[(len(xs) - 1) // 2])", options: ["1", "3", "4", "5"], answer: 1, explain: "Sorted: 1 3 5 15. The two middle values are 3 and 5; the lower median is 3." },
+  { type: "mcq", q: "Why is inserting into a sorted array too slow for 10^5 or more numbers?", options: ["Binary search is slow", "Inserting shifts later elements: O(n) per insertion, O(n^2) in total (about 99 million moves for 20,000 numbers in the experiment)", "Arrays cannot grow", "Sorting is not allowed"], answer: 1, explain: "Finding the position is cheap; making room is not." },
+  { type: "mcq", q: "What is lazy deletion in a heap?", options: ["Deleting only on weekends", "Marking an item as expired in a side table and discarding it only when it reaches the top", "Searching the heap for the item and removing it in O(n)", "Rebuilding the heap after every deletion"], answer: 1, explain: "A heap cannot delete from the middle efficiently; stale entries are skipped when they surface." },
+  { type: "multi", q: "Which are true for the lazy-deletion sliding window median?", options: ["Valid sizes of each half must be tracked separately from heap lengths", "The heaps may hold many expired entries at once", "Each value is pushed once and popped at most once, so the total is O(n log n)", "It cannot handle equal values"], answer: [0, 1, 2], explain: "In the experiment up to 3,598 expired values waited inside the heaps for a window of 100. Equal values are handled by comparing with max(low) consistently." },
+  { type: "mcq", q: "The values 7, 7, 7 arrive. Where does the third 7 go if the rule is 'put x in high only when x is greater than max(low)'?", options: ["In high", "In low", "It is dropped", "In both"], answer: 1, explain: "7 is not greater than max(low) = 7, so it goes to low; the rebalancing step then moves one 7 to high if low becomes too large." }
+]} />

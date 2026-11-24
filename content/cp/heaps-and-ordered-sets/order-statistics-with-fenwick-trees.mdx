@@ -1,0 +1,287 @@
+---
+title: Order Statistics with Fenwick Trees
+track: cp
+module: heaps-and-ordered-sets
+order: 3
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/range-queries/fenwick-trees, cp/heaps-and-ordered-sets/two-heaps-and-running-median]
+tags: [order-statistics, fenwick-tree, coordinate-compression, multiset, kth-smallest, inversions]
+type: lesson
+problems: [m16-kth-in-set]
+furtherReading:
+  - title: cp-algorithms, Fenwick Tree (including finding the k-th element by binary descent)
+    url: https://cp-algorithms.com/data_structures/fenwick.html
+  - title: CSES Problem Set, Sliding Window Median
+    url: https://cses.fi/problemset/task/1076
+  - title: LeetCode, Count of Smaller Numbers After Self
+    url: https://leetcode.com/problems/count-of-smaller-numbers-after-self/
+  - title: Wikipedia, Order statistic tree
+    url: https://en.wikipedia.org/wiki/Order_statistic_tree
+---
+
+## Intuition
+
+A heap answers "what is the smallest?". Many problems ask for something in the **middle** of a collection that keeps **changing**:
+
+- "What is the **k-th smallest** number right now?" (the median is a special case)
+- "How many numbers are **smaller than** `x`?" (the rank of `x`)
+- "Insert a number, remove a number, ask again."
+
+These are **order statistics**. A sorted array answers them in `O(log n)` but takes `O(n)` to insert or remove. A balanced search tree with subtree sizes (an *order statistic tree*) does everything in `O(log n)`, but few standard libraries expose it: C++ `std::set` and Java `TreeSet` give you ordering and neighbours but **no k-th element or rank**, and Python and JavaScript have no ordered set at all.
+
+A **Fenwick tree** (binary indexed tree) over **counts** gives the same operations in about 10 lines of code, in every language. The idea: if the possible values are `1..m`, keep an array where position `v` holds **how many copies of `v`** are currently in the collection. Rank queries become **prefix sums** of that array, and the k-th smallest becomes **"the first position where the prefix sum reaches `k`"**.
+
+## Definition
+
+When values are large or arbitrary (up to `10^9`, negative, or not integers), first **compress** them: collect every value that will ever be inserted or queried, sort and deduplicate them, and replace each by its rank `1..m`. This needs the operations in advance (*offline*). For an online problem with unknown values use a balanced tree or a dynamically sized structure instead.
+
+Over the compressed values keep a Fenwick tree of counts `T`. Then:
+
+| operation | how | cost |
+| --- | --- | --- |
+| insert `v` | add `+1` at position `v` | `O(log m)` |
+| erase `v` | add `-1` at position `v` (check that it is present first: keep a plain count array) | `O(log m)` |
+| count of values `<= v` | prefix sum up to `v` | `O(log m)` |
+| rank of `v` (how many are smaller) | prefix sum up to `v - 1` | `O(log m)` |
+| **k-th smallest** | **binary descent** (below) | `O(log m)` |
+| size | keep a running total | `O(1)` |
+
+### Binary descent for the k-th smallest
+
+The smallest position whose prefix count reaches `k` could be found by binary search on the answer with a prefix sum inside (`O(log^2 m)`). But the Fenwick tree's structure lets you do it in **one pass**. Let `top` be the largest power of two not above `m`. Start with `pos = 0` and for `step = top, top/2, ..., 1`:
+
+```text
+if pos + step <= m and T[pos + step] < k:
+    pos += step
+    k  -= T[pos]
+```
+
+At the end `pos` is the **largest position whose prefix count is below the original `k`**, so `pos + 1` is the rank (compressed position) of the k-th smallest. Why it works: `T[pos + step]` (with `pos` a multiple of `2 * step`) covers exactly the block of `step` positions that follows `pos`, so the test asks "does the whole next block still leave the answer further right?" It is a binary search that reads the tree directly.
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+# vals = sorted distinct values, tree = Fenwick tree of counts over positions 1..size
+def kth(k):                        # k-th smallest (1-indexed); the caller checks k <= total
+    pos, step = 0, top             # top = largest power of two <= size
+    while step:
+        nxt = pos + step
+        if nxt <= size and tree[nxt] < k:
+            pos = nxt
+            k -= tree[nxt]
+        step >>= 1
+    return vals[pos]               # vals is 0-indexed, so vals[pos] is the value at position pos + 1
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+// vals: sorted distinct values; tree: Fenwick counts over 1..size; top: largest power of two <= size
+long long kth(long long k) {
+    int pos = 0;
+    for (int step = top; step > 0; step >>= 1) {
+        int nxt = pos + step;
+        if (nxt <= size && tree[nxt] < k) { pos = nxt; k -= tree[nxt]; }
+    }
+    return vals[pos];
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long kth(long k) {
+    int pos = 0;
+    for (int step = top; step > 0; step >>= 1) {
+        int nxt = pos + step;
+        if (nxt <= size && tree[nxt] < k) { pos = nxt; k -= tree[nxt]; }
+    }
+    return vals[pos];
+}
+```
+
+</Tab>
+</Tabs>
+
+## Experiment
+
+The program wraps these ideas in a small class over values `0..m-1` and checks them against a sorted list and brute force.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import bisect
+import random
+
+
+class OrderStatistics:
+    """A multiset over the values 0..m-1 with insert, erase, rank and k-th smallest, all in O(log m), using a Fenwick tree of counts."""
+    def __init__(self, m):
+        self.m = m
+        self.tree = [0] * (m + 1)
+        self.top = 1
+        while self.top * 2 <= m:
+            self.top *= 2
+        self.size = 0
+        self.steps = 0
+
+    def add(self, v, d):                          # v in 0..m-1
+        i = v + 1
+        while i <= self.m:
+            self.tree[i] += d
+            self.steps += 1
+            i += i & -i
+        self.size += d
+
+    def count_below(self, v):                     # how many stored values are smaller than v: the rank of v, minus one
+        i, total = v, 0
+        while i > 0:
+            total += self.tree[i]
+            self.steps += 1
+            i -= i & -i
+        return total
+
+    def kth(self, k):                             # the k-th smallest value (k starts at 1)
+        pos = 0
+        step = self.top
+        while step:
+            nxt = pos + step
+            self.steps += 1
+            if nxt <= self.m and self.tree[nxt] < k:
+                pos = nxt
+                k -= self.tree[nxt]
+            step >>= 1
+        return pos                                # pos + 1 is the 1-based rank of the answer, so pos is the 0-based value
+
+
+def count_inversions(a):
+    """Pairs i < j with a[i] > a[j]. Compress the values, then for each element count how many earlier ones are larger."""
+    vals = sorted(set(a))
+    rank = {v: i for i, v in enumerate(vals)}
+    os_ = OrderStatistics(len(vals))
+    inv = 0
+    for x in a:
+        r = rank[x]
+        inv += os_.size - (os_.count_below(r + 1))           # earlier elements strictly larger than x
+        os_.add(r, 1)
+    return inv, os_.steps
+
+
+def window_medians(a, k):
+    vals = sorted(set(a))
+    rank = {v: i for i, v in enumerate(vals)}
+    os_ = OrderStatistics(len(vals))
+    out = []
+    for i, x in enumerate(a):
+        os_.add(rank[x], 1)
+        if i >= k:
+            os_.add(rank[a[i - k]], -1)
+        if i >= k - 1:
+            out.append(vals[os_.kth((k + 1) // 2)])
+    return out, os_.steps
+
+
+if True:
+    rnd = random.Random(6)
+
+    # 1. random insert, erase and k-th operations against a plain sorted list
+    m = 1000
+    fen, ref = OrderStatistics(m), []
+    ok, queries = True, 0
+    for _ in range(20000):
+        r = rnd.random()
+        if r < 0.45 or not ref:
+            v = rnd.randrange(m)
+            fen.add(v, 1)
+            bisect.insort(ref, v)
+        elif r < 0.65:
+            v = rnd.choice(ref)
+            fen.add(v, -1)
+            ref.pop(bisect.bisect_left(ref, v))
+        else:
+            k = rnd.randint(1, len(ref))
+            queries += 1
+            ok &= fen.kth(k) == ref[k - 1]
+            v = rnd.randrange(m)
+            ok &= fen.count_below(v) == bisect.bisect_left(ref, v)
+    print(f"20,000 random operations on values below {m}: Fenwick order statistics agree with a sorted list on {queries:,} k-th queries and as many rank queries: {ok}")
+
+    # 2. the cost does not depend on how many values are stored
+    for stored in (1000, 100000):
+        big = OrderStatistics(1 << 20)
+        for _ in range(stored):
+            big.add(rnd.randrange(1 << 20), 1)
+        big.steps = 0
+        for _ in range(1000):
+            big.kth(rnd.randint(1, stored))
+        print(f"  {stored:7,} values stored among 2^20 possible: {big.steps / 1000:.1f} tree steps per k-th query (log2 of the range is 20)")
+
+    # 3. applications: counting inversions and sliding window medians
+    a = [rnd.randint(0, 10**6) for _ in range(3000)]
+    brute = sum(1 for i in range(len(a)) for j in range(i + 1, len(a)) if a[i] > a[j])
+    inv, steps = count_inversions(a)
+    print(f"counting inversions in 3,000 numbers: Fenwick {inv:,} equals the {len(a) * (len(a) - 1) // 2:,}-pair brute force {brute:,}: {inv == brute}; {steps:,} tree steps instead of 4.5 million pair checks")
+    b = [rnd.randint(0, 10**6) for _ in range(5000)]
+    got, steps = window_medians(b, 101)
+    expect = [sorted(b[i:i + 101])[50] for i in range(len(b) - 100)]
+    print(f"sliding window median, 5,000 numbers, window 101: Fenwick equals the brute force: {got == expect}; {steps:,} tree steps in total")
+`} />
+
+What the output shows:
+
+- Over **20,000 random inserts, erases and queries** the Fenwick structure agrees with a plain sorted list on every k-th and every rank query.
+- The cost is **independent of how many values are stored**: with 1,000 stored values or 100,000 among `2^20` possible values, a k-th query takes **21 tree steps** (the loop runs once per power of two from `2^20` down to 1). It depends only on the size of the **value range**, which is why compressing values keeps `m` at most the number of operations.
+- **Counting inversions** (pairs `i < j` with `a[i] > a[j]`) in 3,000 numbers: for each element, count how many earlier elements are larger. The Fenwick answer, **2,317,351**, equals the brute force over **4,498,500** pairs, with about **35,000 tree steps** instead of 4.5 million pair checks. Inversions measure how far an array is from sorted, and the same count gives the number of swaps bubble sort needs.
+- The **sliding window median** of 5,000 numbers with a window of 101 (add the new value, remove the expired one, ask for the `(k + 1) / 2`-th smallest) equals the brute force over every window, with no lazy deletion and no heap bookkeeping: just 129,639 tree steps in total.
+
+The counts are from one seeded run; the agreement with brute force is the correctness evidence.
+
+## Where else this appears
+
+| task | how |
+| --- | --- |
+| Count of smaller (or larger) numbers before or after each element | process in order; for each element ask the rank before inserting it |
+| Inversions, and the minimum adjacent swaps to sort | sum of those counts |
+| k-th smallest in a sliding window, window median | add the new value, erase the expired one, query |
+| Order statistics in a **subrange of an array** (offline) | sort the queries and sweep, or use a persistent or wavelet structure |
+| **Ordered set with k-th and rank** where only ordering exists | compress, then Fenwick |
+| Selecting the best `k` items under changing conditions | a Fenwick tree over values holding counts (and a second one holding sums) lets you add "the sum of the k smallest" |
+
+Many languages offer shortcuts: C++ has the policy-based `tree` (`__gnu_pbds`) with `find_by_order` and `order_of_key`, but it is a GNU extension and not available everywhere; Java's `TreeMap` has no rank. The Fenwick tree is portable and short enough to write from memory in a contest.
+
+## Pitfalls
+
+1. **Forgetting to compress** (or compressing without including every queried value). The tree must cover every value that is ever inserted or erased.
+2. **Erasing an absent value.** A blind `-1` drives a count negative and corrupts later answers. Keep a separate count (or test the point count) and ignore the erase when it is zero.
+3. **Off-by-one between 0-indexed values and a 1-indexed tree.** Fenwick trees are 1-indexed; the descent returns `pos` such that the answer is at position `pos + 1`, which is `vals[pos]` for a 0-indexed value array.
+4. **Asking for `k` larger than the size.** Check against the running total first and print the required sentinel (here `-1`).
+5. **Using `top` that is too large or too small.** `top` must be the largest power of two **not exceeding** `m`; the guard `nxt <= m` handles the rest.
+6. **Binary search with prefix sums** inside a loop: correct but `O(log^2)`; fine for small limits, slow at large ones.
+7. **Forgetting duplicates.** A multiset counts copies, and rank can mean "number strictly smaller" or "number at most". Decide which the problem needs.
+8. **Using 32-bit counts** when sums of values (not counts) are stored in a second tree.
+
+## Practice
+
+<Problem id="m16-kth-in-set" />
+
+### Problem ladder
+
+- [Sliding Window Median](https://cses.fi/problemset/task/1076) (CSES): the window median, by this method or by two heaps.
+- [Count of Smaller Numbers After Self](https://leetcode.com/problems/count-of-smaller-numbers-after-self/) (LeetCode, hard): rank queries while sweeping.
+- [Reverse Pairs](https://leetcode.com/problems/reverse-pairs/) (LeetCode, hard): inversions with a twist, compressing both `a[i]` and `2 * a[i]`.
+- [Kth Largest Element in a Stream](https://leetcode.com/problems/kth-largest-element-in-a-stream/) (LeetCode, easy): a heap of size `k` is simpler when there are no deletions.
+- [Count of Range Sum](https://leetcode.com/problems/count-of-range-sum/) (LeetCode, hard): counting prefix sums in a range with a Fenwick tree.
+
+## Quiz
+
+<Quiz id="cp-m16-order-statistics" tags={["order-statistics", "fenwick-tree", "kth-smallest"]} questions={[
+  { type: "mcq", q: "What does position v of the underlying array hold in a Fenwick tree used for order statistics?", options: ["The value v itself", "How many copies of the (compressed) value v are currently in the collection", "The index of the largest element", "The sum of all values"], answer: 1, explain: "Prefix sums of the counts then give ranks, and the k-th smallest is where the prefix reaches k." },
+  { type: "mcq", q: "Why compress the values first?", options: ["To make them smaller than 10", "Values up to 10^9 cannot index an array; replacing them by ranks keeps the tree size at most the number of operations", "Because Fenwick trees need sorted input", "To remove duplicates from the output"], answer: 1, explain: "The range of the tree must be small. Compression needs the operations in advance (offline)." },
+  { type: "predict", q: "The counts of copies at positions 1 to 5 are 2, 0, 1, 3, 0. Which position holds the 4th smallest copy?", code: "counts = [2, 0, 1, 3, 0]\nk = 4\nrunning = 0\nfor pos, c in enumerate(counts, 1):\n    running += c\n    if running >= k:\n        print(pos)\n        break", options: ["Position 3", "Position 4", "Position 5", "Position 2"], answer: 1, explain: "Prefix counts are 2, 2, 3, 6, 6: the first position whose prefix reaches 4 is position 4." },
+  { type: "mcq", q: "In the binary descent, what does pos hold at the end?", options: ["The position of the answer", "The largest position whose prefix count is less than k, so the answer is at pos + 1", "The total number of elements", "The number of steps taken"], answer: 1, explain: "That is why the code returns vals[pos] for a 0-indexed value array." },
+  { type: "multi", q: "Which are true about the cost of a k-th query on a Fenwick tree over the range 1..m?", options: ["It is O(log m) with the binary descent", "It does not depend on how many values are stored", "It requires the values to be stored in sorted order", "It was 21 tree steps for m = 2^20 in the experiment"], answer: [0, 1, 3], explain: "The tree covers the value range, not the stored values, which is why compressing the range matters." },
+  { type: "mcq", q: "How is the number of inversions in an array computed with this structure?", options: ["Sort and compare", "For each element in order, count how many earlier elements are larger (stored size minus the count of values at most it), then insert it", "Count the zeros", "Use a heap of size 2"], answer: 1, explain: "The experiment gave 2,317,351 inversions in 3,000 numbers, matching the 4.5-million-pair brute force." }
+]} />
