@@ -1,0 +1,249 @@
+---
+title: Knuth's Optimisation of Interval DP
+track: cp
+module: dynamic-programming-ii
+order: 3
+difficulty: expert
+estMinutes: 45
+prerequisites: [cp/dynamic-programming/interval-dp, cp/dynamic-programming/divide-and-conquer-optimization]
+tags: [dp, interval-dp, knuth-optimization, quadrangle-inequality, optimal-bst]
+type: lesson
+problems: [m19-stick-cuts]
+furtherReading:
+  - title: cp-algorithms, Knuth's Optimization
+    url: https://cp-algorithms.com/dynamic_programming/knuth-optimization.html
+  - title: Knuth, Optimum Binary Search Trees (Acta Informatica, 1971)
+    url: https://link.springer.com/article/10.1007/BF00264289
+  - title: Yao, Efficient dynamic programming using quadrangle inequalities (STOC 1980)
+    url: https://dl.acm.org/doi/10.1145/800141.804691
+  - title: LeetCode, Minimum Cost to Cut a Stick
+    url: https://leetcode.com/problems/minimum-cost-to-cut-a-stick/
+---
+
+## Intuition
+
+**Interval DP** solves problems where a segment `[i, j]` is built from two smaller segments split at some point `m`:
+
+```text
+dp[i][j] = min over i < m < j of  ( dp[i][m] + dp[m][j] )  +  cost(i, j)
+```
+
+There are `O(n^2)` intervals and `O(n)` split points for each, so the plain DP is `O(n^3)`: fine for `n = 400`, hopeless for `n = 3000`. **Knuth's optimisation** observes that in many such problems **the best split point moves monotonically**: if you make the interval a little longer, the best split never jumps backwards. So you only need to look at split points **between the best splits of two neighbouring intervals**, and the total work over all intervals collapses to `O(n^2)`.
+
+Typical problems: **cutting a stick** (each cut costs the length of the piece), **merging adjacent piles** (each merge costs the combined size), **optimal binary search trees** (build a tree of minimum expected search cost), and similar "recursive splitting" tasks.
+
+## Definition
+
+Let `opt[i][j]` be the **smallest** `m` achieving the minimum for `dp[i][j]`. The optimisation applies when
+
+```text
+opt[i][j-1]  <=  opt[i][j]  <=  opt[i+1][j]
+```
+
+(the best split of `[i, j]` lies between the best split of `[i, j-1]` and that of `[i+1, j]`). So compute the intervals in **increasing order of length**, and for `[i, j]` search only `m` from `opt[i][j-1]` to `opt[i+1][j]`.
+
+### When is it valid?
+
+A sufficient condition on the cost function `w(i, j) = cost(i, j)` (the **quadrangle inequality** and **monotonicity**):
+
+```text
+w(a, c) + w(b, d)  <=  w(a, d) + w(b, c)      for  a <= b <= c <= d      (quadrangle inequality)
+w(b, c)  <=  w(a, d)                            for  a <= b <= c <= d      (monotone on the lattice of intervals)
+```
+
+For the stick problem `w(i, j) = p[j] - p[i]` holds with **equality** in the first line, and monotonicity is obvious. For merging piles, `w(i, j)` is the sum of the piles from `i` to `j`, which also satisfies both. Without such a property the monotonicity of `opt` can fail and the answer will be wrong, so check the condition, or test the optimised DP against the cubic one on random small inputs.
+
+### Why the total work is quadratic
+
+Fix the length `gap = j - i`. The ranges searched for the intervals of this length are `[opt[i][j-1], opt[i+1][j]]`. Consecutive intervals `[i, j]` and `[i+1, j+1]` share an endpoint of their ranges: the upper end of the first, `opt[i+1][j]`, is the lower end of the second, `opt[i+1][j]`. The ranges therefore **telescope**: their total length over one `gap` is at most `n` plus the number of intervals. With `n` values of `gap`, the total is `O(n^2)`.
+
+### The stick problem in code
+
+Points `p[0] = 0 < p[1] < ... < p[k] < p[k+1] = L`. `dp[i][i+1] = 0`; for longer intervals `m` ranges over the interior points, clamped to `i + 1 .. j - 1`.
+
+<Tabs>
+<Tab label="Python">
+
+```python
+size = k + 2
+dp = [[0] * size for _ in range(size)]
+opt = [[0] * size for _ in range(size)]
+for i in range(size - 1):
+    opt[i][i + 1] = i
+for gap in range(2, size):
+    for i in range(size - gap):
+        j = i + gap
+        best, arg = None, -1
+        for m in range(max(opt[i][j - 1], i + 1), min(opt[i + 1][j], j - 1) + 1):
+            v = dp[i][m] + dp[m][j]
+            if best is None or v < best:
+                best, arg = v, m
+        dp[i][j] = best + p[j] - p[i]
+        opt[i][j] = arg
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+for (int gap = 2; gap < size; gap++)
+    for (int i = 0; i + gap < size; i++) {
+        int j = i + gap;
+        long long best = LLONG_MAX; int arg = -1;
+        for (int m = max(opt[i][j - 1], i + 1); m <= min(opt[i + 1][j], j - 1); m++) {
+            long long v = dp[i][m] + dp[m][j];
+            if (v < best) { best = v; arg = m; }
+        }
+        dp[i][j] = best + p[j] - p[i];
+        opt[i][j] = arg;
+    }
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+for (int gap = 2; gap < size; gap++)
+    for (int i = 0; i + gap < size; i++) {
+        int j = i + gap;
+        long best = Long.MAX_VALUE; int arg = -1;
+        for (int m = Math.max(opt[i][j - 1], i + 1); m <= Math.min(opt[i + 1][j], j - 1); m++) {
+            long v = dp[i][m] + dp[m][j];
+            if (v < best) { best = v; arg = m; }
+        }
+        dp[i][j] = best + p[j] - p[i];
+        opt[i][j] = arg;
+    }
+```
+
+</Tab>
+</Tabs>
+
+## Experiment
+
+The program compares the cubic DP and the Knuth DP on random cut sets: the costs must agree, and the number of candidate evaluations shows the speed-up.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+
+def cuts_cubic(p):
+    k = len(p)
+    dp = [[0] * k for _ in range(k)]
+    evals = 0
+    for gap in range(2, k):
+        for i in range(k - gap):
+            j = i + gap
+            best = None
+            for m in range(i + 1, j):
+                evals += 1
+                v = dp[i][m] + dp[m][j]
+                if best is None or v < best:
+                    best = v
+            dp[i][j] = best + p[j] - p[i]
+    return dp[0][k - 1], evals
+
+
+def cuts_knuth(p):
+    k = len(p)
+    dp = [[0] * k for _ in range(k)]
+    opt = [[0] * k for _ in range(k)]
+    for i in range(k - 1):
+        opt[i][i + 1] = i
+    evals = 0
+    for gap in range(2, k):
+        for i in range(k - gap):
+            j = i + gap
+            best, arg = None, -1
+            for m in range(max(opt[i][j - 1], i + 1), min(opt[i + 1][j], j - 1) + 1):
+                evals += 1
+                v = dp[i][m] + dp[m][j]
+                if best is None or v < best:
+                    best, arg = v, m
+            dp[i][j] = best + p[j] - p[i]
+            opt[i][j] = arg
+    return dp[0][k - 1], evals
+
+
+def demo3():
+    rnd = random.Random(3)
+    ok = True
+    for _ in range(300):
+        k = rnd.randint(0, 25)
+        length = rnd.randint(k + 1, 200)
+        p = [0] + sorted(rnd.sample(range(1, length), k)) + [length]
+        ok &= cuts_cubic(p)[0] == cuts_knuth(p)[0]
+    print(f"300 random cut sets (up to 25 cuts): the Knuth version gives the same cost as the cubic DP every time: {ok}")
+    print("candidate evaluations (the inner loop), random cut positions:")
+    for k in (50, 100, 200, 400, 800):
+        p = [0] + sorted(rnd.sample(range(1, 10**9), k)) + [10**9]
+        _, kn = cuts_knuth(p)
+        cubic = (k + 2) * (k + 1) * k // 6
+        line = f"  {k:4d} cuts: Knuth {kn:9,}  ({kn / (k * k):.2f} per k^2)   cubic DP {cubic:13,}  (about {cubic // kn:,} times more)"
+        if k <= 100:
+            line += f"   [measured cubic: {cuts_cubic(p)[1]:,}]"
+        print(line)
+
+
+demo3()
+`} />
+
+What it shows:
+
+- On **300 random cut sets** (up to 25 cuts) the Knuth version gives exactly the cost of the cubic DP.
+- The **number of candidate evaluations** for random cut positions:
+
+| cuts `k` | Knuth | per `k^2` | cubic DP | ratio |
+| --- | --- | --- | --- | --- |
+| 50 | 2,479 | 0.99 | 22,100 | 8 times |
+| 100 | 10,413 | 1.04 | 171,700 | 16 times |
+| 200 | 40,138 | 1.00 | 1,353,400 | 33 times |
+| 400 | 157,193 | 0.98 | 10,746,800 | 68 times |
+| 800 | 640,188 | 1.00 | 85,653,600 | 133 times |
+
+Knuth stays at about **`1.0 * k^2`** evaluations (a perfect quadratic: doubling `k` quadruples the count), while the cubic DP grows eightfold per doubling. The measured cubic counts for `k = 50` and `100` match the formula `(k + 2)(k + 1)k / 6`.
+
+The counts are exact for these seeded random inputs; the agreement of the costs is the correctness evidence.
+
+## Related optimisations
+
+| technique | recurrence shape | speed-up |
+| --- | --- | --- |
+| **Knuth** | `dp[i][j] = min over m of dp[i][m] + dp[m][j] + w(i, j)` (interval) | `O(n^3)` to `O(n^2)` |
+| **Divide and conquer optimisation** (previous lessons) | `dp[g][j] = min over k < j of dp[g-1][k] + w(k, j)` (layers) | `O(g n^2)` to `O(g n log n)` |
+| **Convex hull trick and Li Chao tree** | `dp[j] = min over k of dp[k] + a_k * x_j + b_k` | `O(n^2)` to `O(n log n)` |
+| **Monge matrices and SMAWK** | row minima of a totally monotone matrix | linear per layer |
+| **Aliens trick (Lagrangian relaxation)** | a count constraint on a convex cost | `O(n log C)` |
+
+Knuth's optimisation is the one for **interval** recurrences with a split point. The related result by Yao (1980) shows the quadrangle inequality is what makes it work.
+
+## Pitfalls
+
+1. **Applying it without the property.** If `w` does not satisfy the quadrangle inequality, `opt` may not be monotone and the result is silently wrong. Always cross-check against the cubic DP on small random inputs.
+2. **Forgetting to clamp `m`** to `i + 1 .. j - 1`. For `gap = 2` the unclamped range can include `i` or `j`, which gives an invalid (too cheap) split.
+3. **Initialising `opt` wrongly** for `j = i + 1`. A common choice is `opt[i][i+1] = i` with the clamp above; or `i + 1` with the other clamp. Be consistent.
+4. **Taking the largest minimiser on ties** in one place and the smallest in another. Use the same tie rule everywhere (the smallest).
+5. **Processing in the wrong order.** Intervals must be computed by increasing length so `opt[i][j-1]` and `opt[i+1][j]` exist.
+6. **Overflow.** Costs sum to about `L * k` and more: use 64-bit integers.
+7. **Memory.** Two `n x n` tables: 1000 by 1000 is fine, 5000 by 5000 is 25 million entries each (consider `int` for `opt`).
+8. **Mixing up merging piles with cutting a stick**: in merging, the cost of an interval is the **sum of the piles** (a prefix-sum difference), not a difference of positions.
+
+## Practice
+
+<Problem id="m19-stick-cuts" />
+
+### Problem ladder
+
+- [Minimum Cost to Cut a Stick](https://leetcode.com/problems/minimum-cost-to-cut-a-stick/) (LeetCode 1547, hard): this exact problem with a smaller limit on the number of cuts, so the cubic DP passes there.
+- [Knuth's Optimization](https://cp-algorithms.com/dynamic_programming/knuth-optimization.html) (cp-algorithms): proof sketch and the merging-piles example.
+- [Merge Stones](https://leetcode.com/problems/minimum-cost-to-merge-stones/) (LeetCode 1000, hard): interval DP with a twist (the plain `O(n^3)` version).
+
+## Quiz
+
+<Quiz id="cp-m19-knuth" tags={["dp", "interval-dp", "knuth-optimization"]} questions={[
+  { type: "predict", q: "A stick of length 10 must be cut at positions 2, 4 and 7, and each cut costs the length of the piece cut. What is the minimum total cost?", code: "p = [0, 2, 4, 7, 10]\nk = len(p)\ndp = [[0] * k for _ in range(k)]\nfor gap in range(2, k):\n    for i in range(k - gap):\n        j = i + gap\n        dp[i][j] = min(dp[i][m] + dp[m][j] for m in range(i + 1, j)) + p[j] - p[i]\nprint(dp[0][k - 1])", options: ["17", "20", "23", "25"], answer: 1, explain: "Cutting at 4 first (cost 10), then 2 in [0, 4] (cost 4) and 7 in [4, 10] (cost 6) gives 20." },
+  { type: "mcq", q: "What is the key property Knuth's optimisation relies on?", options: ["The DP table is symmetric", "The best split point opt[i][j] lies between opt[i][j-1] and opt[i+1][j]", "All costs are equal", "The intervals do not overlap"], answer: 1, explain: "So only split points between those two stored values need to be tried." },
+  { type: "mcq", q: "Why is the total work O(n^2) rather than O(n^3)?", options: ["There are only n intervals", "For a fixed length the search ranges of consecutive intervals share endpoints and telescope, so each diagonal costs O(n) in total", "Candidates are skipped at random", "The inner loop runs once"], answer: 1, explain: "In the experiment the evaluations were about 1.0 * k^2 for k from 50 to 800." },
+  { type: "multi", q: "Which of these are real risks when using Knuth's optimisation?", options: ["Using it when the cost function does not satisfy the quadrangle inequality", "Not clamping the split range to i + 1 .. j - 1", "Overflow in 32-bit arithmetic", "It only works for n below 100"], answer: [0, 1, 2], explain: "Always cross-check against the cubic DP on small random inputs." },
+  { type: "mcq", q: "Which problem is NOT a natural fit for Knuth's optimisation?", options: ["Optimal binary search tree", "Merging adjacent piles with cost equal to the sum merged", "Cutting a stick at marked points", "Shortest path with negative weights"], answer: 3, explain: "Knuth applies to interval recurrences with a split point and a cost satisfying the quadrangle inequality." },
+  { type: "mcq", q: "In what order must the intervals be computed?", options: ["By increasing left end", "By increasing length, so the two neighbouring intervals of length gap - 1 are already known", "By decreasing length", "Randomly"], answer: 1, explain: "opt[i][j-1] and opt[i+1][j] are intervals one shorter than [i, j]." }
+]} />

@@ -1,0 +1,266 @@
+---
+title: Broken Profile DP and Domino Tilings
+track: cp
+module: dynamic-programming-ii
+order: 2
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/dynamic-programming/bitmask-dp, cp/dynamic-programming/grid-paths]
+tags: [dp, bitmask, profile-dp, tiling, counting, grid]
+type: lesson
+problems: [m19-tile-the-floor]
+furtherReading:
+  - title: cp-algorithms, Broken Profile Dynamic Programming
+    url: https://cp-algorithms.com/dynamic_programming/profile-dynamics.html
+  - title: CSES Problem Set, Counting Tilings
+    url: https://cses.fi/problemset/task/2181
+  - title: CSES Problem Set, Grid Completion
+    url: https://cses.fi/problemset/task/1744
+  - title: Kasteleyn, The statistics of dimers on a lattice (1961), the exact count of domino tilings
+    url: https://www.sciencedirect.com/science/article/abs/pii/0031891461900634
+---
+
+## Intuition
+
+How many ways can you tile a 6 by 6 floor with dominoes? Trying them all one after another quickly becomes impossible: there are 6,728 for 6 by 6, 12,988,816 for 8 by 8 and roughly 10^48 for 20 by 20 (computed with Kasteleyn's formula). But a tiling is built **cell by cell**, and the choices you made far in the past matter only through a small amount of information: **which of the cells just ahead of you are already covered**.
+
+If you scan the board row by row, the only cells that earlier dominoes can have covered are in the **next `m` cells** (the rest of the current row and the beginning of the next row), where `m` is the width. That frontier, one bit per cell, is the **profile**. A DP whose state is `(position, profile)` counts all tilings in `O(cells * 2^m)`, which for `m <= 12` or so is easily fast enough even for very long boards.
+
+## Definition
+
+Number the cells in row-major order. The state while standing at cell `(i, j)` is a mask of `m` bits; **bit `c` says whether the next cell the scan will meet in column `c` is already covered**: for columns before `j` that cell is in row `i + 1`, for columns from `j` on it is in row `i`.
+
+At each cell, given `mask`:
+
+| situation | transition |
+| --- | --- |
+| bit `j` is set (already covered by a domino from above, or from the left) | clear bit `j` (the cell below is not covered by anything yet); move on |
+| cell is a pillar (blocked) and bit `j` is clear | nothing to cover; keep the mask |
+| cell is free and bit `j` is clear: **vertical domino**, if the cell below exists and is free | set bit `j` (now it refers to the cell below, covered) |
+| cell is free and bit `j` is clear: **horizontal domino**, if the next cell in the row exists, is free, and its bit `j + 1` is clear | set bit `j + 1` (the next cell is covered); bit `j` stays clear |
+
+After the last cell the profile must be empty, so the answer is `dp[0]`. There are `n * m` cells, `2^m` masks and at most two transitions, so **`O(n * m * 2^m)`**. Make the **narrow** side the mask: a 100 by 8 floor needs 100 * 8 * 256 steps, while a mask over the length-100 side is impossible.
+
+### Why "broken"
+
+Processing a whole row at once and enumerating the next row's mask for each current mask has `4^m` transitions. The **broken profile** processes **one cell at a time**, so the frontier is "broken" along a staircase, and each state has only two transitions: much simpler and about `m` times faster.
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+MOD = 10**9 + 7
+dp = [0] * (1 << m)
+dp[0] = 1
+for i in range(n):
+    for j in range(m):
+        nd = [0] * (1 << m)
+        for mask in range(1 << m):
+            ways = dp[mask]
+            if not ways:
+                continue
+            if (mask >> j) & 1:                                  # already covered
+                nd[mask ^ (1 << j)] = (nd[mask ^ (1 << j)] + ways) % MOD
+            elif grid[i][j] == '#':
+                nd[mask] = (nd[mask] + ways) % MOD
+            else:
+                if i + 1 < n and grid[i + 1][j] == '.':          # vertical domino
+                    nd[mask | (1 << j)] = (nd[mask | (1 << j)] + ways) % MOD
+                if j + 1 < m and grid[i][j + 1] == '.' and not (mask >> (j + 1)) & 1:   # horizontal
+                    nd[mask | (1 << (j + 1))] = (nd[mask | (1 << (j + 1))] + ways) % MOD
+        dp = nd
+answer = dp[0]
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<long long> dp(1 << m, 0), nd(1 << m);
+dp[0] = 1;
+for (int i = 0; i < n; i++) for (int j = 0; j < m; j++) {
+    fill(nd.begin(), nd.end(), 0);
+    for (int mask = 0; mask < (1 << m); mask++) {
+        long long ways = dp[mask];
+        if (!ways) continue;
+        if ((mask >> j) & 1) nd[mask ^ (1 << j)] = (nd[mask ^ (1 << j)] + ways) % MOD;
+        else if (grid[i][j] == '#') nd[mask] = (nd[mask] + ways) % MOD;
+        else {
+            if (i + 1 < n && grid[i + 1][j] == '.') nd[mask | (1 << j)] = (nd[mask | (1 << j)] + ways) % MOD;
+            if (j + 1 < m && grid[i][j + 1] == '.' && !((mask >> (j + 1)) & 1))
+                nd[mask | (1 << (j + 1))] = (nd[mask | (1 << (j + 1))] + ways) % MOD;
+        }
+    }
+    swap(dp, nd);
+}
+// answer = dp[0]
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] dp = new long[1 << m];
+dp[0] = 1;
+for (int i = 0; i < n; i++) for (int j = 0; j < m; j++) {
+    long[] nd = new long[1 << m];
+    for (int mask = 0; mask < (1 << m); mask++) {
+        long ways = dp[mask];
+        if (ways == 0) continue;
+        if (((mask >> j) & 1) == 1) { int t = mask ^ (1 << j); nd[t] = (nd[t] + ways) % MOD; }
+        else if (grid[i].charAt(j) == '#') nd[mask] = (nd[mask] + ways) % MOD;
+        else {
+            if (i + 1 < n && grid[i + 1].charAt(j) == '.') { int t = mask | (1 << j); nd[t] = (nd[t] + ways) % MOD; }
+            if (j + 1 < m && grid[i].charAt(j + 1) == '.' && ((mask >> (j + 1)) & 1) == 0) { int t = mask | (1 << (j + 1)); nd[t] = (nd[t] + ways) % MOD; }
+        }
+    }
+    dp = nd;
+}
+// answer = dp[0]
+```
+
+</Tab>
+</Tabs>
+
+## Experiment
+
+The program counts tilings of several boards and checks 200 random grids with pillars against exhaustive backtracking.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+
+MOD = 10**9 + 7
+
+
+def tilings(grid):
+    n, m = len(grid), len(grid[0])
+    dp = [0] * (1 << m)
+    dp[0] = 1
+    states = 0
+    for i in range(n):
+        for j in range(m):
+            nd = [0] * (1 << m)
+            for mask in range(1 << m):
+                ways = dp[mask]
+                if not ways:
+                    continue
+                states += 1
+                if mask >> j & 1:
+                    nd[mask ^ (1 << j)] = (nd[mask ^ (1 << j)] + ways) % MOD
+                elif grid[i][j] == "#":
+                    nd[mask] = (nd[mask] + ways) % MOD
+                else:
+                    if i + 1 < n and grid[i + 1][j] == ".":
+                        nd[mask | (1 << j)] = (nd[mask | (1 << j)] + ways) % MOD
+                    if j + 1 < m and grid[i][j + 1] == "." and not (mask >> (j + 1)) & 1:
+                        nd[mask | (1 << (j + 1))] = (nd[mask | (1 << (j + 1))] + ways) % MOD
+            dp = nd
+    return dp[0], states
+
+
+def brute_tilings(grid):
+    n, m = len(grid), len(grid[0])
+    cells = [[c == "#" for c in row] for row in grid]
+
+    def go(pos):
+        while pos < n * m and cells[pos // m][pos % m]:
+            pos += 1
+        if pos == n * m:
+            return 1
+        i, j = divmod(pos, m)
+        total = 0
+        cells[i][j] = True
+        if j + 1 < m and not cells[i][j + 1]:
+            cells[i][j + 1] = True
+            total += go(pos + 1)
+            cells[i][j + 1] = False
+        if i + 1 < n and not cells[i + 1][j]:
+            cells[i + 1][j] = True
+            total += go(pos + 1)
+            cells[i + 1][j] = False
+        cells[i][j] = False
+        return total
+
+    return go(0)
+
+
+def demo2():
+    rnd = random.Random(2)
+    print("domino tilings of a 2 x n strip (the Fibonacci numbers):", [tilings(["." * n] * 2)[0] for n in range(1, 11)])
+    for n, m in ((4, 4), (6, 6), (8, 8)):
+        count, states = tilings(["." * m] * n)
+        print(f"  {n} x {m} board: {count:,} tilings ({states:,} DP states visited)")
+    board = ["." * 8 for _ in range(8)]
+    board[0] = "#" + board[0][1:]
+    board[7] = board[7][:7] + "#"
+    print(f"  8 x 8 board with two opposite corners removed: {tilings(board)[0]} tilings (the chessboard colouring argument: 32 cells of one colour, 30 of the other)")
+    ok = True
+    for _ in range(200):
+        n, m = rnd.randint(1, 5), rnd.randint(1, 5)
+        grid = ["".join("#" if rnd.random() < 0.2 else "." for _ in range(m)) for _ in range(n)]
+        ok &= tilings(grid)[0] == brute_tilings(grid) % MOD
+    print(f"200 random grids up to 5 x 5 with pillars: the profile DP equals the exhaustive backtracking in every case: {ok}")
+    count, states = tilings(["." * 8] * 100)
+    print(f"a 100 x 8 floor: {count} modulo 10^9 + 7 from {states:,} DP states (at most 100 * 8 * 256 = {100 * 8 * 256:,}); backtracking would have to visit every tiling, an astronomically larger number")
+
+
+demo2()
+`} />
+
+What it shows:
+
+- Tilings of a **2 by n strip** are the Fibonacci numbers: **1, 2, 3, 5, 8, 13, 21, 34, 55, 89**.
+- The classic boards: **36** tilings for 4 by 4, **6,728** for 6 by 6 and **12,988,816** for 8 by 8, using only **69, 526 and 3,360** DP states (states with a non-zero count) respectively.
+- An 8 by 8 board with **two opposite corners removed has 0 tilings**: the two removed cells have the same colour on a chessboard, leaving 32 cells of one colour and 30 of the other, and every domino covers one of each. The DP finds the impossibility without being told the argument.
+- On **200 random grids** up to 5 by 5 with pillars, the profile DP equals exhaustive backtracking in every case.
+- A **100 by 8** floor is counted from **54,880** non-empty states (at most 204,800), giving 426,075,085 modulo `10^9 + 7`; backtracking would have to enumerate every tiling, an astronomically larger number.
+
+The counts are exact for the stated boards; the agreement with backtracking is the correctness evidence.
+
+## Where the technique applies
+
+| problem | what the profile stores |
+| --- | --- |
+| domino tilings (with pillars) | which upcoming cells are covered |
+| tilings with L-shaped trominoes, or several tile types | the same frontier, with more transitions or more bits per cell |
+| number of ways to colour a grid with no two adjacent cells equal | the colours of the last `m` cells (base `k` instead of 2) |
+| **Hamiltonian paths and cycles on grids** (plug DP) | which frontier edges carry a path end, with connectivity pairing |
+| placing kings, rooks or non-attacking pieces row by row | which columns are used or attacked |
+| maximum independent set on a narrow grid | which of the last `m` cells are chosen |
+| counting spanning trees or perfect matchings on narrow strips | the frontier connectivity or matching state |
+
+For counting domino tilings of **any** board without pillars there is also a closed form (Kasteleyn's determinant), but the DP handles pillars and arbitrary shapes.
+
+## Pitfalls
+
+1. **Mask over the long side.** The mask must be over the narrow dimension. If rows are longer than columns, transpose the grid first.
+2. **Wrong bit meaning.** Be exact about what bit `c` refers to before and after the current column; draw the frontier on paper once.
+3. **Allowing a domino to cover a pillar.** Check that the target cell is free before setting a bit; a pillar is never "already covered".
+4. **Forgetting to clear bit `j`** when an already covered cell is passed, leaving a stale bit for the next row.
+5. **Horizontal domino at the last column** (`j + 1 == m`): not allowed.
+6. **Vertical domino at the last row**: not allowed.
+7. **Not taking the modulus** after each addition, or using `int` for sums of two values near `10^9`.
+8. **Reallocating the new array incorrectly** (copying state across cells): the next cell's DP must start from zeros.
+
+## Practice
+
+<Problem id="m19-tile-the-floor" />
+
+### Problem ladder
+
+- [Counting Tilings](https://cses.fi/problemset/task/2181) (CSES): fill an `n` by `m` grid with `1 x 2` and `2 x 1` tiles; `n` up to 10, `m` up to 1000.
+- [Broken Profile DP](https://cp-algorithms.com/dynamic_programming/profile-dynamics.html) (cp-algorithms): the tutorial with the domino example.
+- [Grid Completion](https://cses.fi/problemset/task/1744) (CSES): a different DP on a grid, for contrast.
+
+## Quiz
+
+<Quiz id="cp-m19-profile-dp" tags={["dp", "bitmask", "profile-dp", "tiling"]} questions={[
+  { type: "predict", q: "How many ways are there to tile a 2 x 4 strip with 1 x 2 dominoes?", code: "fib = [1, 2]\nwhile len(fib) < 4:\n    fib.append(fib[-1] + fib[-2])\nprint(fib[3])", options: ["3", "4", "5", "8"], answer: 2, explain: "Tilings of a 2 x n strip are the Fibonacci numbers 1, 2, 3, 5, 8, ...: for n = 4 there are 5." },
+  { type: "mcq", q: "What does the bitmask in broken profile DP store?", options: ["The cells already visited", "Which of the next m cells in scan order are already covered by dominoes placed earlier", "The positions of blocked cells", "The number of dominoes used"], answer: 1, explain: "Only the frontier of m cells matters; everything behind it is complete." },
+  { type: "mcq", q: "Why make the mask over the narrow side of the grid?", options: ["It makes the code shorter", "The running time is n * m * 2^m, exponential in the mask width only", "Dominoes are narrow", "Python requires it"], answer: 1, explain: "A 100 x 8 floor needs 100 * 8 * 256 steps; a mask of 100 bits is impossible." },
+  { type: "mcq", q: "Why does an 8 x 8 board without two opposite corners have no domino tiling?", options: ["The DP is wrong", "The two removed cells have the same colour on a chessboard, leaving 32 cells of one colour and 30 of the other, but each domino covers one of each", "Corners cannot be tiled", "There are too few dominoes"], answer: 1, explain: "The profile DP returned 0 for this board without being told the argument." },
+  { type: "multi", q: "Which of these are invalid moves in the transition at a free, uncovered cell (i, j)?", options: ["A vertical domino in the last row", "A horizontal domino in the last column", "A horizontal domino onto a cell whose bit is already set", "A vertical domino onto a free cell below"], answer: [0, 1, 2], explain: "A vertical domino onto a free cell below is a normal move." },
+  { type: "mcq", q: "How does a pillar (blocked cell) affect the DP?", options: ["It adds a domino", "A pillar with a clear bit passes the mask on unchanged; a domino may never be placed onto it", "It resets the mask", "It doubles the count"], answer: 1, explain: "Treat the pillar as already filled, and never let a placement cover it." }
+]} />

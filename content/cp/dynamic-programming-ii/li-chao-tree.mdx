@@ -1,0 +1,323 @@
+---
+title: The Li Chao Tree
+track: cp
+module: dynamic-programming-ii
+order: 4
+difficulty: expert
+estMinutes: 45
+prerequisites: [cp/dynamic-programming/convex-hull-trick, cp/range-queries/segment-trees]
+tags: [data-structures, li-chao-tree, convex-hull-trick, lines, dp-optimization, segment-tree]
+type: lesson
+problems: [m19-best-line]
+furtherReading:
+  - title: cp-algorithms, Li Chao Tree
+    url: https://cp-algorithms.com/geometry/li_chao_tree.html
+  - title: Codeforces blog, Li Chao tree (introduction and applications)
+    url: https://codeforces.com/blog/entry/51275
+  - title: CSES Problem Set, Monster Game II
+    url: https://cses.fi/problemset/task/2085
+  - title: Library Checker, Line Add Get Min
+    url: https://judge.yosupo.jp/problem/line_add_get_min
+---
+
+## Intuition
+
+The **convex hull trick** speeds up DP transitions of the form `dp[i] = min over j of (m_j * x_i + b_j)`: each earlier state `j` is a **line** `y = m_j * x + b_j`, and the query asks for the lowest line at the point `x_i`. If lines arrive in sorted slope order and queries are sorted too, a deque handles it in `O(n)`. When they are **not** sorted, you would need a balanced structure that maintains the **hull** of the lines, which is fiddly.
+
+The **Li Chao tree** is a much simpler alternative that needs **no ordering at all**. It is a segment tree over the possible query points where **each node stores one line**: the line that is best at the **midpoint** of the node's interval. Adding a line, or asking for the best line at a point, takes `O(log C)` for a domain of `C` points. You can add lines in any order, and the code is about 25 lines.
+
+## Definition
+
+The tree covers the integer interval `[LO, HI]` of possible query points. Each node covers a sub-interval `[lo, hi]` and stores at most one line.
+
+**Invariant:** for every point `x`, the best line at `x` among all lines inserted so far is stored in some node on the path from the root to the leaf of `x`.
+
+### Inserting a line `L` (maximum version)
+
+Start at the root. At each node with interval `[lo, hi]` and `mid = (lo + hi) // 2`:
+
+1. Compare `L` with the stored line `S` **at `mid`**. The better one stays in the node; call the other one `W` (the loser). If the node was empty, store `L` and stop.
+2. Two different lines cross **at most once**. So `W` can beat `S` on at most one side of `mid`:
+   - if `W` beats `S` at `lo`, it can only win on the **left** half: continue into the left child with `W`;
+   - else if `W` beats `S` at `hi`, continue into the **right** child;
+   - else `W` is worse everywhere in this interval: **discard** it.
+3. Create the child when it does not exist and place `W` there; stop.
+
+Each step goes one level down, so insertion is `O(log C)`.
+
+### Querying a point `x`
+
+Walk from the root to the leaf containing `x` (go left if `x <= mid`, otherwise right), evaluate the line stored in each visited node at `x`, and keep the **best value**. `O(log C)`.
+
+For **minimum** queries, flip the comparisons (or store negated lines). A line `y = m x + b` can also be replaced by a **segment** valid only on an interval: insert it into the `O(log C)` nodes covering that interval (each insertion then costs `O(log^2 C)`).
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+LO, HI = -10**6, 10**6
+slope, icpt, left, right = [], [], [], []
+
+def new(m, b):
+    slope.append(m); icpt.append(b); left.append(-1); right.append(-1)
+    return len(slope) - 1
+
+def add(m, b):
+    if not slope:
+        new(m, b); return
+    node, lo, hi = 0, LO, HI
+    while True:
+        mid = (lo + hi) >> 1
+        if m * mid + b > slope[node] * mid + icpt[node]:          # the new line is better at the midpoint: swap
+            slope[node], m = m, slope[node]
+            icpt[node], b = b, icpt[node]
+        if lo == hi:
+            return
+        if m * lo + b > slope[node] * lo + icpt[node]:            # the loser can still win on the left half
+            side, hi = left, mid
+        elif m * hi + b > slope[node] * hi + icpt[node]:          # or on the right half
+            side, lo = right, mid + 1
+        else:
+            return                                                # it is worse everywhere here
+        if side[node] == -1:
+            side[node] = new(m, b); return
+        node = side[node]
+
+def query(x):
+    node, lo, hi, best = 0, LO, HI, None
+    while node != -1:
+        v = slope[node] * x + icpt[node]
+        if best is None or v > best:
+            best = v
+        mid = (lo + hi) >> 1
+        if x <= mid: node, hi = left[node], mid
+        else: node, lo = right[node], mid + 1
+    return best
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+// arrays or vectors: slope_, icpt, lc, rc; domain [LO, HI]
+void add(long long m, long long b) {
+    if (slope_.empty()) { newNode(m, b); return; }
+    int node = 0, lo = LO, hi = HI;
+    while (true) {
+        int mid = (lo + hi) >> 1;
+        if (m * mid + b > slope_[node] * mid + icpt[node]) { swap(m, slope_[node]); swap(b, icpt[node]); }
+        if (lo == hi) return;
+        vector<int> *side;
+        if (m * lo + b > slope_[node] * lo + icpt[node]) { side = &lc; hi = mid; }
+        else if (m * hi + b > slope_[node] * hi + icpt[node]) { side = &rc; lo = mid + 1; }
+        else return;
+        if ((*side)[node] == -1) { int id = newNode(m, b); (*side)[node] = id; return; }
+        node = (*side)[node];
+    }
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static void add(long m, long b) {
+    if (count == 0) { newNode(m, b); return; }
+    int node = 0, lo = LO, hi = HI;
+    while (true) {
+        int mid = (lo + hi) >> 1;
+        if (m * mid + b > slope[node] * mid + icpt[node]) {
+            long t = slope[node]; slope[node] = m; m = t;
+            t = icpt[node]; icpt[node] = b; b = t;
+        }
+        if (lo == hi) return;
+        int[] side;
+        if (m * lo + b > slope[node] * lo + icpt[node]) { side = left; hi = mid; }
+        else if (m * hi + b > slope[node] * hi + icpt[node]) { side = right; lo = mid + 1; }
+        else return;
+        if (side[node] == -1) { side[node] = newNode(m, b); return; }
+        node = side[node];
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+## Using it in a DP
+
+Take the DP `dp[i] = min over j < i of ( dp[j] + (h_i - h_j)^2 ) + C` (a frog choosing stones). Expanding gives `dp[j] + h_j^2 - 2 h_j * h_i + h_i^2 + C`: for fixed `j` this is a **line in the variable `h_i`** with slope `-2 h_j` and intercept `dp[j] + h_j^2`. So the DP is
+
+```text
+dp[i] = h_i^2 + C + min over j < i of line_j(h_i)
+```
+
+Insert line `j` into the Li Chao tree once `dp[j]` is known, and query at `h_i`. With the **maximum** version, store negated lines (slope `2 h_j`, intercept `-(dp[j] + h_j^2)`) and negate the answer. The heights need not be sorted and the slopes need not be monotone: the Li Chao tree does not care.
+
+## Experiment
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+
+
+class LiChao:
+    """Maximum over lines y = m x + b at integer x in [lo, hi]. Nodes are created only when needed."""
+    def __init__(self, lo, hi):
+        self.lo, self.hi = lo, hi
+        self.m, self.b, self.left, self.right = [], [], [], []
+        self.steps = 0
+
+    def _new(self, m, b):
+        self.m.append(m); self.b.append(b); self.left.append(-1); self.right.append(-1)
+        return len(self.m) - 1
+
+    def add(self, m, b):
+        if not self.m:
+            self._new(m, b)
+            return
+        node, lo, hi = 0, self.lo, self.hi
+        while True:
+            self.steps += 1
+            mid = (lo + hi) >> 1
+            if m * mid + b > self.m[node] * mid + self.b[node]:
+                self.m[node], m = m, self.m[node]
+                self.b[node], b = b, self.b[node]
+            if lo == hi:
+                return
+            if m * lo + b > self.m[node] * lo + self.b[node]:
+                side, hi = self.left, mid
+            elif m * hi + b > self.m[node] * hi + self.b[node]:
+                side, lo = self.right, mid + 1
+            else:
+                return
+            if side[node] == -1:
+                side[node] = self._new(m, b)
+                return
+            node = side[node]
+
+    def query(self, x):
+        node, lo, hi, best = 0, self.lo, self.hi, None
+        while node != -1:
+            self.steps += 1
+            v = self.m[node] * x + self.b[node]
+            if best is None or v > best:
+                best = v
+            mid = (lo + hi) >> 1
+            if x <= mid:
+                node, hi = self.left[node], mid
+            else:
+                node, lo = self.right[node], mid + 1
+        return best
+
+
+def demo4():
+    rnd = random.Random(4)
+    tree = LiChao(-10**6, 10**6)
+    lines = []
+    ok = True
+    for _ in range(1000):
+        m, b = rnd.randint(-10**6, 10**6), rnd.randint(-10**6, 10**6)
+        tree.add(m, b)
+        lines.append((m, b))
+    insert_steps = tree.steps
+    tree.steps = 0
+    for _ in range(1000):
+        x = rnd.randint(-10**6, 10**6)
+        ok &= tree.query(x) == max(m * x + b for m, b in lines)
+    print(f"1,000 random lines and 1,000 queries over x in [-10^6, 10^6]: every answer equals the maximum over all lines: {ok}")
+    print(f"  {insert_steps / 1000:.1f} steps per insertion and {tree.steps / 1000:.1f} per query; only {len(tree.m):,} nodes for 1,000 lines: random lines are mostly dominated and discarded")
+
+    # the opposite extreme: lines that are all tangent to a parabola, so every one of them is the maximum somewhere
+    hard = LiChao(-10**5, 10**5)
+    tangents = []
+    for _ in range(1000):
+        a = rnd.randint(-10**5, 10**5)
+        hard.add(2 * a, -a * a)
+        tangents.append((2 * a, -a * a))
+    ins = hard.steps
+    hard.steps = 0
+    ok2 = True
+    for _ in range(1000):
+        x = rnd.randint(-10**5, 10**5)
+        ok2 &= hard.query(x) == max(m * x + b for m, b in tangents)
+    print(f"1,000 lines tangent to a parabola (every line matters): answers correct: {ok2}; {ins / 1000:.1f} steps per insertion, {hard.steps / 1000:.1f} per query, "
+          f"{len(hard.m):,} nodes (at most one per line, and the depth never exceeds log2 of the range, 18 here)")
+
+    # a DP that needs it: dp[i] = min over j < i of dp[j] + (h[i] - h[j])^2 + C
+    n, C = 1000, 1000
+    h = sorted(rnd.randint(1, 10**5) for _ in range(n))
+    brute = [0] * n
+    brute_evals = 0
+    for i in range(1, n):
+        best = None
+        for j in range(i):
+            brute_evals += 1
+            v = brute[j] + (h[i] - h[j]) ** 2 + C
+            if best is None or v < best:
+                best = v
+        brute[i] = best
+    fast = [0] * n
+    t = LiChao(1, 10**5)                                    # we store NEGATED lines to turn the maximum into a minimum
+    t.add(-(-2 * h[0]), -(0 + h[0] ** 2))                   # line for j = 0: slope -2 h_j, intercept dp_j + h_j^2, negated
+    for i in range(1, n):
+        fast[i] = h[i] ** 2 + C - t.query(h[i])
+        t.add(2 * h[i], -(fast[i] + h[i] ** 2))
+    print(f"a shortest-jumps DP with {n} stones: Li Chao tree equals the quadratic DP: {fast == brute}; "
+          f"{brute_evals:,} transitions for the quadratic version against about {2 * n * 21:,} tree steps")
+
+
+demo4()
+`} />
+
+What it shows:
+
+- With **1,000 random lines and 1,000 queries** over `x` between `-10^6` and `10^6`, every answer equals the maximum over all lines. Random lines are mostly dominated, so the tree needs only **16 nodes** and an insertion takes about **2.9 steps**, a query about **3.0**.
+- The opposite extreme: **1,000 lines tangent to a parabola**, every one of which is the maximum somewhere. All answers are still correct; the tree uses **993 nodes** (at most one per line), an insertion takes about **8.3 steps** and a query about **9.6**, below the depth limit of 18 for a range of 200,001 points.
+- In the **1,000-stone DP**, the Li Chao version equals the quadratic DP. The quadratic one makes **499,500 transitions**; the tree needs about **42,000 steps** (two operations per stone times at most 21 levels).
+
+The counts come from seeded runs; the agreement with brute force is the correctness evidence.
+
+## Li Chao tree versus the other tools
+
+| tool | needs sorted slopes | needs sorted queries | handles arbitrary insertion order | segments | code size |
+| --- | --- | --- | --- | --- | --- |
+| deque convex hull trick | yes | yes (or binary search) | no | no | short |
+| binary search on a hull | yes | no | no | no | medium |
+| dynamic hull with a `std::set` | no | no | yes | no | long and error-prone |
+| **Li Chao tree** | **no** | **no** | **yes** | **yes** (with extra log) | **short** |
+| divide and conquer on time (offline) | no | no | offline only | yes | medium |
+
+The Li Chao tree costs `O(log C)` per operation where `C` is the number of possible query points; compress the offline query coordinates to make `C` equal to the number of queries.
+
+## Pitfalls
+
+1. **Overflow in `m * x + b`.** With `|m|, |x| <= 10^9` the product is `10^18`: use 64-bit and check the range; reduce the domain by compressing queries.
+2. **Querying outside the domain.** Choose `[LO, HI]` to cover every query point.
+3. **Midpoint of negative ranges.** Use a floor division (`>> 1` or `floorDiv`), not truncation towards zero; and be consistent about whether the left child is `[lo, mid]` and the right `[mid + 1, hi]`.
+4. **Forgetting to compare at both ends** after the midpoint swap, or comparing the wrong line (the loser, not the original new line).
+5. **Ties.** Use strict comparisons when swapping so equal lines do not loop; equal lines may be discarded.
+6. **Minimum versus maximum.** Do not mix them: a tree built for maximum cannot answer minimum queries without negating the lines.
+7. **Storing nodes in an array indexed by heap position** (`2 * node + 1`) for a huge domain: use dynamic node creation instead.
+8. **Querying an empty tree.** Handle "no lines yet" explicitly (the problem here promises a line exists).
+
+## Practice
+
+<Problem id="m19-best-line" />
+
+### Problem ladder
+
+- [Line Add Get Min](https://judge.yosupo.jp/problem/line_add_get_min) (Library Checker): the template problem for this structure.
+- [Monster Game II](https://cses.fi/problemset/task/2085) (CSES): a DP with lines, solvable with a Li Chao tree.
+- [Li Chao Tree](https://cp-algorithms.com/geometry/li_chao_tree.html) (cp-algorithms): the structure with line segments and proofs.
+
+## Quiz
+
+<Quiz id="cp-m19-li-chao" tags={["data-structures", "li-chao-tree", "convex-hull-trick"]} questions={[
+  { type: "predict", q: "The lines y = x and y = -x + 6 are in a maximum Li Chao tree. What does a query at x = 2 return?", code: "print(max(1 * 2 + 0, -1 * 2 + 6))", options: ["2", "4", "6", "0"], answer: 1, explain: "The values at x = 2 are 2 and 4; the maximum is 4." },
+  { type: "mcq", q: "What does each node of a Li Chao tree store?", options: ["The hull of all lines", "At most one line: the best one at the midpoint of the node's interval, among the lines that reached it", "A sorted list of lines", "A query point"], answer: 1, explain: "The losing line is passed to at most one child." },
+  { type: "mcq", q: "Why does the losing line go to at most one child?", options: ["Because the tree is binary", "Two distinct lines cross at most once, so the loser can be better than the winner on at most one side of the midpoint", "Because of the invariant on sums", "Because slopes are sorted"], answer: 1, explain: "If it beats the stored line at the left end it can only win on the left half; if at the right end, on the right half; otherwise it is discarded." },
+  { type: "multi", q: "Which are advantages of the Li Chao tree over the deque convex hull trick?", options: ["Lines can be inserted in any order of slope", "Queries need not be sorted", "It can handle line segments (with an extra log factor)", "It has smaller constants always"], answer: [0, 1, 2], explain: "The deque version is faster by a constant when its sorting conditions hold." },
+  { type: "mcq", q: "How do you rewrite dp[i] = min over j of dp[j] + (h_i - h_j)^2 + C for a line structure?", options: ["It cannot be rewritten", "As h_i^2 + C plus the minimum over j of the line with slope -2 h_j and intercept dp[j] + h_j^2, evaluated at h_i", "As a sum of squares", "With a segment tree over j"], answer: 1, explain: "Expand the square: the part depending on j is linear in h_i." },
+  { type: "mcq", q: "In the experiment, why did 1,000 random lines need only 16 nodes while 1,000 tangent lines needed 993?", options: ["The tangent lines are longer", "Most random lines are dominated everywhere and discarded; every tangent line is the maximum somewhere and must be stored", "Random lines have equal slopes", "A bug in the program"], answer: 1, explain: "The node count is at most one per inserted line, and the worst case is when every line matters." }
+]} />
