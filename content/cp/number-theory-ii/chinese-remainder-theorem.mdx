@@ -1,0 +1,248 @@
+---
+title: The Chinese Remainder Theorem
+track: cp
+module: number-theory-ii
+order: 2
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/number-theory-ii/extended-euclid-and-linear-congruences]
+tags: [number-theory, chinese-remainder-theorem, congruence, lcm, extended-euclid]
+type: lesson
+problems: [m17-clock-alignment]
+furtherReading:
+  - title: cp-algorithms, Chinese Remainder Theorem
+    url: https://cp-algorithms.com/algebra/chinese-remainder-theorem.html
+  - title: Library Checker, Chinese Remainder Theorem
+    url: https://judge.yosupo.jp/problem/crt
+  - title: Codeforces 687B, Remainders Game
+    url: https://codeforces.com/problemset/problem/687/B
+---
+
+## Intuition
+
+Two gears turn at different speeds. Gear A shows a mark every 3 ticks, gear B every 5. When will A be at position 2 *and* B at position 3 at the same moment? Each gear gives a **congruence**: `x ≡ 2 (mod 3)` and `x ≡ 3 (mod 5)`. The answer, `x = 8`, repeats every 15 ticks (the least common multiple), so the full solution is `x ≡ 8 (mod 15)`.
+
+The **Chinese remainder theorem (CRT)** says that for **pairwise coprime** moduli, a system of congruences always has exactly one solution modulo the **product** of the moduli. It lets you **split** a big modular computation into small independent ones and **reconstruct** the answer, and it solves puzzles of the form "find a number that leaves remainder `r_i` when divided by `m_i`".
+
+In programming contests the moduli are often **not** coprime (clock periods 6 and 10, for instance), and then the system might have **no solution at all**. The robust method is to **merge the congruences one at a time**, and that is what this lesson teaches.
+
+## Definition
+
+### Merging two congruences
+
+Suppose all the solutions of the congruences handled so far are `x ≡ r1 (mod m1)`, and we add `x ≡ r2 (mod m2)`.
+
+1. Write `x = r1 + m1 * t` for an unknown integer `t` (this satisfies the first congruence for every `t`).
+2. The second congruence becomes `r1 + m1 * t ≡ r2 (mod m2)`, that is, **`m1 * t ≡ r2 - r1 (mod m2)`**: a linear congruence in `t`, solved with the previous lesson.
+3. Let `g = gcd(m1, m2)`. If `g` does **not** divide `r2 - r1`, the system has **no solution**. Stop.
+4. Otherwise `t ≡ ((r2 - r1) / g) * inverse(m1 / g mod m2 / g) (mod m2 / g)`. Extended Euclid on `(m1, m2)` gives `p` with `m1 * p + m2 * q = g`, so `p` is that inverse.
+5. The merged congruence is `x ≡ r1 + m1 * t (mod lcm(m1, m2))`, with `lcm(m1, m2) = m1 / g * m2`. Reduce `r` modulo the new modulus.
+
+Start from `x ≡ 0 (mod 1)` (every integer qualifies) and merge each congruence in turn; at the end `r` is the **smallest non-negative solution** and `m` is the period of all solutions. For pairwise coprime moduli, `g = 1` every time, there is never a contradiction, and the result is the classic theorem.
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def crt(pairs):
+    r, m = 0, 1                                   # all solutions so far: x = r (mod m)
+    for r2, m2 in pairs:
+        g, p, _ = ext_gcd(m, m2)
+        if (r2 - r) % g:
+            return None                           # contradiction
+        t = ((r2 - r) // g * p) % (m2 // g)
+        m_new = m // g * m2                       # lcm(m, m2)
+        r = (r + m * t) % m_new
+        m = m_new
+    return r, m
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+// state: r, m. For each (r2, m2):
+long long g = extGcd(m, m2, p, q);                // m*p + m2*q = g
+if ((r2 - r) % g != 0) { /* no solution */ }
+long long mod = m2 / g;
+long long t = ((r2 - r) / g % mod) * (p % mod) % mod;
+if (t < 0) t += mod;
+long long mNew = m / g * m2;
+r = (r + m * t) % mNew;
+m = mNew;
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long g = extGcd(m, m2);                           // leaves the coefficient of m in coef
+long diff = r2 - r;
+if (diff % g != 0) { /* no solution */ }
+long mod = m2 / g;
+long t = ((diff / g) % mod) * (coef % mod) % mod;
+if (t < 0) t += mod;
+long mNew = m / g * m2;
+r = (r + m * t) % mNew;
+m = mNew;
+```
+
+</Tab>
+</Tabs>
+
+### Overflow
+
+After several merges `m` is the lcm of many moduli and can be huge. In the merge, `m * t` is about `m * (m2 / g)`, which is roughly the new lcm. **If the final lcm fits in a signed 64-bit integer (below `9 * 10^18`) every product here fits too**; if it does not, use 128-bit arithmetic (`__int128` in C++, `BigInteger` in Java, BigInt in JavaScript, native integers in Python).
+
+## Experiment
+
+The program runs the merge on thousands of random systems with non-coprime moduli and checks every answer by brute force over one full period, then shows the textbook formula failing and reconstructs a 12-digit number from its remainders modulo 11 primes.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import math
+import random
+
+
+def ext_gcd(a, b):
+    """Return (g, x, y) with a*x + b*y = g = gcd(a, b), and count the division steps."""
+    x0, y0, x1, y1, steps = 1, 0, 0, 1, 0
+    while b:
+        q = a // b
+        a, b = b, a - q * b
+        x0, x1 = x1, x0 - q * x1
+        y0, y1 = y1, y0 - q * y1
+        steps += 1
+    return a, x0, y0, steps
+
+
+def crt_merge(r1, m1, r2, m2):
+    g, p, _, _ = ext_gcd(m1, m2)
+    if (r2 - r1) % g:
+        return None
+    l = m1 // g * m2
+    t = ((r2 - r1) // g * p) % (m2 // g)
+    return (r1 + m1 * t) % l, l
+
+
+def crt(pairs):
+    r, m = 0, 1
+    for r2, m2 in pairs:
+        merged = crt_merge(r, m, r2, m2)
+        if merged is None:
+            return None
+        r, m = merged
+    return r, m
+
+
+def naive_coprime_formula(pairs):
+    """The textbook formula x = sum r_i * M_i * inverse(M_i mod m_i), where M_i is the product of the other moduli.
+    It needs that inverse to exist, which holds only when the moduli are pairwise coprime."""
+    M = 1
+    for _, m in pairs:
+        M *= m
+    total = 0
+    for r, m in pairs:
+        Mi = M // m
+        total += r * Mi * pow(Mi, -1, m)          # raises ValueError when Mi and m share a factor
+    return total % M
+
+
+def demo_lesson_2():
+    rnd = random.Random(2)
+    solvable = unsolvable = 0
+    ok = True
+    for _ in range(1500):
+        pairs = []
+        for _ in range(rnd.randint(2, 4)):
+            m = rnd.randint(1, 12)
+            pairs.append((rnd.randrange(m), m))
+        lcm = 1
+        for _, m in pairs:
+            lcm = lcm * m // math.gcd(lcm, m)
+        brute = next((x for x in range(lcm) if all(x % m == r for r, m in pairs)), None)
+        got = crt(pairs)
+        if brute is None:
+            ok &= got is None
+            unsolvable += 1
+        else:
+            ok &= got is not None and got[0] == brute and got[1] == lcm
+            solvable += 1
+    print(f"1,500 random systems of 2 to 4 congruences (moduli up to 12, not necessarily coprime): the merge matches a brute force over one full period "
+          f"in every case: {ok}; {solvable} had a solution, {unsolvable} were contradictory")
+
+    pairs = [(2, 3), (3, 5), (2, 7)]
+    print(f"x = 2 (mod 3), 3 (mod 5), 2 (mod 7): merge gives {crt(pairs)}, the product formula gives {naive_coprime_formula(pairs)} (the moduli are coprime, so both are right)")
+    pairs = [(2, 6), (8, 10)]
+    try:
+        naive_coprime_formula(pairs)
+        verdict = "it ran"
+    except ValueError as e:
+        verdict = f"it cannot even be evaluated ({e})"
+    print(f"x = 2 (mod 6), 8 (mod 10): merge gives {crt(pairs)}, so x = 8 (and every 30 more); the coprime-moduli formula: {verdict}")
+    print(f"x = 1 (mod 2) and x = 0 (mod 4): merge says {crt([(1, 2), (0, 4)])} (no solution): an odd number is never a multiple of 4")
+
+    primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+    x = 123456789012
+    big = [(x % p, p) for p in primes]
+    got = crt(big)
+    lcm = math.prod(primes)
+    print(f"reconstructing a hidden number from its remainders modulo the first 11 primes (their product is {lcm:,}): hidden {x:,} recovered {got[0]:,}: {got[0] == x % lcm}")
+
+
+
+
+demo_lesson_2()
+`} />
+
+What it shows:
+
+- On **1,500 random systems** of 2 to 4 congruences with moduli up to 12 (frequently sharing factors), the merge agrees with a brute force search over one period in every case: **755** systems had a solution and **745** were **contradictory**. Contradictions are common when moduli share factors, which is why the check `g | (r2 - r1)` is essential.
+- For the coprime example `x ≡ 2 (mod 3), 3 (mod 5), 2 (mod 7)` the merge gives **23 modulo 105** and the classic formula gives the same 23.
+- For `x ≡ 2 (mod 6)` and `x ≡ 8 (mod 10)` (moduli with gcd 2), the merge returns **8 modulo 30**, while the classic formula (which needs `M / m_i` to be invertible modulo `m_i`) **cannot even be evaluated**.
+- `x ≡ 1 (mod 2)` and `x ≡ 0 (mod 4)` has **no solution** (`None`): an odd number is never a multiple of 4.
+- A hidden number, **123,456,789,012**, is recovered exactly from its remainders modulo the first 11 primes, whose product is **200,560,490,130**. This is how CRT is used to compute with **large numbers in small pieces** (each remainder is computed independently, even in parallel, and the pieces are recombined).
+
+The numbers come from one seeded run.
+
+## Applications
+
+| task | how CRT helps |
+| --- | --- |
+| Periodic events (gears, lights, schedules, calendars) | find the first time all periodic conditions hold; the answer's period is the lcm |
+| Counting or computing modulo a **composite** `m` | factor `m` into prime powers, solve each, combine with CRT (used for `C(n, k) mod m` with non-prime `m`) |
+| Large-number arithmetic (residue number systems, multi-modular hashing and NTT results) | compute modulo several small primes, reconstruct the true value |
+| "Find x with `x mod m_i = r_i`" puzzles | the merge, with the lcm bound checked |
+| Discrete logarithm and other algorithms over composite moduli | break the problem into prime-power parts |
+
+## Pitfalls
+
+1. **Assuming the moduli are coprime.** The product formula `sum r_i * M_i * inverse(M_i)` breaks (inverses do not exist) when moduli share factors; merge pairwise instead.
+2. **Forgetting the contradiction test** `(r2 - r1) % g != 0`. Without it you silently output a wrong number.
+3. **Not reducing `r`** after each merge; keep `0 <= r < m` so the answer is the smallest non-negative solution.
+4. **Overflow of the lcm.** Check that the final lcm fits, or use big integers. A system with 20 moduli of size `10^6` can have an lcm of `10^120`.
+5. **Negative remainders** from `%` in C++ and Java: normalise `t` and `r` after each step.
+6. **Modulus 1.** `x ≡ 0 (mod 1)` is always true and the merge handles it (`g = 1`); do not special-case it incorrectly.
+7. **Order of merging.** The result (the combined congruence) does not depend on order, but the intermediate size might. Merging smaller moduli first keeps numbers small for a little longer.
+8. **Assuming a solution below the lcm exists when the problem allows `x` to be any integer.** The smallest non-negative solution is below the lcm; larger solutions are `r + k * lcm`.
+
+## Practice
+
+<Problem id="m17-clock-alignment" />
+
+### Problem ladder
+
+- [Remainders Game](https://codeforces.com/problemset/problem/687/B) (Codeforces 687B): when does knowing `x mod c_i` determine `x mod k`? An lcm argument.
+- [Chinese Remainder Theorem](https://judge.yosupo.jp/problem/crt) (Library Checker): merge congruences with large moduli (needs 128-bit arithmetic).
+- [Chinese Remainder Theorem](https://cp-algorithms.com/algebra/chinese-remainder-theorem.html) (cp-algorithms): the classic and the general method side by side.
+
+## Quiz
+
+<Quiz id="cp-m17-crt" tags={["number-theory", "chinese-remainder-theorem", "congruence"]} questions={[
+  { type: "predict", q: "What is the smallest non-negative x with x ≡ 2 (mod 3) and x ≡ 3 (mod 5)?", code: "print(next(x for x in range(15) if x % 3 == 2 and x % 5 == 3))", options: ["5", "8", "11", "13"], answer: 1, explain: "8 mod 3 = 2 and 8 mod 5 = 3. All solutions are 8 + 15k." },
+  { type: "mcq", q: "When does a system x ≡ r1 (mod m1), x ≡ r2 (mod m2) have no solution?", options: ["Never", "When gcd(m1, m2) does not divide r2 - r1", "When m1 is larger than m2", "When r1 equals r2"], answer: 1, explain: "Both conditions force x mod g to equal r1 mod g and r2 mod g; if those differ there is a contradiction (1 mod 2 against 0 mod 4)." },
+  { type: "mcq", q: "What is the period of all solutions after merging congruences with moduli 6 and 10 (when a solution exists)?", options: ["60", "30", "16", "4"], answer: 1, explain: "The lcm: 6 / 2 * 10 = 30. The experiment merged x = 2 (mod 6) and x = 8 (mod 10) into 8 (mod 30)." },
+  { type: "multi", q: "Which are valid uses of the Chinese remainder theorem?", options: ["Reconstructing a large number from its remainders modulo several coprime moduli", "Solving periodic alignment puzzles", "Computing something modulo a composite number by solving modulo each prime power", "Finding the gcd of two numbers"], answer: [0, 1, 2], explain: "Finding a gcd is Euclid's algorithm, not CRT." },
+  { type: "mcq", q: "Why can the classic formula x = sum r_i * M_i * inverse(M_i) fail on x = 2 (mod 6), x = 8 (mod 10)?", options: ["The residues are too large", "M_i = 10 and 6 share a factor with the modulus, so the inverse does not exist", "There is no solution", "The formula needs three congruences"], answer: 1, explain: "The experiment shows the formula cannot be evaluated here, although the system has the solution 8 modulo 30." },
+  { type: "mcq", q: "Why must you check that the lcm fits in 64 bits?", options: ["Because lcm is negative", "The merged modulus grows to the lcm of all moduli and intermediate products like m * t are about that size, so an lcm beyond 9 * 10^18 overflows", "Because Python cannot handle it", "Because r must be below 10"], answer: 1, explain: "If the lcm may be huge, use 128-bit or big integers." }
+]} />

@@ -1,0 +1,234 @@
+---
+title: Extended Euclid and Linear Congruences
+track: cp
+module: number-theory-ii
+order: 1
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/math-basics/gcd-and-lcm, cp/math-basics/modular-arithmetic]
+tags: [number-theory, extended-euclid, bezout, modular-inverse, congruence, diophantine]
+type: lesson
+problems: [m17-solve-linear-congruence]
+furtherReading:
+  - title: cp-algorithms, Extended Euclidean Algorithm
+    url: https://cp-algorithms.com/algebra/extended-euclid-algorithm.html
+  - title: cp-algorithms, Linear Diophantine Equation
+    url: https://cp-algorithms.com/algebra/linear-diophantine-equation.html
+  - title: cp-algorithms, Modular Multiplicative Inverse
+    url: https://cp-algorithms.com/algebra/module-inverse.html
+  - title: AtCoder ABC 186 E, Throne
+    url: https://atcoder.jp/contests/abc186/tasks/abc186_e
+---
+
+## Intuition
+
+Euclid's algorithm finds `gcd(a, b)` by repeatedly replacing `(a, b)` with `(b, a mod b)`. It does more than find the gcd: every remainder it produces is a **combination** of the two original numbers. Track that combination while you run it and you get **Bézout's identity**:
+
+```text
+a * x + b * y = gcd(a, b)        for some integers x and y (one of them is usually negative)
+```
+
+That one fact solves several problems that look different:
+
+- **Modular inverse for any modulus**, not only primes. If `gcd(a, m) = 1` then `a * x + m * y = 1`, so `a * x ≡ 1 (mod m)` and `x` is the inverse of `a`. Fermat's little theorem (`a^(p-2)`) needs a prime modulus; this does not.
+- **Linear congruences** `a * x ≡ b (mod m)`, including the case where `a` and `m` share factors.
+- **Linear Diophantine equations** `a * x + b * y = c` in integers (how to pay `c` with coins worth `a` and `b`, or fill a jug).
+- Combining several congruences (next lesson).
+
+## Definition
+
+### The extended algorithm
+
+Run Euclid and keep, for the current pair `(a, b)`, the coefficients that express each as a combination of the original `(a0, b0)`:
+
+```text
+start:  a = a0 = 1*a0 + 0*b0      b = b0 = 0*a0 + 1*b0
+step:   q = a // b;  (a, b) = (b, a - q*b)   and update the coefficients the same way
+end:    b = 0, a = gcd, with its coefficients (x, y)
+```
+
+Iteratively: keep `(x0, y0)` for `a` and `(x1, y1)` for `b`; after computing `q`, set `a, b = b, a - q*b`, `x0, x1 = x1, x0 - q*x1` and `y0, y1 = y1, y0 - q*y1`.
+
+The number of steps is the same as for Euclid's algorithm: **`O(log min(a, b))`**. The worst case is two consecutive Fibonacci numbers; the first such pair above `10^9` (701,408,733 and 1,134,903,170) takes 43 steps, while random pairs near `10^9` average about 17.6 steps (see the experiment below).
+
+<Tabs>
+<Tab label="Python">
+
+```python
+def ext_gcd(a, b):
+    """Return (g, x, y) with a*x + b*y = g = gcd(a, b)."""
+    x0, y0, x1, y1 = 1, 0, 0, 1
+    while b:
+        q = a // b
+        a, b = b, a - q * b
+        x0, x1 = x1, x0 - q * x1
+        y0, y1 = y1, y0 - q * y1
+    return a, x0, y0
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+long long extGcd(long long a, long long b, long long &x, long long &y) {
+    if (b == 0) { x = 1; y = 0; return a; }
+    long long x1, y1;
+    long long g = extGcd(b, a % b, x1, y1);
+    x = y1;
+    y = x1 - (a / b) * y1;
+    return g;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+static long x;                                   // Bezout coefficient of a
+static long extGcd(long a, long b) {
+    long x0 = 1, x1 = 0;
+    while (b != 0) {
+        long q = a / b;
+        long t = a - q * b; a = b; b = t;
+        t = x0 - q * x1; x0 = x1; x1 = t;
+    }
+    x = x0;
+    return a;
+}
+```
+
+</Tab>
+</Tabs>
+
+### Modular inverse
+
+If `gcd(a, m) = 1`, call `ext_gcd(a, m)` and take `x mod m` (the result of `%` can be negative in C++ and Java; fix it with `((x % m) + m) % m`). If `gcd(a, m) > 1`, **no inverse exists**.
+
+### Linear congruences `a * x ≡ b (mod m)`
+
+Let `g = gcd(a, m)`.
+
+1. If `g` does **not** divide `b`, there is **no solution**: the left side is always a multiple of `g` (since `g` divides both `a` and `m`), so `a * x - b` cannot be a multiple of `m`.
+2. Otherwise divide everything by `g`: `(a/g) * x ≡ (b/g) (mod m/g)`. Now `a/g` and `m/g` are **coprime**, so `a/g` has an inverse modulo `m/g`.
+3. The solutions are `x ≡ (b/g) * inverse(a/g mod m/g) (mod m/g)`. Modulo the original `m` there are exactly **`g` distinct solutions**: `x0, x0 + m/g, x0 + 2m/g, ...`. The smallest non-negative one is `x0` itself, in the range `0 .. m/g - 1`.
+
+Using the coefficient `x` from `ext_gcd(a mod m, m)` (which satisfies `a*x + m*y = g`) gives `x0 = (x * (b/g)) mod (m/g)` directly.
+
+### Linear Diophantine equations `a * x + b * y = c`
+
+Solvable in integers exactly when `gcd(a, b)` divides `c`. One solution is `(x * c/g, y * c/g)` from `ext_gcd`; all solutions are `x + k * (b/g)`, `y - k * (a/g)` for integer `k`. Adding the constraint `x ≥ 0, y ≥ 0` turns finding a solution into choosing `k` in a range.
+
+## Experiment
+
+The program checks Bézout's identity, compares inverses with Python's built-in `pow(a, -1, m)`, and counts the solutions of random congruences by brute force.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import math
+import random
+
+
+def ext_gcd(a, b):
+    """Return (g, x, y) with a*x + b*y = g = gcd(a, b), and count the division steps."""
+    x0, y0, x1, y1, steps = 1, 0, 0, 1, 0
+    while b:
+        q = a // b
+        a, b = b, a - q * b
+        x0, x1 = x1, x0 - q * x1
+        y0, y1 = y1, y0 - q * y1
+        steps += 1
+    return a, x0, y0, steps
+
+
+def solve_congruence(a, b, m):
+    g, x, _, _ = ext_gcd(a % m, m)
+    if b % g:
+        return None
+    mm = m // g
+    return (x * ((b // g) % mm)) % mm
+
+
+def demo_lesson_1():
+    rnd = random.Random(1)
+    ok = True
+    for _ in range(20000):
+        a, b = rnd.randint(0, 10**9), rnd.randint(1, 10**9)
+        g, x, y, _ = ext_gcd(a, b)
+        ok &= g == math.gcd(a, b) and a * x + b * y == g
+    print(f"extended Euclid on 20,000 random pairs up to 10^9: a*x + b*y equals gcd(a, b) every time: {ok}")
+
+    inverse_ok, checked = True, 0
+    for _ in range(5000):
+        m = rnd.randint(2, 10**9)
+        a = rnd.randint(1, m - 1)
+        if math.gcd(a, m) == 1:
+            g, x, _, _ = ext_gcd(a, m)
+            inverse_ok &= x % m == pow(a, -1, m)
+            checked += 1
+    print(f"modular inverses by extended Euclid agree with Python's pow(a, -1, m) on {checked:,} coprime pairs (the modulus is not prime): {inverse_ok}")
+
+    # how many solutions does a*x = b (mod m) have? gcd(a, m) of them when gcd divides b, otherwise none
+    agree = True
+    kinds = {"none": 0, "one": 0, "several": 0}
+    for _ in range(2000):
+        m = rnd.randint(1, 60)
+        a, b = rnd.randint(0, 100), rnd.randint(0, 100)
+        sols = [x for x in range(m) if (a * x - b) % m == 0]
+        g = math.gcd(a % m, m)
+        expected = g if b % g == 0 else 0
+        agree &= len(sols) == expected
+        first = solve_congruence(a, b, m)
+        agree &= (first is None) == (not sols) and (first is None or first == sols[0])
+        kinds["none" if not sols else "one" if len(sols) == 1 else "several"] += 1
+    print(f"2,000 random congruences a*x = b (mod m) against a brute force over every x: the count of solutions is gcd(a, m) or 0, and the smallest matches: {agree}; "
+          f"cases with no solution {kinds['none']}, exactly one {kinds['one']}, several {kinds['several']}")
+
+    fa, fb = 1, 1
+    while fb < 10**9:
+        fa, fb = fb, fa + fb
+    print(f"worst case for the number of steps: consecutive Fibonacci numbers {fa:,} and {fb:,} (the first pair above 10^9) need {ext_gcd(fb, fa)[3]} steps (about log of the numbers); "
+          f"the average over random pairs near 10^9 is {sum(ext_gcd(rnd.randint(1, 10**9), rnd.randint(1, 10**9))[3] for _ in range(2000)) / 2000:.1f}")
+
+
+
+
+demo_lesson_1()
+`} />
+
+Reading the output:
+
+- On **20,000 random pairs up to `10^9`**, `a * x + b * y` equals `gcd(a, b)` every time.
+- The inverses from extended Euclid agree with `pow(a, -1, m)` on **3,049 coprime pairs with arbitrary (non-prime) moduli**.
+- Over **2,000 random congruences**, a brute force over every `x` confirms that the number of solutions is exactly `gcd(a, m)` when it divides `b` and `0` otherwise, and that the formula's answer is the smallest: **551** had no solution, **1,198** exactly one (coprime case), and **251** several.
+- Steps: random pairs near `10^9` average **17.6** steps, and the Fibonacci worst case needs **43**.
+
+These counts come from one seeded run; the brute-force agreement is what establishes the formulas.
+
+## Pitfalls
+
+1. **Using Fermat's `a^(m-2)` with a composite modulus.** It only works for prime `m`. For a general modulus use extended Euclid, and check `gcd(a, m) = 1` first.
+2. **Negative coefficients.** `x` and `y` can be negative; reduce with `((x % m) + m) % m` in languages whose `%` keeps the sign of the dividend.
+3. **`a` or `b` equal to zero.** `ext_gcd(0, m)` returns `g = m`; for the congruence this means `m` must divide `b` and the smallest solution is `0`. Reduce `a mod m` before calling.
+4. **Forgetting that there may be many solutions.** When `g > 1` there are `g` solutions modulo `m`; decide which one the problem wants (usually the smallest non-negative).
+5. **Dividing by `g` only on one side.** `a`, `b` and `m` all divide by `g` (only possible when `g | b`).
+6. **Overflow.** Intermediate products like `x * (b/g)` reach `10^18` for moduli near `10^9`: use 64-bit integers, and BigInt in JavaScript.
+7. **Recursive implementation depth.** The recursive form is fine here (depth is about 45 for numbers near `10^9`), but the iterative form avoids any doubt.
+
+## Practice
+
+<Problem id="m17-solve-linear-congruence" />
+
+### Problem ladder
+
+- [Throne](https://atcoder.jp/contests/abc186/tasks/abc186_e) (AtCoder ABC 186 E): a linear congruence with non-coprime parts.
+- [Water and Jug Problem](https://leetcode.com/problems/water-and-jug-problem/) (LeetCode, medium): Bézout's identity in disguise.
+- [Modular Multiplicative Inverse](https://cp-algorithms.com/algebra/module-inverse.html) (cp-algorithms): methods for all moduli and the linear-time inverses of `1..n`.
+
+## Quiz
+
+<Quiz id="cp-m17-extended-euclid" tags={["number-theory", "extended-euclid", "congruence"]} questions={[
+  { type: "mcq", q: "What does the extended Euclidean algorithm return for a and b?", options: ["Only the gcd", "The gcd g and integers x and y with a*x + b*y = g", "The lcm", "The inverse of a modulo b, always"], answer: 1, explain: "That is Bezout's identity. When g = 1 and the modulus is b, x is the modular inverse of a." },
+  { type: "mcq", q: "Why is a^(m-2) mod m not a general way to find modular inverses?", options: ["It is too slow", "It relies on Fermat's little theorem, which needs a prime modulus; for composite m use extended Euclid", "It gives negative numbers", "It only works for a = 1"], answer: 1, explain: "Extended Euclid works for any modulus provided gcd(a, m) = 1." },
+  { type: "predict", q: "How many x in 0..9 satisfy 4x ≡ 6 (mod 10)?", code: "print(sum(1 for x in range(10) if (4 * x - 6) % 10 == 0))", options: ["0", "1", "2", "4"], answer: 2, explain: "g = gcd(4, 10) = 2 divides 6, so there are exactly g = 2 solutions modulo 10: x = 4 and x = 9." },
+  { type: "mcq", q: "For a*x ≡ b (mod m) with g = gcd(a, m) not dividing b, what is the answer?", options: ["x = 0", "No solution", "x = b / g", "Infinitely many solutions"], answer: 1, explain: "a*x - b can never be a multiple of g, hence never a multiple of m." },
+  { type: "multi", q: "Which statements about the extended Euclidean algorithm are true?", options: ["It takes O(log min(a, b)) steps", "The coefficients x and y may be negative", "It needs the modulus to be prime", "Consecutive Fibonacci numbers are its worst case"], answer: [0, 1, 3], explain: "Primality is not required. In the experiment the Fibonacci pair above 10^9 needed 43 steps against about 17.6 on average." },
+  { type: "mcq", q: "After dividing a congruence by g, why does an inverse exist?", options: ["Because b is zero", "Because a/g and m/g are coprime", "Because m/g is prime", "Because x is positive"], answer: 1, explain: "Dividing out the gcd leaves coprime parts, and a number coprime to the modulus is invertible." }
+]} />

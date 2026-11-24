@@ -1,0 +1,253 @@
+---
+title: Binomial Coefficients Modulo a Prime
+track: cp
+module: number-theory-ii
+order: 3
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/math-basics/combinatorics-basics, cp/math-basics/fast-exponentiation, cp/number-theory-ii/extended-euclid-and-linear-congruences]
+tags: [number-theory, combinatorics, binomial-coefficients, factorials, modular-inverse, lucas, catalan]
+type: lesson
+problems: [m17-choose-and-count]
+furtherReading:
+  - title: cp-algorithms, Binomial Coefficients
+    url: https://cp-algorithms.com/combinatorics/binomial-coefficients.html
+  - title: CSES Problem Set, Binomial Coefficients
+    url: https://cses.fi/problemset/task/1079
+  - title: CSES Problem Set, Creating Strings II
+    url: https://cses.fi/problemset/task/1715
+  - title: CSES Problem Set, Bracket Sequences I
+    url: https://cses.fi/problemset/task/2064
+---
+
+## Intuition
+
+`C(n, k)`, "n choose k", counts the ways to pick `k` items from `n`. These numbers get huge very quickly: `C(200000, 100000)` has about 60,000 digits. Contest problems therefore ask for the answer **modulo a prime**, usually `10^9 + 7` or `998244353`, and often ask **many** such queries.
+
+The formula `C(n, k) = n! / (k! * (n - k)!)` is the key, but a *division* appears, and you cannot divide ordinary remainders. Division modulo a prime means multiplying by a **modular inverse**. So:
+
+1. precompute all factorials modulo the prime **once**,
+2. precompute all inverse factorials **once**,
+3. answer each query with **two multiplications**.
+
+After an `O(n)` preparation every query costs `O(1)`.
+
+## Definition
+
+Let `p` be a prime and `n < p`.
+
+```text
+fact[i]      = i! mod p                 fact[i] = fact[i-1] * i
+inv_fact[i]  = (i!)^(-1) mod p
+C(n, k)      = fact[n] * inv_fact[k] * inv_fact[n - k]  mod p       (0 when k > n)
+```
+
+### Computing inverse factorials cheaply
+
+Fermat's little theorem says `a^(p-1) ≡ 1 (mod p)`, so `a^(p-2)` is the inverse of `a` (for `a` not divisible by `p`). Computing that for every factorial would cost `O(log p)` each. Instead compute it **once**, for the largest factorial, then go downwards, using
+
+```text
+1/(i-1)! = i * (1/i!)       so       inv_fact[i-1] = inv_fact[i] * i
+```
+
+Total preparation: `O(N + log p)` for `N` the largest `n` you will ask about. (Alternatively, extended Euclid from the previous lesson computes inverses when the modulus is not prime, but then `n!` may share factors with the modulus.)
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+MOD = 10**9 + 7
+fact = [1] * (N + 1)
+for i in range(1, N + 1):
+    fact[i] = fact[i - 1] * i % MOD
+inv_fact = [1] * (N + 1)
+inv_fact[N] = pow(fact[N], MOD - 2, MOD)
+for i in range(N, 0, -1):
+    inv_fact[i - 1] = inv_fact[i] * i % MOD
+
+def choose(n, k):
+    if k < 0 or k > n:
+        return 0
+    return fact[n] * inv_fact[k] % MOD * inv_fact[n - k] % MOD
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+const long long MOD = 1000000007LL;
+vector<long long> fact(N + 1), invFact(N + 1);
+fact[0] = 1;
+for (int i = 1; i <= N; i++) fact[i] = fact[i - 1] * i % MOD;
+invFact[N] = power(fact[N], MOD - 2);                 // fast exponentiation
+for (int i = N; i >= 1; i--) invFact[i - 1] = invFact[i] * i % MOD;
+auto choose = [&](int n, int k) -> long long {
+    if (k < 0 || k > n) return 0;
+    return fact[n] * invFact[k] % MOD * invFact[n - k] % MOD;
+};
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+long[] fact = new long[N + 1], invFact = new long[N + 1];
+fact[0] = 1;
+for (int i = 1; i <= N; i++) fact[i] = fact[i - 1] * i % MOD;
+invFact[N] = power(fact[N], MOD - 2);
+for (int i = N; i >= 1; i--) invFact[i - 1] = invFact[i] * i % MOD;
+// C(n, k) = k > n ? 0 : fact[n] * invFact[k] % MOD * invFact[n - k] % MOD
+```
+
+</Tab>
+</Tabs>
+
+### Other ways to compute them
+
+| method | cost | when |
+| --- | --- | --- |
+| **Pascal's rule** `C(n, k) = C(n-1, k-1) + C(n-1, k)` | `O(n^2)` memory and time for all values up to `n` | small `n` (a few thousand), works for **any modulus** (only additions) |
+| **Factorials and inverse factorials** | `O(N)` once, `O(1)` per query | prime modulus larger than `n`: the standard |
+| **Multiplicative formula** `C(n, k) = prod (n - i + 1) / i` | `O(k)` per query | a few queries, or when only `k` is small |
+| **Lucas' theorem** | `O(p + log_p n)` | **small prime** modulus where `n` can exceed `p` |
+| **Prime-power moduli and CRT** | combine | composite modulus (factor it, solve each prime power, merge with CRT) |
+
+### Lucas' theorem
+
+When the modulus `p` is a **small prime** and `n` can be larger than `p`, `n!` is divisible by `p` and the factorial method fails (you cannot divide by zero). **Lucas' theorem** writes `n` and `k` in base `p` and multiplies the binomials of the digits:
+
+```text
+C(n, k) ≡ product over digit positions of C(n_i, k_i)   (mod p),     and the result is 0 if any k_i > n_i
+```
+
+Each digit is below `p`, so small binomials (a precomputed table or the factorial method up to `p - 1`) suffice.
+
+## Counting formulas worth knowing
+
+- **Stars and bars:** the number of ways to distribute `n` identical items among `k` people is `C(n + k - 1, k - 1)`; if each person must get at least one, `C(n - 1, k - 1)`.
+- **Catalan numbers:** `Cat(n) = C(2n, n) / (n + 1)` counts balanced bracket sequences of length `2n`, binary trees with `n` nodes, monotone lattice paths that stay on one side of the diagonal, and more. Compute it as `fact[2n] * inv_fact[n] * inv_fact[n + 1]`.
+- **Multinomial coefficients:** arrangements of a multiset, `n! / (c1! * c2! * ...)`, also two multiplications per factor with the tables.
+- **Paths in a grid:** the number of monotone paths from the top-left corner to a cell `r` rows down and `c` columns right is `C(r + c, r)`. Obstacles are handled by subtracting paths through them (inclusion-exclusion over sorted obstacles).
+- **Hockey stick and Vandermonde identities** turn sums of binomials into a single one.
+
+## Experiment
+
+The program compares the factorial method with Python's exact `math.comb`, counts the work of Pascal's rule, checks Lucas' theorem for the prime 13, and prints Catalan numbers and two stars-and-bars counts.
+
+<CodeRunner language="python" timeoutMs={60000} code={`import math
+import random
+
+
+MOD = 10**9 + 7
+
+
+def build_tables(top):
+    fact = [1] * (top + 1)
+    for i in range(1, top + 1):
+        fact[i] = fact[i - 1] * i % MOD
+    inv = [1] * (top + 1)
+    inv[top] = pow(fact[top], MOD - 2, MOD)
+    for i in range(top, 0, -1):
+        inv[i - 1] = inv[i] * i % MOD
+    return fact, inv
+
+
+def lucas(n, k, p):
+    """C(n, k) mod a SMALL prime p, as a product over the base-p digits of n and k."""
+    result = 1
+    while n or k:
+        a, b = n % p, k % p
+        if b > a:
+            return 0
+        result = result * math.comb(a, b) % p
+        n //= p
+        k //= p
+    return result
+
+
+def catalan(n, fact, inv):
+    return fact[2 * n] * inv[n] % MOD * inv[n + 1] % MOD
+
+
+def demo_lesson_3():
+    rnd = random.Random(3)
+    fact, inv = build_tables(200000)
+    ok = True
+    for _ in range(300):                                          # k up to 300 keeps the exact comparison fast
+        n = rnd.randint(0, 200000)
+        k = rnd.randint(0, min(n, 300))
+        ok &= fact[n] * inv[k] % MOD * inv[n - k] % MOD == math.comb(n, k) % MOD
+    for n, k in ((200000, 100000), (199999, 99999), (150000, 60000)):         # a few very large exact values (tens of thousands of digits)
+        ok &= fact[n] * inv[k] % MOD * inv[n - k] % MOD == math.comb(n, k) % MOD
+    print(f"factorial method against the exact math.comb on 300 random queries with n up to 200,000 and k up to 300, and on C(200000, 100000), C(199999, 99999), C(150000, 60000): agrees: {ok}")
+
+    n_max = 1000
+    row = [1]
+    pascal_ops = 0
+    for n in range(1, n_max + 1):
+        row = [1] + [(row[i - 1] + row[i]) % MOD for i in range(1, n)] + [1]
+        pascal_ops += n
+    print(f"Pascal's rule for row {n_max}: {pascal_ops:,} additions, and it only yields the rows you build; "
+          f"the factorial tables need {2 * 200000:,} multiplications once for n up to 200,000, then 2 per query. Same value at row {n_max}: "
+          f"{row[500] == fact[1000] * inv[500] % MOD * inv[500] % MOD}")
+
+    p = 13
+    ok = all(lucas(n, k, p) == math.comb(n, k) % p for n in range(0, 400) for k in range(0, n + 1, 7))
+    print(f"Lucas' theorem for the small prime {p} on every (n, k) with n below 400 and k a multiple of 7: matches math.comb: {ok}; "
+          f"for instance C(100, 40) mod 13 = {lucas(100, 40, 13)}, while n! mod 13 is 0 for n of 13 or more, so the factorial method fails here")
+
+    cats = [catalan(i, fact, inv) for i in range(12)]
+    print("Catalan numbers 0 to 11 from C(2n, n) / (n + 1):", cats)
+    print(f"stars and bars: ways to give 20 identical sweets to 5 children = C(24, 4) = {math.comb(24, 4)}; with each child getting at least 1: C(19, 4) = {math.comb(19, 4)}")
+
+
+
+
+demo_lesson_3()
+`} />
+
+What it shows:
+
+- On 300 random queries with `n` up to **200,000** (and `k` up to 300 so that the exact comparison is quick), and on three very large values (`C(200000, 100000)`, `C(199999, 99999)`, `C(150000, 60000)`, numbers of tens of thousands of digits), the factorial method agrees with the exact `math.comb` modulo `10^9 + 7`.
+- **Pascal's rule** needs **500,500 additions** just for the rows up to 1,000 and yields only those rows, while the factorial tables cost **400,000 multiplications** once for `n` up to 200,000 and then two per query. At row 1,000 the two methods give the same value.
+- **Lucas' theorem** matches `math.comb` modulo 13 for every `n` below 400 and every `k` that is a multiple of 7. For example `C(100, 40) mod 13 = 3`, a case where `n!` is divisible by 13 and the factorial method cannot be used.
+- The **Catalan numbers** come out as **1, 1, 2, 5, 14, 42, 132, 429, 1430, 4862, 16796, 58786**.
+- **Stars and bars:** 20 identical sweets among 5 children: `C(24, 4) = 10,626` ways; with every child receiving at least one sweet, `C(19, 4) = 3,876`.
+
+The agreement checks are the correctness evidence; the operation counts are exact for the stated sizes.
+
+## Pitfalls
+
+1. **Using the factorial method when `n >= p`.** Then `n!` is `0` modulo `p` and inverse factorials do not exist. Use Lucas' theorem or a different approach.
+2. **A non-prime modulus.** Fermat's inverse needs a prime; for a composite modulus use extended Euclid where it is invertible, or factor the modulus and combine with CRT.
+3. **Forgetting `k > n` and negative `k`.** Return `0`.
+4. **Overflow.** Products of two residues below `10^9 + 7` reach `10^18`: 64-bit integers are enough, JavaScript needs BigInt, and `int` overflows.
+5. **Reducing mod `p` after each multiplication**, not after chaining three. `a * b * c % MOD` overflows in 64-bit; write `a * b % MOD * c % MOD`.
+6. **Building tables up to the wrong size.** The largest argument of any factorial you read must be within the tables (`2n` for Catalan, `n + k - 1` for stars and bars).
+7. **Recomputing inverses per query** with fast exponentiation (`O(log p)` each) when one inverse and a downward loop are enough.
+8. **Assuming `C(n, k)` modulo a prime is zero only when `k > n`.** With a small prime and large `n` it can be zero for other reasons (Lucas: a digit of `k` exceeds the digit of `n`).
+
+## Practice
+
+<Problem id="m17-choose-and-count" />
+
+### Problem ladder
+
+- [Binomial Coefficients](https://cses.fi/problemset/task/1079) (CSES): the tables and queries, exactly as here.
+- [Creating Strings II](https://cses.fi/problemset/task/1715) (CSES): multinomial coefficients.
+- [Distributing Apples](https://cses.fi/problemset/task/1717) (CSES): stars and bars.
+- [Bracket Sequences I](https://cses.fi/problemset/task/2064) (CSES): Catalan numbers.
+- [Unique Paths](https://leetcode.com/problems/unique-paths/) (LeetCode, medium): grid paths as a binomial coefficient.
+
+## Quiz
+
+<Quiz id="cp-m17-binomials" tags={["number-theory", "combinatorics", "binomial-coefficients"]} questions={[
+  { type: "predict", q: "What is C(6, 3) mod 7?", code: "import math\nprint(math.comb(6, 3) % 7)", options: ["2", "3", "6", "0"], answer: 2, explain: "C(6, 3) = 20 and 20 mod 7 = 6." },
+  { type: "mcq", q: "Why compute only one modular inverse (of the largest factorial) and derive the rest downwards?", options: ["Fermat's theorem cannot be used twice", "Each inverse by fast exponentiation costs O(log p), while 1/(i-1)! = i * (1/i!) costs O(1) per step", "Inverse factorials are always equal", "Because the smaller ones do not exist"], answer: 1, explain: "The whole preparation is O(N + log p)." },
+  { type: "mcq", q: "For which situation does the factorial method fail and Lucas' theorem help?", options: ["n is 10", "The prime modulus is small and n can be at least the modulus, so n! is divisible by it", "k is 0", "The answer is negative"], answer: 1, explain: "In the experiment C(100, 40) mod 13 = 3 was computed from base-13 digits." },
+  { type: "multi", q: "Which statements are true?", options: ["The number of balanced bracket sequences of length 2n is C(2n, n) / (n + 1)", "Pascal's rule needs only additions, so it works for any modulus", "Stars and bars with every person receiving at least one item gives C(n - 1, k - 1)", "The factorial method works for any modulus"], answer: [0, 1, 2], explain: "Division needs invertible factorials, which a prime modulus larger than n guarantees; for other moduli use Pascal, CRT or other tools." },
+  { type: "mcq", q: "What should C(n, k) return when k > n?", options: ["1", "0", "An error", "n"], answer: 1, explain: "There are no ways to choose more items than exist; guard it before reading the tables." },
+  { type: "mcq", q: "Why write fact[n] * inv_fact[k] % MOD * inv_fact[n - k] % MOD rather than a single product followed by one modulo?", options: ["It is shorter", "Two residues multiply to about 10^18, and a third factor would overflow a 64-bit integer, so reduce after each multiplication", "Modulo is free", "Python requires it"], answer: 1, explain: "Reduce after every product of two residues." }
+]} />
