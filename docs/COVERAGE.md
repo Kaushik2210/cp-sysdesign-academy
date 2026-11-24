@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 243 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 246 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -48,7 +48,8 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 14 String matching | Partial (4 lessons: KMP, Z-function, Manacher, suffix arrays with LCP; no suffix automaton or palindromic tree yet) | 4 |
 | 15 Trees and ancestors | Partial (6 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter, rerooting, heavy-light decomposition, centroid decomposition; no virtual trees or link-cut trees yet) | 6 |
 | 16 Heaps and ordered sets | Partial (3 lessons: heap internals and k-way merge, two heaps and the running median with lazy deletion, order statistics with Fenwick trees; no ordered-set trees or treaps, and no persistent structures yet) | 3 |
-| 17-26 (Levels 2-3) | Planned | 0 |
+| 17 Number theory II | Partial (3 lessons: extended Euclid and linear congruences, the Chinese remainder theorem for any moduli, binomial coefficients modulo a prime with Lucas and Catalan; no Miller-Rabin, Pollard rho, Euler's phi or Mobius inversion yet) | 3 |
+| 18-26 (Levels 2-3) | Planned | 0 |
 
 ## Track 2: System Design
 
