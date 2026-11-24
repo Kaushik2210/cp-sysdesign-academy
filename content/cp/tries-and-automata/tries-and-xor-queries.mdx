@@ -1,0 +1,287 @@
+---
+title: Tries and Maximum XOR Queries
+track: cp
+module: tries-and-automata
+order: 1
+difficulty: medium
+estMinutes: 40
+prerequisites: [cp/hashing/hash-maps-counting, cp/recursion-and-bitmasks/bit-manipulation-basics]
+tags: [trie, prefix-tree, xor, bit-manipulation, greedy]
+type: lesson
+problems: [m18-max-xor-partner]
+furtherReading:
+  - title: CSES Problem Set, Maximum Xor Subarray
+    url: https://cses.fi/problemset/task/1655
+  - title: LeetCode, Maximum XOR of Two Numbers in an Array
+    url: https://leetcode.com/problems/maximum-xor-of-two-numbers-in-an-array/
+  - title: LeetCode, Implement Trie (Prefix Tree)
+    url: https://leetcode.com/problems/implement-trie-prefix-tree/
+---
+
+## Intuition
+
+A **trie** (pronounced "try", from re*trie*val; also called a prefix tree) stores a set of strings so that strings with a **common prefix share the same path**. The root is the empty prefix; each edge is labelled with a letter; walking from the root along a string's letters reaches a node that stands for that prefix. A word is marked at the node where it ends.
+
+That sharing is the whole point. A hash set answers "is this exact word present?"; a trie answers prefix questions with the same effort:
+
+- how many words start with `"car"`? (count the words that pass through that node),
+- what are the words with this prefix? (walk the subtree),
+- what is the longest stored prefix of this string?
+
+Every operation costs `O(length of the string)`, **independent of how many strings are stored**.
+
+## Definition
+
+Each node has up to `A` children, one per letter (`A = 26` for lowercase letters, `A = 2` for bits). Store the children either as an array of `A` indices (fast, memory `A` per node) or as a map (memory proportional to the real children, slower).
+
+```text
+insert(w):  node = root
+            for each letter c of w:
+                if node has no child c: create it
+                node = child c;  passes[node] += 1
+            ends[node] += 1
+search(p):  walk the letters of p; fail if a child is missing
+```
+
+Memory is at most the **total length of all strings** plus one node. Strings with shared prefixes use less (see the experiment).
+
+### Typical string problems
+
+| question | what to store in the nodes |
+| --- | --- |
+| how many words have prefix `p` | `passes` counter |
+| is `w` stored / how many copies | `ends` counter |
+| autocomplete: the most frequent word with prefix `p` | the best word below each node |
+| longest common prefix of a set of words | walk down while a node has exactly one child and is not a word end |
+| does any word equal a prefix of this text position | walk the text from that position |
+
+## Bits instead of letters: the maximum XOR trie
+
+A number below `2^30` is a string of 30 **bits**. Insert each number's bits from the **most significant** to the least significant into a trie with 2 children per node. Now the question "which stored number gives the **largest `a xor x`**?" becomes a greedy walk:
+
+- The highest bit of the xor dominates everything below it: a result with bit 29 set beats any result without it, whatever the lower bits are.
+- So at each level, look at the bit of `x`. If the current node has a child with the **opposite** bit, go there (this bit of the xor becomes 1). Otherwise you must follow the same bit (the xor bit is 0).
+
+After 30 steps you have the maximising partner, and `best` is the xor value. One query costs 30 steps whatever `n` is. The same trie answers:
+
+| query | variation |
+| --- | --- |
+| maximum `a_i xor a_j` over all pairs | insert numbers one by one and query before inserting |
+| **minimum** xor with `x` | prefer the **same** bit instead of the opposite |
+| maximum xor of a **subarray** | prefix xors `p_0 .. p_n`; the subarray xor is `p_i xor p_j`, so it is a maximum pair xor over prefixes (CSES Maximum Xor Subarray) |
+| count of numbers with `a xor x < k` | walk `x` and `k` together, adding the `passes` of subtrees that are entirely below `k` |
+| xor queries with deletions | keep `passes` counters and delete by decrementing |
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+B = 30
+trie = [[-1, -1]]                     # trie[node][bit] = child index or -1
+def insert(v):
+    node = 0
+    for b in range(B - 1, -1, -1):
+        bit = (v >> b) & 1
+        if trie[node][bit] == -1:
+            trie.append([-1, -1])
+            trie[node][bit] = len(trie) - 1
+        node = trie[node][bit]
+
+def max_xor(x):
+    node, best = 0, 0
+    for b in range(B - 1, -1, -1):
+        bit = (x >> b) & 1
+        if trie[node][bit ^ 1] != -1:         # the opposite bit makes this bit of the xor a 1
+            best |= 1 << b
+            node = trie[node][bit ^ 1]
+        else:
+            node = trie[node][bit]
+    return best
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+const int B = 30;
+vector<array<int, 2>> trie(1, array<int, 2>{-1, -1});
+void insert(int v) {
+    int node = 0;
+    for (int b = B - 1; b >= 0; b--) {
+        int bit = (v >> b) & 1;
+        if (trie[node][bit] == -1) { trie[node][bit] = trie.size(); trie.push_back({-1, -1}); }
+        node = trie[node][bit];
+    }
+}
+int maxXor(int x) {
+    int node = 0, best = 0;
+    for (int b = B - 1; b >= 0; b--) {
+        int bit = (x >> b) & 1;
+        if (trie[node][bit ^ 1] != -1) { best |= 1 << b; node = trie[node][bit ^ 1]; }
+        else node = trie[node][bit];
+    }
+    return best;
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+final int B = 30;
+int[] child = new int[2 * (n * B + 2)];        // child[2 * node + bit]
+Arrays.fill(child, -1);
+int nodes = 1;
+// insert: node = 0; for b = B-1 down to 0: bit = (v >> b) & 1;
+//         if (child[2*node+bit] == -1) child[2*node+bit] = nodes++; node = child[2*node+bit];
+// query:  prefer child[2*node+(bit^1)]; if present set best |= 1 << b and move there, else follow bit
+```
+
+</Tab>
+</Tabs>
+
+## Experiment
+
+The program builds the bit trie and a word trie and checks the maximum-xor answers against a brute force over every number.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+from collections import deque
+
+
+class BitTrie:
+    BITS = 30
+
+    def __init__(self):
+        self.child = [[-1, -1]]
+        self.steps = 0
+
+    def insert(self, v):
+        node = 0
+        for b in range(self.BITS - 1, -1, -1):
+            bit = (v >> b) & 1
+            self.steps += 1
+            if self.child[node][bit] == -1:
+                self.child.append([-1, -1])
+                self.child[node][bit] = len(self.child) - 1
+            node = self.child[node][bit]
+
+    def max_xor(self, x):
+        node, best = 0, 0
+        for b in range(self.BITS - 1, -1, -1):
+            bit = (x >> b) & 1
+            self.steps += 1
+            if self.child[node][bit ^ 1] != -1:
+                best |= 1 << b
+                node = self.child[node][bit ^ 1]
+            else:
+                node = self.child[node][bit]
+        return best
+
+
+class WordTrie:
+    """A trie of lowercase words that counts how many words pass through each node."""
+    def __init__(self):
+        self.next = [{}]
+        self.passes = [0]
+        self.ends = [0]
+
+    def add(self, w):
+        node = 0
+        for ch in w:
+            if ch not in self.next[node]:
+                self.next.append({})
+                self.passes.append(0)
+                self.ends.append(0)
+                self.next[node][ch] = len(self.next) - 1
+            node = self.next[node][ch]
+            self.passes[node] += 1
+        self.ends[node] += 1
+
+    def count_prefix(self, p):
+        node = 0
+        for ch in p:
+            if ch not in self.next[node]:
+                return 0
+            node = self.next[node][ch]
+        return self.passes[node]
+
+
+def demo1():
+    rnd = random.Random(1)
+    n, q = 2000, 2000
+    a = [rnd.randrange(1 << 30) for _ in range(n)]
+    xs = [rnd.randrange(1 << 30) for _ in range(q)]
+    t = BitTrie()
+    for v in a:
+        t.insert(v)
+    build_steps = t.steps
+    t.steps = 0
+    got = [t.max_xor(x) for x in xs]
+    expect = [max(v ^ x for v in a) for x in xs]
+    print(f"{n} random 30-bit numbers, {q} queries: the trie answers equal the brute force over every number: {got == expect}")
+    print(f"  trie nodes {len(t.child):,} (the limit is 30 * n + 1 = {30 * n + 1:,}); {t.steps / q:.0f} steps per query, against {n:,} comparisons for the brute force")
+    small = BitTrie()
+    for _ in range(2000):
+        small.insert(rnd.randrange(256))
+    print(f"  the same 2000 inserts of numbers below 256 need only {len(small.child):,} nodes: shared prefixes (the 22 leading zero bits of every number) are stored once")
+
+    words = ["car", "card", "care", "careful", "cat", "dog", "dot", "do", "door"]
+    w = WordTrie()
+    for word in words:
+        w.add(word)
+    print(f"  prefix counts in a word trie of {len(words)} words ({len(w.next) - 1} nodes for {sum(map(len, words))} letters): "
+          f"'car' {w.count_prefix('car')}, 'do' {w.count_prefix('do')}, 'cab' {w.count_prefix('cab')}, 'x' {w.count_prefix('x')}")
+
+
+demo1()
+`} />
+
+What it shows:
+
+- With **2,000 random 30-bit numbers and 2,000 queries**, the trie's answers equal the brute force's for every query. Each query takes **30 steps**, against 2,000 comparisons for the brute force; with `10^5` numbers the gap would be `30` against `100,000`.
+- The trie has **40,336 nodes**, below the worst case of `30 * n + 1 = 60,001`: random numbers share their first few bits. Inserting 2,000 numbers **below 256** needs only **533 nodes**, because all those numbers share their 22 leading zero bits and the top of the trie is stored once.
+- A small **word trie** of 9 words uses **15 nodes for 33 letters**, and the prefix counts come straight from the nodes: **4 words** start with `car`, **4** with `do`, and **0** with `cab` or `x`.
+
+The counts are from one seeded run; the equality with brute force is the correctness evidence.
+
+## Memory and implementation
+
+- **Array of children** per node: fastest, `A` integers per node. For 26 letters and `10^6` total letters that is 26 million integers (about 100 MB in 32-bit): often too much; for bits it is tiny.
+- **Map or sorted list of children**: less memory per node, slower constant factor.
+- **Compressed tries** (radix trees) merge chains of single-child nodes into one edge; **suffix automata and Aho-Corasick** (next lessons) build on tries.
+- Allocate the node arrays **once** at the maximum size (`n * B + 2` nodes) instead of growing per insertion; in garbage-collected languages avoid one object per node.
+- For **deletions** keep a `passes` counter per node and just decrement; you do not have to free nodes.
+
+## Pitfalls
+
+1. **Inserting bits from the wrong end.** The greedy argument needs the **most significant bit first**.
+2. **Wrong number of levels.** If values can reach `2^31 - 1` use 31 levels (or 32 for unsigned); otherwise high bits are ignored silently.
+3. **Querying an empty trie.** The walk then has no child to follow; guarantee at least one inserted number, or handle it.
+4. **Forgetting the sign.** Negative numbers have a different bit pattern; shift them (add an offset) or restrict to non-negative values.
+5. **Memory blow-up** with 26-way array children on very large inputs.
+6. **Confusing prefix with whole-word membership.** Searching `"car"` succeeds if `"card"` is stored; check `ends[node] > 0` for membership.
+7. **Resetting between test cases** by reallocating huge arrays each time; reuse and clear only the nodes you used.
+8. **Using a trie when sorting or hashing is enough.** For a single offline question about equal strings, a hash map is simpler.
+
+## Practice
+
+<Problem id="m18-max-xor-partner" />
+
+### Problem ladder
+
+- [Maximum Xor Subarray](https://cses.fi/problemset/task/1655) (CSES): prefix xors plus the trie.
+- [Maximum XOR of Two Numbers in an Array](https://leetcode.com/problems/maximum-xor-of-two-numbers-in-an-array/) (LeetCode, medium): all pairs, one pass.
+- [Implement Trie (Prefix Tree)](https://leetcode.com/problems/implement-trie-prefix-tree/) (LeetCode, medium): insert, search and prefix queries.
+
+## Quiz
+
+<Quiz id="cp-m18-tries" tags={["trie", "xor", "bit-manipulation"]} questions={[
+  { type: "mcq", q: "What makes a trie fast for prefix queries?", options: ["It sorts the strings", "Strings with a common prefix share one path, so a query walks only as many nodes as the query has letters, whatever the number of stored strings", "It uses hashing", "It compresses the text"], answer: 1, explain: "In the experiment each maximum-xor query took 30 steps whether 2,000 or 200,000 numbers were stored." },
+  { type: "mcq", q: "In the maximum xor trie, why must the numbers be inserted from the most significant bit down?", options: ["It saves memory", "A set high bit in the xor outweighs all lower bits combined, so the greedy walk decides the highest bit first", "Python requires it", "Because bits are numbered from the left"], answer: 1, explain: "The best partner is chosen lexicographically from the top bit." },
+  { type: "predict", q: "What is the maximum of x xor a for x = 5 and a in {3, 10, 25, 2}?", code: "print(max(5 ^ a for a in [3, 10, 25, 2]))", options: ["15", "28", "30", "26"], answer: 1, explain: "5 xor 25 = 28 (00101 xor 11001 = 11100); the other partners give 6, 15 and 7." },
+  { type: "multi", q: "Which are true about tries?", options: ["Insert and search cost O(length of the string)", "Memory is at most the total length of the stored strings plus one", "A trie can only hold lowercase letters", "A binary trie over bits can answer minimum xor queries by preferring the same bit"], answer: [0, 1, 3], explain: "Tries work over any alphabet, including the two symbols 0 and 1." },
+  { type: "mcq", q: "How do you find the maximum xor of a subarray of an array?", options: ["Try all subarrays in O(n^2) only", "Take prefix xors; the xor of a subarray is the xor of two prefix values, so it is a maximum pair xor over the prefixes", "Sort the array first", "Use two pointers"], answer: 1, explain: "This turns a subarray problem into the pair problem the trie solves." },
+  { type: "mcq", q: "Why did 2,000 numbers below 256 need only 533 nodes?", options: ["Duplicates were removed", "All numbers share their 22 leading zero bits, so the upper part of the trie is one shared path", "The trie was compressed", "Small numbers have fewer bits"], answer: 1, explain: "Shared prefixes are stored once; random 30-bit numbers needed 40,336 nodes." }
+]} />

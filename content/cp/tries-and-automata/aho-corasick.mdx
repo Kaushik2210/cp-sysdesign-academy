@@ -1,0 +1,280 @@
+---
+title: The Aho-Corasick Automaton
+track: cp
+module: tries-and-automata
+order: 2
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/string-matching/kmp, cp/tries-and-automata/tries-and-xor-queries]
+tags: [strings, aho-corasick, trie, automaton, failure-links, multi-pattern-matching]
+type: lesson
+problems: [m18-forbidden-words]
+furtherReading:
+  - title: cp-algorithms, Aho-Corasick algorithm
+    url: https://cp-algorithms.com/string/aho_corasick.html
+  - title: "Aho and Corasick, Efficient String Matching: An Aid to Bibliographic Search (1975)"
+    url: https://dl.acm.org/doi/10.1145/360825.360855
+  - title: CSES Problem Set, String Matching (one pattern; compare with the many-pattern problems below)
+    url: https://cses.fi/problemset/task/1753
+---
+
+## Intuition
+
+KMP finds **one** pattern in a text in linear time. With **many** patterns, running KMP once per pattern costs `k` times as much. The **Aho-Corasick automaton** finds all occurrences of **all** patterns together in one pass over the text, in time proportional to the text length plus the number of matches.
+
+The idea combines two things you know:
+
+1. a **trie** of all the patterns (strings with a common prefix share a path), and
+2. a **failure link** for every trie node, which is exactly the KMP prefix function generalised to a trie.
+
+While scanning the text, keep the **longest suffix of the text read so far that is a prefix of some pattern**: that is a node of the trie. Reading the next letter, move to the matching child if it exists. If not, the current suffix cannot be extended; fall back to the **next longest** suffix that is still a pattern prefix, which is what the failure link points to, and try again.
+
+## Definition
+
+For a trie node `v` representing the string `str(v)`:
+
+- **`fail[v]`** is the node of the **longest proper suffix of `str(v)` that is also a node** (a prefix of some pattern). `fail[root] = root`, and for nodes at depth 1 the failure link is the root.
+- A pattern ends at `v` if `v` is marked; and also **every pattern that is a suffix of `str(v)`** ends there, namely the patterns marked on the failure chain `v, fail[v], fail[fail[v]], ...`.
+
+### Building the failure links
+
+Process the nodes in **breadth-first order** (so that all shallower nodes are finished first). For a node `u` with child `v` for letter `c`:
+
+```text
+fail[v] = go[fail[u]][c]       (the child of the failure target, itself already completed)
+```
+
+Complete the **transition table** at the same time: if `u` has no child for `c`, set `go[u][c] = go[fail[u]][c]`. After this every node has a transition for every letter, the automaton is **deterministic**, and scanning never has to follow failure links step by step.
+
+To count matches, give each node `cnt[v]` = the number of patterns that end exactly at `v`, and accumulate along the failure link in the same breadth-first order:
+
+```text
+cnt[u] += cnt[fail[u]]       (fail[u] is shallower, so its cnt is already final)
+```
+
+Now `cnt[state]` is the number of pattern occurrences that **end** at the current text position.
+
+### Scanning
+
+```text
+state = root; total = 0
+for each letter c of the text:
+    state = go[state][c]
+    total += cnt[state]            # all patterns that end here
+```
+
+Total time: building `O(total pattern length * alphabet)` with a dense table; scanning `O(text length)`. Memory: one table row per node.
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+go = [[-1] * 26]; cnt = [0]
+for p in patterns:                         # build the trie
+    s = 0
+    for ch in p:
+        c = ord(ch) - 97
+        if go[s][c] == -1:
+            go.append([-1] * 26); cnt.append(0)
+            go[s][c] = len(go) - 1
+        s = go[s][c]
+    cnt[s] += 1
+fail = [0] * len(go)
+queue = []
+for c in range(26):
+    v = go[0][c]
+    if v == -1: go[0][c] = 0
+    else: queue.append(v)
+for u in queue:                            # the list grows while we iterate: this is the breadth-first order
+    cnt[u] += cnt[fail[u]]
+    for c in range(26):
+        v = go[u][c]
+        if v == -1: go[u][c] = go[fail[u]][c]
+        else:
+            fail[v] = go[fail[u]][c]
+            queue.append(v)
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+// go: vector<array<int,26>>, cnt, fail already sized; queue holds the depth-1 nodes
+for (size_t h = 0; h < queue.size(); h++) {
+    int u = queue[h];
+    cnt[u] += cnt[fail[u]];
+    for (int c = 0; c < 26; c++) {
+        int v = go[u][c];
+        if (v == -1) go[u][c] = go[fail[u]][c];
+        else { fail[v] = go[fail[u]][c]; queue.push_back(v); }
+    }
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+while (head < tail) {
+    int u = queue[head++];
+    cnt[u] += cnt[fail[u]];
+    for (int c = 0; c < 26; c++) {
+        int v = go[u][c];
+        if (v == -1) go[u][c] = go[fail[u]][c];
+        else { fail[v] = go[fail[u]][c]; queue[tail++] = v; }
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+## Experiment
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+from collections import deque
+
+
+class AhoCorasick:
+    def __init__(self, patterns):
+        self.go = [[-1] * 26]
+        self.cnt = [0]
+        for p in patterns:
+            s = 0
+            for ch in p:
+                c = ord(ch) - 97
+                if self.go[s][c] == -1:
+                    self.go.append([-1] * 26)
+                    self.cnt.append(0)
+                    self.go[s][c] = len(self.go) - 1
+                s = self.go[s][c]
+            self.cnt[s] += 1
+        self.fail = [0] * len(self.go)
+        self.depth_order = []
+        queue = deque()
+        for c in range(26):
+            v = self.go[0][c]
+            if v == -1:
+                self.go[0][c] = 0
+            else:
+                queue.append(v)
+        while queue:
+            u = queue.popleft()
+            self.depth_order.append(u)
+            self.cnt[u] += self.cnt[self.fail[u]]
+            for c in range(26):
+                v = self.go[u][c]
+                if v == -1:
+                    self.go[u][c] = self.go[self.fail[u]][c]
+                else:
+                    self.fail[v] = self.go[self.fail[u]][c]
+                    queue.append(v)
+
+    def count(self, text):
+        s, total = 0, 0
+        for ch in text:
+            s = self.go[s][ord(ch) - 97]
+            total += self.cnt[s]
+        return total
+
+
+def naive_count(patterns, text):
+    total = 0
+    for p in patterns:
+        start = 0
+        while True:
+            i = text.find(p, start)
+            if i == -1:
+                break
+            total += 1
+            start = i + 1
+    return total
+
+
+def demo2():
+    rnd = random.Random(2)
+    ac = AhoCorasick(["he", "she", "his", "hers"])
+    print(f"the classic example: words he, she, his, hers in the text 'ushers': {ac.count('ushers')} occurrences (she, he and hers); "
+          f"the automaton has {len(ac.go)} states for {2 + 3 + 3 + 4} letters of words")
+    ok = True
+    for _ in range(500):
+        alpha = rnd.choice(["ab", "abc"])
+        pats = ["".join(rnd.choice(alpha) for _ in range(rnd.randint(1, 5))) for _ in range(rnd.randint(1, 8))]
+        text = "".join(rnd.choice(alpha) for _ in range(rnd.randint(1, 60)))
+        ok &= AhoCorasick(pats).count(text) == naive_count(pats, text)
+    print(f"500 random small cases (patterns and text over 2 or 3 letters, many overlaps and repeats): the automaton equals the naive count in every case: {ok}")
+
+    pats = ["a" * k for k in range(1, 200)]
+    text = "a" * 20000
+    automaton = AhoCorasick(pats)
+    total_letters = sum(map(len, pats))
+    fast = automaton.count(text)
+    print(f"199 nested words (a, aa, aaa, ...; {total_letters:,} letters in all) in a text of 20,000 letters: {fast:,} occurrences; "
+          f"the automaton reads 20,000 letters with one table lookup each, while checking every word at every position would need about {len(pats) * len(text):,} comparisons; "
+          f"states {len(automaton.go)} (one more than the longest word, because the words share one chain)")
+    random_pats = ["".join(rnd.choice("abc") for _ in range(rnd.randint(2, 7))) for _ in range(3000)]
+    rand_ac = AhoCorasick(random_pats)
+    letters = sum(map(len, random_pats))
+    print(f"3,000 random words over 3 letters ({letters:,} letters in all): {len(rand_ac.go):,} states, at most letters + 1 = {letters + 1:,} (shared prefixes merge)")
+
+
+demo2()
+`} />
+
+What the output shows:
+
+- The classic example, the words **he, she, his, hers** in the text **ushers**, gives **3** occurrences (`she`, `he` and `hers`); the automaton has **10 states** for 12 letters of words (shared prefixes `h`, `he` merge).
+- On **500 random small cases** over 2 or 3 letters, with many overlaps and repeated words, the automaton's count equals a naive count in every case.
+- **199 nested words** (`a`, `aa`, `aaa`, ..., 19,900 letters) in a text of **20,000 letters** have **3,960,299** occurrences, found by reading 20,000 letters with one table lookup each; a method that checks every word at every position would do about **3,980,000** position checks. The automaton has only **200 states**, since all the words share one chain.
+- **3,000 random words over 3 letters** (13,577 letters in all) need **1,366 states**, far fewer than the bound of letters plus one (13,578): shared prefixes merge.
+
+The counts are from seeded runs; the equality with the naive method is the correctness evidence.
+
+## Variations
+
+| task | modification |
+| --- | --- |
+| Count the **distinct** patterns that occur | mark nodes when first visited via the failure chain (use "dictionary links" to skip nodes with no pattern), or count with a visited array |
+| Report **where** each pattern occurs | follow the dictionary link chain from each state to list patterns ending there (output size matters) |
+| **Forbidden words** automaton for DP | states of the automaton are DP states: count strings of length `n` that avoid all patterns (`dp[length][state]`, skipping states whose `cnt > 0`) |
+| Lexicographically smallest string avoiding the patterns | BFS or DP on the automaton |
+| **Online** insertion of patterns | rebuild in logarithmic groups, or use a suffix automaton or hashing approach |
+| Largest-weight pattern set matched at each position | accumulate `weight` instead of `cnt` along fail links |
+| Replace a dictionary of words in a text | longest match per position using depth and the failure chain |
+
+The "strings that avoid forbidden words" DP is a signature use: the automaton state summarises exactly what matters about the text so far (its longest suffix that is a pattern prefix), so a DP over `(position, state)` counts valid strings without remembering the text.
+
+## Pitfalls
+
+1. **Not completing the transition table** and following failure links in the scan loop. Correct but potentially slow in the worst case; completing the table (as above) makes every step `O(1)`.
+2. **Accumulating `cnt` out of order.** `cnt[u] += cnt[fail[u]]` must run when `fail[u]` is already final: do it in breadth-first order.
+3. **Forgetting repeated patterns.** Two identical words mark the same node twice; use a counter, not a flag, if each listed copy counts.
+4. **Overflow.** The number of occurrences can reach `text length * number of patterns`; use 64-bit counters.
+5. **Wrong failure link for depth-1 nodes.** They point to the root, not to themselves.
+6. **A 26-wide table for huge total length.** `10^6` letters need 26 million entries: use a map per node, or compress the alphabet.
+7. **Mixing the alphabet.** Mapping letters to `0..25` assumes lowercase input; map uppercase or digits explicitly.
+8. **Following the failure link of the root** in a loop that expects it to shrink: the root is its own failure target.
+
+## Practice
+
+<Problem id="m18-forbidden-words" />
+
+### Problem ladder
+
+- [Aho-Corasick algorithm](https://cp-algorithms.com/string/aho_corasick.html) (cp-algorithms): the full theory with dictionary links and applications.
+- [String Matching](https://cses.fi/problemset/task/1753) (CSES): the one-pattern version, as a baseline with KMP.
+- [Word Search II](https://leetcode.com/problems/word-search-ii/) (LeetCode, hard): a trie with backtracking on a grid.
+- [Stream of Characters](https://leetcode.com/problems/stream-of-characters/) (LeetCode, hard): an automaton over a stream (a reversed trie also works).
+
+## Quiz
+
+<Quiz id="cp-m18-aho-corasick" tags={["strings", "aho-corasick", "automaton"]} questions={[
+  { type: "mcq", q: "What is the failure link of a trie node?", options: ["A link to its parent", "The node of the longest proper suffix of its string that is also a prefix of some pattern", "A link to the longest pattern", "A link to a leaf"], answer: 1, explain: "It is the KMP prefix function generalised to a trie: where to continue when the next letter cannot extend the current match." },
+  { type: "mcq", q: "Why are failure links computed in breadth-first order?", options: ["To save memory", "The failure target of a node is shallower, so it is already final when the node is processed", "Depth-first search cannot handle tries", "It sorts the patterns"], answer: 1, explain: "fail[v] = go[fail[u]][c] needs the completed transitions of the shallower node fail[u]." },
+  { type: "predict", q: "How many occurrences of the words a, aa and aaa are there in the text aaaa (overlaps count)?", code: "text = 'aaaa'\nprint(sum(sum(text[i:i + len(w)] == w for i in range(len(text))) for w in ['a', 'aa', 'aaa']))", options: ["3", "6", "9", "12"], answer: 2, explain: "4 + 3 + 2 = 9. The automaton gets it by adding cnt[state] after every letter." },
+  { type: "mcq", q: "What does cnt[v] += cnt[fail[v]] ensure?", options: ["Patterns are sorted", "Patterns that are suffixes of the string of v are also counted as ending at v", "The automaton becomes smaller", "Repeated patterns are removed"], answer: 1, explain: "A pattern that is a suffix of str(v) ends wherever str(v) ends." },
+  { type: "multi", q: "Which statements about the experiment are true?", options: ["The automaton for he, she, his, hers has 10 states", "199 nested words need 200 states because they share one chain", "The number of states can exceed the total pattern length plus one", "Scanning does one table lookup per text letter once the transitions are completed"], answer: [0, 1, 3], explain: "Each pattern letter creates at most one node, so the states never exceed the total length plus one." },
+  { type: "mcq", q: "How can Aho-Corasick count strings of length n that avoid all forbidden words?", options: ["It cannot", "Run a DP over (length, automaton state) and skip states where a forbidden word ends, since the state captures everything relevant about the text so far", "Use KMP n times", "Sort the words"], answer: 1, explain: "The state is the longest suffix that is a pattern prefix, so no further memory of the text is needed." }
+]} />

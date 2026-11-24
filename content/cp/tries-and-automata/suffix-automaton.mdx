@@ -1,0 +1,321 @@
+---
+title: The Suffix Automaton
+track: cp
+module: tries-and-automata
+order: 3
+difficulty: expert
+estMinutes: 55
+prerequisites: [cp/string-matching/suffix-array, cp/tries-and-automata/aho-corasick]
+tags: [strings, suffix-automaton, substrings, longest-common-substring, automaton, suffix-links]
+type: lesson
+problems: [m18-shared-stretch]
+furtherReading:
+  - title: cp-algorithms, Suffix Automaton
+    url: https://cp-algorithms.com/string/suffix-automaton.html
+  - title: Blumer et al., The Smallest Automaton Recognizing the Subwords of a Text (1985)
+    url: https://www.sciencedirect.com/science/article/pii/0304397585901577
+  - title: CSES Problem Set, Distinct Substrings
+    url: https://cses.fi/problemset/task/2105
+  - title: SPOJ LCS, Longest Common Substring
+    url: https://www.spoj.com/problems/LCS/
+---
+
+## Intuition
+
+The **suffix automaton** (also called DAWG, directed acyclic word graph) of a string `s` is the **smallest** deterministic automaton that accepts exactly the **substrings of `s`**. It answers "is `t` a substring of `s`?" by walking `t` through the automaton, and it carries enough structure to answer many substring questions in linear time:
+
+- the number of **distinct substrings**,
+- the **longest common substring** of two strings,
+- how many **times** a substring occurs,
+- the lexicographically `k`-th substring, the shortest string that is **not** a substring, and more.
+
+A trie of all suffixes would have `O(n^2)` nodes. The surprise is that merging nodes that behave identically leaves **at most `2n - 1` states and `3n - 4` transitions**, built in `O(n)` time.
+
+## Definition
+
+For a substring `u` of `s`, let `endpos(u)` be the set of positions in `s` where an occurrence of `u` **ends**. Two substrings with the same `endpos` set are indistinguishable for the purposes of extending them to the right, so they live in the **same state**.
+
+Facts that make the structure work:
+
+- All strings in one state are **suffixes of the longest one** in it, and their lengths form a contiguous range `len[link[v]] + 1 .. len[v]`.
+- The **suffix link** `link[v]` leads to the state of the longest suffix of `v`'s strings that belongs to a different state (a *larger* `endpos` set, since a shorter string occurs at least as often). The links form a tree rooted at the empty-string state.
+- A **transition** `v --c--> w` means: appending `c` to any string of `v` gives a string of `w`.
+
+### Building it online
+
+Add the letters of `s` one at a time, keeping `last`, the state of the whole prefix read so far.
+
+```text
+extend(c):
+    cur = new state; len[cur] = len[last] + 1
+    p = last
+    while p exists and p has no transition on c:  p --c--> cur;  p = link[p]
+    if p does not exist:                 link[cur] = root
+    else:
+        q = p's transition on c
+        if len[p] + 1 == len[q]:         link[cur] = q               (q already represents exactly the right strings)
+        else:                            split q:
+            clone = copy of q (transitions and link), len[clone] = len[p] + 1
+            redirect transitions of p and its suffix-link ancestors that pointed to q, so they point to clone
+            link[q] = link[cur] = clone
+    last = cur
+```
+
+Why the clone is needed: after adding `c`, the strings of `q` that are not longer than `len[p] + 1` now occur at one more end position than the longer strings of `q`, so their `endpos` sets differ and the state must be split in two. The amortised analysis (each step moves along the suffix links of `last`, whose depth increases by at most one per letter) gives total time **`O(n)`** transitions (times the alphabet handling).
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+nxt, link, length = [{}], [-1], [0]
+last = 0
+for ch in s:
+    cur = len(nxt)
+    nxt.append({}); link.append(0); length.append(length[last] + 1)
+    p = last
+    while p != -1 and ch not in nxt[p]:
+        nxt[p][ch] = cur
+        p = link[p]
+    if p != -1:
+        q = nxt[p][ch]
+        if length[p] + 1 == length[q]:
+            link[cur] = q
+        else:
+            clone = len(nxt)
+            nxt.append(dict(nxt[q])); link.append(link[q]); length.append(length[p] + 1)
+            while p != -1 and nxt[p].get(ch) == q:
+                nxt[p][ch] = clone
+                p = link[p]
+            link[q] = link[cur] = clone
+    last = cur
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+int cur = size++;
+len[cur] = len[last] + 1;
+int p = last;
+while (p != -1 && nxt[p][c] == -1) { nxt[p][c] = cur; p = link[p]; }
+if (p == -1) link[cur] = 0;
+else {
+    int q = nxt[p][c];
+    if (len[p] + 1 == len[q]) link[cur] = q;
+    else {
+        int clone = size++;
+        len[clone] = len[p] + 1;
+        nxt[clone] = nxt[q];
+        link[clone] = link[q];
+        while (p != -1 && nxt[p][c] == q) { nxt[p][c] = clone; p = link[p]; }
+        link[q] = link[cur] = clone;
+    }
+}
+last = cur;
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+int cur = size++;
+len[cur] = len[last] + 1;
+int p = last;
+while (p != -1 && nxt[p][c] == -1) { nxt[p][c] = cur; p = link[p]; }
+if (p == -1) link[cur] = 0;
+else {
+    int q = nxt[p][c];
+    if (len[p] + 1 == len[q]) link[cur] = q;
+    else {
+        int clone = size++;
+        len[clone] = len[p] + 1;
+        nxt[clone] = nxt[q].clone();
+        link[clone] = link[q];
+        while (p != -1 && nxt[p][c] == q) { nxt[p][c] = clone; p = link[p]; }
+        link[q] = link[cur] = clone;
+    }
+}
+last = cur;
+```
+
+</Tab>
+</Tabs>
+
+## Using it
+
+### Distinct substrings
+
+Each state `v` (other than the root) stands for `len[v] - len[link[v]]` different substrings, and different states hold different substrings. So
+
+```text
+distinct substrings = sum over v != root of ( len[v] - len[link[v]] )
+```
+
+### Longest common substring of `s` and `t`
+
+Build the automaton of `s`. Run `t` through it, keeping the current state `v` and the matched length `l`:
+
+```text
+for each letter c of t:
+    while v != root and v has no transition on c:  v = link[v];  l = len[v]
+    if v has a transition on c:  v = go(v, c);  l += 1
+    best = max(best, l)
+```
+
+`l` is always the length of the longest suffix of the part of `t` read so far that occurs in `s`. Total `O(|s| + |t|)`.
+
+### Occurrence counts
+
+Mark the states created for prefixes (not clones) with `cnt = 1`, then add each state's `cnt` into its suffix-link parent, processing states in decreasing order of `len`. Then `cnt[v]` is `|endpos(v)|`, the number of occurrences of every string in state `v`.
+
+## Experiment
+
+<CodeRunner language="python" timeoutMs={30000} code={`import random
+from collections import deque
+
+
+class SuffixAutomaton:
+    def __init__(self, s):
+        self.nxt, self.link, self.length = [{}], [-1], [0]
+        self.clones = 0
+        last = 0
+        for ch in s:
+            cur = len(self.nxt)
+            self.nxt.append({})
+            self.link.append(0)
+            self.length.append(self.length[last] + 1)
+            p = last
+            while p != -1 and ch not in self.nxt[p]:
+                self.nxt[p][ch] = cur
+                p = self.link[p]
+            if p != -1:
+                q = self.nxt[p][ch]
+                if self.length[p] + 1 == self.length[q]:
+                    self.link[cur] = q
+                else:
+                    clone = len(self.nxt)
+                    self.clones += 1
+                    self.nxt.append(dict(self.nxt[q]))
+                    self.link.append(self.link[q])
+                    self.length.append(self.length[p] + 1)
+                    while p != -1 and self.nxt[p].get(ch) == q:
+                        self.nxt[p][ch] = clone
+                        p = self.link[p]
+                    self.link[q] = self.link[cur] = clone
+            last = cur
+
+    def distinct_substrings(self):
+        return sum(self.length[v] - self.length[self.link[v]] for v in range(1, len(self.nxt)))
+
+    def transitions(self):
+        return sum(len(d) for d in self.nxt)
+
+    def longest_common(self, t):
+        v = l = best = 0
+        for ch in t:
+            while v and ch not in self.nxt[v]:
+                v = self.link[v]
+                l = self.length[v]
+            if ch in self.nxt[v]:
+                v = self.nxt[v][ch]
+                l += 1
+            best = max(best, l)
+        return best
+
+
+def demo3():
+    rnd = random.Random(3)
+    ok_distinct = ok_lcs = True
+    max_ratio = 0.0
+    for _ in range(400):
+        alpha = rnd.choice(["ab", "abc", "abcd"])
+        s = "".join(rnd.choice(alpha) for _ in range(rnd.randint(1, 40)))
+        t = "".join(rnd.choice(alpha) for _ in range(rnd.randint(1, 40)))
+        sam = SuffixAutomaton(s)
+        brute = len({s[i:j] for i in range(len(s)) for j in range(i + 1, len(s) + 1)})
+        ok_distinct &= sam.distinct_substrings() == brute
+        best = 0
+        for i in range(len(t)):
+            for j in range(i + 1, len(t) + 1):
+                if t[i:j] in s:
+                    best = max(best, j - i)
+        ok_lcs &= sam.longest_common(t) == best
+        max_ratio = max(max_ratio, len(sam.nxt) / len(s))
+    print(f"400 random string pairs over 2 to 4 letters: distinct substring counts match a brute-force set: {ok_distinct}; "
+          f"longest common substring matches a brute force: {ok_lcs}")
+
+    for name, s in (("random over 26 letters", "".join(rnd.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(5000))),
+                    ("random over 2 letters", "".join(rnd.choice("ab") for _ in range(5000))),
+                    ("a followed by b repeated", "a" + "b" * 4999),
+                    ("all the same letter", "a" * 5000)):
+        sam = SuffixAutomaton(s)
+        print(f"  n = 5,000, {name}: {len(sam.nxt):,} states ({len(sam.nxt) / len(s):.2f} per letter, the limit is 2), {sam.transitions():,} transitions "
+              f"(limit 3n - 4 = {3 * len(s) - 4:,}), {sam.clones:,} clone states, distinct substrings {sam.distinct_substrings():,}")
+
+
+demo3()
+`} />
+
+What the output shows:
+
+- On **400 random string pairs** over 2 to 4 letters, the automaton's **distinct substring count** equals a brute-force set of all substrings, and its **longest common substring** equals a brute-force search, in every case.
+- **State counts** for `n = 5,000` stay below the limit of 2 states per letter:
+
+| string | states | per letter | transitions (limit 14,996) | clones |
+| --- | --- | --- | --- | --- |
+| random over 26 letters | 6,282 | 1.26 | 11,258 | 1,281 |
+| random over 2 letters | 9,978 | 2.00 | 13,733 | 4,977 |
+| `a` followed by 4,999 `b` | 9,999 | 2.00 (exactly `2n - 1`) | 9,999 | 4,998 |
+| all the same letter | 5,001 | 1.00 | 5,000 | 0 |
+
+- The worst case for the number of states is a string like `abbb...b`, which reaches the bound `2n - 1 = 9,999` exactly. A string of one repeated letter needs only `n + 1` states, and has just `n` distinct substrings (`a`, `aa`, ..., `a^n`).
+- Distinct substrings: roughly 12.5 million for each random string of length 5,000 (close to the maximum `n(n + 1)/2 = 12,502,500`), computed from only a few thousand states.
+
+The counts come from one seeded run; the brute-force checks establish correctness.
+
+## Suffix automaton, suffix array or hashing?
+
+| task | suffix automaton | suffix array + LCP | hashing |
+| --- | --- | --- | --- |
+| number of distinct substrings | `O(n)` build, one sum | `O(n log n)` build, `n(n+1)/2 - sum(LCP)` | `O(n^2)`, or heavy |
+| longest common substring of two strings | `O(n + m)` | concatenate; `O(n log n)` | binary search plus hash sets, `O(n log n)`, probabilistic |
+| occurrences of a pattern | walk, then `cnt[v]` | binary search on the array | rolling hash scan |
+| lexicographic order of suffixes | not provided directly | provided | not provided |
+| memory | states times alphabet (or maps) | a few integer arrays | tiny |
+| ease of writing | short once memorised, subtle | moderate | easiest |
+
+Pick the suffix automaton for **substring counting and matching** on one or two strings; pick the suffix array when **suffix order** (lexicographic questions, LCP queries between suffixes) matters.
+
+## Pitfalls
+
+1. **Forgetting the clone's transitions and link.** The clone copies **all** transitions of `q` and `link[q]`; omitting that corrupts the automaton silently.
+2. **Redirecting the wrong transitions.** After cloning, walk `p` up the suffix links redirecting only those transitions that still point to `q`.
+3. **Memory.** Allocate `2n` states with a full alphabet table: for `n = 10^6` and 26 letters that is 52 million entries. Use maps or a smaller alphabet when needed.
+4. **Mixing up the last state.** `last` must become `cur` (the new prefix state), never the clone.
+5. **Counting occurrences without excluding clones.** Only non-clone states start with `cnt = 1`.
+6. **Processing order for propagation.** Sort states by `len` (counting sort) and go from the longest to the shortest; the link tree is not in index order.
+7. **Using one automaton for several strings** without separators or resetting `last`. Either build one automaton per string or separate strings with a unique character, and beware matches that cross the separator.
+8. **Off-by-one in the walk.** On a failed transition set `l = len[v]` **after** moving to `link[v]`, not before.
+
+## Practice
+
+<Problem id="m18-shared-stretch" />
+
+### Problem ladder
+
+- [Distinct Substrings](https://cses.fi/problemset/task/2105) (CSES): the sum formula above.
+- [Longest Common Substring](https://www.spoj.com/problems/LCS/) (SPOJ LCS): this problem on a classic judge.
+- [Suffix Automaton](https://cp-algorithms.com/string/suffix-automaton.html) (cp-algorithms): its many applications, from k-th substring to the smallest string not occurring.
+
+## Quiz
+
+<Quiz id="cp-m18-suffix-automaton" tags={["strings", "suffix-automaton", "substrings"]} questions={[
+  { type: "mcq", q: "How many states can the suffix automaton of a string of length n have at most?", options: ["n", "2n - 1", "n squared", "n log n"], answer: 1, explain: "The string a followed by b repeated reaches exactly 2n - 1 = 9,999 states for n = 5,000 in the experiment." },
+  { type: "mcq", q: "What do the strings of one state have in common?", options: ["They have the same length", "They end at exactly the same positions in s (the same endpos set), and are all suffixes of the longest one", "They start at the same position", "They are palindromes"], answer: 1, explain: "That is why the state can be shared: they extend to the right in the same way." },
+  { type: "predict", q: "How many distinct substrings does the string aab have?", code: "s = 'aab'\nprint(len({s[i:j] for i in range(len(s)) for j in range(i + 1, len(s) + 1)}))", options: ["4", "5", "6", "3"], answer: 1, explain: "a, aa, aab, ab, b. (The substring a occurs twice but counts once.)" },
+  { type: "mcq", q: "Why is a clone state created when len[p] + 1 differs from len[q]?", options: ["To save memory", "Shorter strings of q now occur at one more end position than longer ones, so their endpos sets differ and the state must split", "To reverse the string", "Because q is a leaf"], answer: 1, explain: "The clone takes the shorter strings; q keeps the longer ones." },
+  { type: "multi", q: "Which of these can be answered in linear time with a suffix automaton?", options: ["Number of distinct substrings", "Longest common substring of two strings", "The lexicographically sorted list of all suffixes", "Number of occurrences of a pattern, after processing"], answer: [0, 1, 3], explain: "The sorted list of suffixes is the job of the suffix array." },
+  { type: "mcq", q: "When scanning t through the automaton of s, what do you do when the current state has no transition on the next letter?", options: ["Stop and report 0", "Follow suffix links, setting the matched length to len of the new state, until a transition exists or the root is reached", "Restart from the beginning of t", "Skip the letter without changing the state"], answer: 1, explain: "Following suffix links shortens the matched stretch to the next longest suffix that is still a substring of s." }
+]} />

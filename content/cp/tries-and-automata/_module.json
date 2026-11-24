@@ -1,0 +1,1 @@
+{ "title": "Tries and String Automata", "level": "Level 3: Advanced Structures", "order": 18, "summary": "Tries for prefixes and maximum xor, the Aho-Corasick automaton for many patterns at once, and the suffix automaton for substring questions." }
