@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("200");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("203");
   });
 });
 
@@ -769,7 +769,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 83 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 86 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -878,6 +878,9 @@ test.describe("visualizer lessons", () => {
     ["/cp/graphs/maximum-flow/", "Maximum Flow and Dinic's Algorithm", "Pipe Network"],
     ["/cp/string-matching/manacher/", "Manacher's Algorithm", "Mirror Count"],
     ["/cp/string-matching/suffix-array/", "Suffix Arrays and LCP", "Fresh Substrings"],
+    ["/cp/heaps-and-ordered-sets/heap-internals-and-k-way-merge/", "Heap Internals and k-way Merge", "Merge Sorted Streams"],
+    ["/cp/heaps-and-ordered-sets/two-heaps-and-running-median/", "Two Heaps and the Running Median", "Running Median"],
+    ["/cp/heaps-and-ordered-sets/order-statistics-with-fenwick-trees/", "Order Statistics with Fenwick Trees", "Order Statistics in a Changing Collection"],
     ["/cp/dynamic-programming/convex-hull-trick/", "The Convex Hull Trick", "Stone Hops"],
     ["/cp/trees/heavy-light-decomposition/", "Heavy-Light Decomposition", "Path Boss"],
     ["/cp/trees/centroid-decomposition/", "Centroid Decomposition", "Fixed Distance"],
