@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("206");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("209");
   });
 });
 
@@ -769,7 +769,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 89 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 92 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -884,6 +884,9 @@ test.describe("visualizer lessons", () => {
     ["/cp/number-theory-ii/extended-euclid-and-linear-congruences/", "Extended Euclid and Linear Congruences", "Solve a Linear Congruence"],
     ["/cp/number-theory-ii/chinese-remainder-theorem/", "The Chinese Remainder Theorem", "Clock Alignment"],
     ["/cp/number-theory-ii/binomial-coefficients-modulo-a-prime/", "Binomial Coefficients Modulo a Prime", "Choose and Count"],
+    ["/cp/tries-and-automata/tries-and-xor-queries/", "Tries and Maximum XOR Queries", "Largest XOR Partner"],
+    ["/cp/tries-and-automata/aho-corasick/", "The Aho-Corasick Automaton", "Forbidden Words"],
+    ["/cp/tries-and-automata/suffix-automaton/", "The Suffix Automaton", "Shared Stretch"],
     ["/cp/dynamic-programming/convex-hull-trick/", "The Convex Hull Trick", "Stone Hops"],
     ["/cp/trees/heavy-light-decomposition/", "Heavy-Light Decomposition", "Path Boss"],
     ["/cp/trees/centroid-decomposition/", "Centroid Decomposition", "Fixed Distance"],
@@ -896,7 +899,7 @@ test.describe("visualizer lessons", () => {
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
       await expect(page.getByRole("region", { name: `Problem: ${problem}` })).toBeVisible();
       // Only the first five lessons embed a visualizer; the rest have none yet.
-      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Bridges and Low-Link", "Strongly Connected Components", "Digit DP", "Rerooting DP", "2-SAT", "Maximum Flow and Dinic's Algorithm", "Manacher's Algorithm", "Suffix Arrays and LCP", "The Convex Hull Trick", "Heavy-Light Decomposition", "Centroid Decomposition", "Divide and Conquer DP Optimization", "Min-Cost Max-Flow", "Heap Internals and k-way Merge", "Two Heaps and the Running Median", "Order Statistics with Fenwick Trees", "Extended Euclid and Linear Congruences", "The Chinese Remainder Theorem", "Binomial Coefficients Modulo a Prime"].includes(title)) {
+      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Bridges and Low-Link", "Strongly Connected Components", "Digit DP", "Rerooting DP", "2-SAT", "Maximum Flow and Dinic's Algorithm", "Manacher's Algorithm", "Suffix Arrays and LCP", "The Convex Hull Trick", "Heavy-Light Decomposition", "Centroid Decomposition", "Divide and Conquer DP Optimization", "Min-Cost Max-Flow", "Heap Internals and k-way Merge", "Two Heaps and the Running Median", "Order Statistics with Fenwick Trees", "Extended Euclid and Linear Congruences", "The Chinese Remainder Theorem", "Binomial Coefficients Modulo a Prime", "Tries and Maximum XOR Queries", "The Aho-Corasick Automaton", "The Suffix Automaton"].includes(title)) {
         await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
       }
     });
