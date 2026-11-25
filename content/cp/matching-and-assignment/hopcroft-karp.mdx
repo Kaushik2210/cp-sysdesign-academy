@@ -1,0 +1,205 @@
+---
+title: Hopcroft–Karp
+track: cp
+module: matching-and-assignment
+order: 2
+difficulty: hard
+estMinutes: 35
+prerequisites: [cp/matching-and-assignment/bipartite-matching]
+tags: [bipartite-matching, augmenting-paths, bfs, dfs]
+type: lesson
+problems: []
+furtherReading:
+  - title: "Hopcroft and Karp (1973), An n^5/2 Algorithm for Maximum Matchings in Bipartite Graphs"
+    url: https://web.eecs.umich.edu/~pettie/matching/Hopcroft-Karp-bipartite-matching.pdf
+  - title: "Berge (1957), Two Theorems in Graph Theory"
+    url: https://pmc.ncbi.nlm.nih.gov/articles/PMC534337/
+---
+
+## Intuition
+
+Two robots can use the same charging dock, and only the first robot fits a second dock. If the first robot already occupies the shared dock, move it to the second dock so both robots can charge. The same reassignment can run through several occupied docks before reaching one that is free.
+
+Hopcroft–Karp finds as many pairs as possible in an **unweighted bipartite graph**. Each phase finds the shortest possible reassignment chains and uses a batch that share no vertices. One breadth-first search (BFS) supplies the layers for the whole batch.
+
+## Alternating paths and BFS layers
+
+Let the two sides be `L` and `R`, with `n = |L| + |R|` vertices and `m` edges. A matching `M` is a set of edges with no shared endpoints. A vertex is **free** when it has no mate. Direct every unmatched edge from left to right and every matched edge from right to left. An **augmenting path** runs from a free left vertex to a free right vertex in this directed graph. Flipping membership of its edges in `M` preserves the matching and adds one pair. Berge's theorem says that a matching is maximum exactly when it has no augmenting path.
+
+Start BFS at all free left vertices at once. The code stores distances only for left vertices. Set each free left vertex's distance to zero. When scanning an unmatched edge from `u` to a matched right vertex `v`, follow `v`'s unique matched edge to its left mate `w`. That two-edge move puts `w` in layer `dist[u] + 1` if it is unvisited.
+
+When `v` is free, record `dist[u] + 1` as a candidate for the terminal layer `d`. The first such candidate is the minimum because BFS processes layers in order. Finish scanning left layers below `d` so the phase can use every shortest route. A left vertex at layer `i` is reached in `2i` graph edges, so the shortest augmenting paths have **`2d - 1` edges**.
+
+### The phase invariant
+
+BFS fixes the layers and terminal depth for the phase. Depth-first search (DFS) follows two-edge moves that advance exactly one layer and accepts a free right endpoint only when `dist[u] + 1 == d`. After flipping a path, retire all its vertices from this phase. The code marks its left vertices unavailable, which also blocks its right vertices because each now has a mate on the retired path. On vertices that remain available, the matching has the same edges as at the start of the phase, so any continuation that fails can stay retired until the next BFS.
+
+Try every free left root. At the end, every shortest path from the start of the phase intersects a chosen path. The batch is **maximal** among vertex-disjoint shortest paths, meaning no further shortest path can be added to it. A greedy DFS can find such a batch.
+
+### Why the shortest length strictly increases
+
+For this proof, add a source with a unit-capacity arc to each left vertex and a sink with a unit-capacity arc from each right vertex. Each bipartite edge is a unit-capacity arc from left to right. A matched pair sends one unit of flow from source to sink. In the residual graph, unused arcs go forward and used arcs go backward. The arcs out of the source and into the sink therefore identify the free endpoints.
+
+Use the full residual BFS distances for this argument. Every old residual arc out of a reachable vertex increases the old distance by at most one. Flipping the chosen shortest paths removes their forward arcs and introduces reversals, which go back one layer. Consequently any new source-to-sink path as short as the old shortest one must use only old arcs that advance exactly one layer. Such a path would be an old shortest path. It would intersect a chosen path by maximality, and at that shared vertex it would need a removed arc. For an internal left vertex the incoming arc is its unique old matched edge, and for an internal right vertex the outgoing arc is its unique old matched edge. At the endpoints the required arcs come from the source or go to the sink. Thus the next shortest path is strictly longer, if one exists.
+
+### Complexity
+
+BFS scans each left adjacency list at most once. DFS keeps one cursor per left vertex for the phase, so it examines each adjacency entry at most once. Total path-flipping work is linear in the number of vertices because paths in a batch are disjoint. A phase therefore costs `O(n + m)`.
+
+Let `M*` be a maximum matching. The edges in exactly one of `M` and `M*` form alternating paths and cycles. Cycles and even-length paths contribute equally many edges from both matchings. Each component containing one more edge from `M*` is an augmenting path for `M`, so there are at least `|M*| - |M|` vertex-disjoint augmenting paths in this difference.
+
+After `ceil(sqrt(n))` successful phases, if the algorithm still has work to do, every augmenting path has more than `sqrt(n)` vertices by strict length growth. The disjoint paths in the difference must fit in `n` vertices, so fewer than `sqrt(n)` pairs remain to be added. Each further successful phase adds at least one pair. The total is **`O((n + m) sqrt(n))` time** and `O(n + m)` space including the graph. The usual `O(m sqrt(n))` time bound applies to the phase work after isolated vertices are omitted, since each remaining vertex touches an edge. Reading or writing arrays for the original vertex set can still cost `O(n)`.
+
+## Worked example
+
+Use left order `A, B, C, D` and the neighbor order shown below. Start with an empty matching.
+
+| Left vertex | Right neighbors |
+| --- | --- |
+| A | x, y |
+| B | x |
+| C | z, w |
+| D | z |
+
+| Phase | Left layers and terminal depth | Paths chosen by DFS | Matching after the phase |
+| --- | --- | --- | --- |
+| 1 | Layer 0 has A, B, C, D. The terminal depth is 1. | A → x and C → z | A–x, C–z |
+| 2 | Layer 0 has B, D. Layer 1 has A, C. The terminal depth is 2. | B → x → A → y and D → z → C → w | A–y, B–x, C–w, D–z |
+
+In phase 1, B and D each reach a right vertex already taken by a path in the batch. In phase 2, BFS can follow the matched edges `x → A` and `z → C` backward. It then finds the free endpoints `y` and `w`. Flipping both three-edge paths reassigns A and C while matching B and D. The next BFS has no free left roots.
+
+## Python implementation
+
+`adj[u]` contains the zero-based right neighbors of left vertex `u`. The function takes the size of the right side explicitly, so isolated right vertices are represented. It returns the matching size and both mate arrays, with `-1` for an unmatched vertex. DFS uses an explicit stack so the length of an alternating chain is independent of Python's recursion limit.
+
+<CodeRunner language="python" timeoutMs={30000} code={`from collections import deque
+
+
+def hopcroft_karp(adj, n_right):
+    n_left = len(adj)
+    left_mate = [-1] * n_left
+    right_mate = [-1] * n_right
+    inf = n_left + 1
+    dist = [inf] * n_left
+
+    def bfs():
+        queue = deque()
+        for u in range(n_left):
+            dist[u] = inf
+            if left_mate[u] == -1:
+                dist[u] = 0
+                queue.append(u)
+
+        terminal = inf
+        while queue:
+            u = queue.popleft()
+            if dist[u] >= terminal:
+                continue
+            step = dist[u] + 1
+            for v in adj[u]:
+                if left_mate[u] == v:
+                    continue
+                w = right_mate[v]
+                if w == -1:
+                    terminal = step
+                elif step < terminal and dist[w] == inf:
+                    dist[w] = step
+                    queue.append(w)
+        return terminal
+
+    def augment(root, terminal, cursor):
+        stack = [root]
+        # via[i] is the right vertex between stack[i] and stack[i + 1].
+        via = []
+        while stack:
+            u = stack[-1]
+            if cursor[u] == len(adj[u]):
+                dist[u] = inf
+                stack.pop()
+                if via:
+                    via.pop()
+                continue
+
+            v = adj[u][cursor[u]]
+            cursor[u] += 1
+            if left_mate[u] == v:
+                continue
+            w = right_mate[v]
+            step = dist[u] + 1
+            if w == -1 and step == terminal:
+                via.append(v)
+                for path_u, path_v in zip(stack, via):
+                    left_mate[path_u] = path_v
+                    right_mate[path_v] = path_u
+                    dist[path_u] = inf
+                return True
+            if w != -1 and step < terminal and dist[w] == step:
+                stack.append(w)
+                via.append(v)
+        return False
+
+    size = 0
+    while True:
+        terminal = bfs()
+        if terminal == inf:
+            return size, left_mate, right_mate
+        cursor = [0] * n_left
+        for u in range(n_left):
+            if left_mate[u] == -1 and dist[u] == 0:
+                if augment(u, terminal, cursor):
+                    size += 1
+
+
+def check(adj, n_right, expected):
+    size, left, right = hopcroft_karp(adj, n_right)
+    assert len(left) == len(adj) and len(right) == n_right
+    assert size == expected
+    assert size == sum(v != -1 for v in left)
+    assert size == sum(u != -1 for u in right)
+    for u, v in enumerate(left):
+        if v != -1:
+            assert v in adj[u] and right[v] == u
+    for v, u in enumerate(right):
+        if u != -1:
+            assert left[u] == v
+    return left
+
+
+example = [[0, 1], [0], [2, 3], [2]]
+example_mates = check(example, 4, 4)
+assert example_mates == [1, 0, 3, 2]
+check([], 3, 0)
+check([[], []], 0, 0)
+check([[0, 0], [], [0], [2, 3]], 5, 2)  # Duplicates, isolates, components.
+check([[0], [0], [0], [1, 2]], 3, 2)   # A shared bottleneck.
+
+# The final free left vertex can only reach the last right vertex
+# through a chain of 2 * width - 1 edges after phase 1.
+width = 1200
+chain = [[i, i + 1] for i in range(width - 1)] + [[0]]
+check(chain, width, width)
+print("All checks passed. Example left mates:", example_mates)
+`} />
+
+## Pitfalls
+
+- **Accepting any free right endpoint in DFS.** A branch can reach a free right vertex at a greater depth than another branch. Check the terminal layer to preserve the phase restriction.
+- **Sharing search state across phases.** Recompute distances and reset the adjacency cursors after every batch. A flip can make previously dead branches useful in the next BFS.
+- **Using one index space for both sides.** Left vertex 0 and right vertex 0 are distinct. Keep separate mate arrays and reserve `-1` for the free state.
+- **Applying a cardinality objective to costs.** Hopcroft–Karp maximizes the number of pairs. If pairs have costs and the objective depends on those costs, model that objective with a weighted assignment or min-cost flow algorithm.
+
+## Practice
+
+1. **Trace a phase.** The left adjacency lists in scan order are `a: [p, q]`, `b: [p]`, `c: [q, r]`, `d: [r, s]`. Start empty. Write down the selected paths, terminal layer, and matching after each phase. How many graph edges are on the last augmenting path? Check your trace against the demo by recording each successful phase.
+2. **Allocate workstations.** Given up to 100,000 technicians, 100,000 stations and 300,000 allowed technician–station pairs, return as many assignments as possible and list every unassigned technician. Each station holds one technician. Include a test with stations absent from every allowed pair and a test where every technician has a neighbor but full assignment is impossible.
+3. **Choose the shortest acceptable cable.** Each permitted lab-to-server connection has an integer length. Every lab needs a distinct server. Return the minimum possible value of the longest selected cable, or report impossibility. There is at least one lab and up to 200,000 connections. Prove the feasibility check is monotone and test equal cable lengths.
+4. **Explain an impossible assignment.** If some left vertex is unmatched after Hopcroft–Karp, start an alternating search from all free left vertices. Let `S` be the reachable left vertices and `T` the reachable right vertices. Show that `T` is the set of all neighbors of `S` and that `|T| < |S|`. Return `S` as a certificate that the left side cannot be fully matched.
+
+## Quiz
+
+<Quiz id="cp-matching-and-assignment-hopcroft-karp" tags={["bipartite-matching", "augmenting-paths", "bfs", "dfs"]} questions={[
+  { type: "mcq", q: "BFS first reaches a free right vertex from a left vertex in layer 2. How many graph edges are on a shortest augmenting path?", options: ["2", "3", "5", "6"], answer: 2, explain: "Two paired moves use four graph edges. The final move to the free right vertex uses one more." },
+  { type: "mcq", q: "Which batch is sufficient for one phase?", options: ["Every augmenting path, even when paths share vertices", "Any maximal set of vertex-disjoint shortest augmenting paths", "One shortest path regardless of the unused roots", "A maximum set of vertex-disjoint augmenting paths of arbitrary length"], answer: 1, explain: "Every old shortest path must intersect the batch. Trying all free roots in the layer graph achieves this condition." },
+  { type: "mcq", q: "Why can a reversed arc created by a flip never appear on a new path of the old shortest length?", options: ["The reverse arc goes back one old BFS layer", "Reverse arcs always lead to the sink", "The endpoints become unreachable by definition", "All arcs incident to matched vertices disappear"], answer: 0, explain: "Each arc on a path of that length must gain exactly one old BFS layer, because no residual arc gains more than one." },
+  { type: "mcq", q: "In a graph with 100 vertices, every remaining augmenting path uses at least 11 vertices. What upper bound follows for the number of additional pairs from the disjoint-path argument?", options: ["11", "10", "50", "9"], answer: 3, explain: "The symmetric difference with a maximum matching gives at least one disjoint augmenting path per missing pair. At most floor(100 / 11) such paths fit." }
+]} />
