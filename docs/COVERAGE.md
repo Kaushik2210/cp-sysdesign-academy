@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 253 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 257 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -42,7 +42,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 8 Hashing | Complete (5) | 5 |
 | 9 Recursion and bitmasks | Complete (5) | 5 |
 | 10 Greedy | Complete (5) | 5 |
-| 11 Graphs: shortest paths and connectivity | Partial (11 lessons: Dijkstra, union-find, minimum spanning tree, topological sort, Bellman-Ford, bipartite graphs, bridges, strongly connected components, 2-SAT, maximum flow, min-cost flow; no blossom or Hungarian-style matching yet) | 11 |
+| 11 Graphs: shortest paths and connectivity | Partial (11 lessons: Dijkstra, union-find, minimum spanning tree, topological sort, Bellman-Ford, bipartite graphs, bridges, strongly connected components, 2-SAT, maximum flow, min-cost flow; matching and assignment have their own module) | 11 |
 | 12 Range queries and segment trees | Partial (4 lessons: segment tree, Fenwick tree, sparse table, lazy propagation; no persistent or 2D structures yet) | 4 |
 | 13 Dynamic programming | Partial (10 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths, bitmask DP, interval DP, digit DP, the convex hull trick, divide and conquer optimisation; no Li Chao tree, Knuth optimisation or Aliens trick yet) | 10 |
 | 14 String matching | Partial (4 lessons: KMP, Z-function, Manacher, suffix arrays with LCP; no suffix automaton or palindromic tree yet) | 4 |
@@ -51,7 +51,8 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 17 Number theory II | Partial (3 lessons: extended Euclid and linear congruences, the Chinese remainder theorem for any moduli, binomial coefficients modulo a prime with Lucas and Catalan; no Miller-Rabin, Pollard rho, Euler's phi or Mobius inversion yet) | 3 |
 | 18 Tries and string automata | Partial (3 lessons: tries and maximum xor queries, the Aho-Corasick automaton, the suffix automaton; no palindromic tree, suffix tree or persistent tries yet) | 3 |
 | 19 Dynamic programming II | Partial (4 lessons: sum over subsets, broken profile DP for tilings, Knuth's optimisation, the Li Chao tree; no plug DP, no SMAWK, no aliens trick yet) | 4 |
-| 20-26 (Level 3) | Planned | 0 |
+| 20 Matching and assignment | Partial (4 lessons with runnable Python, practice prompts and quizzes. One embedded judge problem for weighted assignment.) | 4 |
+| 21-26 (Level 3) | Planned | 0 |
 
 ## Track 2: System Design
 

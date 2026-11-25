@@ -1,5 +1,7 @@
 # Decisions
 
+- 2026-11-25 — Matching and Assignment follows the existing graph lessons as CP module 20. Workshop Rota asks for the minimum cost so the exact-output judge accepts instances with tied assignments. The lesson returns an assignment and its dual certificate so learners can check both.
+
 Format: date — decision — why.
 
 - 2026-10-09 — Fresh git repo in the project folder; the parent home directory is itself a git repo, so nested `git init` keeps history isolated.

@@ -60,12 +60,16 @@
     { "kind": "lesson", "ref": "cp/dynamic-programming-ii/broken-profile-dp" },
     { "kind": "lesson", "ref": "cp/dynamic-programming-ii/knuth-optimization" },
     { "kind": "lesson", "ref": "cp/dynamic-programming-ii/li-chao-tree" },
+    { "kind": "lesson", "ref": "cp/matching-and-assignment/bipartite-matching" },
+    { "kind": "lesson", "ref": "cp/matching-and-assignment/hopcroft-karp" },
+    { "kind": "lesson", "ref": "cp/matching-and-assignment/hungarian-algorithm" },
+    { "kind": "lesson", "ref": "cp/matching-and-assignment/edmonds-blossom" },
     { "kind": "page", "title": "Algorithm templates (DSU, Fenwick tree, Dijkstra, KMP)", "href": "/templates/", "note": "Retype each from memory until you can write it in under five minutes." },
     { "kind": "external", "title": "Codeforces", "url": "https://codeforces.com/", "type": "practice", "note": "Rated rounds roughly weekly. Always upsolve: read the editorial for the first problem you could not solve and re-implement it the next day." },
     { "kind": "external", "title": "AtCoder", "url": "https://atcoder.jp/", "type": "practice", "note": "High-quality problems; the ABC and ARC contests are excellent for steady growth." },
     { "kind": "external", "title": "Codeforces EDU", "url": "https://codeforces.com/edu/courses", "type": "course", "note": "Step-by-step courses on segment trees, binary search and more, with practice problems." },
     { "kind": "external", "title": "cp-algorithms", "url": "https://cp-algorithms.com/", "type": "docs", "note": "The reference for every advanced algorithm you will need." },
-    { "kind": "planned", "title": "Trees, segment trees, advanced DP, graphs II, strings II, geometry and contest strategy", "note": "CP modules 20 to 26 are not written on this site yet (modules 11 to 19 cover Dijkstra, union-find, spanning trees, topological sort, Bellman-Ford, bipartite graphs, bridges, strongly connected components, 2-SAT, maximum flow, min-cost flow, segment trees with lazy propagation, Fenwick trees, sparse tables, knapsack, coin change, LIS, edit distance, grid paths, interval DP, digit DP, the convex hull trick, divide and conquer optimisation, bitmask DP, LCA, Euler tours, tree DP, rerooting, heavy-light decomposition, centroid decomposition, KMP, the Z-function, Manacher's algorithm, suffix arrays, heaps, k-way merging, two-heap medians, Fenwick order statistics, the extended Euclidean algorithm, the Chinese remainder theorem, binomial coefficients modulo a prime, tries, the Aho-Corasick automaton, the suffix automaton, sum over subsets, broken profile DP, Knuth optimisation and the Li Chao tree only). Learn them from cp-algorithms and Codeforces EDU, and use the pattern library to connect them to the signals you already know." },
+    { "kind": "planned", "title": "Remaining advanced CP modules", "note": "Modules 21 through 26 remain planned. Use the pattern library to connect the lessons here to the problem signals you already know." },
     { "kind": "project", "title": "A contest-and-upsolve habit with a rating target", "brief": "Compete in at least two rated contests a month. After each, upsolve at least two problems and add the technique to a personal notebook with the signal that reveals it. Track your rating every month.", "deliverable": "A public or private log of contests, upsolves and rating, with targets of about 1600, then 1900, then 2100 or higher over time." }
   ],
   "exit": [
