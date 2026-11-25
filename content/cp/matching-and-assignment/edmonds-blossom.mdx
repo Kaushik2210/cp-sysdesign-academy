@@ -1,0 +1,268 @@
+---
+title: "Edmonds' Blossom Algorithm"
+track: cp
+module: matching-and-assignment
+order: 4
+difficulty: expert
+estMinutes: 45
+prerequisites: [cp/matching-and-assignment/bipartite-matching]
+tags: [graphs, matching, augmenting-paths, blossom]
+type: lesson
+problems: []
+furtherReading:
+  - title: "Jack Edmonds, Paths, Trees, and Flowers (1965)"
+    url: https://doi.org/10.4153/CJM-1965-045-4
+  - title: Library Checker, General Matching
+    url: https://judge.yosupo.jp/problem/general_matching
+---
+
+## Intuition
+
+Suppose each student lists the other students they are willing to pair with, and a pair requires mutual consent. The goal is to form as many disjoint pairs as possible. With two disjoint groups and edges only between groups, bipartite matching works. Here three students can all be compatible with each other, so the graph may contain a triangle.
+
+The idea from bipartite matching still applies. Start at an unpaired vertex and look for a path that alternates between unused and matched edges and ends at another unpaired vertex. Flipping the edges on this path adds a pair. The complication is that in a general graph, two vertices reached at even depth can be adjacent. In a search from one root, that edge can close an odd cycle. Shrinking the cycle lets the search keep going. When it finds a path, the algorithm lifts that path back through the cycle.
+
+## Definitions and search
+
+A **matching** is a set of edges with no shared endpoints. A vertex is **free** when it has no mate. An **augmenting path** is a simple path between two free vertices whose edges alternate outside and inside the matching. Its first and last edges are outside the matching. Flipping means removing its matched edges and taking its other edges, which increases the matching size by one.
+
+**Berge's lemma** says a matching is maximum exactly when there is no augmenting path. To see the other direction, compare the current matching with any larger matching. The edges that occur in exactly one of the two matchings form disjoint alternating paths and cycles. Since the larger matching contributes more edges overall, some path contains one more edge of that matching and starts and ends at vertices free in the current matching.
+
+Grow an alternating tree from one free root. In the current contracted graph, even-depth vertices are called **outer** and odd-depth vertices **inner**. Scan edges from outer vertices:
+
+- An edge to an unreached free vertex completes an augmenting path.
+- An edge to an unreached matched vertex adds that vertex as inner and its mate as outer.
+- An edge to an inner vertex needs no further action. An edge within a single contracted vertex is also skipped.
+- An edge between distinct outer vertices closes a **blossom**. The two tree branches up to their lowest common ancestor, plus the new edge, form an odd cycle. Both branches from that ancestor have even length. The ancestor is the **base** of the blossom. Every other cycle vertex is matched within the cycle, and the base can have a matched edge on the tree path back to the root, called the **stem**.
+
+Contract the blossom into a single outer vertex. Edmonds' contraction theorem says an augmenting path exists before contraction exactly when one exists after contraction, for a blossom reached by such a stem. Contraction keeps the base's matched edge to the outside if it has one. On the cycle, the two arcs from the base to a given exit have opposite parities. The even arc starts with an unmatched edge and, if nonempty, ends with a matched one. It connects the base to an unmatched exit edge while preserving alternation. When the contracted vertex is a free endpoint, its base is the original free endpoint. With nested contractions, lift the outermost contraction first.
+
+## Worked contraction and lifting
+
+Use six vertices `r, x, b, c, d, t`. The whole graph is the triangle `b-c-d-b` plus edges `r-x`, `x-b`, and `d-t`. Begin with matching `{x-b, c-d}`, so `r` and `t` are free.
+
+1. From `r` take the unmatched edge to `x`, then the matched edge to `b`. Scan `b-c` first and follow the matched `c-d`. The tree path is now `r-x-b-c-d`, and `b` and `d` are outer.
+2. Scanning `b-d` closes the triangle. Its base is `b` and its stem is `r-x-b`. Contract the triangle to `B`. The edge `x-B` is matched, and `B-t` is unmatched and comes from `d-t`.
+3. The contracted augmenting path is `r-x-B-t`. Lift it by entering at `b` and leaving at `d`. The direct arc `b-d` would put two unmatched edges in a row just before `t`. The arc `b-c-d` ends on the matched edge `c-d`, so the lifted path alternates.
+
+| Path | Vertices | Edge status before flipping |
+| --- | --- | --- |
+| Contracted | `r-x-B-t` | unmatched, matched, unmatched |
+| Lifted | `r-x-b-c-d-t` | unmatched, matched, unmatched, matched, unmatched |
+
+Flipping gives `{r-x, b-c, d-t}`. All six vertices are paired, so the matching is maximum.
+
+## Python implementation
+
+This solver takes an undirected simple graph on vertices `0` through `n - 1` and returns its matched edges. The command-line wrapper reads `n m` followed by `m` edge rows and prints the number of pairs followed by those pairs, the format used by [Library Checker General Matching](https://judge.yosupo.jp/problem/general_matching).
+
+The adjacency lists always hold the original edges. `base[v]` represents the current contracted vertex containing `v`. `parent[v]` records an original edge from `v` back toward the root. To walk upward from a nonroot outer vertex `v`, first follow `mate[v]`, then `parent[mate[v]]`. During contraction, `mark_side` rewires those original-edge pointers on each branch, starting with the edge that closed the cycle. This encodes the lift so the final augmentation can follow the pointers directly. Newly outer vertices are queued so every original edge out of the contracted vertex can be considered.
+
+<CodeRunner language="python" stdin={"6 6\n0 1\n1 2\n2 3\n3 4\n2 4\n4 5\n"} code={`from collections import deque
+
+
+def maximum_matching(n, edges):
+    graph = [[] for _ in range(n)]
+    for u, v in edges:
+        graph[u].append(v)
+        graph[v].append(u)
+
+    mate = [-1] * n
+
+    def augment_from(root):
+        parent = [-1] * n
+        base = list(range(n))
+        outer = [False] * n
+        outer[root] = True
+        queue = deque([root])
+
+        def common_base(u, v):
+            ancestors = [False] * n
+            while True:
+                u = base[u]
+                ancestors[u] = True
+                if mate[u] == -1:
+                    break
+                u = parent[mate[u]]
+
+            while True:
+                v = base[v]
+                if ancestors[v]:
+                    return v
+                v = parent[mate[v]]
+
+        def mark_side(vertex, child, blossom_base, in_blossom):
+            while base[vertex] != blossom_base:
+                partner = mate[vertex]
+                in_blossom[base[vertex]] = True
+                in_blossom[base[partner]] = True
+                parent[vertex] = child
+                child = partner
+                vertex = parent[partner]
+
+        while queue:
+            u = queue.popleft()
+            for v in graph[u]:
+                if base[u] == base[v] or mate[u] == v:
+                    continue
+
+                if v == root or (mate[v] != -1 and parent[mate[v]] != -1):
+                    blossom_base = common_base(u, v)
+                    in_blossom = [False] * n
+                    mark_side(u, v, blossom_base, in_blossom)
+                    mark_side(v, u, blossom_base, in_blossom)
+                    for w in range(n):
+                        if in_blossom[base[w]]:
+                            base[w] = blossom_base
+                            if not outer[w]:
+                                outer[w] = True
+                                queue.append(w)
+
+                elif parent[v] == -1:
+                    parent[v] = u
+                    if mate[v] == -1:
+                        # Follow the lifted path and flip its edges.
+                        while v != -1:
+                            previous = parent[v]
+                            next_vertex = mate[previous]
+                            mate[v] = previous
+                            mate[previous] = v
+                            v = next_vertex
+                        return True
+
+                    partner = mate[v]
+                    outer[partner] = True
+                    queue.append(partner)
+
+        return False
+
+    for root in range(n):
+        if mate[root] == -1:
+            augment_from(root)
+
+    return [(u, v) for u, v in enumerate(mate) if u < v]
+
+
+def main():
+    import sys
+
+    read_line = sys.stdin.buffer.readline
+    n, m = map(int, read_line().split())
+    edges = [tuple(map(int, read_line().split())) for _ in range(m)]
+    pairs = maximum_matching(n, edges)
+    print(len(pairs))
+    for u, v in pairs:
+        print(u, v)
+
+
+if __name__ == "__main__":
+    main()
+`} />
+
+The edge test with `parent[mate[v]]` identifies a nonroot outer vertex. When the search reaches a new inner vertex, the code sets its parent and queues its mate as outer. Contraction extends that representation to the original vertices absorbed into a blossom.
+
+Each successful search uses an augmenting path and keeps all previously matched vertices matched. Each failed search rules out an augmenting path from its root under the matching at that time. If a later sequence of augmentations could pair that root, compare the later matching with the one at the failure. Their symmetric difference would contain a path starting at that root. Since every previously matched vertex remains matched, the other endpoint would also be free under the earlier matching. This would give an augmenting path at the time of the failure. Thus a single pass over the roots suffices, and Berge's lemma gives optimality.
+
+Each search scans at most `O(m)` adjacency entries. Each contraction merges at least three current vertices and takes `O(n)` time, so contraction work sums to `O(n²)` per search. With at most `n` searches and `m = O(n²)` for a simple graph, the runtime is `O(n³)` and the space usage is `O(n + m)`.
+
+## Pitfalls
+
+- A greedy matching can be maximal while a longer augmenting path still exists.
+- A cycle's parity alone is insufficient for contraction. Its matching and stem must come from the current alternating search.
+- Reset `parent`, `base`, and the queue for each root. The matching persists across searches.
+- Keep the original exit endpoint when lifting. The contracted vertex can expose edges from several original vertices, each with its own route around the cycle.
+- Compare matching sizes during testing and validate the returned edges. A graph can have several different maximum matchings.
+
+## Practice
+
+1. **Trace a five-cycle.** Use cycle `b-c-d-e-f-b` with matching `{c-d, e-f}` and tail edge `e-t`. Start at free vertex `b`. Draw the two even-depth branches that close the blossom, lift the contracted path `B-t`, and list the new matched edges.
+2. **Separate maximal from maximum.** Take a four-vertex path and match its middle edge. Identify an augmenting path, flip its edges, and explain how the search from one end discovers the other.
+3. **Test a disjoint union.** Build a graph from a triangle, a five-cycle, and an isolated vertex. Predict the maximum size, then check it after permuting vertex labels and reversing the input edge order. Explain why the size is invariant even if the pairs change.
+4. **Verify the output contract.** Feed your solver a graph with at least two different maximum matchings. Check that each output pair is an input edge and every vertex appears at most once. Use the same format on [Library Checker General Matching](https://judge.yosupo.jp/problem/general_matching).
+
+### Differential test
+
+Save the solver as `blossom.py` and this block beside it, then run the test file with Python. The brute-force oracle picks the first remaining vertex and tries leaving it free or pairing it with each available neighbor. It checks optimum size independently of the blossom search. The test enumerates every labeled simple graph through six vertices and then uses a fixed seed for a range of densities through twelve vertices. Run without Python's `-O` flag so assertions are enabled.
+
+```python
+from functools import lru_cache
+from itertools import combinations
+from random import Random
+
+from blossom import maximum_matching
+
+
+def brute_size(n, edges):
+    neighbors = [[] for _ in range(n)]
+    for u, v in edges:
+        neighbors[u].append(v)
+        neighbors[v].append(u)
+
+    @lru_cache(maxsize=None)
+    def best(remaining):
+        if not remaining:
+            return 0
+        first = remaining & -remaining
+        u = first.bit_length() - 1
+        rest = remaining ^ first
+        answer = best(rest)
+        for v in neighbors[u]:
+            if rest & (1 << v):
+                answer = max(answer, 1 + best(rest ^ (1 << v)))
+        return answer
+
+    return best((1 << n) - 1)
+
+
+def check(n, edges):
+    pairs = maximum_matching(n, edges)
+    allowed = {frozenset(edge) for edge in edges}
+    used = set()
+    for u, v in pairs:
+        assert u != v and frozenset((u, v)) in allowed, (edges, pairs)
+        assert u not in used and v not in used, (edges, pairs)
+        used.update((u, v))
+    expected = brute_size(n, edges)
+    assert len(pairs) == expected, (n, edges, pairs, expected)
+
+
+def run_tests():
+    cases = 0
+    for n in range(7):
+        possible = list(combinations(range(n), 2))
+        for mask in range(1 << len(possible)):
+            check(n, [edge for i, edge in enumerate(possible) if mask & (1 << i)])
+            cases += 1
+
+    rng = Random(1965)
+    for n in range(7, 13):
+        for density in (0.1, 0.3, 0.5, 0.7, 0.9):
+            for _ in range(50):
+                edges = [
+                    edge for edge in combinations(range(n), 2)
+                    if rng.random() < density
+                ]
+                rng.shuffle(edges)
+                check(n, edges)
+                cases += 1
+
+    print(f"Passed {cases:,} differential cases")
+
+
+if __name__ == "__main__":
+    run_tests()
+```
+
+## Quiz
+
+<Quiz id="cp-edmonds-blossom" tags={["matching", "blossom"]} questions={[
+  { type: "mcq", q: "Which edge triggers a blossom contraction in a one-root search?", options: ["An edge to a new free vertex", "An edge between distinct outer vertices in the current tree", "Any edge on an odd cycle", "The matched edge from an inner vertex to its mate"], answer: 1, explain: "The two even branches from the lowest common ancestor and the new edge form the odd alternating cycle." },
+  { type: "mcq", q: "In the worked triangle, which arc lifts the contracted path from base b to exit d?", options: ["b-d", "b-c-d", "b-c-b-d"], answer: 1, explain: "The b-c-d arc ends with matched edge c-d, so the following unmatched d-t edge preserves alternation." },
+  { type: "mcq", q: "Why can two different returned edge sets both pass the differential test?", options: ["Every maximal matching has the same size", "The objective is maximum cardinality and there can be multiple optimal matchings", "The brute-force oracle checks only whether the input is bipartite"], answer: 1, explain: "Each returned set must be a valid matching with the optimum number of edges." },
+  { type: "mcq", q: "What certifies maximum cardinality for a matching?", options: ["Every vertex has been visited once", "No two free vertices share an edge", "There is no augmenting path"], answer: 2, explain: "Berge's lemma rules out any larger matching exactly when there is no augmenting path." }
+]} />
+
+## Further reading
+
+- Jack Edmonds introduced blossom contraction for maximum cardinality matching in *Paths, Trees, and Flowers*, Canadian Journal of Mathematics 17 (1965), pp. 449–467. [Original paper](https://doi.org/10.4153/CJM-1965-045-4)
+- Practice finding and outputting a maximum matching on undirected general graphs. [Library Checker General Matching](https://judge.yosupo.jp/problem/general_matching)
