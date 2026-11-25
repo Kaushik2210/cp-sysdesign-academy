@@ -1,0 +1,151 @@
+---
+title: The Hungarian Algorithm for Minimum-Cost Assignment
+track: cp
+module: matching-and-assignment
+order: 3
+difficulty: hard
+estMinutes: 45
+prerequisites: [cp/matching-and-assignment/bipartite-matching, cp/graphs/min-cost-flow]
+tags: [graph, matching, assignment, hungarian-algorithm, duality]
+type: lesson
+problems: [m20-workshop-rota]
+furtherReading:
+  - title: H. W. Kuhn, The Hungarian Method for the Assignment Problem
+    url: https://doi.org/10.1002/nav.3800020109
+  - title: Library Checker, Assignment Problem
+    url: https://judge.yosupo.jp/problem/assignment
+---
+
+## Intuition
+
+Each technician must take one job, and two technicians cannot take the same job. The cheapest choice for one technician can force an expensive choice for another. The Hungarian algorithm maintains a price for each row and column. These prices give a lower bound on any complete assignment. When every selected edge meets that bound exactly, the assignment comes with a proof of optimality.
+
+## Costs, potentials and tight edges
+
+Let `C[i][j]` be the cost of assigning row `i` to column `j`. We select a permutation `p` minimizing the sum of `C[i][p[i]]`. Choose row potentials `u` and column potentials `v` with `u[i] + v[j] <= C[i][j]` everywhere. The **slack** or reduced cost is `C[i][j] - u[i] - v[j]`. An edge with zero slack is **tight**.
+
+Summing the inequality over any permutation counts each row and column potential once. Therefore `sum(u) + sum(v)` is a lower bound. A perfect matching of tight edges attains that bound. A judge can verify the permutation, all inequalities, and the cost equality in quadratic time without rerunning the algorithm.
+
+## Worked example
+
+| Technician | Job A | Job B | Job C |
+| --- | ---: | ---: | ---: |
+| 1 | 1 | 2 | 9 |
+| 2 | 1 | 8 | 9 |
+| 3 | 9 | 9 | 0 |
+
+Start with row minima `u = [1, 1, 0]` and `v = [0, 0, 0]`. Assign row 1 to A. Row 2 can reach A through a tight edge and follow its matched edge back to row 1. The smallest slack from these two reached rows to an unreached column is 1, on row 1 to B.
+
+Raise both reached row potentials by 1 and lower A's column potential by 1. The slacks inside the reached set stay fixed. Row 1 to B becomes tight, so flip the alternating path from row 2 through A and row 1 to B. Add row 3 to C. The cost is 3 and the updated lower bound is also 3.
+
+## Maintaining the search
+
+For each new row, grow an alternating tree of tight edges from it. A discovered occupied column contributes its matched row to the tree. For each outside column, keep its least slack from any reached row and remember the predecessor that achieves it.
+
+When the least outside slack is `delta`, add `delta` to the reached rows and subtract it from the reached columns. Edges within the reached sets keep their slack. Edges from outside rows into reached columns gain slack. Edges leaving reached rows lose at most their current slack. Thus feasibility survives and at least one new column becomes reachable. Existing matched edges stay tight because each has both endpoints reached or both outside. When a free column is reached, follow predecessors and flip the path.
+
+With `n` rows and columns, each search visits at most `n` columns and does an `O(n)` scan per visit. Total time is `O(n³)` and extra space is `O(n)` beyond the input.
+
+## Run the solver and verify its certificate
+
+<CodeRunner language="python" code={`
+from itertools import permutations
+from random import Random
+
+
+def assignment(cost):
+    n = len(cost)
+    # Column 0 is a sentinel pointing to the current root.
+    u = [0] + [min(row) for row in cost]
+    v = [0] * (n + 1)
+    owner = [0] * (n + 1)
+    for row in range(1, n + 1):
+        owner[0] = row
+        column = 0
+        used = [False] * (n + 1)
+        slack = [float("inf")] * (n + 1)
+        previous = [0] * (n + 1)
+        while True:
+            used[column] = True
+            current = owner[column]
+            delta = float("inf")
+            next_column = 0
+            for j in range(1, n + 1):
+                if used[j]:
+                    continue
+                reduced = cost[current - 1][j - 1] - u[current] - v[j]
+                if reduced < slack[j]:
+                    slack[j] = reduced
+                    previous[j] = column
+                if slack[j] < delta:
+                    delta, next_column = slack[j], j
+            for j in range(n + 1):
+                if used[j]:
+                    u[owner[j]] += delta
+                    if j != 0:
+                        v[j] -= delta
+                elif j != 0:
+                    slack[j] -= delta
+            column = next_column
+            if owner[column] == 0:
+                break
+        while column:
+            parent = previous[column]
+            owner[column] = owner[parent]
+            column = parent
+
+    jobs = [0] * n
+    for j in range(1, n + 1):
+        jobs[owner[j] - 1] = j - 1
+    return jobs, u[1:], v[1:]
+
+
+def verify(cost):
+    n = len(cost)
+    jobs, u, v = assignment(cost)
+    assert sorted(jobs) == list(range(n))
+    assert all(u[i] + v[j] <= cost[i][j]
+               for i in range(n) for j in range(n))
+    total = sum(cost[i][j] for i, j in enumerate(jobs))
+    assert total == sum(u) + sum(v)
+    assert total == min(sum(cost[i][j] for i, j in enumerate(p))
+                        for p in permutations(range(n)))
+    return jobs, total
+
+
+jobs, total = verify([[1, 2, 9], [1, 8, 9], [9, 9, 0]])
+print("Jobs:", [chr(65 + j) for j in jobs], "cost:", total)
+verify([])
+verify([[-10]])
+verify([[0, 0], [0, 0]])
+rng = Random(20)
+for n in range(1, 7):
+    for _ in range(20):
+        verify([[rng.randrange(-15, 16) for _ in range(n)]
+                for _ in range(n)])
+print("120 random matrices passed brute force and certificate checks.")
+`} />
+
+## Pitfalls
+
+- Keep sentinel index 0 out of the real assignment and the certificate.
+- If there are fewer rows than columns, zero-cost dummy rows can reduce the “assign every row” problem to a square one. Padding in the other direction lets real rows become unassigned, which changes the requirement.
+- A large finite cost only discourages a forbidden match. Check the final assignment, or model only permitted edges with [min-cost flow](/cp/graphs/min-cost-flow/). When adding capacities or leaving jobs unmatched, define the demand and cost of those choices explicitly.
+- In fixed-width languages, size the integer type for cost differences, potentials and the full objective. The sum can be much larger than one matrix cell.
+
+## Practice
+
+<Problem id="m20-workshop-rota" />
+
+1. **Workshop rota.** Compute the assignment and a certificate for `[[3, 1, 3], [2, 1, 7], [4, 2, 1]]`. Then increase the second row's first entry to 10 and explain how the optimal permutation changes.
+2. **Four charging stations.** Two drones must choose different stations. Add dummy rows and decode a solution for costs `[[5, 4, 2, 8], [3, 5, 2, 9]]`. Explain why the dummy assignments add nothing to the objective.
+3. **Shift restrictions.** Design a sparse min-cost flow model where each worker can take up to two shifts, each shift needs two distinct workers, and some worker–shift pairs are prohibited. State every capacity and how you detect infeasibility.
+4. Submit to [Library Checker’s Assignment Problem](https://judge.yosupo.jp/problem/assignment). Generate small signed-cost matrices and compare your solver with enumeration before testing large instances.
+
+## Quiz
+
+<Quiz id="cp-m20-hungarian" tags={["matching", "assignment", "duality"]} questions={[
+  { type: "mcq", q: "Why does a perfect matching of tight edges prove optimality?", options: ["It uses the n smallest entries in the matrix", "Its cost equals the lower bound from feasible potentials", "Each row was processed exactly once"], answer: 1, explain: "Every complete assignment counts each row and column potential exactly once." },
+  { type: "mcq", q: "What happens to slack on edges between reached rows and reached columns during a potential update?", options: ["It is unchanged", "It increases by delta", "It decreases by 2 delta"], answer: 0, explain: "The row increase and column decrease cancel." },
+  { type: "multi", q: "Which checks certify the minimum assignment cost?", options: ["The returned jobs form a permutation", "Every row-column potential sum respects the corresponding cost", "The returned total equals the sum of the potentials", "The assignment must be unique"], answer: [0, 1, 2], explain: "These checks establish primal feasibility, a valid lower bound, and equality. Ties are allowed." }
+]} />
