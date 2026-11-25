@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("213");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("217");
   });
 });
 
@@ -769,7 +769,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 96 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 100 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -913,6 +913,27 @@ test.describe("visualizer lessons", () => {
     await page.goto("/visualizers/dijkstra/");
     await expect(page.getByRole("link", { name: /Shortest Paths with Dijkstra/ })).toBeVisible();
   });
+});
+
+test.describe("matching and assignment lessons", () => {
+  const lessons = [
+    ["bipartite-matching", "Bipartite Matching with Augmenting Paths"],
+    ["hopcroft-karp", "Hopcroft–Karp"],
+    ["hungarian-algorithm", "The Hungarian Algorithm for Minimum-Cost Assignment"],
+    ["edmonds-blossom", "Edmonds' Blossom Algorithm"],
+  ];
+
+  for (const [slug, title] of lessons) {
+    test(`${title} has a code runner and a quiz`, async ({ page }) => {
+      await page.goto(`/cp/matching-and-assignment/${slug}/`);
+      await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 2, name: "Quiz" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Run", exact: true })).toBeVisible();
+      if (slug === "hungarian-algorithm") {
+        await expect(page.getByRole("region", { name: "Problem: Workshop Rota" })).toBeVisible();
+      }
+    });
+  }
 });
 
 test.describe("security, observability and case-study modules", () => {
