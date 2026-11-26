@@ -7,7 +7,7 @@ import { TRACK_META, TRACKS, type Track } from "@/lib/content/schema";
 import { Mdx } from "@/components/mdx/Mdx";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { LessonActions, LessonNotes } from "@/components/layout/LessonActions";
-import { TocSpy } from "@/components/layout/TocSpy";
+import { StepRail } from "@/components/layout/StepRail";
 
 const DIFFICULTY_TINT: Record<string, string> = { beginner: "leaf", easy: "cool", medium: "sun", hard: "hot", expert: "accent" };
 
@@ -38,9 +38,11 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
   const source = getLessonSource(lesson);
   const headings = extractHeadings(source);
   const { prev, next } = getNeighbours(lesson);
+  const indexInModule = mod.lessons.findIndex((l) => l.id === lesson.id) + 1;
 
   return (
-    <div className="mx-auto grid max-w-7xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_14rem]">
+    <div className="dotgrid">
+    <div className="mx-auto grid max-w-[90rem] gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_16rem]">
       <div className="no-print lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)] lg:self-start lg:overflow-y-auto">
         <Sidebar
           currentId={lesson.id}
@@ -54,7 +56,7 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
       </div>
 
       <main className="min-w-0">
-        <nav aria-label="Breadcrumb" className="mb-4 text-sm text-muted-fg">
+        <nav aria-label="Breadcrumb" className="label mb-4">
           <Link href={`/${lesson.track}/`} className="hover:text-fg">
             {TRACK_META[lesson.track].title}
           </Link>
@@ -63,19 +65,22 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
         </nav>
         <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
           <div>
+            <p className="label mb-2" style={{ color: `hsl(var(--${DIFFICULTY_TINT[lesson.difficulty] ?? "accent"}))` }}>
+              Lesson {indexInModule} of {mod.lessons.length}
+            </p>
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{lesson.title}</h1>
-            <p className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
-              <span className="rounded-full px-2.5 py-1 text-white" style={{ background: `hsl(var(--${DIFFICULTY_TINT[lesson.difficulty] ?? "accent"}))` }}>
+            <p className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="tag" style={{ borderColor: `hsl(var(--${DIFFICULTY_TINT[lesson.difficulty] ?? "accent"}))` }}>
                 {lesson.difficulty}
               </span>
-              <span className="rounded-full border border-border bg-card/70 px-2.5 py-1">~{lesson.estMinutes} min</span>
-              <span className="rounded-full border border-border bg-card/70 px-2.5 py-1">{lesson.type}</span>
+              <span className="tag">~{lesson.estMinutes} min</span>
+              <span className="tag">{lesson.type}</span>
             </p>
           </div>
           <LessonActions id={lesson.id} title={lesson.title} />
         </div>
 
-        <article className="prose prose-neutral max-w-none dark:prose-invert">
+        <article className="sheet prose prose-neutral max-w-none p-5 sm:p-8 dark:prose-invert">
           <Mdx source={source} />
         </article>
 
@@ -112,7 +117,8 @@ export default async function LessonPage({ params }: { params: Promise<Params> }
         </nav>
       </main>
 
-      <TocSpy headings={headings} />
+      <StepRail headings={headings} />
+    </div>
     </div>
   );
 }

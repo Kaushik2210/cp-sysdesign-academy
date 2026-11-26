@@ -44,9 +44,12 @@ export function Sidebar({ modules, currentId }: { modules: SidebarModule[]; curr
           return (
             <li key={m.slug}>
               <details open={open || undefined} className="group">
-                <summary className="cursor-pointer select-none rounded px-2 py-1.5 font-medium hover:text-accent">
-                  <span className="label mr-1.5">{m.level.split(":")[0]}</span>
-                  {m.title}
+                <summary className="flex cursor-pointer select-none items-baseline gap-1.5 rounded px-2 py-1.5 font-medium hover:text-accent">
+                  <span className="label shrink-0">{m.level.split(":")[0]}</span>
+                  <span className="min-w-0 flex-1">{m.title}</span>
+                  <span className="label shrink-0 tabular-nums">
+                    {m.lessons.filter((l) => completed[l.id]).length}/{m.lessons.length}
+                  </span>
                 </summary>
                 <ul className="ml-2 border-l border-border pl-2">
                   {m.lessons.map((l) => (
@@ -56,7 +59,7 @@ export function Sidebar({ modules, currentId }: { modules: SidebarModule[]; curr
                         aria-current={l.id === currentId ? "page" : undefined}
                         className={cn(
                           "flex items-center gap-2 rounded px-2 py-1 hover:bg-muted",
-                          l.id === currentId && "bg-muted font-semibold text-fg shadow-[inset_2px_0_0_hsl(var(--accent))]",
+                          l.id === currentId && "bg-muted font-semibold text-fg shadow-[inset_3px_0_0_hsl(var(--hot))]",
                         )}
                       >
                         <span

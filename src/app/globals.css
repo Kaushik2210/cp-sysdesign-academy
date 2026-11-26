@@ -3,33 +3,36 @@
 @tailwind utilities;
 
 :root {
-  --bg: 0 0% 100%;
-  --fg: 0 0% 4%;
-  --muted: 0 0% 96%;
-  --muted-fg: 0 0% 36%;
-  --border: 0 0% 87%;
-  --accent: 242 100% 42%;      /* electric ultramarine */
-  --accent-fg: 0 0% 100%;
-  --card: 0 0% 100%;
-  --hot: 14 100% 40%;          /* vermilion */
-  --cool: 217 100% 40%;        /* cobalt */
-  --sun: 38 100% 28%;          /* ochre */
-  --leaf: 152 100% 22%;        /* pine */
+  /* "Lab notebook" palette: warm paper, ink, a deep-teal accent and a vermilion playhead. */
+  --bg: 42 33% 96%;
+  --fg: 30 22% 8%;
+  --muted: 40 26% 91%;
+  --muted-fg: 30 10% 32%;
+  --border: 38 18% 78%;
+  --accent: 188 88% 21%;       /* deep teal ink */
+  --accent-fg: 45 40% 98%;
+  --card: 45 45% 98.5%;
+  --hot: 12 86% 40%;           /* vermilion playhead */
+  --cool: 217 80% 38%;         /* cobalt */
+  --sun: 36 100% 26%;          /* ochre */
+  --leaf: 152 90% 22%;         /* pine */
+  --grid: 30 15% 70%;          /* dot grid */
 }
 
 .dark {
-  --bg: 0 0% 4%;
-  --fg: 0 0% 96%;
-  --muted: 0 0% 10%;
-  --muted-fg: 0 0% 66%;
-  --border: 0 0% 19%;
-  --accent: 236 100% 76%;
-  --accent-fg: 0 0% 4%;
-  --card: 0 0% 6%;
-  --hot: 14 100% 62%;
-  --cool: 217 100% 70%;
+  --bg: 190 20% 6.5%;
+  --fg: 45 25% 92%;
+  --muted: 190 15% 11%;
+  --muted-fg: 190 8% 68%;
+  --border: 190 12% 21%;
+  --accent: 76 88% 62%;        /* phosphor lime */
+  --accent-fg: 190 30% 7%;
+  --card: 190 17% 9%;
+  --hot: 14 100% 64%;
+  --cool: 205 100% 70%;
   --sun: 40 100% 60%;
   --leaf: 152 70% 52%;
+  --grid: 190 10% 26%;
 }
 
 html {
@@ -76,6 +79,7 @@ h1, h2 {
 /* ---------- Editorial design system ---------- */
 /* Tiny tracked uppercase label, the site's signature micro-typography. */
 .label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.6875rem;
   font-weight: 500;
   letter-spacing: 0.14em;
@@ -194,4 +198,61 @@ code[data-theme*=" "] span {
   main {
     max-width: 100% !important;
   }
+}
+
+/* ---------- Lab workspace (lesson pages) ---------- */
+/* Dot grid like the page of an engineering notebook. */
+.dotgrid {
+  background-image: radial-gradient(hsl(var(--grid) / 0.55) 1px, transparent 1px);
+  background-size: 22px 22px;
+  background-position: -1px -1px;
+}
+/* A lesson sheet: card surface, hairline border and a hard offset shadow in the accent colour. */
+.sheet {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  box-shadow: 6px 6px 0 hsl(var(--accent) / 0.16);
+}
+/* Small mono tag used for difficulty, time and type. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  padding: 0.2rem 0.55rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+}
+/* The step rail: a vertical track with a node per section; visited nodes are filled. */
+.rail-node {
+  position: absolute;
+  left: -0.4375rem;
+  top: 0.5rem;
+  width: 0.8125rem;
+  height: 0.8125rem;
+  border-radius: 9999px;
+  border: 2px solid hsl(var(--border));
+  background: hsl(var(--bg));
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+.rail-node[data-visited="true"] {
+  border-color: hsl(var(--accent));
+  background: hsl(var(--accent));
+}
+.rail-node[data-active="true"] {
+  border-color: hsl(var(--hot));
+  background: hsl(var(--hot));
+  transform: scale(1.35);
+  box-shadow: 0 0 0 4px hsl(var(--hot) / 0.2);
+}
+
+.sheet .prose > h2:first-child {
+  margin-top: 0;
+  border-top: 0;
+  padding-top: 0;
 }
