@@ -1,0 +1,225 @@
+---
+title: Small-to-Large Merging (DSU on Tree)
+track: cp
+module: advanced-trees
+order: 1
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/trees/euler-tour-subtree-queries, cp/hashing/hash-maps-counting]
+tags: [tree, small-to-large, sets, merging, subtree-queries]
+type: lesson
+problems: [m22-colourful-subtrees]
+furtherReading:
+  - title: Codeforces blog, Sack (DSU on tree)
+    url: https://codeforces.com/blog/entry/44351
+  - title: USACO Guide, Small to Large Merging
+    url: https://usaco.guide/plat/merging
+  - title: CSES, Distinct Colors
+    url: https://cses.fi/problemset/task/1139
+---
+
+## Intuition
+
+You are asked something about **every subtree** of a rooted tree: how many distinct colours does it contain, which colour is the most frequent, what is the median value? The natural plan is bottom-up: each vertex keeps a container describing its subtree and **merges the containers of its children** into its own. The risk is the merge cost. On a path of `n` vertices the container grows to size `n` and, if every merge copies it, the total work is `1 + 2 + ... + n`, which is quadratic.
+
+**Small-to-large merging** fixes this with one rule: when two containers meet, **pour the smaller into the larger** and keep the larger one as the result. No element is copied more than `log2 n` times, so the total is `O(n log n)` insertions.
+
+## Definition
+
+**The rule.** To merge containers `A` and `B`, iterate over the smaller one, insert each element into the larger, and keep the larger as the new container (swap references, never copy).
+
+**Why `O(n log n)`.** Follow one element. It is moved only when it lives in the **smaller** container, and after the move it lives in a container at least **twice** as big as before (the larger already had at least as many elements, and now holds the smaller's elements too). A container cannot double more than `log2 n` times before reaching `n` elements, so every element moves at most `log2 n` times. Summed over `n` elements that is `n log2 n` insertions. With hash sets each insertion is `O(1)` expected; with ordered sets it is `O(log n)`, giving `O(n log^2 n)`.
+
+**What "container" can be.**
+
+| question per subtree | container |
+| --- | --- |
+| number of distinct colours | set of colours |
+| most frequent colour | map colour to count, plus the current best (see pitfall 4) |
+| `k`-th smallest or sorted values | ordered multiset |
+| number of pairs with some property | map from value to count, updated while merging |
+
+**Processing order.** Do it iteratively when the tree is deep. If labels are arranged so that `parent[v] < v`, run `v` from `n` down to `1`: all children of `v` have larger labels, so they were merged into `v` before `v` itself is read. Otherwise take the vertices in reverse of a DFS or BFS order.
+
+**Relation to "DSU on tree" (sack).** The sack technique keeps **one** global map and re-uses it by processing the heavy child last without clearing. It reaches the same `O(n log n)` bound and uses less memory. Small-to-large with explicit containers is shorter to write and easier to adapt, so start there.
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+sets = [None] + [{col[v]} for v in range(1, n + 1)]
+ans = [0] * (n + 1)
+for v in range(n, 0, -1):                 # children have larger labels than their parent
+    ans[v] = len(sets[v])
+    if v > 1:
+        p = par[v]
+        a, b = sets[v], sets[p]
+        if len(a) > len(b):               # pour the smaller into the larger
+            a, b = b, a
+        b |= a
+        sets[p] = b
+        sets[v] = None
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+vector<unordered_set<int>> sets(n + 1);
+for (int v = 1; v <= n; v++) sets[v].insert(col[v]);
+for (int v = n; v >= 1; v--) {
+    ans[v] = (int)sets[v].size();
+    if (v > 1) {
+        int p = par[v];
+        if (sets[v].size() > sets[p].size()) swap(sets[v], sets[p]);   // O(1) swap of the two containers
+        for (int x : sets[v]) sets[p].insert(x);
+        sets[v].clear();
+    }
+}
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+HashSet<Integer>[] sets = new HashSet[n + 1];
+for (int v = 1; v <= n; v++) { sets[v] = new HashSet<>(); sets[v].add(col[v]); }
+for (int v = n; v >= 1; v--) {
+    ans[v] = sets[v].size();
+    if (v > 1) {
+        int p = par[v];
+        HashSet<Integer> a = sets[v], b = sets[p];
+        if (a.size() > b.size()) { HashSet<Integer> t = a; a = b; b = t; }
+        b.addAll(a);
+        sets[p] = b;
+        sets[v] = null;
+    }
+}
+```
+
+</Tab>
+</Tabs>
+
+## Experiment
+
+The program first checks both merge strategies against an explicit scan of every subtree on 300 random small trees. Then it counts the **element insertions** performed while merging, with all colours distinct (the worst case for set sizes), comparing small-to-large with the naive rule "always insert the child's set into the parent's".
+
+<CodeRunner language="python" timeoutMs={30000} code={`import math
+import random
+
+
+def make_tree(n, kind, rnd):
+    par = [0, 0] + [0] * (n - 1)
+    for v in range(2, n + 1):
+        if kind == "path":
+            par[v] = v - 1
+        elif kind == "star":
+            par[v] = 1
+        elif kind == "binary":
+            par[v] = v // 2
+        else:
+            par[v] = rnd.randint(1, v - 1)
+    return par
+
+
+def solve(n, col, par, small_to_large):
+    """Distinct colours per subtree. Returns the answers and the number of element insertions made while merging."""
+    sets = [None] + [{col[v]} for v in range(1, n + 1)]
+    ans = [0] * (n + 1)
+    moves = 0
+    for v in range(n, 0, -1):
+        ans[v] = len(sets[v])
+        if v > 1:
+            p = par[v]
+            a, b = sets[v], sets[p]
+            if small_to_large and len(a) > len(b):
+                a, b = b, a
+            moves += len(a)
+            b |= a
+            sets[p] = b
+            sets[v] = None
+    return ans[1:], moves
+
+
+def brute(n, col, par):
+    kids = [[] for _ in range(n + 1)]
+    for v in range(2, n + 1):
+        kids[par[v]].append(v)
+    out = []
+    for v in range(1, n + 1):
+        seen, stack = set(), [v]
+        while stack:
+            x = stack.pop()
+            seen.add(col[x])
+            stack.extend(kids[x])
+        out.append(len(seen))
+    return out
+
+
+def demo():
+    rnd = random.Random(22)
+    ok = True
+    for _ in range(300):
+        n = rnd.randint(1, 40)
+        kind = rnd.choice(["path", "star", "binary", "random"])
+        par = make_tree(n, kind, rnd)
+        col = [0] + [rnd.randint(1, rnd.choice([2, 6, n])) for _ in range(n)]
+        want = brute(n, col, par)
+        ok &= solve(n, col, par, True)[0] == want and solve(n, col, par, False)[0] == want
+    print(f"300 random small trees: both merge strategies equal the explicit subtree scan: {ok}")
+    print("element insertions while merging (all colours distinct, the worst case for set sizes):")
+    for n in (1000, 4000, 16000):
+        for kind in ("path", "star", "binary", "random"):
+            par = make_tree(n, kind, rnd)
+            col = [0] + list(range(1, n + 1))
+            s2l = solve(n, col, par, True)[1]
+            naive = solve(n, col, par, False)[1]
+            print(f"  n = {n:5d} {kind:6s}: small-to-large {s2l:8,} ({s2l / (n * math.log2(n)):.2f} per n log2 n)   always child-into-parent {naive:11,} ({naive / n:,.0f} per vertex)")
+    print("the bound: every element moves only when it sits in the smaller set, so its set at least doubles; at most log2 n moves per element")
+
+
+demo()
+`} />
+
+What it shows:
+
+- Both strategies give the correct answers on all 300 random trees. The difference is only **cost**.
+- On a **path** the naive rule is quadratic: **127,992,000** insertions for `n = 16,000` (8,000 per vertex, and it doubles with `n`), where small-to-large needs **15,999**, one per vertex, because each step pours a single element into the big set.
+- On a **random tree** small-to-large needs 79,549 insertions at `n = 16,000` (0.36 per `n log2 n`); on a **complete binary tree** 102,930 (0.46 per `n log2 n`). Both stay below `n log2 n`, as the argument predicts.
+- On a **star** both are linear. The naive rule is only bad when a big set is merged **into a small one**, which a path produces at every step.
+- The naive rule can look fine on random or balanced trees (10 to 12 insertions per vertex here), which is why it passes small tests and fails on a path.
+
+## Pitfalls
+
+1. **Copying instead of swapping.** `b = a | b` creates a new set and costs the size of both. Merge in place and keep the larger object.
+2. **Choosing which to keep by the tree rather than by size.** Keeping the parent's set regardless of size is exactly the naive rule.
+3. **Recursion depth.** A path of `10^5` vertices overflows the default stack in Python and Java. Use the label order `parent < child`, or iterate over a reversed BFS order.
+4. **Most frequent colour.** After merging counts you must update the current best carefully: counts only grow, so the best of the merged container is the best of the larger plus any colour whose count was raised by the merge. Do not recompute from scratch.
+5. **Reading the answer too early or too late.** Record `ans[v]` after all children have been merged into `v` and **before** `v` is merged into its parent.
+6. **Forgetting that the container is moved.** After pouring `v` into `p`, `sets[v]` is gone (set it to `None`); a later read of it is a bug.
+7. **Hash flooding.** Adversarial inputs can break unordered containers in C++. For hacked-prone contests use a custom hash or an ordered set.
+8. **Memory.** `n` one-element sets cost real memory in Python and Java. For `n` near `10^6` prefer the sack technique or an Euler tour with an offline distinct-count structure.
+
+## Practice
+
+<Problem id="m22-colourful-subtrees" />
+
+### Problem ladder
+
+- [Lomsat gelral](https://codeforces.com/problemset/problem/600/E) (Codeforces 600E, 2300): the dominant colour per subtree, the classic for this technique.
+- [Distinct Colors in Subtree](https://cses.fi/problemset/task/1139) (CSES 1139): the same task as the exercise, with larger limits.
+- [Small to Large Merging](https://usaco.guide/plat/merging) (USACO Guide): more examples and the sack variant.
+- [Sack (DSU on tree)](https://codeforces.com/blog/entry/44351) (Codeforces blog): the one-global-map version.
+
+## Quiz
+
+<Quiz id="cp-m22-small-to-large" tags={["tree", "small-to-large", "sets"]} questions={[
+  { type: "mcq", q: "What is the small-to-large rule?", options: ["Merge the children in increasing label order", "Insert the elements of the smaller container into the larger one and keep the larger", "Always keep the parent's container", "Sort the containers first"], answer: 1, explain: "Keeping the larger container means an element only moves when it sits in the smaller one." },
+  { type: "mcq", q: "Why does each element move at most log2 n times?", options: ["Because the tree has depth log2 n", "Each move puts it in a container at least twice as large, and a container cannot exceed n elements", "Because sets are balanced trees", "Because merging is commutative"], answer: 1, explain: "After a move its container holds at least twice as many elements as before." },
+  { type: "predict", q: "A path of 16000 vertices with all colours distinct. Roughly how many insertions does small-to-large need in total?", code: "# parent[v] = v - 1, processed from v = n down to 2\n# at each step a 1-element set meets the big set", options: ["About 16,000", "About 224,000 (n log2 n)", "About 128 million", "About 8,000"], answer: 0, explain: "Every merge pours a single element into the big set. The experiment counted 15,999." },
+  { type: "mcq", q: "When is the naive rule (always insert the child into the parent) catastrophic?", options: ["On a star", "On a path, where a big child set is poured into a tiny parent set at every step", "On a complete binary tree only", "Never"], answer: 1, explain: "The experiment counted 127,992,000 insertions on a path of 16,000 against 15,999 for small-to-large." },
+  { type: "multi", q: "Which of these are real pitfalls?", options: ["Copying the sets instead of swapping references", "Reading ans[v] before all children are merged", "Recursion depth on a path-shaped tree", "Using a hash set at all"], answer: [0, 1, 2], explain: "Hash sets are fine; the other three break correctness or the time bound." },
+  { type: "mcq", q: "Total time with ordered sets (O(log n) insertion)?", options: ["O(n)", "O(n log n)", "O(n log^2 n)", "O(n^2)"], answer: 2, explain: "O(n log n) insertions, each costing O(log n)." },
+]} />
