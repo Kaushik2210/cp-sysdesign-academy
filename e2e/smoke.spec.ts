@@ -756,7 +756,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("217");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("220");
   });
 });
 
@@ -769,7 +769,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 100 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 103 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -891,6 +891,9 @@ test.describe("visualizer lessons", () => {
     ["/cp/dynamic-programming-ii/broken-profile-dp/", "Broken Profile DP and Domino Tilings", "Tile the Floor"],
     ["/cp/dynamic-programming-ii/knuth-optimization/", "Knuth's Optimisation of Interval DP", "Cutting the Stick"],
     ["/cp/dynamic-programming-ii/li-chao-tree/", "The Li Chao Tree", "Best Line at a Point"],
+    ["/cp/graphs-ii/euler-paths-and-hierholzer/", "Euler Paths and Hierholzer's Algorithm", "Smallest Itinerary"],
+    ["/cp/graphs-ii/floyd-warshall-and-matrix-powers/", "Floyd-Warshall and Shortest Walks by Matrix Powers", "Cheapest Walk of Exactly k Roads"],
+    ["/cp/graphs-ii/functional-graphs-and-binary-lifting/", "Functional Graphs and Binary Lifting", "Jump Stations"],
     ["/cp/dynamic-programming/convex-hull-trick/", "The Convex Hull Trick", "Stone Hops"],
     ["/cp/trees/heavy-light-decomposition/", "Heavy-Light Decomposition", "Path Boss"],
     ["/cp/trees/centroid-decomposition/", "Centroid Decomposition", "Fixed Distance"],
@@ -903,7 +906,7 @@ test.describe("visualizer lessons", () => {
       await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
       await expect(page.getByRole("region", { name: `Problem: ${problem}` })).toBeVisible();
       // Only the first five lessons embed a visualizer; the rest have none yet.
-      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Bridges and Low-Link", "Strongly Connected Components", "Digit DP", "Rerooting DP", "2-SAT", "Maximum Flow and Dinic's Algorithm", "Manacher's Algorithm", "Suffix Arrays and LCP", "The Convex Hull Trick", "Heavy-Light Decomposition", "Centroid Decomposition", "Divide and Conquer DP Optimization", "Min-Cost Max-Flow", "Heap Internals and k-way Merge", "Two Heaps and the Running Median", "Order Statistics with Fenwick Trees", "Extended Euclid and Linear Congruences", "The Chinese Remainder Theorem", "Binomial Coefficients Modulo a Prime", "Tries and Maximum XOR Queries", "The Aho-Corasick Automaton", "The Suffix Automaton", "Sum over Subsets (SOS) DP", "Broken Profile DP and Domino Tilings", "Knuth's Optimisation of Interval DP", "The Li Chao Tree"].includes(title)) {
+      if (!["Fenwick Trees", "Longest Increasing Subsequence", "The Z-Function", "Minimum Spanning Trees", "Topological Sort", "Coin Change", "Bellman-Ford", "Edit Distance", "Lowest Common Ancestor", "Euler Tours", "Grid Paths", "Bipartite Graphs", "Tree DP", "Bitmask DP", "Sparse Tables", "Lazy Propagation", "Interval DP", "Bridges and Low-Link", "Strongly Connected Components", "Digit DP", "Rerooting DP", "2-SAT", "Maximum Flow and Dinic's Algorithm", "Manacher's Algorithm", "Suffix Arrays and LCP", "The Convex Hull Trick", "Heavy-Light Decomposition", "Centroid Decomposition", "Divide and Conquer DP Optimization", "Min-Cost Max-Flow", "Heap Internals and k-way Merge", "Two Heaps and the Running Median", "Order Statistics with Fenwick Trees", "Extended Euclid and Linear Congruences", "The Chinese Remainder Theorem", "Binomial Coefficients Modulo a Prime", "Tries and Maximum XOR Queries", "The Aho-Corasick Automaton", "The Suffix Automaton", "Sum over Subsets (SOS) DP", "Broken Profile DP and Domino Tilings", "Knuth's Optimisation of Interval DP", "The Li Chao Tree", "Euler Paths and Hierholzer's Algorithm", "Floyd-Warshall and Shortest Walks by Matrix Powers", "Functional Graphs and Binary Lifting"].includes(title)) {
         await expect(page.getByRole("button", { name: /^(Play|Pause)/ }).first()).toBeVisible();
       }
     });

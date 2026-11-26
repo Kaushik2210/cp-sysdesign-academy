@@ -14,7 +14,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 257 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 260 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
 | Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
@@ -52,6 +52,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 18 Tries and string automata | Partial (3 lessons: tries and maximum xor queries, the Aho-Corasick automaton, the suffix automaton; no palindromic tree, suffix tree or persistent tries yet) | 3 |
 | 19 Dynamic programming II | Partial (4 lessons: sum over subsets, broken profile DP for tilings, Knuth's optimisation, the Li Chao tree; no plug DP, no SMAWK, no aliens trick yet) | 4 |
 | 20 Matching and assignment | Partial (4 lessons with runnable Python, practice prompts and quizzes. One embedded judge problem for weighted assignment.) | 4 |
+| 21 Graphs II | Partial (3 lessons with measured runnable Python demos, practice problems and quizzes: Euler paths, Floyd-Warshall with min-plus matrix powers, functional graphs with binary lifting. No visualizers.) | 3 |
 | 21-26 (Level 3) | Planned | 0 |
 
 ## Track 2: System Design
