@@ -1,0 +1,237 @@
+---
+title: Functional Graphs and Binary Lifting
+track: cp
+module: graphs-ii
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/trees/lowest-common-ancestor]
+tags: [graph, functional-graph, binary-lifting, cycle-detection, tortoise-hare]
+type: lesson
+problems: [m21-jump-station]
+furtherReading:
+  - title: cp-algorithms, Binary Lifting
+    url: https://cp-algorithms.com/graph/lca_binary_lifting.html
+  - title: Cycle detection (Floyd's tortoise and hare)
+    url: https://en.wikipedia.org/wiki/Cycle_detection
+  - title: LeetCode, Kth Ancestor of a Tree Node
+    url: https://leetcode.com/problems/kth-ancestor-of-a-tree-node/
+---
+
+## Intuition
+
+A **functional graph** is a directed graph in which every vertex has **exactly one** outgoing edge: `next[v]`. A teleporter at every station, a pointer in every cell, the map `x to (a x + b) mod m` on residues, the step of a pseudorandom generator. All are functions from a finite set to itself.
+
+Follow the pointers from any start and you must eventually repeat a vertex, because there are finitely many. The picture is the Greek letter rho: a **tail** of `mu` distinct vertices leading into a **cycle** of `lambda` vertices that you then circle forever. A whole functional graph is a set of cycles, each with trees of tails hanging into it.
+
+The question "where am I after `k` steps?" for `k` as large as `10^18` has two good answers: use the **structure** (reduce `k` modulo the cycle length), or use **binary lifting** (jump by powers of two), which needs no structure at all.
+
+## Definition
+
+### Binary lifting
+
+Let `up[j][v]` be the vertex reached from `v` after `2^j` steps. Then
+
+```text
+up[0][v]     = next[v]
+up[j+1][v]   = up[j][ up[j][v] ]          (two jumps of 2^j make one of 2^(j+1))
+```
+
+For a query `(v, k)` write `k` in binary and, for each set bit `j`, do `v = up[j][v]`. The jumps all follow the same function, so their order is irrelevant. With `k < 2^60` (which covers `10^18`) the table has `60 n` entries, is built in `O(n log k)`, and each query costs `O(log k)`.
+
+The same table solves **k-th ancestor** in a rooted tree (point the root at itself) and, with an extra array for sums, **weighted jumps**: `sum[j][v]` is the total weight along the `2^j` jumps.
+
+### Tail and cycle
+
+Walk from `v` recording the first time each vertex appears. The first repeat gives `mu` (the index of the repeated vertex) and `lambda` (walk length minus `mu`). Then for `k < mu + lambda` the answer is the `k`-th walked vertex, otherwise the `(mu + (k - mu) mod lambda)`-th. This is `O(mu + lambda)` per start, so it suits single queries, or all queries once you precompute tails and cycle positions for every vertex.
+
+### Floyd's tortoise and hare
+
+To find `mu` and `lambda` with **O(1) memory**: move a tortoise one step and a hare two steps per round until they meet (this proves a cycle). Then restart the tortoise at the start and move both one step at a time; they meet at the **cycle entry**, and the number of steps is `mu`. Finally walk the hare around the cycle once to measure `lambda`. This is the classic way to detect that a pseudorandom sequence has entered a loop, and the heart of Pollard's rho factorisation.
+
+### Code
+
+<Tabs>
+<Tab label="Python">
+
+```python
+LOG = 60                                   # 2^60 is above 10^18
+up = [nxt[:]]                              # nxt is 0-indexed here
+for j in range(1, LOG):
+    prev = up[-1]
+    up.append([prev[prev[v]] for v in range(n)])
+
+
+def jump(v, k):
+    j = 0
+    while k:
+        if k & 1:
+            v = up[j][v]
+        k >>= 1
+        j += 1
+    return v
+```
+
+</Tab>
+<Tab label="C++">
+
+```cpp
+const int LOG = 60;
+vector<vector<int>> up(LOG, vector<int>(n));
+up[0] = nxt;
+for (int j = 1; j < LOG; j++)
+    for (int v = 0; v < n; v++) up[j][v] = up[j - 1][up[j - 1][v]];
+auto jump = [&](int v, long long k) {
+    for (int j = 0; k > 0; j++, k >>= 1)
+        if (k & 1) v = up[j][v];
+    return v;
+};
+```
+
+</Tab>
+<Tab label="Java">
+
+```java
+final int LOG = 60;
+int[][] up = new int[LOG][n];
+up[0] = nxt.clone();
+for (int j = 1; j < LOG; j++)
+    for (int v = 0; v < n; v++) up[j][v] = up[j - 1][up[j - 1][v]];
+// query: for (int j = 0; k > 0; j++, k >>= 1) if ((k & 1) == 1) v = up[j][v];
+```
+
+</Tab>
+</Tabs>
+
+## Experiment
+
+The program builds a random function on 20,000 stations, checks 2,000 queries with `k` up to `10^18` against the tail-and-cycle method, checks Floyd's tortoise and hare, and measures tail and cycle lengths.
+
+<CodeRunner language="python" timeoutMs={30000} code={`import math
+import random
+
+
+# ---------------------------------------------------------------- DEMO 3: functional graphs
+def rho_dict(nxt, v):
+    seen, order = {}, []
+    cur = v
+    while cur not in seen:
+        seen[cur] = len(order)
+        order.append(cur)
+        cur = nxt[cur]
+    mu = seen[cur]
+    return mu, len(order) - mu
+
+
+def rho_floyd(nxt, x0):
+    """Floyd's tortoise and hare: tail length mu and cycle length lam using O(1) memory."""
+    tort, hare = nxt[x0], nxt[nxt[x0]]
+    steps = 1
+    while tort != hare:
+        tort, hare = nxt[tort], nxt[nxt[hare]]
+        steps += 1
+    mu, tort = 0, x0
+    while tort != hare:
+        tort, hare = nxt[tort], nxt[hare]
+        mu += 1
+    lam, hare = 1, nxt[tort]
+    while tort != hare:
+        hare = nxt[hare]
+        lam += 1
+    return mu, lam, steps
+
+
+def lifting_table(nxt, n, log):
+    up = [nxt[:]]
+    for _ in range(1, log):
+        prev = up[-1]
+        up.append([prev[prev[v]] for v in range(n)])
+    return up
+
+
+def jump(up, v, k):
+    j = 0
+    while k:
+        if k & 1:
+            v = up[j][v]
+        k >>= 1
+        j += 1
+    return v
+
+
+def demo3():
+    rnd = random.Random(3)
+    n = 20000
+    nxt = [rnd.randrange(n) for _ in range(n)]
+    up = lifting_table(nxt, n, 60)
+    ok = True
+    for _ in range(2000):
+        v = rnd.randrange(n)
+        k = rnd.choice([rnd.randint(0, 100), rnd.randint(0, 10**18)])
+        mu, lam = rho_dict(nxt, v)
+        order = []
+        cur = v
+        for _ in range(mu + lam):
+            order.append(cur)
+            cur = nxt[cur]
+        expect = order[k] if k < mu + lam else order[mu + (k - mu) % lam]
+        ok &= jump(up, v, k) == expect
+    print(f"random function on {n:,} stations, 2,000 queries with k up to 10^18: binary lifting equals the tail-and-cycle method every time: {ok}")
+
+    mus, lams, rhos, floyd_ok = [], [], [], True
+    for v in rnd.sample(range(n), 500):
+        mu, lam = rho_dict(nxt, v)
+        mus.append(mu)
+        lams.append(lam)
+        rhos.append(mu + lam)
+        floyd_ok &= rho_floyd(nxt, v)[:2] == (mu, lam)
+    print(f"Floyd's tortoise and hare (O(1) memory) finds the same tail and cycle lengths as the dictionary method on 500 starts: {floyd_ok}")
+    print(f"measured on random functions of {n:,} stations: average tail {sum(mus) / len(mus):.0f}, cycle {sum(lams) / len(lams):.0f}, whole walk before a repeat {sum(rhos) / len(rhos):.0f}; "
+          f"theory for a random mapping: tail and cycle about sqrt(pi n / 8) = {math.sqrt(math.pi * n / 8):.0f} each, the walk about sqrt(pi n / 2) = {math.sqrt(math.pi * n / 2):.0f}")
+    print(f"the lifting table has 60 levels of {n:,} entries; one query takes at most 60 jumps (here {bin(10**18).count('1')} set bits in 10^18)")
+
+
+demo3()
+`} />
+
+What it shows:
+
+- Binary lifting and the **tail-and-cycle method** agree on all 2,000 queries, with `k` as large as `10^18`.
+- The tortoise and hare finds the same `mu` and `lambda` as the dictionary method on 500 starts, using constant memory.
+- On a random function of 20,000 stations the average **tail is 97**, the **cycle is 52** and the walk before a repeat is **149**. Random-mapping theory predicts about `sqrt(pi n / 8) = 89` for tail and cycle each and `sqrt(pi n / 2) = 177` for the walk: the same order, `sqrt(n)`, with sampling noise from 500 starts on one random function.
+- The lifting table has **60 levels**; one query takes at most 60 jumps (here `10^18` has 24 set bits).
+
+So walks in a random function are short, around `sqrt(n)`. Adversarial inputs (one big cycle through every vertex, or one long tail) are the ones that make naive simulation slow, which is why the problem tests include them.
+
+## Pitfalls
+
+1. **Number range of `k`.** `10^18` fits a signed 64-bit integer but not a JavaScript double. Use `BigInt` there, `long long` in C++ and `long` in Java.
+2. **Too few levels.** `LOG = 30` handles only `k < 2^30`. For `10^18` you need 60.
+3. **Indexing.** Mixing 0-indexed arrays with 1-indexed input is the classic off-by-one; convert once on input.
+4. **Memory.** `60 * n` ints is 24 MB at `n = 10^5` as `int` in C++, but Python lists of ints are much heavier. Use arrays, or the tail-and-cycle method, when memory is tight.
+5. **Reducing modulo the wrong length.** The cycle length applies only after the tail: use `mu + (k - mu) mod lambda`, not `k mod lambda`.
+6. **Roots in a tree.** For k-th ancestor set `up[0][root] = root` (or a sentinel), otherwise jumps past the root fall off the table.
+7. **Forgetting `k = 0`.** The loop over set bits handles it correctly (no jumps), but a hand-written special case often does not.
+8. **Using the tortoise and hare for many queries.** It finds the structure from one start in `O(mu + lambda)`; it does not answer many arbitrary `k` queries quickly.
+
+## Practice
+
+<Problem id="m21-jump-station" />
+
+### Problem ladder
+
+- [Kth Ancestor of a Tree Node](https://leetcode.com/problems/kth-ancestor-of-a-tree-node/) (LeetCode 1483, hard): binary lifting on a tree.
+- [Linked List Cycle II](https://leetcode.com/problems/linked-list-cycle-ii/) (LeetCode 142, medium): the tortoise and hare, finding the cycle entry.
+- [Find the Duplicate Number](https://leetcode.com/problems/find-the-duplicate-number/) (LeetCode 287, medium): a functional graph hidden in an array.
+- [Binary Lifting](https://cp-algorithms.com/graph/lca_binary_lifting.html) (cp-algorithms): lifting for LCA and k-th ancestor.
+
+## Quiz
+
+<Quiz id="cp-m21-functional" tags={["graph", "functional-graph", "binary-lifting"]} questions={[
+  { type: "mcq", q: "What shape does the walk from any vertex of a functional graph take?", options: ["A path that always ends at a leaf", "A tail followed by a cycle (the rho shape)", "A tree with several branches", "A complete graph"], answer: 1, explain: "Finitely many vertices and one outgoing edge each force a repeat, hence a tail into a cycle." },
+  { type: "mcq", q: "How many levels of the lifting table cover every k up to 10^18?", options: ["30", "40", "60", "1000"], answer: 2, explain: "2^60 is about 1.15 * 10^18, so 60 levels (bits 0 to 59) suffice." },
+  { type: "predict", q: "next = [1, 2, 0, 3] over vertices 0 to 3 (0 goes to 1, 1 to 2, 2 to 0, 3 to itself). Where is vertex 0 after 10^18 steps? The cycle length is 3 and 10^18 mod 3 = 1.", code: "next = [1, 2, 0, 3]\nv = 0\n# apply 10**18 steps; the walk is 0 1 2 0 1 2 ...", options: ["0", "1", "2", "3"], answer: 1, explain: "The tail is empty (mu = 0), so the answer is the (10^18 mod 3)-th vertex of the cycle, which is vertex 1." },
+  { type: "multi", q: "Which statements about binary lifting are correct?", options: ["up[j+1][v] = up[j][up[j][v]]", "The order in which set bits of k are applied does not matter", "It needs the cycle structure of the graph", "A query costs O(log k)"], answer: [0, 1, 3], explain: "Lifting never looks for cycles; it just composes the same function with itself." },
+  { type: "mcq", q: "What is Floyd's tortoise and hare mainly useful for?", options: ["Finding the tail and cycle lengths of one walk with O(1) memory", "Answering many k-step queries in O(1) each", "Sorting vertices", "Finding shortest paths"], answer: 0, explain: "It was verified in the experiment against the dictionary method on 500 starts." },
+  { type: "mcq", q: "In JavaScript, why must k up to 10^18 be read as a BigInt?", options: ["BigInt is faster", "Doubles are exact only up to 2^53, so 10^18 would be rounded", "Arrays cannot be indexed by numbers", "parseInt rejects large numbers"], answer: 1, explain: "Rounding k would change its binary digits and give wrong jumps." },
+]} />
