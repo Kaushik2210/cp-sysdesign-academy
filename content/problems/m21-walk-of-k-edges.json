@@ -1,0 +1,155 @@
+{
+  "id": "m21-walk-of-k-edges",
+  "title": "Cheapest Walk of Exactly k Roads",
+  "source": {
+    "name": "Original exercise; classic technique (shortest walks by matrix exponentiation in the min-plus semiring)"
+  },
+  "rating": 2000,
+  "tags": [
+    "graphs",
+    "matrix-exponentiation",
+    "shortest-walks",
+    "min-plus"
+  ],
+  "statement": "A network has `n` stations and a table of one-way road costs: `w[i][j] >= 0` is the cost of the road from station `i` to station `j`, and `-1` means there is no such road (a station may have a road to itself). A trip must use **exactly `k` roads**, starting at station `1` and ending at station `n`; stations and roads may be repeated. Find the **cheapest total cost**, or `-1` if no trip with exactly `k` roads exists.\n\n**Input.** The first line holds `n` and `k`. Then `n` lines of `n` integers: the cost table.\n\n**Output.** One integer.",
+  "constraints": [
+    "1 ≤ n ≤ 30",
+    "0 ≤ k ≤ 10^9",
+    "0 ≤ w[i][j] ≤ 1000 or w[i][j] = -1 (totals reach about 10^12, so use 64-bit integers)"
+  ],
+  "timeLimitMs": 2000,
+  "tests": [
+    {
+      "input": "3 2\n-1 1 5\n-1 -1 1\n-1 -1 -1\n",
+      "output": "2\n",
+      "hidden": false
+    },
+    {
+      "input": "3 1\n-1 1 5\n-1 -1 1\n-1 -1 -1\n",
+      "output": "5\n",
+      "hidden": false
+    },
+    {
+      "input": "1 4\n2\n",
+      "output": "8\n",
+      "hidden": true
+    },
+    {
+      "input": "1 3\n-1\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "2 0\n-1 1\n1 -1\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "2 3\n-1 4\n3 -1\n",
+      "output": "11\n",
+      "hidden": true
+    },
+    {
+      "input": "2 4\n-1 4\n3 -1\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "4 5\n-1 1 -1 -1\n-1 -1 1 -1\n-1 -1 -1 1\n1 -1 -1 -1\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "3 4\n-1 -1 3\n12 -1 -1\n-1 -1 -1\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "4 9\n16 -1 -1 -1\n-1 -1 14 6\n12 15 4 18\n20 17 15 13\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "5 6\n-1 -1 13 13 0\n8 -1 -1 -1 -1\n14 6 13 -1 12\n-1 -1 4 17 19\n8 15 -1 20 16\n",
+      "output": "31\n",
+      "hidden": true
+    },
+    {
+      "input": "2 10\n-1 3\n20 -1\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "4 7\n13 15 -1 -1\n-1 -1 10 17\n-1 2 -1 3\n0 10 16 -1\n",
+      "output": "52\n",
+      "hidden": true
+    },
+    {
+      "input": "5 5\n8 12 -1 19 -1\n-1 18 -1 9 5\n-1 3 13 -1 3\n-1 14 -1 17 -1\n5 5 -1 -1 19\n",
+      "output": "35\n",
+      "hidden": true
+    },
+    {
+      "input": "3 0\n7 -1 4\n-1 13 -1\n17 6 20\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "3 4\n16 5 1\n-1 -1 -1\n4 -1 2\n",
+      "output": "7\n",
+      "hidden": true
+    },
+    {
+      "input": "1 7\n2\n",
+      "output": "14\n",
+      "hidden": true
+    },
+    {
+      "input": "1 11\n6\n",
+      "output": "66\n",
+      "hidden": true
+    },
+    {
+      "input": "30 1000000000\n-1 333 -1 212 -1 -1 -1 844 167 -1 654 -1 -1 -1 727 -1 626 636 473 111 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n287 26 694 -1 -1 -1 -1 -1 968 -1 -1 980 -1 -1 -1 -1 -1 1000 -1 -1 -1 505 -1 -1 -1 805 -1 189 -1 -1\n-1 80 193 -1 -1 -1 490 -1 213 -1 -1 515 859 -1 -1 655 -1 18 -1 -1 -1 -1 -1 -1 -1 -1 -1 275 957 -1\n-1 -1 845 -1 573 419 -1 -1 -1 -1 -1 -1 -1 415 837 887 122 -1 -1 -1 311 -1 963 -1 -1 74 -1 -1 -1 279\n700 941 250 -1 -1 679 -1 -1 441 -1 -1 354 -1 -1 -1 295 -1 -1 -1 -1 -1 722 180 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 401 -1 251 270 -1 690 -1 -1 -1 632 -1 -1 113 -1 -1 -1 -1 -1 496 770 -1\n109 -1 -1 -1 -1 849 -1 617 465 -1 -1 -1 -1 843 -1 -1 -1 -1 393 -1 -1 -1 940 -1 -1 89 -1 454 230 -1\n962 -1 -1 -1 -1 -1 -1 342 -1 -1 -1 -1 -1 -1 -1 -1 -1 389 -1 -1 -1 -1 -1 -1 775 -1 -1 -1 -1 -1\n354 -1 309 732 612 -1 445 -1 -1 -1 -1 -1 -1 -1 80 524 -1 -1 -1 -1 -1 -1 -1 -1 47 -1 -1 -1 -1 -1\n-1 -1 -1 -1 79 -1 550 -1 -1 356 616 -1 -1 -1 -1 -1 630 -1 -1 994 965 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 900 675 -1 895 -1 -1 -1 -1 15 536 -1 -1 -1 -1 -1 -1 -1 -1 136 -1 -1 934 -1 -1 -1 -1 -1\n291 267 603 -1 -1 916 188 -1 -1 -1 -1 -1 213 364 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 859 -1 858 696 -1 -1\n-1 87 -1 -1 -1 -1 169 897 -1 781 -1 -1 315 -1 -1 -1 -1 -1 -1 976 15 -1 548 -1 -1 -1 -1 -1 -1 -1\n-1 686 626 90 -1 323 -1 386 -1 -1 350 907 -1 -1 -1 681 -1 78 -1 916 -1 -1 -1 86 -1 219 -1 -1 -1 445\n734 -1 -1 -1 -1 468 -1 909 -1 -1 42 101 -1 795 45 -1 54 -1 -1 -1 -1 -1 279 -1 -1 187 -1 -1 789 947\n-1 -1 376 -1 -1 271 -1 -1 685 462 766 -1 -1 -1 546 -1 -1 737 -1 -1 -1 652 193 277 462 -1 -1 52 261 -1\n-1 732 903 494 -1 -1 -1 -1 617 -1 -1 -1 534 -1 -1 -1 228 130 -1 -1 -1 -1 -1 -1 -1 -1 465 646 690 -1\n-1 -1 -1 -1 -1 -1 149 -1 -1 107 899 -1 761 -1 -1 35 -1 -1 -1 -1 718 -1 -1 -1 -1 -1 -1 -1 699 -1\n490 921 -1 -1 -1 -1 -1 -1 -1 712 -1 868 -1 -1 -1 -1 -1 -1 -1 -1 198 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 949 -1 524 -1 -1 132 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 970\n-1 -1 -1 679 -1 -1 -1 -1 -1 44 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 173 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 51 -1 -1 -1 -1 -1 -1 982 140 -1 -1 -1 614 -1 -1\n-1 -1 697 -1 -1 321 -1 863 -1 151 -1 -1 383 -1 -1 -1 -1 292 -1 589 353 -1 176 -1 -1 -1 -1 -1 -1 -1\n-1 654 -1 222 -1 -1 -1 -1 -1 -1 635 -1 -1 969 -1 -1 684 623 -1 178 -1 933 818 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 428 958 -1 341 -1 785 -1 774 -1 -1 -1 939 874 -1 828 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 737 -1 845 -1 688 -1 -1 -1 233 -1 819 860 606 -1 -1 6 -1 546 -1 524 461 -1 -1 -1 621 -1 -1 -1 -1\n-1 -1 -1 -1 730 835 -1 225 -1 -1 -1 -1 259 -1 743 -1 -1 -1 776 60 -1 -1 -1 -1 493 -1 136 -1 -1 -1\n-1 64 -1 -1 -1 378 -1 801 -1 -1 -1 -1 624 -1 -1 -1 -1 -1 645 -1 332 974 641 -1 51 -1 -1 -1 468 -1\n-1 -1 -1 -1 -1 -1 825 384 -1 -1 -1 -1 424 -1 632 673 -1 -1 349 554 -1 622 -1 -1 -1 511 -1 705 -1 -1\n889 -1 -1 -1 -1 779 -1 408 -1 -1 803 -1 -1 -1 300 925 -1 -1 45 -1 282 -1 -1 -1 -1 -1 -1 -1 -1 -1\n",
+      "output": "26000001007\n",
+      "hidden": true
+    },
+    {
+      "input": "30 999999999\n-1 -1 -1 -1 -1 -1 -1 328 -1 -1 794 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 151 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 885 -1 -1 -1 -1 -1 -1 -1 -1 710 -1 -1 -1 -1 -1 -1 -1 -1 -1 570 -1 -1 -1 -1 -1 -1\n564 -1 -1 -1 521 -1 -1 -1 -1 480 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 303 -1 711 -1 497 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 293 -1 -1 -1 -1 -1 274 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 588 -1 -1 -1 -1 -1 -1 -1 868 -1 690 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 498 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 803 -1 -1 -1 383 -1 926 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 359 -1 -1 -1 38 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 90 -1 -1 635 -1 -1 809 -1 -1 -1 -1 -1 -1 342\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 702 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 401 0 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 180 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 388 -1 474 -1 -1 -1 -1 -1 644 -1 71 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 251 -1 -1 -1 -1 69 -1 -1 -1 -1 -1 -1 -1 -1 106 -1\n-1 -1 -1 -1 -1 345 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 450 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 107 -1 332 -1 -1 -1 -1 145 54 -1 -1 -1 -1 -1 130 -1 -1 132 -1\n483 -1 -1 -1 -1 -1 -1 -1 320 -1 -1 -1 -1 -1 378 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 502 -1 -1 -1 -1 -1 -1 -1 499 -1 -1 -1 -1 -1 -1\n-1 -1 137 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 628 421 -1 860 -1 -1 -1 -1 -1 -1 -1 668 -1\n-1 88 -1 -1 140 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 598 -1 -1 -1 860\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 348 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 607 -1 -1 -1 -1 -1 -1 -1 968 -1 -1 503 404 -1 -1 825 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 630 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 204 -1 -1 -1 -1 -1 -1 -1 634 -1 785 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 938 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 334 556 -1 -1 -1 -1 515 -1 -1 -1 -1 337 -1 -1 -1 -1 -1 463 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 884 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 215 -1 -1 774 -1 -1 851 -1 -1\n-1 -1 97 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 342 952 -1 228 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 140 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 583 -1 -1 -1\n",
+      "output": "205000000072\n",
+      "hidden": true
+    },
+    {
+      "input": "30 999999971\n-1 22 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 582 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 605 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 678 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 593 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 174 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 173 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 985 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 55 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 51 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 931 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 555 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 484 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 777 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 703 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 334 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 970 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 449 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 362 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 322 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 700 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 114 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 502 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 967 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 321 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 644 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 300 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 65 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 157\n541 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n",
+      "output": "-1\n",
+      "hidden": true
+    },
+    {
+      "input": "30 999999999\n-1 22 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 582 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 605 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 678 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 593 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 174 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 173 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 985 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 55 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 51 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 931 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 555 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 484 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 777 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 703 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 334 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 970 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 449 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 362 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 322 -1 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 700 -1 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 114 -1 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 502 -1 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 967 -1 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 321 -1 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 644 -1 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 300 -1 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 65 -1\n-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 157\n541 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1\n",
+      "output": "-1\n",
+      "hidden": true
+    }
+  ],
+  "hints": [
+    "A DP over the number of roads used, dp[step][station], costs O(k * n^2). That is far too slow for k up to 10^9. Notice how step t + 1 is obtained from step t by the same rule every time.",
+    "Let W be the cost matrix. Define a new product of matrices: (A * B)[i][j] = min over t of A[i][t] + B[t][j] (instead of sum of products). Then the cheapest walk with exactly a + b roads is the product of the cheapest walks with a roads and b roads.",
+    "So the answer is the (1, n) entry of W^k in this (min, +) algebra. Compute the power by repeated squaring in O(n^3 log k), using the identity matrix with 0 on the diagonal and infinity elsewhere. Treat missing roads as infinity and never add to infinity."
+  ],
+  "editorial": "Let `D_t[i][j]` be the cheapest walk from `i` to `j` with exactly `t` roads, and `W = D_1` (with `+infinity` for missing roads). A walk of `a + b` roads splits at the vertex reached after `a` roads, so `D_{a+b}[i][j] = min over t of D_a[i][t] + D_b[t][j]`. This is a **matrix product over the (min, +) semiring**: the operation `min` plays the role of addition and `+` the role of multiplication. The semiring has the properties that fast exponentiation needs: the product is associative and there is an identity (`0` on the diagonal, `+infinity` elsewhere: a walk of zero roads stays in place at cost zero). Therefore `D_k = W^k` can be computed with repeated squaring in `O(n^3 log k)`, about `27000 * 30 * 2 = 1.6 million` basic steps for the largest input. The answer is entry `(1, n)` of `W^k`, or `-1` if it is still infinity. Two implementation points: never add to infinity (skip entries equal to infinity, or use a sentinel such as `Long.MAX_VALUE / 4` and test before adding), and use 64-bit integers, since a cheapest walk can cost up to about `1000 * 10^9`. The same trick counts walks (the ordinary matrix power) and finds maximum-cost or boolean reachability walks (change the semiring to (max, +) or (or, and)).",
+  "complexity": {
+    "time": "O(n^3)",
+    "space": "O(n^2)"
+  },
+  "starter": {
+    "python": "import sys\n\ndata = sys.stdin.read().split()\nn, k = int(data[0]), int(data[1])\n# w[i][j] = data[2 + i * n + j], with -1 meaning no road\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0], k = tok[1];\n// w[i][j] = tok[2 + i * n + j], with -1 meaning no road\n",
+    "java": "import java.util.*;\n\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        int n = sc.nextInt();\n        long k = sc.nextLong();\n        // read the n x n cost table\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\nint main() {\n    int n;\n    long long k;\n    scanf(\"%d %lld\", &n, &k);\n    // read the n x n cost table\n    return 0;\n}\n"
+  },
+  "solutions": {
+    "python": "import sys\n\ndata = sys.stdin.read().split()\nn, k = int(data[0]), int(data[1])\nINF = float('inf')\nbase = [[INF if int(data[2 + i * n + j]) < 0 else int(data[2 + i * n + j]) for j in range(n)] for i in range(n)]\n\ndef mul(a, b):                                    # (min, +) product: c[i][j] = min over t of a[i][t] + b[t][j]\n    c = [[INF] * n for _ in range(n)]\n    for i in range(n):\n        ci = c[i]\n        for t in range(n):\n            ait = a[i][t]\n            if ait == INF:\n                continue\n            bt = b[t]\n            for j in range(n):\n                v = ait + bt[j]\n                if v < ci[j]:\n                    ci[j] = v\n    return c\n\nresult = [[0 if i == j else INF for j in range(n)] for i in range(n)]   # the identity: a walk of 0 edges costs 0 at the same vertex\ne = k\nwhile e:                                          # fast exponentiation with the (min, +) product\n    if e & 1:\n        result = mul(result, base)\n    base = mul(base, base)\n    e >>= 1\nr = result[0][n - 1]\nprint(-1 if r == INF else int(r))\n",
+    "javascript": "const lines = [];\nlet line;\nwhile ((line = readLine()) !== null) lines.push(line);\nconst tok = lines.join(' ').split(/\\s+/).filter(s => s.length).map(Number);\nconst n = tok[0];\nlet e = tok[1];\nconst INF = Infinity;\nfunction mul(a, b) {\n  const c = Array.from({ length: n }, () => new Array(n).fill(INF));\n  for (let i = 0; i < n; i++) {\n    for (let t = 0; t < n; t++) {\n      const ait = a[i][t];\n      if (ait === INF) continue;\n      for (let j = 0; j < n; j++) {\n        const v = ait + b[t][j];\n        if (v < c[i][j]) c[i][j] = v;\n      }\n    }\n  }\n  return c;\n}\nlet base = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => tok[2 + i * n + j] < 0 ? INF : tok[2 + i * n + j]));\nlet result = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => i === j ? 0 : INF));\nwhile (e > 0) {\n  if (e % 2 === 1) result = mul(result, base);\n  base = mul(base, base);\n  e = Math.floor(e / 2);\n}\nconst r = result[0][n - 1];\nconsole.log(r === INF ? '-1' : String(r));\n",
+    "java": "import java.io.*;\nimport java.util.*;\n\npublic class Main {\n    static int n;\n    static final long INF = Long.MAX_VALUE / 4;\n    static long[][] mul(long[][] a, long[][] b) {\n        long[][] c = new long[n][n];\n        for (long[] row : c) Arrays.fill(row, INF);\n        for (int i = 0; i < n; i++)\n            for (int t = 0; t < n; t++) {\n                long ait = a[i][t];\n                if (ait >= INF) continue;\n                for (int j = 0; j < n; j++) {\n                    if (b[t][j] >= INF) continue;\n                    long v = ait + b[t][j];\n                    if (v < c[i][j]) c[i][j] = v;\n                }\n            }\n        return c;\n    }\n    public static void main(String[] args) throws IOException {\n        StreamTokenizer st = new StreamTokenizer(new BufferedInputStream(System.in));\n        st.nextToken();\n        n = (int) st.nval;\n        st.nextToken();\n        long e = (long) st.nval;\n        long[][] base = new long[n][n];\n        for (int i = 0; i < n; i++)\n            for (int j = 0; j < n; j++) {\n                st.nextToken();\n                long w = (long) st.nval;\n                base[i][j] = w < 0 ? INF : w;\n            }\n        long[][] result = new long[n][n];\n        for (int i = 0; i < n; i++) {\n            Arrays.fill(result[i], INF);\n            result[i][i] = 0;\n        }\n        while (e > 0) {\n            if ((e & 1) == 1) result = mul(result, base);\n            base = mul(base, base);\n            e >>= 1;\n        }\n        long r = result[0][n - 1];\n        System.out.println(r >= INF ? -1 : r);\n    }\n}\n",
+    "cpp": "#include <bits/stdc++.h>\nusing namespace std;\ntypedef long long ll;\nconst ll INF = LLONG_MAX / 4;\nint n;\ntypedef vector<vector<ll>> Mat;\nMat mul(const Mat &a, const Mat &b) {\n    Mat c(n, vector<ll>(n, INF));\n    for (int i = 0; i < n; i++)\n        for (int t = 0; t < n; t++) {\n            if (a[i][t] >= INF) continue;\n            for (int j = 0; j < n; j++) {\n                if (b[t][j] >= INF) continue;\n                c[i][j] = min(c[i][j], a[i][t] + b[t][j]);\n            }\n        }\n    return c;\n}\nint main() {\n    ll k;\n    scanf(\"%d %lld\", &n, &k);\n    Mat base(n, vector<ll>(n)), result(n, vector<ll>(n, INF));\n    for (int i = 0; i < n; i++)\n        for (int j = 0; j < n; j++) {\n            ll w;\n            scanf(\"%lld\", &w);\n            base[i][j] = w < 0 ? INF : w;\n        }\n    for (int i = 0; i < n; i++) result[i][i] = 0;\n    while (k > 0) {\n        if (k & 1) result = mul(result, base);\n        base = mul(base, base);\n        k >>= 1;\n    }\n    ll r = result[0][n - 1];\n    printf(\"%lld\\n\", r >= INF ? -1LL : r);\n    return 0;\n}\n"
+  }
+}
