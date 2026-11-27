@@ -83,6 +83,35 @@ Assumptions: 20 million daily active users; each opens the app 5 times a day, an
   { option: "Autoscale from a lean base", pros: "Cost follows demand", cons: "Reaction lag, depends on downstream capacity", chooseWhen: "Stateless tiers with gradual load changes" }
 ]} />
 
+<ConceptWalkthrough
+  title="Sizing a fleet to lose a zone"
+  nodes={[
+    {"id": "a", "label": "Zone A", "x": 19, "y": 45},
+    {"id": "b", "label": "Zone B", "x": 50, "y": 45},
+    {"id": "c", "label": "Zone C", "x": 81, "y": 45},
+  ]}
+  frames={[
+    {
+      title: "Size for peak traffic",
+      note: "A service receives 960 requests per second at peak. Each instance can serve 120 requests per second within the latency target. Three equally sized zones with three instances each give 9 instances and 1,080 requests per second of capacity.",
+      active: ["a", "b", "c"],
+      values: {"a": "360 req/s", "b": "360 req/s", "c": "360 req/s"},
+    },
+    {
+      title: "Lose one zone",
+      note: "When Zone C goes offline, six instances remain and can serve 720 requests per second within the latency target. At peak, 960 \u00e2\u02c6\u2019 720 = 240 requests per second must wait, be rejected, or exceed the target.",
+      active: ["a", "b", "c"],
+      values: {"a": "360 req/s", "b": "360 req/s", "c": "offline"},
+    },
+    {
+      title: "Provision for that failure",
+      note: "Four instances in each zone leave eight across A and B if C fails again. Their capacity is 8 \u00c3\u2014 120 = 960 requests per second, exactly the peak. This buys single-zone tolerance for three additional instances. It leaves zero spare capacity during the modeled failure.",
+      active: ["a", "b", "c"],
+      values: {"a": "480 req/s", "b": "480 req/s", "c": "offline"},
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - **Planning from averages** and being surprised by peaks, retries and cache-cold events.

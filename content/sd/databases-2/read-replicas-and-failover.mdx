@@ -94,6 +94,39 @@ A service peaks at 12,000 reads per second and 800 writes per second. One databa
   { option: "Multi-region standby", pros: "Survives region loss", cons: "Cross-region lag or latency; more expensive", chooseWhen: "Disaster recovery requirements" }
 ]} />
 
+<ConceptWalkthrough
+  title="Splitting read capacity and failover headroom"
+  nodes={[
+    {"id": "p", "label": "Primary", "x": 50, "y": 20},
+    {"id": "a", "label": "Replica A", "x": 19, "y": 65},
+    {"id": "b", "label": "Replica B", "x": 50, "y": 65},
+    {"id": "c", "label": "Replica C", "x": 81, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Spread read traffic",
+      note: "A primary handles 200 writes per second and two replicas handle 450 reads per second each. Read demand is 900 per second and each replica can serve up to 600. Assume either replica is eligible for promotion once the old primary is fenced.",
+      active: ["p", "a", "b"],
+      values: {"p": "200 wr/s", "a": "450 reads/s", "b": "450 reads/s", "c": "absent"},
+      edges: [{"from": "p", "to": "a"}, {"from": "p", "to": "b"}],
+    },
+    {
+      title: "Promote one replica",
+      note: "The primary fails and A is promoted to handle all 200 writes per second. Policy keeps all reads on replicas, so B must handle the 900 reads by itself. It can serve 600 and the remaining 300 reads per second must wait or be shed.",
+      active: ["p", "a", "b"],
+      values: {"p": "fenced", "a": "200 wr/s", "b": "600 of 900", "c": "absent"},
+      edges: [{"from": "a", "to": "b"}],
+    },
+    {
+      title: "Compare a third replica",
+      note: "With a third replica available before the outage, A can take writes and two replicas remain for reads. B and C each handle 450 reads per second, leaving 150 per replica. Paying for an extra replica during normal operation preserves read capacity after promotion.",
+      active: ["a", "b", "c"],
+      values: {"p": "fenced", "a": "200 wr/s", "b": "450 reads/s", "c": "450 reads/s"},
+      edges: [],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Pointing reporting queries at the leader and calling the replica a "backup".

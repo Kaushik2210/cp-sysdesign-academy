@@ -287,6 +287,37 @@ All five principles point toward the same habit: **assemble behaviour from small
 
 The same ideas appear at larger scale: a **microservice** with one clear responsibility (S), extended by new services rather than edits to a core (O), exposing a narrow API (I) and depending on contracts, not another service's internals (D). The [service boundaries lesson](/sd/microservice-patterns/service-boundaries-and-availability/) is SOLID applied to deployment units.
 
+<ConceptWalkthrough
+  title="Inject a clock to test the expiry boundary"
+  nodes={[
+    {id: "service", label: "Pass check", x: 25, y: 26},
+    {id: "clock", label: "Clock", x: 75, y: 26},
+    {id: "pass", label: "Pass", x: 25, y: 70},
+    {id: "result", label: "Result", x: 75, y: 70},
+  ]}
+  edges={[{from: "service", to: "clock"}, {from: "service", to: "pass"}, {from: "service", to: "result"}]}
+  frames={[
+    {
+      title: "Give the policy a clock interface",
+      note: "A day pass expires at second 1200 on the service clock. PassCheck accepts a pass while clock.now() < 1200. The application injects a real clock in production and a fixed clock in the test.",
+      active: ["service", "clock", "pass"],
+      values: {pass: "ends 1200", clock: "injected"},
+    },
+    {
+      title: "Test one second before expiry",
+      note: "The fixed clock returns 1199 and the pass expires at 1200. PassCheck evaluates 1199 < 1200 as true and returns valid.",
+      active: ["service", "clock", "result"],
+      values: {clock: "1199 s", pass: "ends 1200", result: "valid"},
+    },
+    {
+      title: "Test the exact boundary",
+      note: "The fixed clock now returns 1200. With the same policy and pass, 1200 < 1200 is false, so the check returns expired. The test controls one injected value and can run immediately.",
+      active: ["service", "clock", "result"],
+      values: {clock: "1200 s", pass: "ends 1200", result: "expired"},
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="When to apply the principles" rows={[

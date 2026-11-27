@@ -209,6 +209,16 @@ Before building a feature, draw the data flows and ask, for each boundary: **S**
 
 Your product lets users paste a link and your server fetches the page to show a preview card, and it also lets users export their invoices as PDF at `/invoices/{id}/pdf`. List the attacks each feature invites, the defences you would put at the code, network and monitoring levels, and how you would test that each one actually works.
 
+<ConceptWalkthrough title="Restrict outbound requests" nodes={[
+  {"id":"n0","label":"Request","x":16,"y":47},
+  {"id":"n1","label":"Policy","x":50,"y":47},
+  {"id":"n2","label":"Egress","x":84,"y":47},
+]} frames={[
+  {"title":"Accept named destinations","note":"A preview service maps recognized destination identifiers to approved upstreams. The service owns the destination list.","active":["n0"],"values":{"n0":"preview ID","n1":"allowlist"}},
+  {"title":"Apply policy before connecting","note":"Reject a destination that falls outside policy before connecting. Reapply validation to each permitted redirect.","active":["n1"],"values":{"n0":"unknown","n1":"reject","n2":"no connection"}},
+  {"title":"Enforce independent egress rules","note":"Network egress restrictions constrain traffic even if application validation regresses. Monitor rejected requests for operational investigation.","active":["n1","n2"],"values":{"n1":"app check","n2":"network rule"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m15-web-api-attacks" tags={["security", "owasp", "injection", "xss", "csrf", "ssrf"]} questions={[

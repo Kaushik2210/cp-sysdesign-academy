@@ -232,6 +232,37 @@ Defences, in layers (none is sufficient alone):
 - **Roll out gradually**: shadow mode (the agent proposes, a human acts), then low-risk tasks, then more autonomy as measured reliability earns it.
 - **Cost**: each step is a model call whose context grows ([serving large language models](/sd/ai-systems/serving-large-language-models/)); long loops are quadratic in cost unless old context is summarised or trimmed.
 
+<ConceptWalkthrough
+  title="Check a draft against a read-only ledger"
+  nodes={[
+    {id: "read", label: "Ledger", x: 20, y: 25},
+    {id: "draft", label: "Draft", x: 80, y: 25},
+    {id: "check", label: "Check", x: 20, y: 70},
+    {id: "budget", label: "Budget", x: 80, y: 70},
+  ]}
+  edges={[{from: "read", to: "draft"}, {from: "draft", to: "check"}]}
+  frames={[
+    {
+      title: "Reserve a fixed budget",
+      note: "The task is to draft an invoice summary for order Q17. The workflow permits at most two model attempts and one read-only ledger call. That call returns 3 units at 120 cents each and tax of 27 cents.",
+      active: ["read", "budget"],
+      values: {read: "3 × 120¢", budget: "2 attempts"},
+    },
+    {
+      title: "Reject a draft with a wrong total",
+      note: "Attempt 1 returns the expected fields for order Q17 but reports a total of 378 cents. A deterministic check recomputes 3 × 120 + 27 = 387 cents and rejects the draft. One model attempt remains, with the ledger result kept for reuse.",
+      active: ["draft", "check", "budget"],
+      values: {draft: "378¢", check: "387¢", budget: "1 left"},
+    },
+    {
+      title: "Accept the corrected draft",
+      note: "Attempt 2 reuses the same Q17 ledger result and reports 387 cents. The schema and total checks pass, so publish the summary with zero attempts left. The workflow has no ledger write capability.",
+      active: ["draft", "check"],
+      values: {draft: "387¢", check: "pass", budget: "0 left"},
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Key decisions in agent design" rows={[

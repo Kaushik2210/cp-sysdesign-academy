@@ -359,6 +359,38 @@ Notice how the extensions land in **new classes** behind existing interfaces, th
 5. Can I **test** it with fixed inputs (no hidden clocks, randomness or globals)?
 6. Did I discuss **concurrency, failure and extension** concretely?
 
+<ConceptWalkthrough
+  title="Two gates compete for the last car spot"
+  nodes={[
+    {id: "east", label: "East gate", x: 23, y: 25},
+    {id: "west", label: "West gate", x: 77, y: 25},
+    {id: "spot", label: "M12", x: 23, y: 70},
+    {id: "tickets", label: "Tickets", x: 77, y: 70},
+  ]}
+  frames={[
+    {
+      title: "Start with one eligible spot",
+      note: "Cars C8 and C9 arrive at the East and West gates together. M12 is the last free medium or large spot. The ticket index is empty, and East acquires the lot lock first in this trace.",
+      active: ["east", "west", "spot"],
+      values: {east: "C8", west: "C9", spot: "free", tickets: "0 open"},
+    },
+    {
+      title: "Claim the spot under the lock",
+      note: "While holding the lock, East verifies M12 is free, assigns it to C8 and records ticket T1 for C8 and M12. East then releases the lock. There is one open ticket and zero eligible free spots.",
+      active: ["east", "spot", "tickets"],
+      values: {east: "C8", spot: "C8", tickets: "T1"},
+      edges: [{from: "east", to: "spot"}, {from: "spot", to: "tickets"}],
+    },
+    {
+      title: "Recheck after acquiring the lock",
+      note: "West now holds the lock. Its check finds M12 occupied by C8, and no other car-sized spot is free. West reports full for C9 and issues no ticket. T1 is still the sole open ticket.",
+      active: ["west", "spot", "tickets"],
+      values: {west: "full", spot: "C8", tickets: "T1 only"},
+      edges: [{from: "west", to: "spot"}],
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Key decisions in the design" rows={[

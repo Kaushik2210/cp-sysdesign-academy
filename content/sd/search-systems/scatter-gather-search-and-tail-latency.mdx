@@ -169,6 +169,16 @@ Search queries are read-only, so duplicating them is safe. For writes, hedging n
 
 Your product search has 80 shards, a latency goal of 200 ms at p99, and each shard has two replicas. During a sale, p99 jumps to 900 ms. Which of the defences above would you try first, in what order, and how would you check that hedging is not making the overload worse? What do you show the user if you drop slow shards?
 
+<ConceptWalkthrough title="Handle a late shard" nodes={[
+  {"id":"n0","label":"Shard A","x":16,"y":47},
+  {"id":"n1","label":"Shard B","x":50,"y":47},
+  {"id":"n2","label":"Merge","x":84,"y":47},
+]} frames={[
+  {"title":"Fan out together","note":"A completes in 24 ms and B will take 85 ms. The coordinator has a 70 ms deadline.","active":["n0","n1"],"values":{"n0":"24 ms","n1":"85 ms","n2":"cutoff 70"}},
+  {"title":"Apply the deadline","note":"At 70 ms A’s hits are available. B’s hits are missing. A complete response is unavailable within this deadline.","active":["n0","n2"],"values":{"n0":"returned","n1":"late","n2":"partial"}},
+  {"title":"Make the result contract explicit","note":"If partial search results are acceptable, merge A’s hits and flag the missing shard. An export that needs completeness can fail explicitly or retry later.","active":["n2"],"values":{"n2":"A only"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m14-scatter-gather" tags={["search", "tail-latency", "sharding"]} questions={[

@@ -95,6 +95,40 @@ Also remember **egress**: moving data out of a cloud region or to the internet i
 - **Backups in the same blast radius.** If the same credentials can delete production and backups, one compromise removes both.
 - **Retention conflicts.** Legal hold or compliance requires keeping; privacy law requires deleting. Design per-data-class retention.
 
+<ConceptWalkthrough
+  title="Choosing an archive retrieval rate"
+  nodes={[
+    {"id": "hot", "label": "Hot", "x": 26, "y": 45},
+    {"id": "cold", "label": "Archive", "x": 74, "y": 45},
+  ]}
+  frames={[
+    {
+      title: "Price a month of recordings",
+      note: "A studio keeps 1,000 GB of recordings for the full month. In this model hot storage costs $0.020 per GB-month with free retrieval. Archive costs $0.005 per GB-month plus $0.030 per GB retrieved, with a two-hour restore delay. Ignore other fees.",
+      active: ["hot", "cold"],
+      values: {"hot": "$20 storage", "cold": "$5 storage"},
+    },
+    {
+      title: "Restore 100 GB",
+      note: "With 100 GB retrieved, archive costs $5 + $3 = $8 for the month. Hot storage still costs $20. The studio saves $12 if it can wait two hours for each archive restore.",
+      active: ["hot", "cold"],
+      values: {"hot": "$20 total", "cold": "$8 total"},
+    },
+    {
+      title: "Find the break-even point",
+      note: "Archive saves $15 on storage. At $0.030 per GB, 500 GB of retrieval consumes the entire $15 saving. Both tiers now cost $20, and archive still has a two-hour restore delay.",
+      active: ["hot", "cold"],
+      values: {"hot": "$20 total", "cold": "$20 total"},
+    },
+    {
+      title: "Restore 700 GB",
+      note: "At 700 GB retrieved, archive costs $5 + $21 = $26. Hot storage costs $20 and avoids the two-hour restore delay. Expected retrieval volume and restore deadlines both affect the tier choice.",
+      active: ["hot", "cold"],
+      values: {"hot": "$20 total", "cold": "$26 total"},
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Equating "11 nines durability" with "never lose data" or with availability.

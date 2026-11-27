@@ -139,6 +139,38 @@ Peak 20,000 requests per second; each backend sustains about 1,500 requests per 
 - **Thundering reconnect**: after an LB restart, millions of clients reconnect at once. Use jittered client backoff.
 - **Slow backend**: not dead, just slow, so health checks pass while latency climbs. Use latency-aware algorithms, timeouts and outlier ejection.
 
+<ConceptWalkthrough
+  title="Tuning health-check sensitivity"
+  nodes={[
+    {"id": "lb", "label": "Balancer", "x": 50, "y": 20},
+    {"id": "a", "label": "Server A", "x": 25, "y": 65},
+    {"id": "b", "label": "Server B", "x": 75, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Start with spare capacity",
+      note: "Two servers can each handle 100 requests per second. They normally split 90 requests per second as 45 each. The balancer probes each server every five seconds and removes a server after two consecutive failed probes.",
+      active: ["lb", "a", "b"],
+      values: {"lb": "90 req/s", "a": "45 req/s", "b": "45 req/s"},
+      edges: [{"from": "lb", "to": "a"}, {"from": "lb", "to": "b"}],
+    },
+    {
+      title: "Wait through one failed probe",
+      note: "A fails the probe at second zero, and B passes. With a two-failure threshold, A stays eligible and is still assigned about 45 requests per second. This avoids ejecting A for a single probe failure but exposes requests to a real outage.",
+      active: ["lb", "a", "b"],
+      values: {"lb": "90 req/s", "a": "1 failed", "b": "45 req/s"},
+      edges: [{"from": "lb", "to": "a"}, {"from": "lb", "to": "b"}],
+    },
+    {
+      title: "Remove A on the next failure",
+      note: "A fails again at second five and the balancer removes it. B takes all 90 requests per second, leaving 10 requests per second of spare capacity. A one-failure threshold could have rerouted five seconds earlier in this trace.",
+      active: ["lb", "a", "b"],
+      values: {"lb": "90 req/s", "a": "ejected", "b": "90 req/s"},
+      edges: [{"from": "lb", "to": "b"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Treating the LB as a magic fix while the database stays a single machine; the bottleneck just moves.

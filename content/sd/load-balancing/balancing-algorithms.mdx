@@ -175,6 +175,37 @@ A local run printed about 80.1 percent moved for mod N and about 19.7 percent fo
 - **Weight misconfiguration**: weights not updated after a hardware change leave a big machine idle.
 - **Measurement lag**: with least response time, latency data is old by the time you act on it.
 
+<ConceptWalkthrough
+  title="Routing three short jobs behind a long one"
+  nodes={[
+    {"id": "lb", "label": "Balancer", "x": 50, "y": 20},
+    {"id": "a", "label": "Server A", "x": 25, "y": 65},
+    {"id": "b", "label": "Server B", "x": 75, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Set up the batch",
+      note: "A and B each execute one job at a time in FIFO order. A has a job with eight seconds left and B is idle. Three new jobs of two seconds each arrive together. Count queued and running jobs as outstanding, and start the round-robin pointer at A.",
+      active: ["lb", "a", "b"],
+      values: {"lb": "3 \u00c3\u2014 2 s", "a": "8 s work", "b": "0 s work"},
+    },
+    {
+      title: "Assign by round robin",
+      note: "Round robin assigns the new jobs to A, B, and A. In arrival order the new jobs finish at seconds 10, 2, and 12. The last new job finishes after 12 seconds, even though B becomes idle at second two.",
+      active: ["lb", "a", "b"],
+      values: {"lb": "A / B / A", "a": "12 s work", "b": "2 s work"},
+      edges: [{"from": "lb", "to": "a"}, {"from": "lb", "to": "b"}],
+    },
+    {
+      title: "Assign by least outstanding",
+      note: "Starting again from the same initial state, least outstanding sends the first job to B. A and B now each have one job, so break the tie toward B. The third goes to A, which has one job versus B's two. Finish times are 2, 4, and 10 seconds. This lowers the last finish to 10 seconds but still queues behind A's long job because counts ignore duration.",
+      active: ["lb", "a", "b"],
+      values: {"lb": "B / B / A", "a": "10 s work", "b": "4 s work"},
+      edges: [{"from": "lb", "to": "a"}, {"from": "lb", "to": "b"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Choosing by the textbook name instead of measuring p99 on your own traffic mix.

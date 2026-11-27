@@ -61,6 +61,16 @@ Interviewers increasingly ask how you use AI tools. A good answer is specific an
 
 Avoid both extremes: "I do not use it" and "it writes everything for me."
 
+<ConceptWalkthrough title="Turn an incident into a project story" nodes={[
+  {"id":"n0","label":"Baseline","x":17,"y":48},
+  {"id":"n1","label":"Action","x":50,"y":48},
+  {"id":"n2","label":"Evidence","x":82,"y":48},
+]} frames={[
+  {"title":"Establish the operating context","note":"A checkout API had 480 ms p95 latency during the peak hour, above a 300 ms target. Explain how you measured p95 and which subset of traffic you are discussing.","active":["n0"],"values":{"n0":"480 ms p95"}},
+  {"title":"Describe your contribution","note":"Your traces showed repeated inventory lookups within one request. You removed the repeated lookup and compared the old and new versions on a matched canary cohort while tracking error rates.","active":["n1"],"values":{"n1":"remove repeat"}},
+  {"title":"Report a measured result","note":"In this example, canary p95 reached 260 ms with a similar traffic mix and no visible error-rate increase. Report the observation window and cohort size, and keep claims tied to that comparison.","active":["n2"],"values":{"n2":"260 ms p95"}},
+]} />
+
 ## Questions to ask them
 
 Prepare three real questions. They show curiosity and help you decide whether you want the job: "How does the team decide what to build next?", "What does a good first 90 days look like?", "How are incidents handled and reviewed?"

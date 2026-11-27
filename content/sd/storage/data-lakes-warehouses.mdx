@@ -83,6 +83,39 @@ The exact ratios are workload dependent, but one to two orders of magnitude less
   { option: "Lakehouse table format", pros: "One copy of data with ACID-like tables and time travel", cons: "More moving parts, compaction and maintenance jobs", chooseWhen: "You want lake economics with warehouse-style reliability" }
 ]} />
 
+<ConceptWalkthrough
+  title="Pruning a week of meter readings"
+  nodes={[
+    {"id": "query", "label": "Query", "x": 50, "y": 19},
+    {"id": "row", "label": "Rows", "x": 19, "y": 66},
+    {"id": "col", "label": "Columns", "x": 50, "y": 66},
+    {"id": "day", "label": "Daily", "x": 81, "y": 66},
+  ]}
+  frames={[
+    {
+      title: "Scan full rows",
+      note: "A week holds 7 million readings, exactly 1 million per day. Each row is 100 bytes. Summing a 4-byte usage field for two days scans 700 MB in an unpartitioned row layout with no index. Use decimal MB and ignore metadata and compression.",
+      active: ["query", "row"],
+      values: {"query": "2 days", "row": "700 MB"},
+      edges: [{"from": "query", "to": "row"}],
+    },
+    {
+      title: "Project two columns",
+      note: "An unpartitioned column layout reads a 4-byte day field and a 4-byte usage field for all 7 million rows in this simple full scan. At 8 bytes per row it reads 56 MB.",
+      active: ["query", "col"],
+      values: {"query": "2 days", "col": "56 MB"},
+      edges: [{"from": "query", "to": "col"}],
+    },
+    {
+      title: "Prune by partition day",
+      note: "With one partition per day, directory metadata identifies the two matching partitions. The query reads only the 4-byte usage field for 2 million rows, or 8 MB. Daily partitions save another 48 MB here, with more partitions and metadata to manage as the history grows.",
+      active: ["query", "day"],
+      values: {"query": "2 days", "day": "8 MB"},
+      edges: [{"from": "query", "to": "day"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - **Many tiny files.** Thousands of KB-sized Parquet files hurt listing and scan performance; compact into files of hundreds of MB.

@@ -103,6 +103,45 @@ Common fixes, from simplest to most precise:
   { option: "Leaderless with quorums", pros: "No failover step; tolerates node loss and slow nodes; tunable r and w", cons: "Weaker guarantees, conflict resolution, read repair and anti-entropy needed", chooseWhen: "High-availability key-value workloads with huge write volume" }
 ]} />
 
+<ConceptWalkthrough
+  title="Choosing when a reservation is acknowledged"
+  nodes={[
+    {"id": "app", "label": "Client", "x": 50, "y": 20},
+    {"id": "p", "label": "Primary", "x": 25, "y": 65},
+    {"id": "r", "label": "Replica", "x": 75, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Write reservation R9",
+      note: "A primary and a replica both start at version 40. When R9 arrives, the primary durably records version 41 after 4 ms. If the primary stays up, the replica durably records it and confirms back to the primary at 24 ms. Assume negligible client network delay.",
+      active: ["app", "p", "r"],
+      values: {"app": "R9 sent", "p": "v41 at 4 ms", "r": "v40"},
+      edges: [{"from": "app", "to": "p"}],
+    },
+    {
+      title: "Acknowledge at the primary",
+      note: "With async replication, the client gets success at 4 ms. If the primary fails permanently at 10 ms before the replica receives R9, the replica can be promoted at version 40 and R9 is missing despite the success response.",
+      active: ["app", "p", "r"],
+      values: {"app": "ack at 4 ms", "p": "failed", "r": "v40"},
+      edges: [{"from": "app", "to": "p"}],
+    },
+    {
+      title: "Wait for a durable replica",
+      note: "With synchronous acknowledgement and the same 10 ms failure, the client receives no success and the replica is still at version 40. The client needs to resolve the outcome before retrying the reservation.",
+      active: ["app", "p"],
+      values: {"app": "no ack", "p": "failed", "r": "v40"},
+      edges: [],
+    },
+    {
+      title: "Compare healthy-path latency",
+      note: "When the primary stays up, the synchronous client receives success at 24 ms, after the replica has made version 41 durable. That is 20 ms later than async. The wait protects acknowledged writes against the modeled primary loss when the confirming replica survives.",
+      active: ["app", "p", "r"],
+      values: {"app": "ack at 24 ms", "p": "v41", "r": "v41"},
+      edges: [{"from": "p", "to": "r"}, {"from": "p", "to": "app"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Treating a replica as a free backup: replication copies mistakes too. A bad `DELETE` replicates instantly. You still need point-in-time backups.

@@ -202,6 +202,43 @@ The simulated systems, judge and costs are idealised and the probabilities are a
 - **Online signals**: thumbs, edits, regeneration, copy, abandonment and escalation rates are **noisy and biased** (only some users give feedback), but they are measured on real work; use them to find where to look, and to validate offline metrics.
 - **Privacy**: evaluation data contains real user text. Apply the same retention, access and anonymisation rules as production data.
 
+<ConceptWalkthrough
+  title="A better average fails the release gate"
+  nodes={[
+    {id: "routine", label: "Routine", x: 23, y: 25},
+    {id: "critical", label: "Exceptions", x: 77, y: 25},
+    {id: "total", label: "Overall", x: 23, y: 70},
+    {id: "gate", label: "Gate", x: 77, y: 70},
+  ]}
+  edges={[{from: "routine", to: "total"}, {from: "critical", to: "total"}, {from: "critical", to: "gate"}]}
+  frames={[
+    {
+      title: "Freeze the comparison set",
+      note: "Run both versions on the same 100 labeled support requests. The held-out set contains 90 routine requests and 10 critical exceptions. Score each answer by exact match on the required action.",
+      active: ["routine", "critical"],
+      values: {routine: "90 cases", critical: "10 cases", total: "100 cases"},
+    },
+    {
+      title: "Measure the baseline",
+      note: "The current version answers 72 of 90 routine requests and 10 of 10 exceptions correctly. Its overall exact-match score is (72 + 10) / 100 = 82%.",
+      active: ["routine", "critical", "total"],
+      values: {routine: "72/90", critical: "10/10", total: "82%"},
+    },
+    {
+      title: "Score the candidate",
+      note: "The candidate answers 81 of 90 routine requests and 7 of 10 exceptions correctly. Its overall score rises to 88%, while its critical-exception score drops from 100% to 70%.",
+      active: ["routine", "critical", "total"],
+      values: {routine: "81/90", critical: "7/10", total: "88%"},
+    },
+    {
+      title: "Apply the critical-slice rule",
+      note: "The release rule requires at least 9 of 10 critical exceptions correct on this fixed set. The candidate scores 7 of 10, so the gate blocks rollout even though its overall score is 88%.",
+      active: ["critical", "gate"],
+      values: {critical: "7/10", total: "88%", gate: "need 9/10"},
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Key decisions in LLM evaluation" rows={[

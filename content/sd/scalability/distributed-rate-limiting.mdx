@@ -102,6 +102,44 @@ An API has 5,000 customers. Free tier: 60 requests per minute per API key; Pro: 
 - Pro tier uses a token bucket with `rate = 10/s`, `capacity = 20`, plus a minute-level fixed window of 600 to cap sustained use.
 - On deny: `429`, `Retry-After: <seconds>`, and a body naming the limit hit.
 
+<ConceptWalkthrough
+  title="An atomic counter versus local quota slices"
+  nodes={[
+    {"id": "a", "label": "Edge A", "x": 23, "y": 20},
+    {"id": "b", "label": "Edge B", "x": 77, "y": 20},
+    {"id": "store", "label": "Quota", "x": 50, "y": 64},
+  ]}
+  frames={[
+    {
+      title: "Allow two requests to race",
+      note: "A client has used nine of ten permits in a fixed one-minute window. The same client sends one request to each edge. With separate read and write operations, both edges can read nine and decide they may admit a request.",
+      active: ["a", "b", "store"],
+      values: {"a": "reads 9", "b": "reads 9", "store": "9 used"},
+      edges: [{"from": "a", "to": "store"}, {"from": "b", "to": "store"}],
+    },
+    {
+      title: "Count the lost update",
+      note: "If both edges accept and each writes the value ten computed from its read, eleven requests have actually passed while the store shows ten. This trace uses an ordinary assignment for the write.",
+      active: ["a", "b", "store"],
+      values: {"a": "accepted", "b": "accepted", "store": "10 stored"},
+      edges: [{"from": "a", "to": "store"}, {"from": "b", "to": "store"}],
+    },
+    {
+      title: "Serialize the check and increment",
+      note: "Reset to nine used and retry with an atomic check-and-increment at the quota store. If A runs first, it increments to ten and B sees ten and rejects. Exactly ten requests have passed, with both edges depending on the shared store to decide.",
+      active: ["a", "b", "store"],
+      values: {"a": "accepted", "b": "rejected", "store": "10 used"},
+      edges: [{"from": "a", "to": "store"}, {"from": "b", "to": "store"}],
+    },
+    {
+      title: "Compare fixed local slices",
+      note: "In a fresh window, give each edge five local permits. If all ten requests land on A, A accepts five and rejects five while B still has all five permits. Fixed slices enforce the global ceiling without a per-request shared-store call, but can strand capacity under skew.",
+      active: ["a", "b", "store"],
+      values: {"a": "5 passed", "b": "5 unused", "store": "10 split"},
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - **Check-then-set** without atomicity (the classic race).

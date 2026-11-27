@@ -209,6 +209,16 @@ Rules: never ship code and a **schema change that breaks the previous version** 
 
 You are launching a new payment flow that changes the database schema and calls a new provider. It must not double-charge. Describe the release plan: which strategy for the code, how flags are used, how the schema is changed in steps, what the canary compares and what triggers an automatic rollback, what is dark-launched with mirrored traffic first, and what you do if you discover a bug after the migration has run.
 
+<ConceptWalkthrough title="Decide whether to expand a canary" nodes={[
+  {"id":"n0","label":"Control","x":16,"y":47},
+  {"id":"n1","label":"Canary","x":50,"y":47},
+  {"id":"n2","label":"Gate","x":84,"y":47},
+]} frames={[
+  {"title":"Compare similar cohorts","note":"Each version handles 2,000 requests. The control has 4 errors and the canary has 24. Predict their error rates.","active":["n0","n1"],"values":{"n0":"4 / 2000","n1":"24 / 2000"}},
+  {"title":"Hold the rollout","note":"The rates are 0.2% and 1.2%. The canary exceeds a predeclared absolute 0.5% limit.","active":["n1","n2"],"values":{"n0":"0.2%","n1":"1.2%","n2":"limit 0.5%"}},
+  {"title":"Measure the rollback","note":"Return the canary cohort to the known-good version. Check recovery before starting another rollout.","active":["n0","n2"],"values":{"n0":"known good","n2":"hold"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m16-safe-deployments" tags={["deployments", "canary", "feature-flags", "migrations"]} questions={[

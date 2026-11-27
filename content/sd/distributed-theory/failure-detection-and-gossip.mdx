@@ -66,6 +66,41 @@ SWIM combines the two ideas: failure detection by random probing, with membershi
   C-->>A: B is alive (via C)
   Note over A: B stays alive; only the A to B link was bad`} caption="SWIM indirect probe: a failed direct ping is double-checked through other nodes before suspecting B" />
 
+<ConceptWalkthrough title="Suspect a member and refute the report" nodes={[
+  { id: "a", label: "A", x: 22, y: 27 },
+  { id: "b", label: "B", x: 78, y: 27 },
+  { id: "c", label: "C", x: 50, y: 68 },
+]} frames={[
+  {
+    title: "A's direct probe times out",
+    note: "A sends a probe to B at incarnation 7 and hears no reply before the deadline. A starts an indirect check because silence is compatible with either a crash or a delayed message.",
+    active: ["a","b"],
+    values: {"a":"timeout","b":"inc 7"},
+    edges: [{"from":"a","to":"b"}],
+  },
+  {
+    title: "C's indirect check also times out",
+    note: "A asks C to probe B. No acknowledgement reaches A by the indirect deadline, so A marks B suspect at incarnation 7 and starts a suspicion timer.",
+    active: ["a","b","c"],
+    values: {"a":"suspect","b":"inc 7","c":"timeout"},
+    edges: [{"from":"a","to":"c"},{"from":"c","to":"b"}],
+  },
+  {
+    title: "B learns about the suspicion",
+    note: "C receives and relays A's suspect report. B is alive after a brief pause and learns that its current incarnation 7 has been marked suspect.",
+    active: ["a","c","b"],
+    values: {"a":"suspect","c":"suspect","b":"inc 7"},
+    edges: [{"from":"a","to":"c"},{"from":"c","to":"b"}],
+  },
+  {
+    title: "B supersedes the suspect report",
+    note: "B increments to incarnation 8 and announces that it is alive. When the newer report reaches A via C before the suspicion timer expires, A clears the suspicion.",
+    active: ["a","b","c"],
+    values: {"a":"alive 8","b":"inc 8","c":"alive 8"},
+    edges: [{"from":"b","to":"c"},{"from":"c","to":"a"}],
+  },
+]} />
+
 ## Code 1: how fast does a rumour spread?
 
 Each round every informed node picks `fanout` random nodes and informs them. The program counts rounds until all `n` nodes know, averaged over several runs (fewer for the larger clusters to keep it quick: 20, 10, 3 and 1 runs).

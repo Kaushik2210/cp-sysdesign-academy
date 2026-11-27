@@ -88,6 +88,35 @@ A viral post receives 30,000 like events per second. Assume one shard sustains a
   { option: "Dedicated shard for hot tenant", pros: "Isolation; others unaffected", cons: "Manual or detection-driven; uneven cost", chooseWhen: "Multi-tenant systems with a few giant tenants" }
 ]} />
 
+<ConceptWalkthrough
+  title="Striping a live vote counter"
+  nodes={[
+    {"id": "a", "label": "Stripe A", "x": 18, "y": 46},
+    {"id": "b", "label": "Stripe B", "x": 50, "y": 46},
+    {"id": "c", "label": "Stripe C", "x": 82, "y": 46},
+  ]}
+  frames={[
+    {
+      title: "Saturate a single counter",
+      note: "One contest counter starts at zero and receives 900 increments in one second. One partition can apply up to 400 increments per second. If all updates target one key on A and excess writes queue, the applied count is 400 at second one and 500 updates are waiting.",
+      active: ["a", "b", "c"],
+      values: {"a": "400 applied", "b": "idle", "c": "idle"},
+    },
+    {
+      title: "Spread writes over three partitions",
+      note: "Replay from zero with three counter stripes placed on different partitions. An even split sends 300 increments to each. Each partition is below its 400-per-second limit, so all 900 are applied by second one and none are queued.",
+      active: ["a", "b", "c"],
+      values: {"a": "300 applied", "b": "300 applied", "c": "300 applied"},
+    },
+    {
+      title: "Read and sum all stripes",
+      note: "After those updates have settled, a reader fetches the three stripes and sums 300 + 300 + 300 = 900. The design trades one counter read for three. During continuing writes, an ordinary fan-out read can mix observation times unless the system supplies a consistent snapshot.",
+      active: ["a", "b", "c"],
+      values: {"a": "read 300", "b": "read 300", "c": "read 300"},
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Assuming consistent hashing or more shards fixes a hot key.

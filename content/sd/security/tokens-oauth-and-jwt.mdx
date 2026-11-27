@@ -226,6 +226,16 @@ For browser apps many teams use a small **backend-for-frontend** that holds the 
 
 Your company runs 40 microservices, a web app and a mobile app. Today every service checks a session cookie against one shared database, and that database is a bottleneck and a single point of failure. Propose a token design: which flow for each client, whether access tokens are JWTs or opaque, how long they live, how you revoke a compromised account within a minute, and how a service decides what a caller may do.
 
+<ConceptWalkthrough title="Check an access token before authorizing" nodes={[
+  {"id":"n0","label":"Verify","x":16,"y":47},
+  {"id":"n1","label":"Audience","x":50,"y":47},
+  {"id":"n2","label":"Scope","x":84,"y":47},
+]} frames={[
+  {"title":"Check provenance","note":"Verify the signature with a trusted issuer key and enforce the expected issuer, algorithm and time bounds. Suppose these pass.","active":["n0"],"values":{"n0":"signature OK"}},
+  {"title":"Reject the wrong audience","note":"This API serves inventory. A token for billing does not grant access here, even with a valid signature.","active":["n1"],"values":{"n0":"signature OK","n1":"billing","n2":"reject"}},
+  {"title":"Enforce the operation scope","note":"An otherwise valid inventory token with inventory.read can authorize an eligible read. Deny a write requiring inventory.write.","active":["n1","n2"],"values":{"n0":"signature OK","n1":"inventory","n2":"read only"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m15-tokens-oauth-jwt" tags={["security", "oauth2", "jwt"]} questions={[

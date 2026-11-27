@@ -62,6 +62,36 @@ An **even** cluster size buys nothing: 4 nodes tolerate the same single failure 
 
 Others: ZAB (ZooKeeper), Viewstamped Replication, and Byzantine protocols such as PBFT.
 
+<ConceptWalkthrough title="Follow a majority through a partition" nodes={[
+  { id: "a", label: "A", x: 22, y: 25 },
+  { id: "b", label: "B", x: 50, y: 25 },
+  { id: "c", label: "C", x: 78, y: 25 },
+  { id: "d", label: "D", x: 34, y: 68 },
+  { id: "e", label: "E", x: 66, y: 68 },
+]} frames={[
+  {
+    title: "Three voters form a quorum",
+    note: "In a fixed five-voter group, three votes form a majority. A, B, and C can act as a quorum while D and E are slow.",
+    active: ["a","b","c"],
+    values: {"a":"ready","b":"ready","c":"ready","d":"slow","e":"slow"},
+    edges: [{"from":"a","to":"b"},{"from":"b","to":"c"}],
+  },
+  {
+    title: "Only the larger partition can make progress",
+    note: "The network splits into A-B-C and D-E. A-B-C can still reach three votes. D-E can reach only two and must wait, even if its members are both healthy.",
+    active: ["a","b","c"],
+    values: {"a":"side 1","b":"side 1","c":"side 1","d":"side 2","e":"side 2"},
+    edges: [{"from":"a","to":"b"},{"from":"b","to":"c"},{"from":"d","to":"e"}],
+  },
+  {
+    title: "A new majority must overlap the old one",
+    note: "Connectivity changes and C, D, and E can communicate. This new quorum intersects A-B-C at C. The protocol uses the shared voter and its persisted state to preserve safety across the change.",
+    active: ["c","d","e"],
+    values: {"a":"isolated","b":"isolated","c":"overlap","d":"ready","e":"ready"},
+    edges: [{"from":"c","to":"e"},{"from":"d","to":"e"}],
+  },
+]} />
+
 ## Code: what a majority costs and buys
 
 Each node is up independently with probability `p`. The cluster works while a majority is up. The program computes the exact probability with the binomial formula and checks it by simulation.

@@ -263,6 +263,45 @@ print("invariants and money conservation hold over 5000 random operations:", ok,
 | **Non-greedy coin systems** | replace `make_change` with dynamic programming (the [coin change](/cp/dynamic-programming/coin-change/) lesson) because greedy fails for some coin sets |
 | **Several machines** | each machine runs this model locally; a backend collects sales and stock, with idempotent reports ([idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)) |
 
+<ConceptWalkthrough
+  title="A rejected selection can succeed on retry"
+  nodes={[
+    {id: "credit", label: "Credit", x: 23, y: 25},
+    {id: "slot", label: "Slot B4", x: 77, y: 25},
+    {id: "bank", label: "Bank", x: 23, y: 70},
+    {id: "out", label: "Output", x: 77, y: 70},
+  ]}
+  frames={[
+    {
+      title: "Insert the first coin",
+      note: "Slot B4 costs 80¢ and has 2 items. The bank contains one 25¢ coin. The customer inserts 100¢ into escrow, putting the machine in HasMoney with 100¢ credit.",
+      active: ["credit", "slot", "bank"],
+      values: {credit: "100¢", slot: "2 at 80¢", bank: "1 × 25¢"},
+    },
+    {
+      title: "Reject the first selection",
+      note: "With 100¢ credit and an 80¢ price, B4 requires 20¢ change. The payout pool contains only a 100¢ coin and a 25¢ coin, so the machine declines the sale. Credit stays at 100¢, stock stays at 2 and sales remain 0¢.",
+      active: ["credit", "slot", "out"],
+      values: {credit: "100¢", slot: "2 left", bank: "1 × 25¢", out: "declined"},
+      edges: [{from: "credit", to: "slot"}, {from: "slot", to: "out"}],
+    },
+    {
+      title: "Add a coin and retry",
+      note: "The customer inserts 5¢, so credit is 105¢ and B4 now requires 105 − 80 = 25¢ change. The one 25¢ bank coin covers the exact amount.",
+      active: ["credit", "bank", "slot"],
+      values: {credit: "105¢", slot: "2 at 80¢", bank: "1 × 25¢"},
+      edges: [{from: "credit", to: "slot"}, {from: "bank", to: "out"}],
+    },
+    {
+      title: "Commit the sale",
+      note: "The machine dispenses one B4 item and pays out 25¢. The bank now holds the inserted 100¢ and 5¢ coins, B4 stock is 1, sales are 80¢ and credit resets to 0¢ in Idle.",
+      active: ["slot", "bank", "out"],
+      values: {credit: "0¢", slot: "1 left", bank: "105¢", out: "item + 25¢"},
+      edges: [{from: "slot", to: "out"}, {from: "bank", to: "out"}],
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Ways to model the machine" rows={[

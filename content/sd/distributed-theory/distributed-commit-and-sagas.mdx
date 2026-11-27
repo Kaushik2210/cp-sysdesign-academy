@@ -69,6 +69,41 @@ Practical requirements:
 - Use the **transactional outbox** pattern: write the business change and the event to publish in one local transaction, and let a relay publish the event, so you never commit state without announcing it or the reverse.
 - Compensations can fail too; they are retried until they succeed, and some actions (sending an email) cannot be undone, only followed by an apology message.
 
+<ConceptWalkthrough title="Compensate a failed checkout saga" nodes={[
+  { id: "order", label: "Order", x: 24, y: 25 },
+  { id: "pay", label: "Pay", x: 76, y: 25 },
+  { id: "stock", label: "Stock", x: 24, y: 67 },
+  { id: "ship", label: "Ship", x: 76, y: 67 },
+]} frames={[
+  {
+    title: "Commit each checkout step",
+    note: "The saga creates a pending order, charges 40, and reserves 2 units. These are three local commits, so another service can already observe the pending order and charge.",
+    active: ["order","pay","stock"],
+    values: {"order":"pending","pay":"paid 40","stock":"held 2","ship":"waiting"},
+    edges: [{"from":"order","to":"pay"},{"from":"pay","to":"stock"}],
+  },
+  {
+    title: "Shipping fails before booking",
+    note: "The shipping service reports a definitive failure before making a booking. The saga records failure and starts compensating the completed steps in reverse order, beginning with inventory.",
+    active: ["ship","stock"],
+    values: {"order":"pending","pay":"paid 40","stock":"held 2","ship":"failed"},
+    edges: [{"from":"ship","to":"stock"}],
+  },
+  {
+    title: "Release inventory and refund",
+    note: "The inventory service releases the two reserved units, then payments refunds 40. A retry of either compensation uses the same operation ID so it cannot release or refund twice.",
+    active: ["stock","pay"],
+    values: {"order":"pending","pay":"refunded","stock":"released","ship":"failed"},
+    edges: [{"from":"stock","to":"pay"}],
+  },
+  {
+    title: "Cancel the pending order",
+    note: "After both compensations succeed, the saga cancels the original order. Its final business state is cancelled, and the payment history still records both the charge and its refund.",
+    active: ["order"],
+    values: {"order":"cancelled","pay":"refunded","stock":"released","ship":"failed"},
+  },
+]} />
+
 ## Code: what happens when things go wrong
 
 The program runs 2PC with participants for orders, payments and stock under four scenarios, then runs a four-step saga that fails at different steps.

@@ -275,6 +275,45 @@ In the real world button presses arrive **while cars are moving**. Two common st
 
 Safety-critical logic (door interlocks, overspeed) lives in **separate hardware controllers**, never only in this software.
 
+<ConceptWalkthrough
+  title="Dispatch by pickup time with LOOK"
+  nodes={[
+    {id: "a", label: "Car A", x: 23, y: 25},
+    {id: "b", label: "Car B", x: 77, y: 25},
+    {id: "p", label: "Pickup", x: 23, y: 70},
+    {id: "d", label: "Drop-off", x: 77, y: 70},
+  ]}
+  frames={[
+    {
+      title: "Compare the car states",
+      note: "At tick 0 a rider requests floor 3 to floor 5. Car A is at floor 4 moving up and already owes a drop-off at floor 7. Car B is idle at floor 0. A is one floor from pickup and B is three floors away.",
+      active: ["a", "b", "p"],
+      values: {a: "4 ↑ to 7", b: "0 idle", p: "floor 3", d: "floor 5"},
+    },
+    {
+      title: "Simulate both pickup times",
+      note: "Under LOOK, A takes 3 movement ticks to floor 7, 1 door tick, 4 movement ticks down to floor 3 and 1 door tick to pick up, totaling 9. B takes 3 movement ticks up and 1 door tick, totaling 4. LeastEta assigns the rider to B.",
+      active: ["a", "b", "p"],
+      values: {a: "9 ticks", b: "4 ticks", p: "floor 3"},
+      edges: [{from: "a", to: "p"}, {from: "b", to: "p"}],
+    },
+    {
+      title: "Pick up at tick four",
+      note: "Assigned car B reaches floor 3 at tick 3 and opens its doors at tick 4. The rider boards after waiting 4 ticks, and floor 5 enters B's pending stops.",
+      active: ["b", "p"],
+      values: {b: "floor 3", p: "tick 4", d: "queued"},
+      edges: [{from: "b", to: "p"}],
+    },
+    {
+      title: "Drop off at tick seven",
+      note: "Car B moves from floor 3 to 4 on tick 5, then to 5 on tick 6, and opens at tick 7. The rider's ride time is 7 − 4 = 3 ticks.",
+      active: ["b", "d"],
+      values: {b: "floor 5", p: "tick 4", d: "tick 7"},
+      edges: [{from: "b", to: "d"}],
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Scheduling and dispatch choices" rows={[

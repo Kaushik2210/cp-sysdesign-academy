@@ -264,6 +264,46 @@ The numbers are from one run with fixed random seeds, so they are exactly reprod
 
 For the policy comparison in more depth see the [eviction policies](/sd/caching/eviction-policies/) lesson.
 
+<ConceptWalkthrough
+  title="A cache hit changes the next eviction"
+  nodes={[
+    {id: "a", label: "P", x: 18, y: 45},
+    {id: "b", label: "Q", x: 50, y: 20},
+    {id: "c", label: "R", x: 82, y: 45},
+    {id: "map", label: "Keys", x: 50, y: 73},
+  ]}
+  frames={[
+    {
+      title: "Fill a two-entry cache",
+      note: "With capacity 2, put(P, 40) followed by put(Q, 60) builds the list Q→P from most to least recently used. The hash map has keys P and Q and points to their list nodes.",
+      active: ["a", "b", "map"],
+      values: {a: "40 · LRU", b: "60 · MRU", map: "P, Q"},
+      edges: [{from: "b", to: "a"}],
+    },
+    {
+      title: "Read the least recent entry",
+      note: "get(P) returns 40. Its hash map entry locates the node directly, so unlink P and move it to the head. The list becomes P→Q and Q becomes the least recently used entry.",
+      active: ["a", "b"],
+      values: {a: "40 · MRU", b: "60 · LRU", map: "P, Q"},
+      edges: [{from: "a", to: "b"}],
+    },
+    {
+      title: "Insert R and evict Q",
+      note: "put(R, 80) prepends R. The cache temporarily has three entries, so evict tail Q from both the list and the map. The new list is R→P and the map contains P and R.",
+      active: ["c", "b", "map"],
+      values: {a: "40 · LRU", b: "evicted", c: "80 · MRU", map: "P, R"},
+      edges: [{from: "c", to: "a"}],
+    },
+    {
+      title: "Check the evicted key",
+      note: "get(Q) misses in the hash map and returns None. The cache still contains R=80 and P=40, in recency order R→P. A miss leaves recency unchanged.",
+      active: ["b", "map"],
+      values: {a: "40 · LRU", b: "None", c: "80 · MRU", map: "P, R"},
+      edges: [{from: "c", to: "a"}],
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Eviction policy and implementation choices" rows={[

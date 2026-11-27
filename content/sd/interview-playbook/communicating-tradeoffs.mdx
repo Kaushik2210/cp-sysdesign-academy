@@ -55,6 +55,16 @@ Vague trade-offs sound like memorised lists. Tie them to your own estimates:
 
 The [trade-off cheat sheets](/cheatsheets/tradeoffs/) compare 14 common decisions side by side, with when to choose each option. Use them to fill in the alternative, criterion and cost of your five-part sentence.
 
+<ConceptWalkthrough title="Choose where to fan out a feed" nodes={[
+  {"id":"n0","label":"Publish","x":17,"y":48},
+  {"id":"n1","label":"Write-time","x":50,"y":48},
+  {"id":"n2","label":"Read-time","x":82,"y":48},
+]} frames={[
+  {"title":"Start with the workload","note":"An account with 100 followers and another with 1 million followers each publish one post. Predict which publish needs a different strategy if every precomputed inbox entry costs one write.","active":["n0"],"values":{"n0":"2 posts"}},
+  {"title":"Estimate the work","note":"Write-time fan-out queues 100 inbox writes for the small account and 1 million for the large one. Read-time merging avoids those large publish bursts but adds work when followers open the feed.","active":["n1","n2"],"values":{"n1":"burst writes","n2":"merge on read"}},
+  {"title":"Name a hybrid and a tripwire","note":"Precompute the small account. Merge the large account on read. Track feed read latency and fan-out backlog. If large-account merges violate the read budget, revisit the cutoff or cache merged results.","active":["n1","n2"],"values":{"n1":"small account","n2":"large account"}},
+]} />
+
 ## Practise out loud
 
 Pick a decision and answer in the five-part form, speaking, timed to under a minute. Try these:

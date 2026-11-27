@@ -92,6 +92,39 @@ Online resharding follows a pattern: copy the shard in the background while new 
   { option: "No sharding (scale up, replicas, cache)", pros: "Simplest; full SQL and transactions", cons: "Hard ceiling on storage and write throughput", chooseWhen: "Data fits one big node and writes are manageable" }
 ]} />
 
+<ConceptWalkthrough
+  title="Picking a shard key for a workshop catalog"
+  nodes={[
+    {"id": "router", "label": "Query", "x": 50, "y": 20},
+    {"id": "a", "label": "Shard A", "x": 19, "y": 65},
+    {"id": "b", "label": "Shard B", "x": 50, "y": 65},
+    {"id": "c", "label": "Shard C", "x": 81, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Route by workshop",
+      note: "A catalog stores 90 workshop sessions. Workshops A and B each own 20 sessions, and workshop C owns 50. Three shards hold one workshop each, so a lookup by workshop C routes to one shard, which holds 50 of the 90 sessions.",
+      active: ["router", "a", "b", "c"],
+      values: {"router": "1 shard", "a": "20 rows", "b": "20 rows", "c": "50 rows"},
+      edges: [{"from": "router", "to": "c"}],
+    },
+    {
+      title: "Spread sessions by ID",
+      note: "Use session ID modulo three instead. Assume each workshop's IDs cover the three residues as evenly as possible, with totals of 30 sessions per shard. Workshop C's 50 land as 17, 17, and 16. Fetching all sessions for C now queries three shards, even with a local workshop index.",
+      active: ["router", "a", "b", "c"],
+      values: {"router": "3 shards", "a": "17 of C", "b": "17 of C", "c": "16 of C"},
+      edges: [{"from": "router", "to": "a"}, {"from": "router", "to": "b"}, {"from": "router", "to": "c"}],
+    },
+    {
+      title: "Compare the same workload",
+      note: "A burst of 60 point reads for C's sessions targets the single C shard under workshop routing. If the queried IDs are evenly split by residue, ID routing sends 20 reads per shard. It reduces C's peak shard traffic from 60 to 20 at the cost of three-way fan-out for a workshop listing.",
+      active: ["router", "a", "b", "c"],
+      values: {"router": "60 reads", "a": "20 reads", "b": "20 reads", "c": "20 reads"},
+      edges: [{"from": "router", "to": "a"}, {"from": "router", "to": "b"}, {"from": "router", "to": "c"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Choosing a shard key from the table you are sketching rather than from the queries you must serve.

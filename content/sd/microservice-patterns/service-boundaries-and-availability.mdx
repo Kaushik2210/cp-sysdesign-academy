@@ -48,6 +48,35 @@ Every additional hard dependency multiplies in another factor below 1. Two defen
 - **Reduce hard dependencies** by making some optional: use a cached or default answer when a service is down (*graceful degradation*), render the page without the recommendations box.
 - **Make dependencies more available** with redundancy, timeouts and the resilience patterns in the next lesson.
 
+<ConceptWalkthrough title="Move recommendations off the checkout path" nodes={[
+  { id: "checkout", label: "Checkout", x: 24, y: 25 },
+  { id: "pay", label: "Pay", x: 76, y: 25 },
+  { id: "stock", label: "Stock", x: 24, y: 67 },
+  { id: "recs", label: "Recs", x: 76, y: 67 },
+]} frames={[
+  {
+    title: "Every dependency gates checkout",
+    note: "Checkout waits for payment, stock, and recommendations. If each of the three dependencies independently succeeds 99.9% of the time, the dependency path succeeds about 99.7003% of the time.",
+    active: ["checkout","pay","stock","recs"],
+    values: {"checkout":"3 required","pay":"99.9%","stock":"99.9%","recs":"99.9%"},
+    edges: [{"from":"checkout","to":"pay"},{"from":"checkout","to":"stock"},{"from":"checkout","to":"recs"}],
+  },
+  {
+    title: "An optional feature blocks an order",
+    note: "Recommendations times out while payment and stock are healthy. Checkout's policy requires every response, so a failure in product suggestions prevents order confirmation.",
+    active: ["checkout","recs"],
+    values: {"checkout":"blocked","pay":"healthy","stock":"healthy","recs":"timeout"},
+    edges: [{"from":"checkout","to":"recs"}],
+  },
+  {
+    title: "Confirm with the essential dependencies",
+    note: "Move recommendations to a separate request with its own deadline. Checkout can now confirm when payment and stock succeed, even while recommendations is down. The two required dependencies yield 99.8001% under the same independence assumption.",
+    active: ["checkout","pay","stock"],
+    values: {"checkout":"confirmed","pay":"ok","stock":"ok","recs":"optional"},
+    edges: [{"from":"checkout","to":"pay"},{"from":"checkout","to":"stock"}],
+  },
+]} />
+
 ## Code: how fast does availability decay?
 
 Each service is up 99.9% of the time ("three nines": about 8.8 hours of downtime a year). The program computes `a^k` exactly, checks it by simulation, and compares ten required dependencies with a design where six of them have fallbacks.

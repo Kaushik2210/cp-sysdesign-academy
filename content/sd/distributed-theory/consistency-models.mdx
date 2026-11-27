@@ -70,6 +70,35 @@ Even without failures, a strongly consistent read or write must coordinate with 
 
 With `n` replicas, a write waits for `w` acknowledgements and a read asks `r` replicas, taking the newest value. If `w + r > n`, every read set overlaps every acknowledged write set in at least one replica, so a read that starts after a write was acknowledged sees it. Choosing `w` and `r` trades read cost against write cost and failure tolerance. As the replication lesson warns, `w + r > n` by itself does **not** give linearizability (concurrent writes, sloppy quorums and clock-based tie-breaking can still bite), but the overlap is the foundation.
 
+<ConceptWalkthrough title="Read a partially replicated write" nodes={[
+  { id: "a", label: "A", x: 22, y: 27 },
+  { id: "b", label: "B", x: 50, y: 27 },
+  { id: "c", label: "C", x: 78, y: 27 },
+  { id: "client", label: "Client", x: 50, y: 68 },
+]} frames={[
+  {
+    title: "Acknowledge on two replicas",
+    note: "A write of version 2 completes once replicas A and B acknowledge it. C is still on version 1, so write acknowledgement does not imply that every replica is current.",
+    active: ["a","b","client"],
+    values: {"a":"v2","b":"v2","c":"v1","client":"2 ACKs"},
+    edges: [{"from":"a","to":"client"},{"from":"b","to":"client"}],
+  },
+  {
+    title: "Read from the lagging replica",
+    note: "A read that starts after the write completes can still return version 1 if it asks only C. With one read replica and two write replicas out of three, the sets can be disjoint.",
+    active: ["c","client"],
+    values: {"a":"v2","b":"v2","c":"v1","client":"v1"},
+    edges: [{"from":"c","to":"client"}],
+  },
+  {
+    title: "Read from two replicas",
+    note: "The client asks B and C, receives versions 2 and 1, and selects version 2. Any pair intersects the acknowledged write pair in this fixed replica set, assuming no concurrent writes in this example.",
+    active: ["b","c","client"],
+    values: {"a":"v2","b":"v2","c":"v1","client":"v2"},
+    edges: [{"from":"b","to":"client"},{"from":"c","to":"client"}],
+  },
+]} />
+
 ## Code: how often does a read go stale?
 
 The program replicates a write to 5 replicas, each applying it after an independent random delay. A write is acknowledged when `w` replicas have it. A reader starts the moment the acknowledgement arrives and asks `r` random replicas. We count reads that miss the write.

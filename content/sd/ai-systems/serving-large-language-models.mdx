@@ -226,6 +226,46 @@ Honest limits of the model: the step-time constants, the heavy-tailed answer len
 - **Fallbacks**: a second region, a second model, or a degraded mode ("answers may be shorter") when capacity is lost.
 - **Observability**: TTFT and inter-token latency percentiles, tokens per second, queue depth, cache hit rate and memory use, cost per request, error and refusal rate, and **quality metrics** from continuous evaluation.
 
+<ConceptWalkthrough
+  title="Refill a decode slot at the next iteration"
+  nodes={[
+    {id: "a", label: "Request A", x: 23, y: 25},
+    {id: "b", label: "Request B", x: 77, y: 25},
+    {id: "c", label: "Request C", x: 23, y: 70},
+    {id: "batch", label: "Decode", x: 77, y: 70},
+  ]}
+  frames={[
+    {
+      title: "Start with two active sequences",
+      note: "This scheduler has two decode slots and all three requests have completed prefill. A needs 1 output token, B needs 3, and C needs 2. Iteration 1 starts with A and B active and C queued.",
+      active: ["a", "b", "batch"],
+      values: {a: "1 left", b: "3 left", c: "2 queued", batch: "tick 1"},
+      edges: [{from: "a", to: "batch"}, {from: "b", to: "batch"}],
+    },
+    {
+      title: "Free A's slot",
+      note: "Iteration 1 emits one token for A and one for B. A finishes and releases its decode slot. B has 2 tokens left and C still needs 2.",
+      active: ["a", "b", "batch"],
+      values: {a: "done", b: "2 left", c: "2 queued", batch: "2 emitted"},
+      edges: [{from: "a", to: "batch"}, {from: "b", to: "batch"}],
+    },
+    {
+      title: "Admit C alongside B",
+      note: "Continuous batching admits C into A's vacated slot for iteration 2. B and C each emit one token in that iteration, leaving 1 token for each.",
+      active: ["b", "c", "batch"],
+      values: {a: "done", b: "1 left", c: "1 left", batch: "tick 2"},
+      edges: [{from: "b", to: "batch"}, {from: "c", to: "batch"}],
+    },
+    {
+      title: "Finish both sequences",
+      note: "Iteration 3 emits the last token for B and C. Across three iterations the server emits 1 + 3 + 2 = 6 tokens. A static batch holding C until A and B both finish would need five decode iterations for the same work.",
+      active: ["b", "c", "batch"],
+      values: {a: "done", b: "done", c: "done", batch: "6 total"},
+      edges: [{from: "b", to: "batch"}, {from: "c", to: "batch"}],
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Key serving decisions" rows={[

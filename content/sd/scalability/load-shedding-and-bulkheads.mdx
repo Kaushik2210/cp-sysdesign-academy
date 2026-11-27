@@ -93,6 +93,38 @@ A product page calls inventory, pricing, reviews and recommendations. Normal lat
 
 This is Little's law at work: in-flight requests equal arrival rate times latency, so latency growth silently multiplies resource use.
 
+<ConceptWalkthrough
+  title="Keeping search responsive during a stall"
+  nodes={[
+    {"id": "pool", "label": "Workers", "x": 50, "y": 20},
+    {"id": "img", "label": "Images", "x": 25, "y": 65},
+    {"id": "search", "label": "Search", "x": 75, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Fill a shared pool",
+      note: "A service has 12 workers, one per concurrent request. Twelve image requests arrive and each holds its worker for three seconds because the image dependency is slow. Immediately after, four search requests arrive. All four wait because images hold all 12 workers.",
+      active: ["pool", "img", "search"],
+      values: {"pool": "12 busy", "img": "12 running", "search": "4 waiting"},
+      edges: [{"from": "img", "to": "pool"}],
+    },
+    {
+      title: "Reserve four workers for search",
+      note: "Repeat the burst with eight workers reserved for images and four for search. Eight images run and four are shed immediately under a zero-queue admission policy. All four searches start at once and each finishes 100 ms after starting.",
+      active: ["pool", "img", "search"],
+      values: {"pool": "8 + 4 slots", "img": "4 shed", "search": "4 running"},
+      edges: [{"from": "img", "to": "pool"}, {"from": "search", "to": "pool"}],
+    },
+    {
+      title: "Account for idle reserved slots",
+      note: "At 100 ms, all four searches are finished and their workers are idle. Eight slow images still run and the four shed image requests have already failed. Reservation protects search latency at the cost of unused search capacity while images are saturated.",
+      active: ["pool", "img", "search"],
+      values: {"pool": "4 idle", "img": "8 running", "search": "4 done"},
+      edges: [{"from": "img", "to": "pool"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - **Retries without budgets**, tripling load on a failing service.

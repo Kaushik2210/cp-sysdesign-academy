@@ -175,6 +175,16 @@ The ordering tells the story. **Raw term frequency is the worst** (16.8%, close 
 
 Your documentation site search returns a very long "changelog" page first for almost every query, because it repeats every product word hundreds of times. Which BM25 parameter would you inspect first? What judged queries would you assemble to check a fix, and how would you know it did not hurt other queries?
 
+<ConceptWalkthrough title="Compare frequency gains in BM25" nodes={[
+  {"id":"n0","label":"1 hit","x":16,"y":47},
+  {"id":"n1","label":"2 hits","x":50,"y":47},
+  {"id":"n2","label":"4 hits","x":84,"y":47},
+]} frames={[
+  {"title":"Hold length constant","note":"Use average document length, k1 = 1.2 and the same IDF. Predict whether doubling mentions doubles the score contribution.","active":["n0"],"values":{"n0":"tf = 1","n1":"tf = 2","n2":"tf = 4"}},
+  {"title":"Compare one and two hits","note":"The factor before IDF is 2.2 × tf / (tf + 1.2). One hit gives 1.000 and two hits give 1.375.","active":["n0","n1"],"values":{"n0":"1.000","n1":"1.375","n2":"?"}},
+  {"title":"See diminishing gains","note":"Four hits give about 1.692. Two more mentions add around 0.317, less than the first extra mention’s gain of 0.375.","active":["n1","n2"],"values":{"n0":"1.000","n1":"1.375","n2":"1.692"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m14-ranking-bm25" tags={["search", "bm25", "relevance"]} questions={[

@@ -136,6 +136,46 @@ That fifth entry is the instructive one. Retrying a poison message four times is
   { option: "Drop on failure", pros: "No backlog or DLQ to manage", cons: "Silent data loss", chooseWhen: "Non-critical telemetry" }
 ]} />
 
+<ConceptWalkthrough
+  title="Protecting a worker from a poison job"
+  nodes={[
+    {"id": "prod", "label": "Producer", "x": 20, "y": 23},
+    {"id": "q", "label": "Queue", "x": 50, "y": 23},
+    {"id": "w", "label": "Worker", "x": 50, "y": 65},
+    {"id": "d", "label": "DLQ", "x": 81, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Cap the queue",
+      note: "Four jobs A through D arrive together. The queue can hold three waiting jobs and the worker has one attempt per second. Before processing starts, A, B, and C are waiting. The producer receives a retryable rejection for D.",
+      active: ["prod", "q", "w", "d"],
+      values: {"prod": "D deferred", "q": "A B C", "w": "idle", "d": "0 jobs"},
+      edges: [{"from": "prod", "to": "q"}],
+    },
+    {
+      title: "Back off after the first failure",
+      note: "At second zero A fails. The worker schedules its second attempt for second three in a separate delayed-retry store. This frees the worker to serve two healthy jobs while A waits. B and C are still queued at this instant.",
+      active: ["q", "w", "d"],
+      values: {"q": "B C", "w": "A fails", "d": "0 jobs"},
+      edges: [{"from": "q", "to": "w"}],
+    },
+    {
+      title: "Use the spare attempts",
+      note: "B succeeds at second one and C succeeds at second two. At the end of second two, the main queue is empty and A still has a delayed retry due at second three. The producer has kept D deferred for this trace.",
+      active: ["prod", "q", "w", "d"],
+      values: {"prod": "D deferred", "q": "empty", "w": "B C done", "d": "0 jobs"},
+      edges: [{"from": "q", "to": "w"}],
+    },
+    {
+      title: "Quarantine after the retry limit",
+      note: "A fails again at second three and the worker moves it to the DLQ. The main queue is empty, B and C completed, and one job now needs DLQ investigation. The two-attempt limit bounds worker time spent on A, while the queue cap pushed D back to the producer.",
+      active: ["prod", "q", "w", "d"],
+      values: {"prod": "D deferred", "q": "empty", "w": "A fails", "d": "A stored"},
+      edges: [{"from": "w", "to": "d"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Retrying permanent errors; validate and classify errors first.

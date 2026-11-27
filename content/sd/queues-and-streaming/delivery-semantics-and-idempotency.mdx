@@ -95,6 +95,38 @@ Fix: in one database transaction, `INSERT INTO processed(id) VALUES ('m-17')` (u
   { option: "Single partition for global order", pros: "Total order", cons: "Throughput capped at one consumer; one hot spot", chooseWhen: "Small volumes that truly require global order" }
 ]} />
 
+<ConceptWalkthrough
+  title="A redelivered wallet credit"
+  nodes={[
+    {"id": "q", "label": "Queue", "x": 20, "y": 43},
+    {"id": "w", "label": "Worker", "x": 50, "y": 43},
+    {"id": "db", "label": "DB", "x": 80, "y": 43},
+  ]}
+  frames={[
+    {
+      title: "Deliver credit C7",
+      note: "An at-least-once queue delivers a $12 credit with ID C7. The wallet holds $30 and the database has no processed record for C7.",
+      active: ["q", "w", "db"],
+      values: {"q": "C7 pending", "w": "attempt 1", "db": "$30 / new"},
+      edges: [{"from": "q", "to": "w"}],
+    },
+    {
+      title: "Commit before losing the ack",
+      note: "The worker records C7 under a unique key and increments the balance in the same database transaction. The balance becomes $42. The worker crashes before acknowledging the delivery, so C7 can return after its lease expires.",
+      active: ["q", "w", "db"],
+      values: {"q": "C7 unacked", "w": "crashed", "db": "$42 / seen"},
+      edges: [{"from": "w", "to": "db"}],
+    },
+    {
+      title: "Deduplicate the redelivery",
+      note: "A second worker sees the committed C7 key, skips the credit, and acknowledges C7. The queue has no pending C7 and the balance stays $42. Applying both deliveries would yield $54. The transaction and processed-ID storage buy a single credit effect.",
+      active: ["q", "w", "db"],
+      values: {"q": "C7 acked", "w": "skipped", "db": "$42 / seen"},
+      edges: [{"from": "q", "to": "w"}, {"from": "w", "to": "db"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Believing a broker's "exactly-once" flag makes an email or payment safe.

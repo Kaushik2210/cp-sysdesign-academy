@@ -89,6 +89,45 @@ Ask three questions in order:
   { option: "Object storage", pros: "Near-unlimited scale, high durability, cheap, HTTP access, tiers and lifecycle rules", cons: "No in-place edit, higher latency per request, weak listing and rename", chooseWhen: "Media, backups, logs, data lake files, static assets" }
 ]} />
 
+<ConceptWalkthrough
+  title="Updating a 4 KiB region"
+  nodes={[
+    {"id": "app", "label": "Editor", "x": 50, "y": 19},
+    {"id": "obj", "label": "Object", "x": 19, "y": 66},
+    {"id": "block", "label": "Block", "x": 50, "y": 66},
+    {"id": "file", "label": "File", "x": 81, "y": 66},
+  ]}
+  frames={[
+    {
+      title: "Set up a fixed-size edit",
+      note: "An editor changes 4 KiB inside a 64 MiB recording. Compare a single-object layout that requires whole-object replacement, a block volume with 4 KiB blocks, and a shared file. Assume the edit starts on a block boundary.",
+      active: ["app", "obj", "block", "file"],
+      values: {"app": "4 KiB edit", "obj": "64 MiB", "block": "4 KiB blocks", "file": "64 MiB"},
+    },
+    {
+      title: "Replace the object",
+      note: "With the single-object layout, the editor uploads a full 64 MiB replacement. That is 16,384 times the changed bytes, excluding any reads needed to assemble the replacement.",
+      active: ["app", "obj"],
+      values: {"app": "4 KiB edit", "obj": "64 MiB write"},
+      edges: [{"from": "app", "to": "obj"}],
+    },
+    {
+      title: "Write the addressed block",
+      note: "On the block volume the aligned change touches one 4 KiB block. That is 4 KiB of logical writes, before filesystem metadata or replication. The host supplies the filesystem and manages access to the volume.",
+      active: ["app", "block"],
+      values: {"app": "4 KiB edit", "block": "4 KiB write"},
+      edges: [{"from": "app", "to": "block"}],
+    },
+    {
+      title: "Write at a file offset",
+      note: "On the shared filesystem the editor can write 4 KiB at the offset through a common pathname. Multiple hosts can use that pathname, with coordination needed if they edit overlapping regions.",
+      active: ["app", "file"],
+      values: {"app": "4 KiB edit", "file": "4 KiB write"},
+      edges: [{"from": "app", "to": "file"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - **Treating object storage like a file system.** "Renaming" a prefix of a million keys means a million copy-and-delete operations. Choose key names so you never need to rename.

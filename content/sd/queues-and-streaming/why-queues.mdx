@@ -83,6 +83,38 @@ Rule of thumb: if the question is "who should do this job?", use a queue. If it 
   { option: "Log-based stream", pros: "Replay, multiple consumers, ordering per partition", cons: "More operational weight; consumer offset management", chooseWhen: "Event streams, data pipelines, CDC" }
 ]} />
 
+<ConceptWalkthrough
+  title="Draining a print-job burst"
+  nodes={[
+    {"id": "api", "label": "API", "x": 20, "y": 43},
+    {"id": "q", "label": "Queue", "x": 50, "y": 43},
+    {"id": "w", "label": "Workers", "x": 80, "y": 43},
+  ]}
+  frames={[
+    {
+      title: "Accept a burst",
+      note: "At time zero, the API durably enqueues 60 print jobs. Workers can complete 20 jobs per second. At the start, 60 jobs are outstanding and zero are done. The API can acknowledge acceptance after enqueueing.",
+      active: ["api", "q", "w"],
+      values: {"api": "60 accepted", "q": "60 waiting", "w": "0 done"},
+      edges: [{"from": "api", "to": "q"}],
+    },
+    {
+      title: "Absorb new arrivals",
+      note: "During the first second, 10 more jobs arrive and workers finish 20. At the one-second boundary, 50 jobs remain and 20 are done. Counts are sampled between batches with no jobs in flight.",
+      active: ["api", "q", "w"],
+      values: {"api": "70 accepted", "q": "50 waiting", "w": "20 done"},
+      edges: [{"from": "api", "to": "q"}, {"from": "q", "to": "w"}],
+    },
+    {
+      title: "Drain at the spare rate",
+      note: "With 10 new jobs and 20 completions each second, the remaining 50 jobs drain over five more seconds. At second six, 120 jobs have been accepted and completed. The queue absorbs the original burst, while job completion still depends on worker capacity.",
+      active: ["api", "q", "w"],
+      values: {"api": "120 accepted", "q": "0 waiting", "w": "120 done"},
+      edges: [{"from": "api", "to": "q"}, {"from": "q", "to": "w"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Using a queue where the user needs a synchronous answer; polling or callbacks then re-add the complexity.

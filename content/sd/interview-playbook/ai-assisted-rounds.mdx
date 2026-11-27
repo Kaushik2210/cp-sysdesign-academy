@@ -65,6 +65,16 @@ Run this drill on 10 problems (it is also a step in the [roadmap](/roadmap/)):
 
 The [mock interview tool](/mock/) includes AI-assisted coding questions with a scoring rubric for verification and collaboration.
 
+<ConceptWalkthrough title="Verify a suggested sliding-window strategy" nodes={[
+  {"id":"n0","label":"Assume","x":17,"y":48},
+  {"id":"n1","label":"Test","x":50,"y":48},
+  {"id":"n2","label":"Revise","x":82,"y":48},
+]} frames={[
+  {"title":"Find the assumption","note":"A tool proposes shrinking a sliding window when its sum exceeds K. That decision assumes extending the window cannot reduce its sum. Check whether negative numbers are allowed.","active":["n0"],"values":{"n0":"K = 0"}},
+  {"title":"Try a minimal counterexample","note":"With values 2 and −2, the full interval sums to 0, so length 2 is valid. Shrinking immediately after seeing 2 discards the start before −2 arrives.","active":["n1"],"values":{"n1":"[2, −2]"}},
+  {"title":"Repair and verify","note":"If the task asks for longest sum at most K with signed values, keep a brute-force oracle and derive a signed-prefix-sum solution before trusting replacements. Compare the replacement on generated small arrays and boundary cases.","active":["n2"],"values":{"n2":"compare"}},
+]} />
+
 ## Pitfalls
 
 - **Prompting the entire problem.** It looks like you cannot solve it yourself.

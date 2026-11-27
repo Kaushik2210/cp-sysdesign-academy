@@ -188,6 +188,16 @@ The search index is a **derived copy**. The source of truth stays in the primary
 
 A marketplace has 30 million listings in PostgreSQL. Buyers search by free text, filter by category and price, and expect new listings to show up within about 10 seconds. Would you start with the database's full-text search or a dedicated engine? What is the synchronisation path, and what happens to search when the indexing consumer falls an hour behind?
 
+<ConceptWalkthrough title="Intersect two postings lists" nodes={[
+  {"id":"n0","label":"blue","x":16,"y":47},
+  {"id":"n1","label":"bike","x":50,"y":47},
+  {"id":"n2","label":"AND","x":84,"y":47},
+]} frames={[
+  {"title":"Read both lists","note":"Blue appears in documents 1 and 3. Bike appears in documents 2 and 3. Predict the intersection.","active":["n0","n1"],"values":{"n0":"1, 3","n1":"2, 3","n2":"?"}},
+  {"title":"Advance the lower ID","note":"Compare 1 with 2 and advance blue to 3. Compare 3 with 2 and advance bike to 3.","active":["n0","n1"],"values":{"n0":"at 3","n1":"at 3","n2":"?"}},
+  {"title":"Emit the matching ID","note":"Both point at document 3. Emit it and advance both cursors. An exhausted list ends the intersection.","active":["n2"],"values":{"n0":"exhausted","n1":"exhausted","n2":"Doc 3"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m14-inverted-indexes" tags={["search", "inverted-index"]} questions={[

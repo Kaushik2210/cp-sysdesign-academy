@@ -185,6 +185,16 @@ You do not know whether failover works until you fail over. **Chaos engineering*
 
 An online store runs in one region with a primary Postgres database, an async replica in another availability zone and nightly snapshots in the same account. Management wants "to survive a region outage and never lose an order". Which RPO and RTO do you propose for orders, for the product catalog and for the analytics warehouse, which DR strategy and replication mode for each, how do you protect the backups from deletion and ransomware, and how will you prove in the next quarter that the plan works?
 
+<ConceptWalkthrough title="Replay a regional recovery" nodes={[
+  {"id":"n0","label":"Backup","x":16,"y":47},
+  {"id":"n1","label":"Logs","x":50,"y":47},
+  {"id":"n2","label":"Restore","x":84,"y":47},
+]} frames={[
+  {"title":"Snapshot at 10:00","note":"The last off-site log ends at 10:08. Production fails at 10:10. Predict the newest recoverable point.","active":["n0","n1"],"values":{"n0":"10:00","n1":"10:08"}},
+  {"title":"Recover through 10:08","note":"Restore the snapshot and replay the durable log. The last two minutes need reconciliation from another durable record.","active":["n1","n2"],"values":{"n0":"10:00","n1":"10:08","n2":"replay"}},
+  {"title":"Measure restoration","note":"Restore and replay take 12 minutes. Testing and traffic cutover add four. This drill observed a 2-minute data gap and 16-minute service recovery.","active":["n2"],"values":{"n1":"2 min gap","n2":"16 min"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m16-backups-dr-chaos" tags={["disaster-recovery", "backups", "rpo", "rto", "chaos"]} questions={[

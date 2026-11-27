@@ -194,6 +194,16 @@ The **database query** owns 50 ms of the 120 ms request on its own; no amount of
 
 Checkout p99 latency doubles at 14:05 but CPU, error rate and the average all look normal. You have metrics, unstructured logs from 12 services and no tracing. In what order do you add instrumentation, which signal do you check first on the next incident, and how do you keep the cost under control?
 
+<ConceptWalkthrough title="Investigate a slow checkout" nodes={[
+  {"id":"n0","label":"Metric","x":16,"y":47},
+  {"id":"n1","label":"Trace","x":50,"y":47},
+  {"id":"n2","label":"Log","x":84,"y":47},
+]} frames={[
+  {"title":"Find the time window","note":"Checkout p95 rises from 220 ms to 700 ms. The histogram locates the tail latency change.","active":["n0"],"values":{"n0":"p95 700 ms"}},
+  {"title":"Find where it waits","note":"A 720 ms sample spends 610 ms waiting on inventory and 48 ms in payment. Inspect inventory first.","active":["n1"],"values":{"n1":"610 ms"}},
+  {"title":"Correlate by trace ID","note":"The inventory log for this sample shows retries after connection timeouts. Check how frequently that happens before generalizing from the sample.","active":["n1","n2"],"values":{"n1":"inventory","n2":"retries"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m16-logs-metrics-traces" tags={["observability", "metrics", "tracing", "logging"]} questions={[

@@ -74,6 +74,39 @@ Compare two stamps `A` and `B`:
   P2->>P3: message
   Note over P3: d: V=[1,1,2]`} caption="a happens before b and d (their vectors are smaller). c is concurrent with a and b: [0,0,1] and [1,1,0] are not comparable." />
 
+<ConceptWalkthrough title="Track causality with vector clocks" nodes={[
+  { id: "p1", label: "P1", x: 22, y: 30 },
+  { id: "p2", label: "P2", x: 50, y: 30 },
+  { id: "p3", label: "P3", x: 78, y: 30 },
+]} frames={[
+  {
+    title: "P1 sends event a",
+    note: "All clocks start at zero in the coordinate order P1, P2, P3. P1 increments its own coordinate to stamp send a with [1,0,0].",
+    active: ["p1"],
+    values: {"p1":"[1,0,0]","p2":"[0,0,0]","p3":"[0,0,0]"},
+  },
+  {
+    title: "P2 receives event a",
+    note: "P2 merges P1's stamp component by component and increments its own coordinate. Receive b has stamp [1,1,0], which dominates a's stamp, so a happened before b.",
+    active: ["p1","p2"],
+    values: {"p1":"[1,0,0]","p2":"[1,1,0]","p3":"[0,0,0]"},
+    edges: [{"from":"p1","to":"p2"}],
+  },
+  {
+    title: "P3 records independent event c",
+    note: "P3 increments its own coordinate to [0,0,1]. Comparing it to b's [1,1,0], P3 is ahead in one coordinate and behind in two. Events b and c are concurrent.",
+    active: ["p3"],
+    values: {"p1":"[1,0,0]","p2":"[1,1,0]","p3":"[0,0,1]"},
+  },
+  {
+    title: "P3 receives P2's next send",
+    note: "P2 increments to [1,2,0] for its send. P3 merges to [1,2,1] and increments to [1,2,2]. The receive now follows both b and c.",
+    active: ["p2","p3"],
+    values: {"p1":"[1,0,0]","p2":"[1,2,0]","p3":"[1,2,2]"},
+    edges: [{"from":"p2","to":"p3"}],
+  },
+]} />
+
 ## Where this shows up in real systems
 
 - **Dynamo-style stores** attach a vector clock (often called a version vector) to each value. If one version dominates another, the older is discarded. If two versions are concurrent, **both are kept as siblings** and the application (or a CRDT) merges them, for example by taking the union of two shopping carts.

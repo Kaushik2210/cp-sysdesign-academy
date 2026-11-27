@@ -146,6 +146,40 @@ For a rename or a type change, use several deployable steps, never one:
 
 For HTTP APIs, additive changes go in place; breaking changes get a **new version** (`/v2/orders`, a header, or a new gRPC package) and a published deprecation timeline.
 
+<ConceptWalkthrough title="Rename a field across rolling deployments" nodes={[
+  { id: "api", label: "Producer", x: 50, y: 25 },
+  { id: "old", label: "Old app", x: 24, y: 67 },
+  { id: "new", label: "New app", x: 76, y: 67 },
+]} frames={[
+  {
+    title: "Start with the legacy field",
+    note: "The producer emits a display name as name. Existing consumers require this field, so removing it now would break their reads.",
+    active: ["api","old"],
+    values: {"api":"name","old":"uses name"},
+    edges: [{"from":"api","to":"old"}],
+  },
+  {
+    title: "Expand the response contract",
+    note: "The producer sends both name and displayName with the same value. Old consumers keep reading name, and upgraded consumers prefer displayName with a fallback for older producers.",
+    active: ["api","old","new"],
+    values: {"api":"both","old":"name","new":"prefers new"},
+    edges: [{"from":"api","to":"old"},{"from":"api","to":"new"}],
+  },
+  {
+    title: "Verify migration and replay",
+    note: "The team verifies that all active consumers handle displayName and that any replaying consumer can still interpret old events containing name alone. It checks usage and compatibility tests before removal.",
+    active: ["old","new"],
+    values: {"api":"both","old":"migrated","new":"replay OK"},
+  },
+  {
+    title: "Contract the producer output",
+    note: "After the deprecation period and verification, the producer emits only displayName. Upgraded consumers still retain their fallback where historical events can be replayed.",
+    active: ["api","new"],
+    values: {"api":"new only","old":"retired","new":"reads new"},
+    edges: [{"from":"api","to":"new"}],
+  },
+]} />
+
 ## Tools
 
 - **Schema formats with rules built in:** Protocol Buffers (never reuse a field number; new fields optional with defaults), Avro (writer and reader schemas resolved by name with defaults and aliases), JSON Schema with `additionalProperties` policy.

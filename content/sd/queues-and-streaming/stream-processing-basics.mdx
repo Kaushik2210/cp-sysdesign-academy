@@ -98,6 +98,38 @@ Events with event times (seconds): 3, 12, 58, 61, 64, 125, and a late event at t
   { option: "CDC into streams", pros: "Consistent derived data without dual writes", cons: "Couples consumers to table schemas; needs connector ops", chooseWhen: "Syncing DB to search, cache or warehouse" }
 ]} />
 
+<ConceptWalkthrough
+  title="Waiting for a late energy reading"
+  nodes={[
+    {"id": "input", "label": "Events", "x": 25, "y": 65},
+    {"id": "wm", "label": "Watermark", "x": 50, "y": 20},
+    {"id": "out", "label": "Window", "x": 75, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Open a five-minute window",
+      note: "The event-time window covers 10:00 up to 10:05. Readings of 3 kWh at 10:01 and 4 kWh at 10:04 have arrived. The watermark is 10:04 and the provisional sum is 7 kWh. This policy emits one final result at watermark 10:07.",
+      active: ["input", "wm", "out"],
+      values: {"input": "3 + 4 kWh", "wm": "10:04", "out": "7 kWh"},
+      edges: [{"from": "input", "to": "out"}],
+    },
+    {
+      title: "Accept a late reading",
+      note: "At watermark 10:06, a reading with event time 10:03 arrives with 2 kWh. It belongs to the window and arrives before the 10:07 finalization point. The running sum becomes 9 kWh. Finalizing at watermark 10:05 would have missed those 2 kWh.",
+      active: ["input", "wm", "out"],
+      values: {"input": "+2 kWh", "wm": "10:06", "out": "9 kWh"},
+      edges: [{"from": "input", "to": "out"}],
+    },
+    {
+      title: "Finalize and route later arrivals",
+      note: "At watermark 10:07 the processor emits 9 kWh and drops the window state. A subsequent 1 kWh reading stamped 10:02 goes to a late-data side output. Waiting two extra minutes of watermark progress captured the 2 kWh reading and held state longer.",
+      active: ["input", "wm", "out"],
+      values: {"input": "1 kWh aside", "wm": "10:07", "out": "9 kWh final"},
+      edges: [{"from": "wm", "to": "out"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Using processing time when the business question is about event time.

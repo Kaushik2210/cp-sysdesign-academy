@@ -121,6 +121,38 @@ With a bucket of 10 and a refill of 5 per second, a burst of 30 requests in one 
 - **Auth dependency latency**: a token introspection call per request adds to every request. Prefer locally verifiable tokens (signed JWTs with short lifetimes) or cache introspection results briefly.
 - **Header spoofing**: if services trust an identity header, ensure only the gateway can reach them and that the gateway strips client-supplied copies.
 
+<ConceptWalkthrough
+  title="Enforcing a quota before the services"
+  nodes={[
+    {"id": "in", "label": "Client A", "x": 20, "y": 42},
+    {"id": "gw", "label": "Gateway", "x": 50, "y": 42},
+    {"id": "svc", "label": "Orders", "x": 80, "y": 42},
+  ]}
+  frames={[
+    {
+      title: "Forward traffic through a proxy",
+      note: "During one fixed second, client A sends 80 order reads and client B sends 40. A reverse proxy configured for routing alone forwards all 120 reads to Orders. Assume the service has capacity to handle them.",
+      active: ["in", "gw", "svc"],
+      values: {"in": "80 req/s", "gw": "120 pass", "svc": "120 req/s"},
+      edges: [{"from": "in", "to": "gw"}, {"from": "gw", "to": "svc"}],
+    },
+    {
+      title: "Apply a per-client quota",
+      note: "In an alternative setup, the gateway authenticates both clients and allows 50 reads per client in that same fixed second. It accepts 50 from A and all 40 from B, and returns 429 for A's remaining 30. Orders receives 90 reads.",
+      active: ["in", "gw", "svc"],
+      values: {"in": "30 rejected", "gw": "90 pass", "svc": "90 req/s"},
+      edges: [{"from": "in", "to": "gw"}, {"from": "gw", "to": "svc"}],
+    },
+    {
+      title: "Budget the policy cost",
+      note: "The gateway reduces origin traffic by 30 of 120 reads, or 25 percent. Suppose authentication and quota checks add 2 ms per forwarded read. A forwarded read that took 20 ms through the routing-only proxy now takes 22 ms under the same downstream latency.",
+      active: ["in", "gw", "svc"],
+      values: {"in": "22 ms", "gw": "+2 ms", "svc": "90 req/s"},
+      edges: [{"from": "in", "to": "gw"}, {"from": "gw", "to": "svc"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Letting the gateway accumulate business logic until it is an unmaintainable monolith.

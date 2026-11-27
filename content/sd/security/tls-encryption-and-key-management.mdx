@@ -236,6 +236,16 @@ The bit flip changes the amount silently when there is no integrity check, and i
 
 You store customers' national ID numbers and documents for a lending product, in one Postgres database and an object store, behind 30 services that talk to each other over a private network. Which of the layers above do you use for each, where do the keys live and who can use them, how do services authenticate one another, and how do you rotate the master key without a maintenance window?
 
+<ConceptWalkthrough title="Rotate a key that wraps data keys" nodes={[
+  {"id":"n0","label":"Object","x":16,"y":47},
+  {"id":"n1","label":"Data key","x":50,"y":47},
+  {"id":"n2","label":"Wrap key","x":84,"y":47},
+]} frames={[
+  {"title":"Identify the layer","note":"A data key encrypts the object. A wrapping key protects that data key. This example rotates just the wrapping key.","active":["n0","n1","n2"],"values":{"n0":"encrypted","n1":"DEK","n2":"old"}},
+  {"title":"Rewrap the data key","note":"An authorized key-management operation unwraps the data key within the protected boundary and wraps it using the new key version. Object ciphertext stays the same.","active":["n1","n2"],"values":{"n0":"same bytes","n1":"rewrapped","n2":"new"}},
+  {"title":"Verify before retirement","note":"Verify that migrated objects and new writes decrypt with the intended versions. Retire the old key only after coverage and recovery checks.","active":["n0","n2"],"values":{"n0":"verified","n2":"retire old"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m15-tls-encryption" tags={["security", "tls", "encryption", "kms"]} questions={[

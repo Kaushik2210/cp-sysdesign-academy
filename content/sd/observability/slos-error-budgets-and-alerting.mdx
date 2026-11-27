@@ -220,6 +220,16 @@ That is the point of the design: **alert on how fast the budget is being spent, 
 
 Your payments API has a 99.99% target in the sales contract, but it depends on a card network at 99.9% and a database at 99.95%. You also have a nightly 10-minute maintenance window. Is 99.99% achievable? What SLO do you set internally, how do you count the maintenance window and card-network errors, and which alerts do you create?
 
+<ConceptWalkthrough title="Calculate error-budget burn" nodes={[
+  {"id":"n0","label":"SLO","x":16,"y":47},
+  {"id":"n1","label":"Traffic","x":50,"y":47},
+  {"id":"n2","label":"Budget","x":84,"y":47},
+]} frames={[
+  {"title":"Find the allowance","note":"A 99.9% success SLO allows one failure per thousand. The current window has six failures per thousand.","active":["n0","n2"],"values":{"n0":"99.9%","n2":"0.1%"}},
+  {"title":"Compute burn rate","note":"Divide 0.6% observed errors by 0.1% allowed errors to get a 6× burn rate.","active":["n1","n2"],"values":{"n1":"0.6%","n2":"6x burn"}},
+  {"title":"Check both windows","note":"Evaluate the short and long windows against their configured thresholds. A brief spike and a sustained burn call for different urgency.","active":["n0","n1","n2"],"values":{"n0":"SLO","n1":"two windows","n2":"thresholds"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m16-slos-error-budgets" tags={["sre", "slo", "error-budget", "alerting"]} questions={[

@@ -45,6 +45,42 @@ Most applications store the **current state**: a row with the balance of an acco
   P2 --> R2[(Search index: transactions)]
   Q[Query: show my balance] --> R1`} caption="CQRS with event sourcing: commands change the event store, queries hit read models that are updated asynchronously" />
 
+<ConceptWalkthrough title="Follow a write into a delayed read model" nodes={[
+  { id: "cmd", label: "Command", x: 24, y: 25 },
+  { id: "log", label: "Log", x: 76, y: 25 },
+  { id: "view", label: "View", x: 24, y: 67 },
+  { id: "ui", label: "Screen", x: 76, y: 67 },
+]} frames={[
+  {
+    title: "Append the accepted command as an event",
+    note: "The account has a balance of 100 at event 10. The command handler validates a withdrawal of 30 and appends event 11, so the authoritative balance is now 70.",
+    active: ["cmd","log"],
+    values: {"cmd":"debit 30","log":"event 11","view":"at 10","ui":"100"},
+    edges: [{"from":"cmd","to":"log"}],
+  },
+  {
+    title: "Read while the projection is behind",
+    note: "The screen queries the read model immediately after the write. The projection has applied events only through 10, so the screen still shows 100 even though event 11 is durable.",
+    active: ["view","ui"],
+    values: {"log":"event 11","view":"at 10","ui":"100"},
+    edges: [{"from":"view","to":"ui"}],
+  },
+  {
+    title: "Apply the event and advance the cursor",
+    note: "The projection applies debit 30 and saves balance 70 together with its event-11 checkpoint. A repeat delivery of event 11 is skipped because that checkpoint already covers it.",
+    active: ["log","view"],
+    values: {"log":"event 11","view":"at 11","ui":"100"},
+    edges: [{"from":"log","to":"view"}],
+  },
+  {
+    title: "Read after the projection catches up",
+    note: "The next screen query reads the projected balance of 70. A client that needs read-your-writes can wait until the projection reaches the event version returned by its write.",
+    active: ["view","ui"],
+    values: {"log":"event 11","view":"at 11","ui":"70"},
+    edges: [{"from":"view","to":"ui"}],
+  },
+]} />
+
 ## Code: replay cost, snapshots and read-model lag
 
 The program builds an account with 100,457 events and compares loading it by full replay with loading from a snapshot taken every 10,000, 1,000 and 100 events. It also shows a command being validated against state, time travel, and a read model that lags and catches up.

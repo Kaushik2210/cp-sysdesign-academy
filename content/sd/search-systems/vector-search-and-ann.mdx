@@ -173,6 +173,16 @@ Both methods show the same trade-off curve: **comparing about 5 to 11% of the ve
 
 A support site has 400,000 help articles chunked into 3 million passages, embedded with a 768-dimension model. Users type questions in natural language, but also paste error codes like `E-4412`. Would you use exact search, IVF or HNSW? How would you combine it with keyword search so the error code still works, and how would you decide that your recall is good enough?
 
+<ConceptWalkthrough title="Rerank approximate candidates" nodes={[
+  {"id":"n0","label":"ANN","x":16,"y":47},
+  {"id":"n1","label":"Rerank","x":50,"y":47},
+  {"id":"n2","label":"Top 2","x":84,"y":47},
+]} frames={[
+  {"title":"Get candidates","note":"The approximate index returns A, B and C. Its candidate step excludes D. Predict whether reranking alone can recover D.","active":["n0"],"values":{"n0":"A, B, C","n2":"?"}},
+  {"title":"Score exact distances","note":"From the original vectors, A = 0.40, B = 0.18 and C = 0.35. Smaller distances rank first.","active":["n1"],"values":{"n1":"B < C < A","n2":"?"}},
+  {"title":"Return B, then C","note":"The reranker fixes ordering within the candidate set. To find out whether it missed D, compare with an exact search and measure recall.","active":["n2"],"values":{"n0":"D absent","n2":"B, C"}},
+]} />
+
 ## Quiz
 
 <Quiz id="sd-m14-vector-search" tags={["vector-search", "ann", "embeddings"]} questions={[

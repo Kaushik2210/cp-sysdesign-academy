@@ -115,6 +115,44 @@ Numbers like these are why durability scheme and tiering (next lessons) dominate
   { option: "Presigned multipart", pros: "Parallel parts, resumable, retry only failed parts", cons: "More API calls, cleanup of abandoned uploads, more client logic", chooseWhen: "Large files, flaky mobile networks, video" }
 ]} />
 
+<ConceptWalkthrough
+  title="Retrying a video upload"
+  nodes={[
+    {"id": "client", "label": "Client", "x": 25, "y": 44},
+    {"id": "store", "label": "Blob store", "x": 75, "y": 44},
+  ]}
+  frames={[
+    {
+      title: "Split the recording",
+      note: "A client uploads an 80 MiB recording over a 10 MiB/s link. Compare a single PUT with four sequential 20 MiB parts. Either takes 8 seconds of byte transfer when nothing fails.",
+      active: ["client", "store"],
+      values: {"client": "80 MiB", "store": "0 MiB"},
+      edges: [{"from": "client", "to": "store"}],
+    },
+    {
+      title: "Drop the connection mid-part",
+      note: "The connection drops after 75 MiB have been sent, before the fourth part completes. The store has three confirmed parts totaling 60 MiB. The single PUT also failed before its object could complete.",
+      active: ["client", "store"],
+      values: {"client": "75 MiB sent", "store": "60 MiB held"},
+      edges: [{"from": "client", "to": "store"}],
+    },
+    {
+      title: "Retry only the unfinished part",
+      note: "The client reuses the multipart upload ID and sends the entire 20 MiB fourth part again, then completes the upload with all four part identifiers. Multipart transfers 75 + 20 = 95 MiB in 9.5 seconds of byte transfer.",
+      active: ["client", "store"],
+      values: {"client": "95 MiB sent", "store": "80 MiB final"},
+      edges: [{"from": "client", "to": "store"}],
+    },
+    {
+      title: "Compare the single PUT retry",
+      note: "A single PUT retries the entire 80 MiB. It transfers 75 + 80 = 155 MiB in 15.5 seconds of byte transfer. Multipart saves 60 MiB and 6 seconds here, in exchange for tracking parts and completing or aborting the upload.",
+      active: ["client", "store"],
+      values: {"client": "155 MiB sent", "store": "80 MiB final"},
+      edges: [{"from": "client", "to": "store"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - **Sequential key names at high rate** (timestamps or incrementing ids as the leading characters) can concentrate load on one index partition on some stores. Check provider guidance; a short hash prefix is a common fix when needed.

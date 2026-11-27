@@ -93,6 +93,18 @@ Walk the diagram asking "what happens when this dies, or gets ten times busier?"
 
 Restate the design in three sentences, the main trade-off you accepted, and what you would do next with more time.
 
+<ConceptWalkthrough title="Recover the clock in a feed-design interview" nodes={[
+  {"id":"n0","label":"Clarify","x":16,"y":26},
+  {"id":"n1","label":"Estimate","x":48,"y":26},
+  {"id":"n2","label":"Design","x":82,"y":26},
+  {"id":"n3","label":"Deep dive","x":30,"y":69},
+  {"id":"n4","label":"Recap","x":69,"y":69},
+]} frames={[
+  {"title":"Check the remaining time","note":"It is minute 12. You finished requirements and estimates, and the round ends at 45. Name the read path and write path before choosing either for a deep dive.","active":["n2"],"values":{"n0":"done","n1":"done","n2":"now","n4":"45 min"}},
+  {"title":"Fix the time budget","note":"Use minutes 12–24 for the baseline. Reserve minutes 24–39 for fan-out and failure modes, plus six minutes for recap. The plan has room for one deep dive.","active":["n2","n3","n4"],"values":{"n2":"12–24","n3":"24–39","n4":"39–45"}},
+  {"title":"Stop with an explicit decision","note":"At minute 39, leave ranking details aside. State how your design handles a large publisher, how to observe backlog, and what load result would make you change the approach.","active":["n4"],"values":{"n2":"outlined","n3":"covered","n4":"now"}},
+]} />
+
 ## Practise with a clock
 
 Reading the framework is not the same as running it. Use the [mock interview tool](/mock/) to draw a random question, work through it against this exact timeline, and score yourself against a rubric.

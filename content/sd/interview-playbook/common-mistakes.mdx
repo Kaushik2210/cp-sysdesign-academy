@@ -52,6 +52,16 @@ Getting stuck is normal. What the interviewer sees is how you handle it.
 Saying "wait, that breaks our ordering guarantee, let me revisit" shows you check your own work. Interviewers see that as seniority, not weakness.
 </Callout>
 
+<ConceptWalkthrough title="Recover from an unsupported capacity claim" nodes={[
+  {"id":"n0","label":"Claim","x":17,"y":48},
+  {"id":"n1","label":"Math","x":50,"y":48},
+  {"id":"n2","label":"Decision","x":82,"y":48},
+]} frames={[
+  {"title":"Catch the unsupported claim","note":"You say a search replica can easily handle the launch. The interviewer asks what traffic each replica sees. State the workload and benchmark assumptions before defending the choice.","active":["n0"],"values":{"n0":"unverified"}},
+  {"title":"Run the peak calculation","note":"Assume 8,000 reads per second at peak and 2,000 reads per second per replica at the latency target. Four healthy replicas meet peak with no spare capacity. Predict the capacity after one host is lost.","active":["n1"],"values":{"n1":"4 × 2,000"}},
+  {"title":"Rework the answer","note":"If traffic can redistribute evenly, one replica loss leaves 6,000 reads per second, short of peak. Five replicas meet peak after a single loss under those assumptions. Benchmark the latency and describe where you need more headroom.","active":["n2"],"values":{"n2":"5 replicas"}},
+]} />
+
 ## What would you choose and why?
 
 You realise at minute 30 that the database you chose cannot handle the write volume you estimated. Do you (a) keep going and hope they do not notice, (b) stop, say what you got wrong and propose the fix, or (c) restart the design? Write the sentence you would say.

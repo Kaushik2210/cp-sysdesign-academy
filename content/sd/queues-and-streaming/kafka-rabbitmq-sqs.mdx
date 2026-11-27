@@ -83,6 +83,39 @@ An order-events topic must sustain 30,000 messages per second, and a consumer in
   { from: "prod", to: "broker", label: "append" }, { from: "broker", to: "follower", label: "replicate" }, { from: "broker", to: "group", label: "fetch" }
 ]} />
 
+<ConceptWalkthrough
+  title="Running a second pass over audit events"
+  nodes={[
+    {"id": "src", "label": "Ingest", "x": 50, "y": 19},
+    {"id": "log", "label": "Log", "x": 19, "y": 65},
+    {"id": "q", "label": "Queue", "x": 50, "y": 65},
+    {"id": "r", "label": "Readers", "x": 81, "y": 65},
+  ]}
+  frames={[
+    {
+      title: "Load two copies of the same workload",
+      note: "In two alternative designs, ingest writes the same 600 one-KB audit events into a retained log or a work queue. Each design starts with 600 KB of payload. Ignore replication, compression, and metadata.",
+      active: ["src", "log", "q"],
+      values: {"src": "600 events", "log": "600 KB", "q": "600 KB"},
+      edges: [{"from": "src", "to": "log"}, {"from": "src", "to": "q"}],
+    },
+    {
+      title: "Run the first reader",
+      note: "The first reader finishes all 600 events. The log keeps its 600 KB through its retention window and the reader commits offset 600 as its next position, starting from zero. The queue reader removes all 600 messages using the queue's completion operation.",
+      active: ["log", "q", "r"],
+      values: {"log": "600 KB", "q": "0 KB", "r": "600 read"},
+      edges: [{"from": "log", "to": "r"}, {"from": "q", "to": "r"}],
+    },
+    {
+      title: "Start an independent audit reader",
+      note: "Before retention expires, a new log consumer group starts at offset zero and can read all 600 events. In the queue design the second reader sees zero messages. Replaying there requires a separate retained copy. Keeping 600 KB in the log buys independent replay.",
+      active: ["log", "q", "r"],
+      values: {"log": "600 replay", "q": "0 replay", "r": "new audit"},
+      edges: [{"from": "log", "to": "r"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - Picking Kafka for a few hundred tasks a day because it is fashionable; a managed queue is far cheaper to operate.

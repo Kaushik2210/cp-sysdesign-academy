@@ -306,6 +306,38 @@ When an answer is wrong, **diagnose in order**: was the right passage **in the i
 - **Fallbacks**: if the vector index is down, use keyword search; if the model is down, show the top passages.
 - **Monitoring**: retrieval latency, empty-result rate, abstention rate, citation validity, user feedback, and drift (new documents types that the chunker handles badly).
 
+<ConceptWalkthrough
+  title="Retrieve two chunks the requester can read"
+  nodes={[
+    {id: "memo", label: "Private", x: 23, y: 25},
+    {id: "guide", label: "Guide", x: 77, y: 25},
+    {id: "faq", label: "FAQ", x: 23, y: 70},
+    {id: "prompt", label: "Prompt", x: 77, y: 70},
+  ]}
+  frames={[
+    {
+      title: "Rank a three-chunk corpus",
+      note: "A requester asks when refurbished items ship. Toy relevance scores are 0.97 for an internal memo, 0.90 for the public guide and 0.81 for the public FAQ. The requester has public access only and needs up to two chunks.",
+      active: ["memo", "guide", "faq"],
+      values: {memo: "0.97", guide: "0.90", faq: "0.81"},
+    },
+    {
+      title: "Filter before taking top two",
+      note: "The permission filter removes the internal memo from the candidate set. Top 2 over the permitted set now returns the guide (0.90) and FAQ (0.81), filling both context slots.",
+      active: ["guide", "faq", "prompt"],
+      values: {memo: "excluded", guide: "rank 1", faq: "rank 2", prompt: "2 chunks"},
+      edges: [{from: "guide", to: "prompt"}, {from: "faq", to: "prompt"}],
+    },
+    {
+      title: "Answer with the permitted evidence",
+      note: "The guide says refurbished items ship in 3 business days. The FAQ says the clock starts after payment clears. With these two passages, the answer is 3 business days after payment clears, citing the guide for the duration and the FAQ for the start time.",
+      active: ["guide", "faq", "prompt"],
+      values: {guide: "3 days", faq: "paid first", prompt: "2 sources"},
+      edges: [{from: "guide", to: "prompt"}, {from: "faq", to: "prompt"}],
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Key decisions in a RAG system" rows={[

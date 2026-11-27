@@ -43,6 +43,41 @@ In a call chain the problem compounds. If the edge service retries 3 times, and 
   HalfOpen --> Closed: probe succeeds
   HalfOpen --> Open: probe fails`} caption="Circuit breaker states: open means calls fail immediately without touching the dependency" />
 
+<ConceptWalkthrough title="Contain retries and probe for recovery" nodes={[
+  { id: "client", label: "Client", x: 21, y: 32 },
+  { id: "api", label: "API", x: 50, y: 32 },
+  { id: "dep", label: "Backend", x: 79, y: 32 },
+]} frames={[
+  {
+    title: "Nested retries multiply backend traffic",
+    note: "For one user request, the client makes up to three API attempts and the API makes up to three backend attempts per call. If every attempt fails with a retryable error, the backend receives nine calls.",
+    active: ["client","api","dep"],
+    values: {"client":"3 tries","api":"3 each","dep":"9 calls"},
+    edges: [{"from":"client","to":"api"},{"from":"api","to":"dep"}],
+  },
+  {
+    title: "Centralize retries and open the breaker",
+    note: "The API owns retries and allows at most three total attempts within the request deadline. Starting with a fresh breaker that opens after three consecutive failures, the third backend failure opens the circuit.",
+    active: ["api","dep"],
+    values: {"client":"1 try","api":"open","dep":"3 fails"},
+    edges: [{"from":"api","to":"dep"}],
+  },
+  {
+    title: "Fail fast during the cooldown",
+    note: "While the circuit is open, a new API request receives an unavailable result immediately. The API makes zero backend calls for that request.",
+    active: ["client","api"],
+    values: {"client":"unavail.","api":"open","dep":"0 calls"},
+    edges: [{"from":"client","to":"api"}],
+  },
+  {
+    title: "Admit a half-open probe",
+    note: "After the cooldown, the breaker admits one trial call under this policy. The probe succeeds, so the breaker closes and subsequent requests can reach the backend.",
+    active: ["api","dep"],
+    values: {"api":"closed","dep":"probe OK"},
+    edges: [{"from":"api","to":"dep"}],
+  },
+]} />
+
 ## Code: how many calls reach the dependency?
 
 A three-tier chain: **edge**, **middle**, **dependency**. The dependency fails a fixed fraction of calls. We compare five setups: no retries, retries at the edge only, retries (3 attempts) at both layers, both layers with a retry budget (each first attempt earns 0.1 of a retry), and the budget plus a circuit breaker in front of the dependency (opens after 5 consecutive failures, fails fast for 50 calls, then probes).

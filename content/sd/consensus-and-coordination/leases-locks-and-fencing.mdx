@@ -52,6 +52,42 @@ Systems like ZooKeeper and etcd offer primitives that make these patterns easy:
 
 Keep the lock service for **coordination**, not for data; its throughput is limited (every write is a majority commit).
 
+<ConceptWalkthrough title="Fence a worker whose lease expired" nodes={[
+  { id: "a", label: "Worker A", x: 24, y: 27 },
+  { id: "b", label: "Worker B", x: 76, y: 27 },
+  { id: "lock", label: "Lease", x: 24, y: 68 },
+  { id: "store", label: "Store", x: 76, y: 68 },
+]} frames={[
+  {
+    title: "A acquires token 41",
+    note: "The lease service grants A a time-limited lease with fencing token 41. A's first write succeeds, and the store atomically records 41 as its highest accepted token.",
+    active: ["a","lock","store"],
+    values: {"a":"token 41","b":"waiting","lock":"A holds","store":"max 41"},
+    edges: [{"from":"lock","to":"a"},{"from":"a","to":"store"}],
+  },
+  {
+    title: "A pauses and its lease expires",
+    note: "A pauses long enough for the lease to expire. The lease service can now grant the next lease, while the store still has 41 recorded because it has seen no newer write.",
+    active: ["a","lock"],
+    values: {"a":"paused","b":"waiting","lock":"expired","store":"max 41"},
+    edges: [{"from":"a","to":"lock"}],
+  },
+  {
+    title: "B advances the store to token 42",
+    note: "B acquires the lease with the next token, 42. Its write succeeds and atomically raises the store's high-water mark to 42.",
+    active: ["b","lock","store"],
+    values: {"a":"paused","b":"token 42","lock":"B holds","store":"max 42"},
+    edges: [{"from":"lock","to":"b"},{"from":"b","to":"store"}],
+  },
+  {
+    title: "Storage rejects A's delayed write",
+    note: "A resumes and submits a write with token 41. The store compares it with the persisted token 42 and rejects the stale write before changing the resource.",
+    active: ["a","store"],
+    values: {"a":"token 41","b":"token 42","lock":"B holds","store":"reject 41"},
+    edges: [{"from":"a","to":"store"}],
+  },
+]} />
+
 ## Code: pausing past the lease
 
 Client A takes a lock with a 10 second lease (token 1) and then pauses for a random, exponentially distributed time before writing. If the pause exceeds the lease, the lock service gives the lock to client B (token 2), which writes. A then wakes up and writes. The storage either accepts every write (no fencing) or compares the token with the highest it has seen (fencing).

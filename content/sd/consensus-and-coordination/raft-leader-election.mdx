@@ -57,6 +57,40 @@ The difficulty moves to **choosing and replacing the leader**. If the leader cra
 
 The election timeout must be **much larger than the heartbeat interval and the network round trip** (otherwise healthy leaders are deposed by lost heartbeats) and **much smaller than the time between failures** (otherwise the system spends its life electing). The **spread** of the random interval controls how often elections split.
 
+<ConceptWalkthrough title="Resolve a split Raft election" nodes={[
+  { id: "a", label: "A", x: 22, y: 30 },
+  { id: "b", label: "B", x: 50, y: 30 },
+  { id: "c", label: "C", x: 78, y: 30 },
+]} frames={[
+  {
+    title: "All three time out in term 8",
+    note: "The three servers have equally up-to-date logs and no current leader. Each times out before hearing a vote request, starts term 8, and votes for itself. One vote apiece falls short of the required two.",
+    active: ["a","b","c"],
+    values: {"a":"self t8","b":"self t8","c":"self t8"},
+  },
+  {
+    title: "B starts term 9 first",
+    note: "B draws the shortest new election timeout, advances to term 9 and votes for itself. B requests votes while A and C are still in term 8.",
+    active: ["b","a","c"],
+    values: {"a":"t8","b":"self t9","c":"t8"},
+    edges: [{"from":"b","to":"a"},{"from":"b","to":"c"}],
+  },
+  {
+    title: "A's vote gives B a majority",
+    note: "A receives B's higher-term request, becomes a follower in term 9 and grants its vote because B's log is up to date. B now has two of three votes and becomes leader.",
+    active: ["a","b"],
+    values: {"a":"voted B","b":"leader","c":"t8"},
+    edges: [{"from":"a","to":"b"}],
+  },
+  {
+    title: "B establishes leadership with heartbeats",
+    note: "B sends term-9 heartbeats. C steps down on seeing the newer term, and both followers reset their election timers when they receive valid heartbeats from B.",
+    active: ["a","b","c"],
+    values: {"a":"follow","b":"leader","c":"follow"},
+    edges: [{"from":"b","to":"a"},{"from":"b","to":"c"}],
+  },
+]} />
+
 ## Code: how much spread do randomised timeouts need?
 
 Five servers, a base timeout of 150 ms plus a random spread, and message delays of 5 to 15 ms. A server becomes a candidate if its timeout fires before any vote request reaches it; otherwise it votes for the request that reaches it first. The program measures how often the first round ends in a split vote, and how many rounds are needed on average until a leader exists.

@@ -106,6 +106,38 @@ Autoscaling adds or removes instances automatically. Choices:
   { option: "Horizontal, autoscaled", pros: "Matches cost to load, absorbs spikes within boot time", cons: "Needs statelessness, tuning, metrics, and limits on downstream", chooseWhen: "Variable traffic and stateless tiers" }
 ]} />
 
+<ConceptWalkthrough
+  title="Covering a burst while instances start"
+  nodes={[
+    {"id": "in", "label": "Traffic", "x": 20, "y": 43},
+    {"id": "ready", "label": "Ready", "x": 50, "y": 43},
+    {"id": "wait", "label": "Queue", "x": 80, "y": 43},
+  ]}
+  frames={[
+    {
+      title: "Start with two ready instances",
+      note: "Two stateless instances each serve 50 requests per second. Normal traffic is 80 requests per second, so aggregate capacity is 100 and the request queue is empty.",
+      active: ["in", "ready", "wait"],
+      values: {"in": "80 req/s", "ready": "100 req/s", "wait": "0 queued"},
+      edges: [{"from": "in", "to": "ready"}],
+    },
+    {
+      title: "Scale up after a traffic step",
+      note: "Traffic jumps to 140 requests per second. The autoscaler immediately requests two more instances, but they take 15 seconds to become ready. With capacity still at 100, a queue that accepts all excess traffic reaches 40 \u00c3\u2014 15 = 600 requests just before the instances come online.",
+      active: ["in", "ready", "wait"],
+      values: {"in": "140 req/s", "ready": "100 req/s", "wait": "600 queued"},
+      edges: [{"from": "in", "to": "ready"}, {"from": "in", "to": "wait"}],
+    },
+    {
+      title: "Drain once capacity is ready",
+      note: "Four ready instances supply 200 requests per second. With arrivals still at 140, the spare 60 requests per second drains the 600 queued requests in 10 seconds, clearing the queue at second 25. Keeping a third instance warm would have covered all 140 immediately, at the cost of paying for the extra instance during normal traffic.",
+      active: ["in", "ready", "wait"],
+      values: {"in": "140 req/s", "ready": "200 req/s", "wait": "0 queued"},
+      edges: [{"from": "in", "to": "ready"}, {"from": "wait", "to": "ready"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 - **Scaling the stateless tier and melting the database.** Doubling app servers doubles connections and queries to the shared store. Use connection pooling and caching and size downstream capacity first.

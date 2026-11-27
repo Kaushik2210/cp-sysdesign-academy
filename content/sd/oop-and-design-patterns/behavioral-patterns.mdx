@@ -295,6 +295,45 @@ Both importers get the same guaranteed sequence (parse, validate, save) and supp
 | run a request through ordered, independent checks | Chain of Responsibility |
 | lock the order of steps but vary a few of them | Template Method |
 
+<ConceptWalkthrough
+  title="Undo a move and resize in reverse order"
+  nodes={[
+    {id: "invoker", label: "History", x: 20, y: 25},
+    {id: "move", label: "Move", x: 50, y: 25},
+    {id: "resize", label: "Resize", x: 80, y: 25},
+    {id: "card", label: "Card", x: 50, y: 70},
+  ]}
+  frames={[
+    {
+      title: "Start with an empty history",
+      note: "A drawing editor has a card at x = 10 px and width = 40 px. Its command invoker starts with an empty undo stack. The card is the receiver that both commands modify.",
+      active: ["invoker", "card"],
+      values: {invoker: "0 commands", card: "x10 w40"},
+    },
+    {
+      title: "Execute two commands",
+      note: "Move changes x from 10 to 25 px, then Resize changes width from 40 to 60 px. Each command saves the property value it replaces and is pushed onto the undo stack in execution order, [Move, Resize].",
+      active: ["invoker", "move", "resize", "card"],
+      values: {invoker: "2 commands", move: "10 → 25", resize: "40 → 60", card: "x25 w60"},
+      edges: [{from: "invoker", to: "move"}, {from: "move", to: "resize"}, {from: "move", to: "card"}, {from: "resize", to: "card"}],
+    },
+    {
+      title: "Undo the resize",
+      note: "Undo pops Resize, the newest command. It restores width to 40 px while x stays at 25 px. The undo stack now contains only Move.",
+      active: ["invoker", "resize", "card"],
+      values: {invoker: "1 command", resize: "60 → 40", card: "x25 w40"},
+      edges: [{from: "invoker", to: "resize"}, {from: "resize", to: "card"}],
+    },
+    {
+      title: "Undo the move",
+      note: "The next Undo pops Move and restores x to 10 px. The card is back to x = 10 px and width = 40 px, and the undo stack is empty.",
+      active: ["invoker", "move", "card"],
+      values: {invoker: "0 commands", move: "25 → 10", card: "x10 w40"},
+      edges: [{from: "invoker", to: "move"}, {from: "move", to: "card"}],
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Using behavioural patterns" rows={[

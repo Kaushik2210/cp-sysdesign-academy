@@ -355,6 +355,38 @@ except PermissionError as e:
 
 Real designs combine them: a **factory** builds a **decorated** repository (cache over retries over database) behind a **facade**, with an **adapter** at the vendor boundary.
 
+<ConceptWalkthrough
+  title="Adapt a Fahrenheit probe to a Celsius interface"
+  nodes={[
+    {id: "monitor", label: "Monitor", x: 20, y: 27},
+    {id: "adapter", label: "Adapter", x: 50, y: 27},
+    {id: "probe", label: "Probe", x: 80, y: 27},
+    {id: "result", label: "Reading", x: 50, y: 70},
+  ]}
+  edges={[{from: "monitor", to: "adapter"}, {from: "adapter", to: "probe"}, {from: "adapter", to: "result"}]}
+  frames={[
+    {
+      title: "Call the application's interface",
+      note: "A greenhouse monitor calls readCelsius() and triggers cooling at 25°C or higher. A legacy probe exposes readFahrenheit(), so the monitor receives an adapter implementing readCelsius().",
+      active: ["monitor", "adapter"],
+      values: {monitor: "limit 25°C"},
+    },
+    {
+      title: "Translate the reading",
+      note: "The adapter calls readFahrenheit() on the legacy probe and receives 68°F. It applies (68 − 32) × 5 / 9 = 20 and returns 20°C through readCelsius().",
+      active: ["adapter", "probe", "result"],
+      values: {probe: "68°F", result: "20°C"},
+    },
+    {
+      title: "Apply the monitor's rule",
+      note: "The greenhouse monitor compares the returned 20°C with its 25°C threshold. Since 20 < 25, cooling stays off. The monitor uses the same Celsius interface it would use with a native Celsius probe.",
+      active: ["monitor", "result"],
+      values: {monitor: "cooling off", result: "20°C"},
+      edges: [{from: "monitor", to: "adapter"}, {from: "adapter", to: "result"}],
+    },
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Using design patterns" rows={[
