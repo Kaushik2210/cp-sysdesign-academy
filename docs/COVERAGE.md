@@ -14,9 +14,9 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |
-| Zero-to-elite roadmap | Complete | 10 phases, 261 steps; steps for unwritten modules are marked Not on this site yet |
+| Zero-to-elite roadmap | Complete | 10 phases, 266 steps; steps for unwritten modules are marked Not on this site yet |
 | Sitemap, link checker, validator (incl. MDX compile) | Complete | |
-| Playwright e2e | Planned | `pnpm e2e` script exists, no specs yet |
+| Playwright e2e | Complete | Smoke tests cover navigation, progress, core interactions and published lessons. Runs in CI. |
 | Interactive sandboxes | Complete | 5 simulators: consistent hashing, rate limiter, cache eviction, load balancer, design canvas; all unit tested, experiments verified against the simulators |
 | Pattern library | Partial | 38 patterns; 8 point to planned lessons |
 | Template library | Partial | 9 tested templates (Python/Java run locally, C++ in CI); spec lists many more (segment tree, LCA, Dinic, FFT...) |
@@ -46,15 +46,15 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | 12 Range queries and segment trees | Partial (4 lessons: segment tree, Fenwick tree, sparse table, lazy propagation; no persistent or 2D structures yet) | 4 |
 | 13 Dynamic programming | Partial (10 lessons: 0/1 knapsack, longest increasing subsequence, coin change, edit distance and LCS, grid paths, bitmask DP, interval DP, digit DP, the convex hull trick, divide and conquer optimisation; no Li Chao tree, Knuth optimisation or Aliens trick yet) | 10 |
 | 14 String matching | Partial (4 lessons: KMP, Z-function, Manacher, suffix arrays with LCP; no suffix automaton or palindromic tree yet) | 4 |
-| 15 Trees and ancestors | Partial (6 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter, rerooting, heavy-light decomposition, centroid decomposition; no virtual trees or link-cut trees yet) | 6 |
+| 15 Trees and ancestors | Partial (6 lessons: LCA with binary lifting, Euler tours and subtree queries, tree DP and the diameter, rerooting, heavy-light decomposition, centroid decomposition; virtual trees are in module 22; no link-cut trees yet) | 6 |
 | 16 Heaps and ordered sets | Partial (3 lessons: heap internals and k-way merge, two heaps and the running median with lazy deletion, order statistics with Fenwick trees; no ordered-set trees or treaps, and no persistent structures yet) | 3 |
 | 17 Number theory II | Partial (3 lessons: extended Euclid and linear congruences, the Chinese remainder theorem for any moduli, binomial coefficients modulo a prime with Lucas and Catalan; no Miller-Rabin, Pollard rho, Euler's phi or Mobius inversion yet) | 3 |
 | 18 Tries and string automata | Partial (3 lessons: tries and maximum xor queries, the Aho-Corasick automaton, the suffix automaton; no palindromic tree, suffix tree or persistent tries yet) | 3 |
 | 19 Dynamic programming II | Partial (4 lessons: sum over subsets, broken profile DP for tilings, Knuth's optimisation, the Li Chao tree; no plug DP, no SMAWK, no aliens trick yet) | 4 |
 | 20 Matching and assignment | Partial (4 lessons with runnable Python, practice prompts and quizzes. One embedded judge problem for weighted assignment.) | 4 |
 | 21 Graphs II | Partial (3 lessons with measured runnable Python demos, practice problems and quizzes: Euler paths, Floyd-Warshall with min-plus matrix powers, functional graphs with binary lifting. No visualizers.) | 3 |
-| 22 Advanced trees | Partial (1 lesson so far: small-to-large merging, with a measured runnable demo, one practice problem and a quiz. Virtual trees and tree hashing are not written.) | 1 |
-| 21-26 (Level 3) | Planned | 0 |
+| 22 Advanced trees | Partial (4 lessons: small-to-large merging, Mo's algorithm for arrays and trees, and virtual trees, with two embedded judge problems. Tree hashing and link-cut trees are still unwritten.) | 4 |
+| 23-26 (Level 3) | Planned | 0 |
 
 ## Track 2: System Design
 

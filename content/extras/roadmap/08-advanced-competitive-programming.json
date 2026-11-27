@@ -68,12 +68,16 @@
     { "kind": "lesson", "ref": "cp/graphs-ii/floyd-warshall-and-matrix-powers" },
     { "kind": "lesson", "ref": "cp/graphs-ii/functional-graphs-and-binary-lifting" },
     { "kind": "lesson", "ref": "cp/advanced-trees/small-to-large-merging" },
+    { "kind": "lesson", "ref": "cp/advanced-trees/mo-algorithm" },
+    { "kind": "lesson", "ref": "cp/advanced-trees/mo-on-trees" },
+    { "kind": "lesson", "ref": "cp/advanced-trees/virtual-trees" },
+    { "kind": "page", "title": "Full competitive programming checklist", "href": "/paths/cp-6-month-expert/", "note": "Study every published CP lesson in course order and reserve time for timed practice and upsolving." },
     { "kind": "page", "title": "Algorithm templates (DSU, Fenwick tree, Dijkstra, KMP)", "href": "/templates/", "note": "Retype each from memory until you can write it in under five minutes." },
     { "kind": "external", "title": "Codeforces", "url": "https://codeforces.com/", "type": "practice", "note": "Rated rounds roughly weekly. Always upsolve: read the editorial for the first problem you could not solve and re-implement it the next day." },
     { "kind": "external", "title": "AtCoder", "url": "https://atcoder.jp/", "type": "practice", "note": "High-quality problems; the ABC and ARC contests are excellent for steady growth." },
     { "kind": "external", "title": "Codeforces EDU", "url": "https://codeforces.com/edu/courses", "type": "course", "note": "Step-by-step courses on segment trees, binary search and more, with practice problems." },
     { "kind": "external", "title": "cp-algorithms", "url": "https://cp-algorithms.com/", "type": "docs", "note": "The reference for every advanced algorithm you will need." },
-    { "kind": "planned", "title": "Remaining advanced CP modules", "note": "Modules 22 (partly written) through 26 remain planned. Use the pattern library to connect the lessons here to the problem signals you already know." },
+    { "kind": "planned", "title": "Remaining advanced CP modules", "note": "Modules 23 through 26 remain planned. Use the pattern library to connect the lessons here to the problem signals you already know." },
     { "kind": "project", "title": "A contest-and-upsolve habit with a rating target", "brief": "Compete in at least two rated contests a month. After each, upsolve at least two problems and add the technique to a personal notebook with the signal that reveals it. Track your rating every month.", "deliverable": "A public or private log of contests, upsolves and rating, with targets of about 1600, then 1900, then 2100 or higher over time." }
   ],
   "exit": [

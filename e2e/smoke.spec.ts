@@ -63,6 +63,14 @@ test("learning path page renders a daily checklist", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Day 1", exact: true })).toBeVisible();
 });
 
+test("full system design path reaches case studies and AI systems", async ({ page }) => {
+  await page.goto("/paths/");
+  await page.getByRole("link", { name: /Complete System Design in 90 days/ }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Complete System Design in 90 days" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Case Study: Design a Payment System", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Designing Reliable AI Agents/ })).toBeVisible();
+});
+
 test("distributed systems lessons render with a runnable program and a quiz", async ({ page }) => {
   for (const [path, title] of [
     ["/sd/distributed-theory/consistency-models/", "Consistency Models and PACELC"],
@@ -756,7 +764,7 @@ test.describe("reduced motion", () => {
 
   test("animated numbers show their final value immediately", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("region", { name: "Stats" })).toContainText("221");
+    await expect(page.getByRole("region", { name: "Stats" })).toContainText("224");
   });
 });
 
@@ -769,7 +777,7 @@ test.describe("track, lesson and sandbox pages", () => {
     const bar = page.getByRole("progressbar", { name: "Sorting and Binary Search progress" });
     await expect(bar).toBeVisible();
     await expect(bar).not.toHaveAttribute("aria-valuenow", "0");
-    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 104 lessons");
+    await expect(page.getByRole("group", { name: "Competitive Programming progress" })).toContainText("1 / 107 lessons");
   });
 
   test("the lesson table of contents highlights the section being read", async ({ page }) => {
@@ -917,6 +925,30 @@ test.describe("visualizer lessons", () => {
     await page.goto("/visualizers/dijkstra/");
     await expect(page.getByRole("link", { name: /Shortest Paths with Dijkstra/ })).toBeVisible();
   });
+});
+
+test.describe("advanced tree lessons", () => {
+  const lessons = [
+    ["mo-algorithm", "Mo's Algorithm for Offline Range Queries"],
+    ["mo-on-trees", "Mo's Algorithm on Trees"],
+    ["virtual-trees", "Virtual Trees"],
+  ];
+
+  for (const [slug, title] of lessons) {
+    test(`${title} has a code runner and a quiz`, async ({ page }) => {
+      await page.goto(`/cp/advanced-trees/${slug}/`);
+      await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 2, name: "Quiz" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Run", exact: true })).toBeVisible();
+      if (slug === "mo-algorithm") {
+        const problem = page.getByRole("region", { name: "Problem: Range Variety" });
+        await expect(problem).toBeVisible();
+        const complexity = problem.getByRole("group", { name: "Complexity self-check" });
+        await complexity.getByRole("button", { name: "O(n sqrt(n))", exact: true }).click();
+        await expect(complexity.getByRole("status")).toHaveText("Correct");
+      }
+    });
+  }
 });
 
 test.describe("matching and assignment lessons", () => {
