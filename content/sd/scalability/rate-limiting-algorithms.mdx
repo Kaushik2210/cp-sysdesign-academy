@@ -132,6 +132,49 @@ Reading the output:
 
 You can also run this on your own machine: it has no dependencies.
 
+<ConceptWalkthrough
+  title="A refill pays for two requests"
+  nodes={[
+    { id: "request", label: "Request", x: 20, y: 47 },
+    { id: "bucket", label: "Bucket", x: 50, y: 47 },
+    { id: "result", label: "Result", x: 80, y: 47 }
+  ]}
+  edges={[{ from: "request", to: "bucket" }, { from: "bucket", to: "result" }]}
+  frames={[
+    {
+      title: "The initial burst empties the bucket",
+      note: "At t = 0, five admitted requests have spent all five tokens. The sixth and seventh requests at t = 0 are rejected, leaving 0 of 5 tokens. Each request costs one token and the bucket refills at two tokens per second.",
+      active: ["bucket", "result"],
+      values: { request: "t = 0 s", bucket: "0 / 5", result: "2 rejected" }
+    },
+    {
+      title: "Refill before checking the first request",
+      note: "The first request at t = 1 triggers the lazy refill. One second at two tokens per second adds two tokens. The bucket holds 2 of 5 tokens before the request is charged.",
+      active: ["request", "bucket"],
+      values: { request: "1st at 1 s", bucket: "2 / 5", result: "Pending" },
+      edges: [{ from: "request", to: "bucket" }]
+    },
+    {
+      title: "Admit the first request",
+      note: "The first request at t = 1 costs one token. The bucket has two tokens, so the limiter admits the request and leaves 1 of 5 tokens.",
+      active: ["request", "bucket", "result"],
+      values: { request: "1st at 1 s", bucket: "1 / 5", result: "Admit" }
+    },
+    {
+      title: "Admit the second request",
+      note: "The second request also arrives at t = 1. Zero seconds have elapsed since the last refill. The limiter spends the one remaining token to admit the request, leaving 0 of 5 tokens.",
+      active: ["request", "bucket", "result"],
+      values: { request: "2nd at 1 s", bucket: "0 / 5", result: "Admit" }
+    },
+    {
+      title: "Reject the third request",
+      note: "The third request also arrives at t = 1, so the elapsed time is still zero. The request needs one token and the bucket has zero. The limiter rejects it and the bucket stays at 0 of 5 tokens.",
+      active: ["request", "bucket", "result"],
+      values: { request: "3rd at 1 s", bucket: "0 / 5", result: "Reject" }
+    }
+  ]}
+/>
+
 ## What happens to rejected requests?
 
 Return **HTTP 429 Too Many Requests** and tell the client when to come back with `Retry-After` (seconds or an HTTP date). Many APIs also return headers such as remaining quota and reset time (names vary; an IETF draft standardises `RateLimit` headers). Clients should respond with exponential backoff and jitter, not tight retry loops.

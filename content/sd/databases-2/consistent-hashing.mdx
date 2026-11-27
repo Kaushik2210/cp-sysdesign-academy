@@ -41,6 +41,46 @@ When a node joins at some position, it takes over only the keys between its pred
     N3 --> N1
   end`} caption="k1 (position 25) is owned by Node B, the next node clockwise; k2 (55) by Node C" />
 
+<ConceptWalkthrough
+  title="A node joins the hash ring"
+  nodes={[
+    { id: "a", label: "A", x: 23, y: 22 },
+    { id: "k1", label: "k1", x: 50, y: 22 },
+    { id: "d", label: "D", x: 77, y: 22 },
+    { id: "b", label: "B", x: 77, y: 70 },
+    { id: "k2", label: "k2", x: 50, y: 70 },
+    { id: "c", label: "C", x: 23, y: 70 }
+  ]}
+  edges={[
+    { from: "a", to: "k1" }, { from: "k1", to: "d" }, { from: "d", to: "b" },
+    { from: "b", to: "k2" }, { from: "k2", to: "c" }, { from: "c", to: "a" }
+  ]}
+  frames={[
+    {
+      title: "Find the owners before the join",
+      note: "The ring has A at 10, B at 40, and C at 70. D has yet to join. Moving clockwise from k1 at 25 reaches B first, so B owns k1. Moving clockwise from k2 at 55 reaches C first, so C owns k2.",
+      active: ["a", "k1", "b", "k2", "c"],
+      values: { a: "10", k1: "25 → B", d: "Absent", b: "40", k2: "55 → C", c: "70" },
+      edges: [
+        { from: "a", to: "k1" }, { from: "k1", to: "b" }, { from: "b", to: "k2" },
+        { from: "k2", to: "c" }, { from: "c", to: "a" }
+      ]
+    },
+    {
+      title: "D joins and takes k1 from B",
+      note: "D joins at 30, between A at 10 and B at 40. k1 at 25 now reaches D first clockwise, so it moves from B to D. k2 at 55 still reaches C at 70 first.",
+      active: ["k1", "d", "b"],
+      values: { a: "10", k1: "25 → D", d: "30", b: "40", k2: "55 → C", c: "70" }
+    },
+    {
+      title: "Check which keys move",
+      note: "D at 30 takes only keys in (10, 30] from B at 40. Of the two sample keys, k1 at 25 is in that interval and belongs to D. k2 at 55 is outside it and stays with C at 70. A at 10 keeps its own range.",
+      active: ["k2", "c"],
+      values: { a: "10", k1: "25 → D", d: "30", b: "40", k2: "55 → C", c: "70" }
+    }
+  ]}
+/>
+
 ## Virtual nodes
 
 With one point per physical node, the arcs between points are random lengths, so some nodes own much more of the ring than others, and a removed node dumps its entire load on one neighbour. **Virtual nodes** place each physical node at many points (commonly tens to hundreds). Then:

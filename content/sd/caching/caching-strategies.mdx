@@ -29,6 +29,17 @@ Having a cache is one decision; deciding **who talks to it and in what order** i
 
 The application owns the logic: read the cache; on a miss, read the database, then populate the cache.
 
+<ConceptWalkthrough title="Follow the first cache-aside read" nodes={[
+  { id: "app", label: "App", x: 18, y: 45 },
+  { id: "cache", label: "Cache", x: 50, y: 45 },
+  { id: "db", label: "DB", x: 82, y: 45 },
+]} frames={[
+  { title: "Look in the cache", note: "The app sends GET user:42 to the cache. The cache has no entry, so it returns a miss.", active: ["app", "cache"], values: { cache: "miss" }, edges: [{ from: "app", to: "cache" }] },
+  { title: "Get the source value", note: "The app reads user:42 from the database and receives version 1. The cache is still empty.", active: ["app", "db"], values: { db: "v1" }, edges: [{ from: "app", to: "db" }] },
+  { title: "Fill the cache", note: "The app stores version 1 in the cache with an expiry, then returns the value to the caller.", active: ["app", "cache"], values: { cache: "v1", db: "v1" }, edges: [{ from: "app", to: "cache" }] },
+  { title: "The next read hits", note: "A second request for user:42 gets version 1 directly from the cache. The app skips the database read.", active: ["app", "cache"], values: { cache: "hit · v1", db: "v1" }, edges: [{ from: "app", to: "cache" }] },
+]} />
+
 <Diagram kind="mermaid" caption="Cache-aside read and write" code={`sequenceDiagram
   participant A as Application
   participant C as Cache

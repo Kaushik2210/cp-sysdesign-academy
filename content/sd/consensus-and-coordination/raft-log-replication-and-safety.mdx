@@ -35,6 +35,17 @@ This enforces the **Log Matching Property**: if two logs contain an entry with t
 
 **Commit.** An entry is committed once the leader has stored it on a majority of servers **and** it belongs to the leader's own term. The leader tells followers the commit index in later `AppendEntries` messages, and each server applies committed entries to its state machine in order. (Entries from earlier terms are committed *indirectly*, when a later entry of the current term is committed on top of them; the paper's Figure 8 shows what goes wrong otherwise.)
 
+<ConceptWalkthrough title="Commit a log prefix in Raft" nodes={[
+  { id: "a", label: "Leader A", x: 50, y: 24 },
+  { id: "b", label: "Follower B", x: 24, y: 70 },
+  { id: "c", label: "Follower C", x: 76, y: 70 },
+]} frames={[
+  { title: "Start term 4", note: "A and B have an uncommitted term-3 entry at index 7. C has only the committed prefix through index 6. A cannot advance its commit index to 7 by counting replicas of that earlier-term entry.", active: ["a", "b"], values: { a: "7:t3", b: "7:t3", c: "through 6" } },
+  { title: "Append an entry in the current term", note: "Leader A appends a term-4 entry at index 8 and sends AppendEntries to B. A alone holds the new entry, so index 8 is still uncommitted.", active: ["a"], values: { a: "8:t4", b: "7:t3", c: "through 6" }, edges: [{ from: "a", to: "b" }] },
+  { title: "A majority acknowledges index 8", note: "B stores the entry and replies successfully. A and B make two of three servers. Since the entry at index 8 belongs to term 4, A commits through index 8, including the earlier entry at index 7.", active: ["a", "b"], values: { a: "commit 8", b: "8:t4", c: "through 6" }, edges: [{ from: "a", to: "b" }] },
+  { title: "Apply the committed prefix", note: "A tells B the new commit index in a later AppendEntries request. B can now apply entries 7 and 8 in order. C can apply them after it catches up and hears the commit index.", active: ["a", "b"], values: { a: "applied 8", b: "applied 8", c: "through 6" }, edges: [{ from: "a", to: "b" }] },
+]} />
+
 **Election restriction (the safety rule).** A server votes for a candidate only if the candidate's log is **at least as up to date** as its own:
 
 ```text
