@@ -63,6 +63,16 @@ For example `sum(7)` adds `bit[7]` (position 7), `bit[6]` (positions 5..6) and `
   ]}
 />
 
+<ConceptWalkthrough title="Turn two prefixes into a range sum" nodes={[
+  {"id":"n0","label":"Left cut","x":17,"y":46},
+  {"id":"n1","label":"Right cut","x":50,"y":46},
+  {"id":"n2","label":"Range","x":83,"y":46},
+]} frames={[
+  {"title":"Keep the updated array","note":"After adding 3 at index 3, the array is 2, 1, 7, 3, 5, 2. To sum [3, 5], predict where the unwanted prefix ends.","active":["n2"],"values":{"n0":"?","n1":"through 5","n2":"[3, 5]"}},
+  {"title":"Subtract through index 2","note":"Prefix(5) is 18 and prefix(2) is 3. Subtracting cancels positions 1 and 2 and leaves 15. Subtracting prefix(3) would also remove position 3.","active":["n0","n1","n2"],"values":{"n0":"prefix 2 = 3","n1":"prefix 5 = 18","n2":"sum = 15"}},
+  {"title":"Convert assignment into a delta","note":"Set position 4 from 3 to 6 by adding 3 to its covering nodes. The same query now gives 21 − 3 = 18. Adding 6 would increment the old value to 9.","active":["n1","n2"],"values":{"n0":"still 3","n1":"prefix 5 = 21","n2":"sum = 18"}},
+]} />
+
 ## Code
 
 <Tabs>
@@ -168,6 +178,16 @@ print("inversions of", p, "=", inv)
 To count elements `<= x` in a growing multiset, keep a Fenwick tree over the value range with `1` per inserted element. With values up to `10^9`, first compress them to ranks `1..n` (sort and deduplicate, see [coordinate mapping](/cp/hashing/coordinate-mapping-grouping/)).
 </Callout>
 
+<ConceptWalkthrough title="Count inversions without counting ties" nodes={[
+  {"id":"n0","label":"Input","x":17,"y":46},
+  {"id":"n1","label":"Seen","x":50,"y":46},
+  {"id":"n2","label":"Inversions","x":83,"y":46},
+]} frames={[
+  {"title":"Compress values to ranks","note":"For 4, 2, 4, 1, assign ranks 1 → 1, 2 → 2 and 4 → 3. The tree counts previously seen elements by rank. For a new rank r, seen minus prefix(r) counts earlier values strictly greater than it.","active":["n0","n1"],"values":{"n0":"4, 2, 4, 1","n1":"0","n2":"0"}},
+  {"title":"Scan across the repeated 4","note":"The first 4 contributes zero. The 2 contributes one because the earlier 4 is greater. The second 4 contributes zero because prefix(3) includes both earlier values, including the equal 4. Query before inserting the current value.","active":["n0","n1","n2"],"values":{"n0":"4, 2, 4","n1":"3 stored","n2":"1"}},
+  {"title":"Count the final contribution","note":"At value 1 the tree has three earlier values, and prefix(1) is zero. Its contribution is 3 and the total is 4. Equal values never count as strict inversions.","active":["n1","n2"],"values":{"n0":"value 1","n1":"3 above","n2":"4 total"}},
+]} />
+
 ## Pitfalls
 
 1. **0-based indexes.** `x & -x` is `0` for `x = 0`, so `add(0, d)` loops forever. Shift every index up by one.
@@ -176,6 +196,16 @@ To count elements `<= x` in a growing multiset, keep a Fenwick tree over the val
 4. **Rebuilding on updates.** An update changes only `log n` nodes; do not recompute.
 5. **Overflow.** Sums of many large values need 64-bit integers.
 6. **Setting a value instead of adding.** The tree supports `add`. To assign, add the *difference* `new - old` (keep a plain array alongside).
+
+<ConceptWalkthrough title="Build a range update from two difference events" nodes={[
+  {"id":"n0","label":"Events","x":17,"y":46},
+  {"id":"n1","label":"Tree A","x":50,"y":46},
+  {"id":"n2","label":"Tree B","x":83,"y":46},
+]} frames={[
+  {"title":"Mark the start and stop","note":"Start with an all-zero array of length 5. Adding 3 to [2, 4] places +3 at difference index 2 and −3 at index 5. Tree A stores difference values. Tree B stores each difference weighted by index minus one.","active":["n0"],"values":{"n0":"+3 at 2","n1":"−3 at 5","n2":"weights 1, 4"}},
+  {"title":"Sum the first four positions","note":"A difference at index j contributes to x − j + 1 positions of prefix x. Summing gives x × A.prefix(x) − B.prefix(x). At x = 4, A gives 3 and B gives 3, so the prefix sum is 9.","active":["n1","n2"],"values":{"n0":"prefix 4","n1":"A = 3","n2":"B = 3"}},
+  {"title":"Watch the stop event cancel","note":"At x = 5, A gives 3 − 3 = 0 and B gives 3 − 12 = −9. The prefix stays 9, so position 5 gained zero. Use two such prefix sums to answer an arbitrary range sum.","active":["n0","n1","n2"],"values":{"n0":"prefix 5","n1":"A = 0","n2":"B = −9"}},
+]} />
 
 ## Practice
 
