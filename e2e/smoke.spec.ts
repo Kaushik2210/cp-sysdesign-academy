@@ -990,9 +990,12 @@ test("concept walkthrough plays, pauses and replays", async ({ page }) => {
   const walkthrough = page.getByRole("region", { name: "Follow the first cache-aside read" });
   await page.clock.install();
   await walkthrough.getByRole("button", { name: "Play", exact: true }).click();
-  await page.clock.runFor(3500);
+  const pause = walkthrough.getByRole("button", { name: "Pause", exact: true });
+  await expect(pause).toBeVisible();
+  await page.clock.runFor(3700);
   await expect(walkthrough.getByRole("status")).toContainText("Get the source value");
-  await walkthrough.getByRole("button", { name: "Pause", exact: true }).click();
+  await pause.click();
+  await expect(walkthrough.getByRole("button", { name: "Play", exact: true })).toBeVisible();
   await page.clock.runFor(3500);
   await expect(walkthrough.getByRole("status")).toContainText("Step 2 of 4");
   const next = walkthrough.getByRole("button", { name: "Next step" });
