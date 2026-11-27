@@ -52,6 +52,56 @@ Use six vertices `r, x, b, c, d, t`. The whole graph is the triangle `b-c-d-b` p
 
 Flipping gives `{r-x, b-c, d-t}`. All six vertices are paired, so the matching is maximum.
 
+<ConceptWalkthrough
+  title="Contract a blossom and lift the path"
+  nodes={[
+    { id: "r", label: "r", x: 11, y: 46 },
+    { id: "x", label: "x", x: 30, y: 46 },
+    { id: "b", label: "b", x: 49, y: 46 },
+    { id: "c", label: "c", x: 59, y: 19 },
+    { id: "d", label: "d", x: 69, y: 46 },
+    { id: "t", label: "t", x: 89, y: 46 },
+    { id: "blossom", label: "B", x: 59, y: 77 },
+  ]}
+  edges={[
+    { from: "r", to: "x" }, { from: "x", to: "b" }, { from: "b", to: "c" },
+    { from: "c", to: "d" }, { from: "b", to: "d" }, { from: "d", to: "t" },
+  ]}
+  frames={[
+    {
+      title: "Grow the alternating tree",
+      note: "Start at free vertex r and grow the highlighted path r–x–b–c–d. Its edges are unmatched, matched, unmatched, matched. Vertices b and d are both at even depth. The edge b–d has yet to be scanned, t is still free, and B is reserved for the contraction.",
+      active: ["r", "x", "b", "c", "d"],
+      edges: [{ from: "r", to: "x" }, { from: "x", to: "b" }, { from: "b", to: "c" }, { from: "c", to: "d" }, { from: "d", to: "t" }],
+    },
+    {
+      title: "Close the odd cycle",
+      note: "Scanning the unmatched edge b–d closes the highlighted triangle b–c–d–b. Edge c–d is matched inside the cycle. Vertex b is the base, where the stem r–x–b enters the cycle on the matched edge x–b. The unmatched edge d–t leads to free t.",
+      active: ["b", "c", "d"],
+      values: { b: "base" },
+    },
+    {
+      title: "Contract the triangle",
+      note: "Replace b, c, and d with the single outer vertex B. Its matched stem edge x–B represents x–b, and its unmatched exit edge B–t represents d–t. The highlighted path r–x–B–t alternates unmatched, matched, unmatched between free r and t.",
+      active: ["r", "x", "blossom", "t"],
+      values: { blossom: "b,c,d" },
+      edges: [{ from: "r", to: "x" }, { from: "x", to: "blossom" }, { from: "blossom", to: "t" }],
+    },
+    {
+      title: "Lift through the even arc",
+      note: "Expand B at entry b and exit d. The arc b–c–d has two edges and ends on matched c–d, so it can continue on unmatched d–t. Taking b–d would put two unmatched edges in a row. The highlighted path r–x–b–c–d–t alternates unmatched, matched, unmatched, matched, unmatched.",
+      active: ["r", "x", "b", "c", "d", "t"],
+      edges: [{ from: "r", to: "x" }, { from: "x", to: "b" }, { from: "b", to: "c" }, { from: "c", to: "d" }, { from: "d", to: "t" }],
+    },
+    {
+      title: "Flip to gain one pair",
+      note: "Remove x–b and c–d and take the three shown edges r–x, b–c, and d–t. The matching grows from two pairs to three. All six vertices are now paired, so this matching is maximum.",
+      active: ["r", "x", "b", "c", "d", "t"],
+      edges: [{ from: "r", to: "x" }, { from: "b", to: "c" }, { from: "d", to: "t" }],
+    },
+  ]}
+/>
+
 ## Python implementation
 
 This solver takes an undirected simple graph on vertices `0` through `n - 1` and returns its matched edges. The command-line wrapper reads `n m` followed by `m` edge rows and prints the number of pairs followed by those pairs, the format used by [Library Checker General Matching](https://judge.yosupo.jp/problem/general_matching).

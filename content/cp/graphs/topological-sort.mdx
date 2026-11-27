@@ -155,6 +155,52 @@ for u in order:
 print("longest chain:", max(longest.values()))
 `} />
 
+<ConceptWalkthrough
+  title="Kahn’s algorithm on the course plan"
+  nodes={[
+    { id: "v1", label: "1", x: 18, y: 40 },
+    { id: "v2", label: "2", x: 62, y: 46 },
+    { id: "v3", label: "3", x: 40, y: 20 },
+    { id: "v4", label: "4", x: 84, y: 46 },
+    { id: "queue", label: "Queue", x: 24, y: 73 },
+  ]}
+  edges={[
+    { from: "v1", to: "v2" }, { from: "v1", to: "v3" },
+    { from: "v3", to: "v2" }, { from: "v2", to: "v4" },
+  ]}
+  frames={[
+    {
+      title: "Count the incoming edges",
+      note: "The prerequisites are 1 → 2, 1 → 3, 3 → 2, and 2 → 4. The in-degrees of courses 1 through 4 are 0, 2, 1, 1. Only course 1 has in-degree zero, so the queue starts at [1]. The order is empty.",
+      active: ["v1"], values: { v1: "0", v2: "2", v3: "1", v4: "1", queue: "[1]" },
+    },
+    {
+      title: "Take 1 and enqueue 3",
+      note: "Pop 1 and remove its edges to 2 and 3. Course 2 drops from in-degree 2 to 1 and still needs 3. Course 3 drops from 1 to 0 and enters the queue. Course 4 stays at 1. The queue is [3] and the order is [1].",
+      active: ["v3"], values: { v1: "done", v2: "1", v3: "0", v4: "1", queue: "[3]" },
+      edges: [{ from: "v3", to: "v2" }, { from: "v2", to: "v4" }],
+    },
+    {
+      title: "Take 3 and enqueue 2",
+      note: "Pop 3 and remove 3 → 2. Course 2 drops from in-degree 1 to 0 and enters the queue. Course 4 still has in-degree 1 from 2 → 4. The queue is [2] and the order is [1, 3].",
+      active: ["v2"], values: { v1: "done", v2: "0", v3: "done", v4: "1", queue: "[2]" },
+      edges: [{ from: "v2", to: "v4" }],
+    },
+    {
+      title: "Take 2 and enqueue 4",
+      note: "Pop 2 and remove 2 → 4, the last edge. Course 4 drops from in-degree 1 to 0 and enters the queue. The queue is [4] and the order is [1, 3, 2].",
+      active: ["v4"], values: { v1: "done", v2: "done", v3: "done", v4: "0", queue: "[4]" },
+      edges: [],
+    },
+    {
+      title: "Take 4 and check the order",
+      note: "Pop 4. It has no outgoing edges. The queue is empty and all four courses appear in the order [1, 3, 2, 4], so the graph is acyclic.",
+      active: [], values: { v1: "done", v2: "done", v3: "done", v4: "done", queue: "[]" },
+      edges: [],
+    },
+  ]}
+/>
+
 ## What topological order is used for
 
 1. **Scheduling with prerequisites**, build orders, package installation.

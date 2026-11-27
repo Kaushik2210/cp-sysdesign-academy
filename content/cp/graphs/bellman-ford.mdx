@@ -138,6 +138,45 @@ d, neg = bellman_ford(4, [(2, 3, -3), (3, 2, 1), (1, 4, 1)], 1)
 print("unreachable negative cycle ignored:", not neg)
 `} />
 
+<ConceptWalkthrough
+  title="Bellman–Ford’s negative-cycle check"
+  nodes={[
+    { id: "v1", label: "1", x: 20, y: 55 },
+    { id: "v2", label: "2", x: 50, y: 30 },
+    { id: "v3", label: "3", x: 80, y: 55 },
+  ]}
+  edges={[
+    { from: "v1", to: "v2" }, { from: "v2", to: "v3" }, { from: "v3", to: "v2" },
+  ]}
+  frames={[
+    {
+      title: "Initialize distances from 1",
+      note: "Distances to vertices 1, 2, and 3 start at [0, ∞, ∞]. Each round scans the worked example’s edges in order: 1 → 2 (weight +1), 2 → 3 (−3), then 3 → 2 (+1).",
+      active: ["v1"], values: { v1: "0", v2: "∞", v3: "∞" },
+    },
+    {
+      title: "Reach vertex 2 in round 1",
+      note: "Relax 1 → 2 with weight +1. The candidate 0 + 1 = 1 beats infinity, so the distances are now [0, 1, ∞] in vertex order. This update can be used by the next edge in the same round.",
+      active: ["v1", "v2"], values: { v1: "0", v2: "1", v3: "∞" },
+    },
+    {
+      title: "Finish round 1",
+      note: "On 2 → 3, the candidate 1 − 3 = −2 beats infinity. On 3 → 2, the candidate −2 + 1 = −1 beats the previous distance 1. Round 1 ends at [0, −1, −2] in vertex order.",
+      active: ["v2", "v3"], values: { v1: "0", v2: "−1", v3: "−2" },
+    },
+    {
+      title: "Finish round 2",
+      note: "The direct candidate 1 on 1 → 2 leaves distance −1 in place. Edge 2 → 3 lowers −2 to −1 − 3 = −4, then 3 → 2 lowers −1 to −4 + 1 = −3. After n − 1 = 2 rounds, the distances are [0, −3, −4] in vertex order.",
+      active: ["v2", "v3"], values: { v1: "0", v2: "−3", v3: "−4" },
+    },
+    {
+      title: "Check for improvement in round 3",
+      note: "The direct candidate 1 leaves distance −3 in place. Then 2 → 3 gives −3 − 3 = −6, beating −4, and 3 → 2 gives −6 + 1 = −5, beating −3. The distances end at [0, −5, −6]. An improvement in round n = 3 confirms a reachable negative cycle. Vertex 1 reaches 2 → 3 → 2, whose total weight is −3 + 1 = −2.",
+      active: ["v2", "v3"], values: { v1: "0", v2: "−5", v3: "−6" },
+    },
+  ]}
+/>
+
 ## Faster variants and relatives
 
 | method | when to use |

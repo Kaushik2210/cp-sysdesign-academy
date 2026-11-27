@@ -76,6 +76,63 @@ For `(3, 5)`, the LCA is `0`. The window starts at the **exit** of `3`, so `[3, 
 
 The branches contribute blue and red. Adding the LCA contributes gold, so the distinct count is **3**. Toggle `0` out before moving the pointers again. An exit event can activate a vertex because window membership depends on parity.
 
+<ConceptWalkthrough
+  title="Path (3, 5): Euler parity and the extra LCA"
+  nodes={[
+    { id: "0", label: "0", x: 50, y: 18 },
+    { id: "1", label: "1", x: 31, y: 43 },
+    { id: "2", label: "2", x: 75, y: 43 },
+    { id: "3", label: "3", x: 14, y: 75 },
+    { id: "4", label: "4", x: 47, y: 75 },
+    { id: "5", label: "5", x: 79, y: 75 },
+  ]}
+  edges={[
+    { from: "0", to: "1" },
+    { from: "0", to: "2" },
+    { from: "1", to: "3" },
+    { from: "1", to: "4" },
+    { from: "2", to: "5" },
+  ]}
+  frames={[
+    {
+      title: "Start at the exit of 3",
+      note: "For path (3, 5), the endpoints are in different branches of LCA 0. Start the inclusive window [3, 8] at position 3, the exit event of vertex 3. That single occurrence makes 3 odd and active.",
+      active: ["3"],
+      values: { "3": "Odd" },
+    },
+    {
+      title: "Enter vertex 4",
+      note: "Extend the window to position 4, the entry event of vertex 4. Vertices 3 and 4 each occur once, so both are active.",
+      active: ["3", "4"],
+      values: { "3": "Odd", "4": "Odd" },
+    },
+    {
+      title: "Exit vertex 4",
+      note: "Position 5 adds the exit event of vertex 4. Its entry and exit give it two occurrences, so its parity is even and it becomes inactive. Only vertex 3 remains active.",
+      active: ["3"],
+      values: { "3": "Odd", "4": "Even" },
+    },
+    {
+      title: "Finish the Euler window",
+      note: "Positions 6, 7, and 8 add the exit of 1, the entry of 2, and the entry of 5. In the full window [3, 8], vertices 1, 2, 3, and 5 are odd and active. The LCA 0 has zero occurrences in this window.",
+      active: ["1", "2", "3", "5"],
+      values: { "0": "Zero", "1": "Odd", "2": "Odd", "3": "Odd", "4": "Even", "5": "Odd" },
+    },
+    {
+      title: "Add the LCA and count",
+      note: "Temporarily activate vertex 0 while keeping the window at [3, 8]. The active vertices now form the full path 3–1–0–2–5. Vertices 1 and 2 are blue, 3 and 5 are red, and 0 is gold, giving 3 distinct colours.",
+      active: ["0", "1", "2", "3", "5"],
+      values: { "0": "Extra LCA", "1": "Odd", "2": "Odd", "3": "Odd", "4": "Even", "5": "Odd" },
+    },
+    {
+      title: "Restore window parity",
+      note: "After recording 3, toggle vertex 0 back out. The window is still [3, 8], and the active set again contains exactly its odd vertices: 1, 2, 3, and 5.",
+      active: ["1", "2", "3", "5"],
+      values: { "0": "Zero", "1": "Odd", "2": "Odd", "3": "Odd", "4": "Even", "5": "Odd" },
+    },
+  ]}
+/>
+
 ## Code
 
 The solver takes colours, an undirected edge list for a nonempty tree with vertices numbered from `0`, and a list of query pairs. The iterative DFS records both tour events and the immediate parents. The LCA helper uses the entry and exit times to test ancestry, then lifts one endpoint to just below the common ancestor.

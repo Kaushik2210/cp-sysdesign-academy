@@ -38,6 +38,47 @@ Start with row minima `u = [1, 1, 0]` and `v = [0, 0, 0]`. Assign row 1 to A. Ro
 
 Raise both reached row potentials by 1 and lower A's column potential by 1. The slacks inside the reached set stay fixed. Row 1 to B becomes tight, so flip the alternating path from row 2 through A and row 1 to B. Add row 3 to C. The cost is 3 and the updated lower bound is also 3.
 
+<ConceptWalkthrough
+  title="From tight edges to an optimal assignment"
+  nodes={[
+    { id: "r1", label: "Row 1", x: 24, y: 20 },
+    { id: "r2", label: "Row 2", x: 24, y: 49 },
+    { id: "r3", label: "Row 3", x: 24, y: 78 },
+    { id: "a", label: "Job A", x: 76, y: 20 },
+    { id: "b", label: "Job B", x: 76, y: 49 },
+    { id: "c", label: "Job C", x: 76, y: 78 },
+  ]}
+  edges={[{ from: "r1", to: "a" }, { from: "r2", to: "a" }, { from: "r3", to: "c" }]}
+  frames={[
+    {
+      title: "Start with row minima",
+      note: "Row potentials are (1, 1, 0) and job potentials are (0, 0, 0) in A, B, C order. The tight edges are 1–A, 2–A, and 3–C. The current assignment contains only 1–A, which is highlighted.",
+      active: ["r1", "a"],
+      values: { r1: "u=1", r2: "u=1", r3: "u=0", a: "v=0", b: "v=0", c: "v=0" },
+    },
+    {
+      title: "Find the smallest outside slack",
+      note: "From free row 2, follow tight edge 2–A, then the matched edge A–1. The reached set is rows 1 and 2 and job A. The potentials and tight edges are unchanged. Of the edges from the reached rows to jobs B and C, 1–B has the smallest slack, 2 − 1 − 0 = 1.",
+      active: ["r1", "r2", "a"],
+      values: { r1: "u=1", r2: "u=1", r3: "u=0", a: "v=0", b: "v=0", c: "v=0" },
+    },
+    {
+      title: "Adjust potentials and reach B",
+      note: "Add 1 to the potentials of rows 1 and 2 and subtract 1 from job A. Row potentials are now (2, 2, 0) and job potentials are (−1, 0, 0). The changes cancel on 1–A and 2–A, while 3–C is unaffected. Edges from the reached rows to B and C lose 1 slack and stay feasible. Edge 3–A gains 1 slack. Edge 1–B is newly tight, so the alternating path 2–A–1–B reaches free job B.",
+      active: ["r2", "a", "r1", "b"],
+      values: { r1: "u=2", r2: "u=2", r3: "u=0", a: "v=−1", b: "v=0", c: "v=0" },
+      edges: [{ from: "r1", to: "a" }, { from: "r2", to: "a" }, { from: "r1", to: "b" }, { from: "r3", to: "c" }],
+    },
+    {
+      title: "Flip the path and certify optimality",
+      note: "Replace 1–A with 2–A and 1–B, then add 3–C. The three shown edges form a complete assignment of cost 1 + 2 + 0 = 3. The feasible potentials (2, 2, 0) and (−1, 0, 0) sum to 3. Every complete assignment counts each potential once, so its cost is at least 3. This assignment attains that bound.",
+      active: ["r1", "r2", "r3", "a", "b", "c"],
+      values: { r1: "u=2", r2: "u=2", r3: "u=0", a: "v=−1", b: "v=0", c: "v=0" },
+      edges: [{ from: "r2", to: "a" }, { from: "r1", to: "b" }, { from: "r3", to: "c" }],
+    },
+  ]}
+/>
+
 ## Maintaining the search
 
 For each new row, grow an alternating tree of tight edges from it. A discovered occupied column contributes its matched row to the tree. For each outside column, keep its least slack from any reached row and remember the predecessor that achieves it.

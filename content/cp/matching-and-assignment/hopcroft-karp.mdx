@@ -68,6 +68,54 @@ Use left order `A, B, C, D` and the neighbor order shown below. Start with an em
 
 In phase 1, B and D each reach a right vertex already taken by a path in the batch. In phase 2, BFS can follow the matched edges `x → A` and `z → C` backward. It then finds the free endpoints `y` and `w`. Flipping both three-edge paths reassigns A and C while matching B and D. The next BFS has no free left roots.
 
+<ConceptWalkthrough
+  title="Two Hopcroft–Karp phases"
+  nodes={[
+    {id:"a",label:"A",x:14,y:29},
+    {id:"b",label:"B",x:14,y:68},
+    {id:"x",label:"x",x:37,y:68},
+    {id:"y",label:"y",x:37,y:29},
+    {id:"c",label:"C",x:63,y:29},
+    {id:"d",label:"D",x:63,y:68},
+    {id:"z",label:"z",x:86,y:68},
+    {id:"w",label:"w",x:86,y:29}
+  ]}
+  edges={[
+    {from:"a",to:"x"},{from:"a",to:"y"},{from:"b",to:"x"},
+    {from:"c",to:"z"},{from:"c",to:"w"},{from:"d",to:"z"}
+  ]}
+  frames={[
+    {
+      title:"Phase 1 BFS finds one-edge paths",
+      note:"The matching is empty, so A, B, C, and D all start in left layer 0. Every right vertex is free. Each displayed edge reaches a free endpoint immediately, so the terminal depth is 1 and shortest paths have one edge.",
+      active:["a","b","c","d","x","y","z","w"],
+      values:{a:"L0",b:"L0",c:"L0",d:"L0"}
+    },
+    {
+      title:"Phase 1 DFS adds two pairs",
+      note:"In scan order, A takes x and C takes z. B and D can only reach the right vertices taken by those paths. The batch leaves A paired with x and C paired with z, with B, D, y, and w free.",
+      active:["a","x","c","z"],
+      edges:[{from:"x",to:"a"},{from:"z",to:"c"}]
+    },
+    {
+      title:"Phase 2 BFS reaches a new layer",
+      note:"With A paired with x and C paired with z, free B and D start in left layer 0. BFS follows B through x to A and D through z to C, putting A and C in layer 1. From there, A reaches free y and C reaches free w. The terminal depth is 2, so shortest paths now have three edges.",
+      active:["a","b","c","d","x","y","z","w"],
+      values:{a:"L1",b:"L0",c:"L1",d:"L0",y:"free",w:"free"},
+      edges:[
+        {from:"b",to:"x"},{from:"x",to:"a"},{from:"a",to:"y"},
+        {from:"d",to:"z"},{from:"z",to:"c"},{from:"c",to:"w"}
+      ]
+    },
+    {
+      title:"Phase 2 DFS adds two more pairs",
+      note:"DFS flips the two disjoint paths from B through x and A to y, and from D through z and C to w. The new pairs are A with y, B with x, C with w, and D with z. The next BFS has no free left root, so the algorithm stops at four pairs.",
+      active:["a","b","c","d","x","y","z","w"],
+      edges:[{from:"a",to:"y"},{from:"b",to:"x"},{from:"c",to:"w"},{from:"d",to:"z"}]
+    }
+  ]}
+/>
+
 ## Python implementation
 
 `adj[u]` contains the zero-based right neighbors of left vertex `u`. The function takes the size of the right side explicitly, so isolated right vertices are represented. It returns the matching size and both mate arrays, with `-1` for an unmatched vertex. DFS uses an explicit stack so the length of an alternating chain is independent of Python's recursion limit.

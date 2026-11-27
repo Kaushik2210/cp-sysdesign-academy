@@ -40,6 +40,20 @@ On `[4, 4, 7, 1, 7, 1]`, use blocks of size 2 and start at `[0, 0)`.
 
 Return `[2, 1, 3]` in input order. Before running the demo, predict the answer to `[4, 5)` and identify the update that removes the last copy of 1 from `[2, 6)`.
 
+<ConceptWalkthrough title="Move Mo's window" nodes={[
+  { id: "p0", label: "4", x: 11, y: 47 },
+  { id: "p1", label: "4", x: 27, y: 47 },
+  { id: "p2", label: "7", x: 42, y: 47 },
+  { id: "p3", label: "1", x: 58, y: 47 },
+  { id: "p4", label: "7", x: 73, y: 47 },
+  { id: "p5", label: "1", x: 89, y: 47 },
+]} frames={[
+  { title: "Start with an empty window", note: "The array is 4, 4, 7, 1, 7, 1. The window [0, 0) contains nothing and has distinct count 0.", active: [] },
+  { title: "Two copies, one distinct value", note: "Move the right boundary to 2. The two active positions both hold 4, so query 1 gets answer 1.", active: ["p0", "p1"] },
+  { title: "Keep the remaining copy", note: "Expand the right boundary to 4 and move the left boundary to 1. The active values are 4, 7, 1. Query 2 gets answer 3 because one copy of 4 is still inside.", active: ["p1", "p2", "p3"] },
+  { title: "Record the last answer", note: "Expand right to 6 and move left to 2. The last copy of 4 leaves. The active values are 7, 1, 7, 1, so query 0 gets answer 2. Return answers in input order as 2, 1, 3.", active: ["p2", "p3", "p4", "p5"] },
+]} />
+
 ## Why the sort helps
 
 For `n` elements and `q` queries, the left endpoint travels `O(qB + n)`: its movements within blocks are bounded by `B` per query, and block numbers never decrease. The right endpoint moves `O(n)` per visited block, including the boundary jump. With at most `ceil(n/B)` blocks and constant-time updates, the total time is `O(q log q + qB + n ceil(n/B))`. Taking `B` near `sqrt(n)` gives `O(q log q + (n+q)sqrt(n))`. If `q` is far from `n`, use the bound to reason about a different block size instead of treating square root as a fixed rule.

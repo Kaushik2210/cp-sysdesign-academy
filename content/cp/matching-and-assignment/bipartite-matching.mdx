@@ -49,6 +49,46 @@ C --unused--> 0 --matched--> A --unused--> 1 --matched--> B --unused--> 2
 
 Booth `2` is free. Assign B to `2`, A to `1`, and C to `0` as the search returns. D then tries `0`, but its owner C has no other option. The final pairs are `(A, 1)`, `(B, 2)`, and `(C, 0)`.
 
+<ConceptWalkthrough
+  title="Augment the matching for C"
+  nodes={[
+    {id:"a",label:"A",x:84,y:28},
+    {id:"b",label:"B",x:50,y:72},
+    {id:"c",label:"C",x:16,y:28},
+    {id:"r0",label:"0",x:50,y:28},
+    {id:"r1",label:"1",x:84,y:72},
+    {id:"r2",label:"2",x:16,y:72}
+  ]}
+  edges={[{from:"r0",to:"a"},{from:"r1",to:"b"}]}
+  frames={[
+    {
+      title:"Start with two pairs",
+      note:"A holds booth 0 and B holds booth 1. C and booth 2 are free. The diagram shows the volunteers and booths involved in C's search.",
+      active:["a","r0","b","r1"],
+      values:{c:"free",r2:"free"}
+    },
+    {
+      title:"Follow the current owners",
+      note:"With A still at booth 0 and B at booth 1, free C tries booth 0. The search follows its matched edge back to A. A tries booth 1, whose matched edge leads back to B.",
+      active:["c","r0","a","r1","b"],
+      edges:[{from:"c",to:"r0"},{from:"r0",to:"a"},{from:"a",to:"r1"},{from:"r1",to:"b"}]
+    },
+    {
+      title:"Reach a free booth",
+      note:"B can take free booth 2. The complete path goes from C through booth 0, A, booth 1, and B to booth 2. The edges from booths 0 and 1 back to their owners are matched. The three edges from volunteers to booths are unused.",
+      active:["c","r0","a","r1","b","r2"],
+      values:{r2:"free"},
+      edges:[{from:"c",to:"r0"},{from:"r0",to:"a"},{from:"a",to:"r1"},{from:"r1",to:"b"},{from:"b",to:"r2"}]
+    },
+    {
+      title:"Flip the path",
+      note:"Drop A's old pair with booth 0 and B's old pair with booth 1. On the return from the search, assign B to 2, A to 1, and C to 0. The matching grows from two pairs to three.",
+      active:["a","r1","b","r2","c","r0"],
+      edges:[{from:"b",to:"r2"},{from:"a",to:"r1"},{from:"c",to:"r0"}]
+    }
+  ]}
+/>
+
 ### Certify the answer with a vertex cover
 
 A **vertex cover** is a set of vertices containing at least one endpoint of every edge. Any cover must contain at least one distinct vertex per matching edge, so its size is an upper bound on the size of every matching. A valid matching and a valid cover of equal size certify both optimal answers.
