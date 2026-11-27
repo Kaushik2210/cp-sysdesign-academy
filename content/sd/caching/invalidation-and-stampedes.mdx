@@ -77,6 +77,18 @@ Back-of-envelope: a key read 2,000 times per second whose recompute takes 300 ms
 | Refresh-ahead / pre-warm | Background job refreshes known hot keys before expiry; warm caches before cutover | Wasted refreshes; must know the hot set |
 | Load shedding | Cap concurrent recomputations; reject or degrade the rest | Some users get errors or defaults |
 
+<ConceptWalkthrough title="Coalesce six misses for one expired key" nodes={[
+  { id: "a", label: "Worker A", x: 25, y: 23 },
+  { id: "b", label: "Worker B", x: 75, y: 23 },
+  { id: "cache", label: "Cache", x: 25, y: 68 },
+  { id: "db", label: "DB", x: 75, y: 68 },
+]} frames={[
+  { title: "Expire the key just before a burst", note: "A shared cache entry expires at t = 0 ms. Each of two workers receives one read of that key at 0, 20 and 40 ms. One recomputation takes 100 ms. Replay the same six arrivals under three coordination policies.", active: ["a", "b", "cache"], values: { a: "3 reads", b: "3 reads", cache: "Expired", db: "100 ms" }, edges: [{ from: "a", to: "cache" }, { from: "b", to: "cache" }] },
+  { title: "Let every miss recompute", note: "The first fills can finish only at t = 100 ms, so all six requests miss and start their own database work. At t = 40 ms, all six recomputations are in flight.", active: ["a", "b", "db"], values: { a: "3 loads", b: "3 loads", cache: "Empty at 40 ms", db: "6 in flight" }, edges: [{ from: "a", to: "db" }, { from: "b", to: "db" }] },
+  { title: "Share the in-flight load within each worker", note: "With per-worker coalescing, each worker starts one load at t = 0 ms. Its requests at 20 and 40 ms join that load. At t = 40 ms, the database has two recomputations in flight and four requests are waiting on them.", active: ["a", "b", "db"], values: { a: "1 load", b: "1 load", cache: "Empty at 40 ms", db: "2 in flight" }, edges: [{ from: "a", to: "db" }, { from: "b", to: "db" }] },
+  { title: "Use a shared lease for one load", note: "A wins a shared lease at t = 0 ms that stays valid through the fill. Only A starts a recomputation. The other five requests wait for the shared cache, which A fills at t = 100 ms so they can all read the result.", active: ["a", "b", "cache", "db"], values: { a: "Lease holder", b: "Waits", cache: "Fill at 100 ms", db: "1 load total" }, edges: [{ from: "a", to: "db" }, { from: "a", to: "cache" }, { from: "b", to: "cache" }] },
+]} />
+
 ### Probabilistic early expiration, runnable
 
 The XFetch rule: recompute early when `now - delta * beta * ln(random()) >= expiry`, where `delta` is how long a recompute takes and `beta` (default 1) tunes aggressiveness. Since `ln(random())` is negative, the left side adds a random positive amount, so the *chance of refreshing rises as expiry nears* and roughly one reader refreshes slightly early instead of all readers missing at expiry.

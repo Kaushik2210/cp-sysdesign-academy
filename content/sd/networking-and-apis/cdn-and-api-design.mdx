@@ -74,6 +74,46 @@ A response containing user-specific data must be `private` or `no-store`, or be 
 
 Worked number: a site gets 1,000 requests per second for static assets with a 95% edge hit ratio. The origin sees about 50 requests per second instead of 1,000, a 20 times reduction. Raising the hit ratio to 99% brings it to about 10 per second, which is why cache key hygiene is worth the effort.
 
+<ConceptWalkthrough
+  title="Following one image through a CDN cache"
+  nodes={[
+    { id: "client", label: "Browser", x: 20, y: 46 },
+    { id: "edge", label: "Edge", x: 50, y: 46 },
+    { id: "origin", label: "Origin", x: 80, y: 46 },
+  ]}
+  edges={[]}
+  frames={[
+    {
+      title: "Fill the cache on the first request",
+      note: "At t = 0, the first browser requests /covers/atlas.webp from an empty CDN edge. The origin sends a 40 KB image with Cache-Control: public, max-age=60 and ETag: \"atlas-v1\". The edge stores it and serves the first browser.",
+      active: ["client", "edge", "origin"],
+      values: { client: "40 KB", edge: "miss", origin: "200 / 40 KB" },
+      edges: [{ from: "origin", to: "edge" }, { from: "edge", to: "client" }],
+    },
+    {
+      title: "Serve a fresh copy from the edge",
+      note: "At t = 25 s, a different browser requests the same URL at the same edge. With negligible transit time, the cached copy has 60 - 25 = 35 s of freshness left. The edge sends its 40 KB copy and makes zero origin requests for this hit.",
+      active: ["client", "edge"],
+      values: { client: "40 KB", edge: "35 s left" },
+      edges: [{ from: "edge", to: "client" }],
+    },
+    {
+      title: "Revalidate the stale copy",
+      note: "At t = 70 s, a third browser requests the image. The edge still has the bytes, but its copy is 10 s past its freshness lifetime. It asks the origin to validate the copy using If-None-Match: \"atlas-v1\".",
+      active: ["edge", "origin"],
+      values: { client: "waiting", edge: "10 s stale", origin: "check tag" },
+      edges: [{ from: "client", to: "edge" }, { from: "edge", to: "origin" }],
+    },
+    {
+      title: "Reuse the image after a 304",
+      note: "The image is unchanged, so the origin replies 304 Not Modified with no body. The edge sends a 200 with the stored image to the third browser. Across three browser requests, the origin handled two requests and sent 40 KB of image data. Serving all three directly would have cost 120 KB of origin image data.",
+      active: ["client", "edge", "origin"],
+      values: { client: "200 / 40 KB", edge: "cached", origin: "304 / 0 KB" },
+      edges: [{ from: "origin", to: "edge" }, { from: "edge", to: "client" }],
+    },
+  ]}
+/>
+
 ## API design best practices
 
 ### Pagination

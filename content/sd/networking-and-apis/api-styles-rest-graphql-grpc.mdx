@@ -72,6 +72,53 @@ query {
 
 One round trip, only the requested fields. Typically all queries go to a single `POST /graphql`, so URL-based HTTP caching does not apply directly; caching moves to the client library or to persisted queries. A server resolving nested fields naively makes one database call per item (the **N+1 problem**), usually fixed with batching (for example a DataLoader pattern). Because clients can write arbitrary queries, servers need depth limits, cost analysis and timeouts to avoid expensive queries.
 
+<ConceptWalkthrough
+  title="Batching nested GraphQL lookups for an event schedule"
+  nodes={[
+    { id: "client", label: "Client", x: 20, y: 46 },
+    { id: "api", label: "GraphQL", x: 50, y: 46 },
+    { id: "db", label: "DB", x: 80, y: 46 },
+  ]}
+  edges={[]}
+  frames={[
+    {
+      title: "Make one request for the schedule",
+      note: "An event app asks for the title and speaker name of each session in a single GraphQL query. One client round trip can still fan out into several database queries.",
+      active: ["client", "api"],
+      values: { client: "1 request" },
+      edges: [{ from: "client", to: "api" }],
+    },
+    {
+      title: "Read the three sessions",
+      note: "The server runs one query for sessions ordered by start time. The returned rows reference speaker IDs 8, 12, and 8, in that order. There are three sessions and two distinct speakers.",
+      active: ["api", "db"],
+      values: { api: "8, 12, 8", db: "1 query" },
+      edges: [{ from: "api", to: "db" }],
+    },
+    {
+      title: "Count the naive lookups",
+      note: "With an uncached database lookup in each speaker resolver, the server queries speaker 8, speaker 12, then speaker 8 again. Including the session query, the server makes 1 + 3 = 4 database queries for the same one client request.",
+      active: ["api", "db"],
+      values: { api: "3 lookups", db: "4 total" },
+      edges: [{ from: "api", to: "db" }],
+    },
+    {
+      title: "Fetch the distinct speakers together",
+      note: "In a batched implementation, the server gathers and deduplicates the IDs from the three sessions. It fetches both speaker rows with one query using WHERE id IN (8, 12). This replaces all three individual lookups.",
+      active: ["api", "db"],
+      values: { api: "8, 12", db: "2 total" },
+      edges: [{ from: "api", to: "db" }],
+    },
+    {
+      title: "Attach speakers in session order",
+      note: "Speaker 8 is Mina and speaker 12 is Omar. The server indexes the two rows by ID and fills in the three sessions in their original order: Mina, Omar, Mina. The app still makes one request, and database queries drop from four to two.",
+      active: ["client", "api"],
+      values: { client: "3 items", db: "2 queries" },
+      edges: [{ from: "api", to: "client" }],
+    },
+  ]}
+/>
+
 ### gRPC
 
 ```protobuf

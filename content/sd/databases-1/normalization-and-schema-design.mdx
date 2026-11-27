@@ -55,6 +55,47 @@ CREATE TABLE order_items (
 
 Each fact now lives once; a city change is one row update.
 
+### Worked example: rename a shared classroom
+
+<ConceptWalkthrough
+  title="Follow the dependencies in a workshop schedule"
+  nodes={[
+    { id: "wide", label: "Schedule", x: 25, y: 29 },
+    { id: "slots", label: "Slots", x: 75, y: 29 },
+    { id: "workshops", label: "Workshops", x: 75, y: 69 },
+    { id: "rooms", label: "Rooms", x: 25, y: 69 }
+  ]}
+  frames={[
+    {
+      title: "Find what determines each fact",
+      note: "A schedule has three rows keyed by (workshop_id, slot_no). W1 has slots 1 and 2 with 12 and 16 seats offered. W2 has slot 1 with 10 seats offered. Each workshop uses one room, and both use room R4, called Cedar. The seat offer belongs to a slot, the room assignment belongs to a workshop, and the name belongs to a room.",
+      active: ["wide"],
+      values: { wide: "3 rows" }
+    },
+    {
+      title: "Move the workshop's room assignment",
+      note: "W1's two slots repeat the same room assignment because workshop_id alone determines room_id. To remove that partial dependency, keep three Slots rows with the full key and seat offer, and store two Workshops rows keyed by workshop_id. W1 and W2 both point to R4. If room_name is stored on each workshop row, Cedar still appears twice.",
+      active: ["slots", "workshops"],
+      values: { slots: "3 rows", workshops: "2 rows" },
+      edges: [{ from: "slots", to: "workshops" }]
+    },
+    {
+      title: "Give the room name its own row",
+      note: "In Workshops, room_id determines room_name, so the name depends on the workshop key through room_id. Remove that transitive dependency by moving the name to Rooms, keyed by room_id. With R4 stored once as Cedar, joining slot W1/2 to workshop W1 and room R4 reconstructs the original result of 16 seats in Cedar.",
+      active: ["slots", "workshops", "rooms"],
+      values: { slots: "W1/2: 16", workshops: "W1 to R4", rooms: "R4: Cedar" },
+      edges: [{ from: "slots", to: "workshops" }, { from: "workshops", to: "rooms" }]
+    },
+    {
+      title: "Rename Cedar to Maple",
+      note: "The wide schedule would need all 3 rows updated to rename R4 everywhere. In the normalized schema, update the single Rooms row for R4. All 3 slots now display Maple when joined, with seat offers still 12, 16 and 10. The room ID stays stable across the rename.",
+      active: ["slots", "workshops", "rooms"],
+      values: { wide: "3 updates", slots: "3 show Maple", workshops: "2 use R4", rooms: "1 update" },
+      edges: [{ from: "slots", to: "workshops" }, { from: "workshops", to: "rooms" }]
+    }
+  ]}
+/>
+
 ## Denormalization: when and how
 
 Joins cost CPU and I/O, and in sharded systems cross-shard joins are expensive or impossible. Common denormalizations:

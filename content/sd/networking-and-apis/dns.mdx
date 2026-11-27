@@ -78,6 +78,45 @@ Every record carries a **TTL** (time to live, in seconds). Resolvers, operating 
 If a record has a one-day TTL and you change it, some clients keep the old address for up to a day. Before a planned migration, lower the TTL well in advance (at least the old TTL ahead of time), switch, then raise it again. Some resolvers also ignore low TTLs or clamp them, so treat TTL as a request, not a guarantee.
 </Callout>
 
+<ConceptWalkthrough
+  title="Planning a DNS cutover around cached answers"
+  nodes={[
+    { id: "client", label: "Client", x: 20, y: 46 },
+    { id: "resolver", label: "Resolver", x: 50, y: 46 },
+    { id: "auth", label: "Auth DNS", x: 80, y: 46 },
+  ]}
+  edges={[]}
+  frames={[
+    {
+      title: "Lower the TTL before switching addresses",
+      note: "At t = 0, the operator lowers the TTL of the A record for shop.example.com from 300 s to 60 s and keeps the old address. This resolver cached the old address at t = -10 s with TTL 300 s, so that copy expires at t = 290 s.",
+      active: ["resolver", "auth"],
+      values: { resolver: "290 s left", auth: "old, 60s" },
+    },
+    {
+      title: "Refill with the shorter TTL",
+      note: "At t = 290 s, a client lookup finds the resolver's copy expired. The resolver asks authoritative DNS and gets the old address with TTL 60 s. The replacement copy expires at t = 350 s.",
+      active: ["client", "resolver", "auth"],
+      values: { client: "old IP", resolver: "60 s left", auth: "old, 60s" },
+      edges: [{ from: "client", to: "resolver" }, { from: "resolver", to: "auth" }],
+    },
+    {
+      title: "Switch and keep serving the old address",
+      note: "At t = 300 s, one full original TTL after lowering it, authoritative DNS switches to the new address. At t = 310 s, a fresh client lookup through this resolver still gets the old address with 40 s left. The old endpoint stays available for clients using those cached answers.",
+      active: ["client", "resolver"],
+      values: { client: "old IP", resolver: "40 s left", auth: "new, 60s" },
+      edges: [{ from: "client", to: "resolver" }],
+    },
+    {
+      title: "Fetch the new address",
+      note: "At t = 350 s, the next lookup through this resolver finds the cached copy expired and gets the new address from authoritative DNS. Under normal TTL handling, another resolver could have refreshed just before the t = 300 s switch, so allow the full 60 s after the switch for cached answers to expire.",
+      active: ["client", "resolver", "auth"],
+      values: { client: "new IP", resolver: "60 s left", auth: "new, 60s" },
+      edges: [{ from: "client", to: "resolver" }, { from: "resolver", to: "auth" }],
+    },
+  ]}
+/>
+
 Negative answers (name does not exist) are cached too, for a period set by the zone.
 
 ## DNS as a traffic tool

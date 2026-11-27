@@ -30,9 +30,9 @@ Having a cache is one decision; deciding **who talks to it and in what order** i
 The application owns the logic: read the cache; on a miss, read the database, then populate the cache.
 
 <ConceptWalkthrough title="Follow the first cache-aside read" nodes={[
-  { id: "app", label: "App", x: 18, y: 45 },
-  { id: "cache", label: "Cache", x: 50, y: 45 },
-  { id: "db", label: "DB", x: 82, y: 45 },
+  { id: "app", label: "App", x: 18, y: 64 },
+  { id: "cache", label: "Cache", x: 50, y: 25 },
+  { id: "db", label: "DB", x: 82, y: 64 },
 ]} frames={[
   { title: "Look in the cache", note: "The app sends GET user:42 to the cache. The cache has no entry, so it returns a miss.", active: ["app", "cache"], values: { cache: "miss" }, edges: [{ from: "app", to: "cache" }] },
   { title: "Get the source value", note: "The app reads user:42 from the database and receives version 1. The cache is still empty.", active: ["app", "db"], values: { db: "v1" }, edges: [{ from: "app", to: "db" }] },

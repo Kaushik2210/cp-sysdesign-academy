@@ -104,6 +104,54 @@ Rule: at least one doctor must be on call. Alice and Bob are both on call. Each 
   B->>DB: commit
   Note over DB: on-call = 0, invariant broken`} />
 
+### Worked example: two withdrawals from one stock count
+
+<ConceptWalkthrough
+  title="Claim stock with a conditional update"
+  nodes={[
+    { id: "a", label: "Worker A", x: 25, y: 27 },
+    { id: "b", label: "Worker B", x: 75, y: 27 },
+    { id: "stock", label: "Stock", x: 50, y: 69 }
+  ]}
+  frames={[
+    {
+      title: "Both workers read 6",
+      note: "A warehouse has 6 units. Worker A requests 4 and reads 6. Before A writes, worker B requests 3 and also reads 6. Both reads happen separately from the writes, so each worker has a local copy of the same count.",
+      active: ["a", "b", "stock"],
+      values: { a: "wants 4", b: "wants 3", stock: "6" },
+      edges: [{ from: "stock", to: "a" }, { from: "stock", to: "b" }]
+    },
+    {
+      title: "A writes its computed balance",
+      note: "A subtracts its request of 4 from the 6 it read and commits an unconditional write of 2. There are now only 2 units available. B still holds its earlier reading of 6.",
+      active: ["a", "stock"],
+      values: { a: "writes 2", b: "read 6", stock: "2" },
+      edges: [{ from: "a", to: "stock" }]
+    },
+    {
+      title: "B overwrites A's deduction",
+      note: "B computes 6 minus 3 using its stale read and commits an unconditional write of 3. The system now shows 3 on hand and has accepted requests for 4 plus 3, a total of 7 from an initial stock of 6. The final write lost A's deduction, even though the stored count never went negative.",
+      active: ["b", "stock"],
+      values: { a: "claimed 4", b: "writes 3", stock: "3" },
+      edges: [{ from: "b", to: "stock" }]
+    },
+    {
+      title: "Replay with the check inside the write",
+      note: "Reset stock to 6. A runs UPDATE stock SET units = units - 4 WHERE sku = 'P1' AND units >= 4. The predicate and subtraction use the same current row in one statement. The check passes, one row changes, and after A commits, 2 units remain.",
+      active: ["a", "stock"],
+      values: { a: "1 row", b: "wants 3", stock: "2" },
+      edges: [{ from: "a", to: "stock" }]
+    },
+    {
+      title: "B checks the remaining 2 units",
+      note: "B uses the same conditional update with 3 as both the amount to subtract and the minimum required. After A's commit, 2 is below 3, so B updates zero rows and the application declines the request. A claimed 4 and 2 remain, accounting for all 6 original units.",
+      active: ["b", "stock"],
+      values: { a: "claimed 4", b: "0 rows", stock: "2" },
+      edges: [{ from: "b", to: "stock" }]
+    }
+  ]}
+/>
+
 ## Isolation levels
 
 The SQL standard defines four levels in terms of which anomalies they must prevent. Real databases differ in the details, so check yours.

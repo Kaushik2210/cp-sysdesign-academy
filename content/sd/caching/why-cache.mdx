@@ -69,6 +69,19 @@ for h in (0.0, 0.5, 0.8, 0.9, 0.95, 0.99):
     print(f"h={h:4.0%}  latency={expected_latency(h):5.1f} ms  db_rps={db_load(10000, h):7.0f}")
 `} />
 
+<ConceptWalkthrough title="Ramp traffic as the cache warms" nodes={[
+  { id: "traffic", label: "Traffic", x: 20, y: 43 },
+  { id: "cache", label: "Cache", x: 50, y: 43 },
+  { id: "db", label: "DB", x: 80, y: 43 },
+]} edges={[
+  { from: "traffic", to: "cache" }, { from: "cache", to: "db" },
+]} frames={[
+  { title: "Compute the full-traffic threshold", note: "A stateless catalog service expects 12,000 reads/s, and its database has a budget of 2,400 reads/s. At full traffic, at most 2,400 / 12,000 = 20% of reads can miss, so the hit ratio must reach at least 80%. Assume one database read per miss.", active: ["traffic", "db"], values: { traffic: "12,000/s", cache: "80% min", db: "2,400/s cap" }, edges: [] },
+  { title: "Start with a cold cache", note: "At 0% hits, all admitted reads go to the database. Admit 1,200 reads/s as the cache warms. That produces 1,200 misses/s and uses half the database budget.", active: ["traffic", "cache", "db"], values: { traffic: "1,200/s", cache: "0% hits", db: "1,200/s" } },
+  { title: "Hold at 75% hits", note: "The cache reaches 75% hits at 6,000 reads/s. The database sees 6,000 × 25% = 1,500 reads/s. Hold traffic here because at the same miss rate, 12,000 reads/s would send 3,000 reads/s to the database, 600 above budget.", active: ["traffic", "cache", "db"], values: { traffic: "6,000/s", cache: "75% hits", db: "1,500/s" } },
+  { title: "Restore full traffic at 85% hits", note: "At 85% hits, the projected database load at 12,000 reads/s is 12,000 × 15% = 1,800 reads/s. Ramp up while measuring the miss rate at each step. If 85% holds at full traffic, the database has 600 reads/s of spare capacity.", active: ["traffic", "cache", "db"], values: { traffic: "12,000/s", cache: "85% hits", db: "1,800/s" } },
+]} />
+
 ## Where caches live
 
 Layers from the user inward, each with a different owner, size and invalidation story:

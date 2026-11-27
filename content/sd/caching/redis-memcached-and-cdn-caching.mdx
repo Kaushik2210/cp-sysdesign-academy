@@ -82,6 +82,18 @@ For web content, the first and cheapest cache is HTTP itself. Browsers and CDNs 
 | `stale-while-revalidate=N` | May serve a stale copy for N seconds while refreshing in the background |
 | `stale-if-error=N` | May serve stale if the origin errors |
 
+<ConceptWalkthrough title="Follow one response through two freshness windows" nodes={[
+  { id: "browser", label: "Browser", x: 20, y: 43 },
+  { id: "cdn", label: "CDN", x: 50, y: 43 },
+  { id: "origin", label: "Origin", x: 80, y: 43 },
+]} frames={[
+  { title: "Fill the CDN at t = 0 s", note: "A first visitor requests a public museum schedule. The CDN fetches v1 from the origin with Cache-Control: public, max-age=30, s-maxage=90. With negligible transit time, v1 starts at age 0. The browser freshness limit is 30 s and the CDN limit is 90 s.", active: ["browser", "cdn", "origin"], values: { browser: "v1", cdn: "v1 · 0 s", origin: "v1" }, edges: [{ from: "browser", to: "cdn" }, { from: "cdn", to: "origin" }] },
+  { title: "Give a new visitor 10 seconds of freshness", note: "At t = 20 s, a new visitor has no local copy. The CDN serves v1 with Age: 20 because 20 is below its 90 s limit. The new browser starts with an already aged response, leaving 30 − 20 = 10 s of local freshness.", active: ["browser", "cdn"], values: { browser: "10 s left", cdn: "v1 · 20 s", origin: "v1" }, edges: [{ from: "browser", to: "cdn" }] },
+  { title: "Reuse the local copy at t = 25 s", note: "The second visitor requests the schedule again at t = 25 s. Its stored response is now 20 + 5 = 25 s old, so the browser serves v1 locally with 5 s of freshness left.", active: ["browser"], values: { browser: "5 s left", cdn: "v1 · 25 s", origin: "v1" } },
+  { title: "Use the edge after browser expiry", note: "At t = 35 s, the second browser's copy is stale. In this example the response has no validators, so the browser sends an unconditional GET. The CDN can still serve v1 with Age: 35, leaving that response immediately stale for future browser reuse.", active: ["browser", "cdn"], values: { browser: "v1 · stale", cdn: "v1 · 35 s", origin: "v1" }, edges: [{ from: "browser", to: "cdn" }] },
+  { title: "Fetch the new schedule at t = 90 s", note: "At t = 90 s, the browser requests the schedule again. The CDN copy has reached its 90 s limit, so the CDN forwards the GET. The origin now has v2 and returns a fresh 200 response. Both caches can store v2 with age starting at 0 s.", active: ["browser", "cdn", "origin"], values: { browser: "v2", cdn: "v2 · 0 s", origin: "v2" }, edges: [{ from: "browser", to: "cdn" }, { from: "cdn", to: "origin" }] },
+]} />
+
 ### Validators: ETag and Last-Modified
 
 When a cached response goes stale, the cache can *revalidate* instead of downloading again:

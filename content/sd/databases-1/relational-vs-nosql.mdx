@@ -84,6 +84,47 @@ Good when relationships are the main subject: social graphs, recommendations, fr
   { from: "pattern", to: "rel", label: "joins, integrity" }, { from: "pattern", to: "kv", label: "lookup by id" }, { from: "pattern", to: "wide", label: "write-heavy, time-ordered" }, { from: "pattern", to: "graph", label: "relationships" }
 ]} />
 
+## Worked example: from one sensor to a whole lab
+
+<ConceptWalkthrough
+  title="Which layout serves the sensor query?"
+  nodes={[
+    { id: "query", label: "Query", x: 25, y: 29 },
+    { id: "a", label: "A partition", x: 25, y: 69 },
+    { id: "b", label: "B partition", x: 75, y: 69 },
+    { id: "sql", label: "SQL join", x: 75, y: 29 }
+  ]}
+  frames={[
+    {
+      title: "Seek inside one partition",
+      note: "A wide-column table partitions readings by sensor ID and sorts them by minute. Sensor A has readings at minutes 10, 20 and 30. For A in the half-open interval [15, 30), seek to the first minute at or after 15, return the reading at 20 and stop at 30. This read visits one sensor partition.",
+      active: ["query", "a"],
+      values: { query: "Sensor A", a: "20" },
+      edges: [{ from: "query", to: "a" }]
+    },
+    {
+      title: "A lab query fans out",
+      note: "For all readings in Lab 1 in [15, 30), assume a directory already lists its sensors A and B. The table is partitioned by sensor ID, so issue two partition reads. A contributes minute 20. B, with readings at 12 and 25, contributes minute 25. Merge the results in time order to get A at 20, then B at 25.",
+      active: ["query", "a", "b"],
+      values: { query: "Lab 1", a: "20", b: "25" },
+      edges: [{ from: "query", to: "a" }, { from: "query", to: "b" }]
+    },
+    {
+      title: "Express the lab query as a join",
+      note: "In a relational layout, readings carry sensor IDs and the sensors table records that A and B belong to Lab 1. Join on sensor ID, filter by Lab 1 and the interval [15, 30), and order by minute. One SQL statement returns the same two sensor-and-minute pairs, A at 20 and B at 25. The database still does the work of finding the matching rows.",
+      active: ["query", "sql"],
+      values: { query: "Lab 1", sql: "A20, B25" },
+      edges: [{ from: "query", to: "sql" }]
+    },
+    {
+      title: "Choose for the workload",
+      note: "If high-volume reads nearly always name one sensor, the wide-column layout gives that query a one-partition path. A lab query needs one read per sensor with this layout, so 100 sensors would mean 100 partition reads even when few have matching rows. If lab and other group filters change often, start with the relational layout so the same tables can serve those joins.",
+      active: ["a", "b", "sql"],
+      values: { a: "1 per sensor", b: "1 per sensor", sql: "Flexible join" }
+    }
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Database families compared (generalisations; individual products differ)" rows={[

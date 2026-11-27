@@ -51,6 +51,53 @@ data: {"symbol":"ABC","price":101.4}
 - One direction only: server to client. Client-to-server messages use ordinary requests.
 - Works over normal HTTP (including HTTP/2 multiplexing), so proxies and auth work as usual. Text only. On HTTP/1.1, browsers limit connections per domain, which can matter.
 
+<ConceptWalkthrough
+  title="Resuming a live scoreboard after a disconnect"
+  nodes={[
+    { id: "browser", label: "Browser", x: 20, y: 46 },
+    { id: "server", label: "SSE", x: 50, y: 46 },
+    { id: "log", label: "Event log", x: 80, y: 46 },
+  ]}
+  edges={[]}
+  frames={[
+    {
+      title: "Receive event 41",
+      note: "The scoreboard uses SSE because the page only receives updates. Over its open EventSource connection, the browser receives event 41 and shows the score as 1–0. The server retains events in ID order for replay.",
+      active: ["browser", "server"],
+      values: { browser: "1–0 / #41", log: "through #41" },
+      edges: [{ from: "server", to: "browser" }],
+    },
+    {
+      title: "Keep recording while the browser is offline",
+      note: "The connection drops after event 41. The server records event 42 with score 1–1 and event 43 with score 2–1. The browser still shows 1–0 and its last received event ID is 41.",
+      active: ["server", "log"],
+      values: { browser: "1–0 / #41", log: "#42, #43" },
+      edges: [{ from: "server", to: "log" }],
+    },
+    {
+      title: "Reconnect with event 41 as the cursor",
+      note: "EventSource reconnects with Last-Event-ID: 41. The server reads retained events with IDs greater than 41 in ascending order. That selects 42 and 43. The replay comes from the server's event log.",
+      active: ["browser", "server", "log"],
+      values: { browser: "last #41", log: "#42, #43" },
+      edges: [{ from: "browser", to: "server" }, { from: "server", to: "log" }],
+    },
+    {
+      title: "Replay event 42 first",
+      note: "The server streams event 42 on the new connection. The scoreboard moves from 1–0 to 1–1. If the connection drops again after the browser receives 42, EventSource will reconnect with 42 as its cursor.",
+      active: ["browser", "server"],
+      values: { browser: "1–1 / #42", server: "sent #42" },
+      edges: [{ from: "server", to: "browser" }],
+    },
+    {
+      title: "Replay event 43 and resume live updates",
+      note: "Next the server sends event 43. The scoreboard shows 2–1, and EventSource now has 43 as its reconnect cursor. Both missed events have arrived. The server keeps the response open for new updates.",
+      active: ["browser", "server"],
+      values: { browser: "2–1 / #43", server: "live" },
+      edges: [{ from: "server", to: "browser" }],
+    },
+  ]}
+/>
+
 ### WebSockets
 
 A request with `Upgrade: websocket` switches the connection (status `101 Switching Protocols`) into a full-duplex message channel over the same TCP connection.

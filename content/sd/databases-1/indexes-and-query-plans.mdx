@@ -124,6 +124,48 @@ In PostgreSQL the same ideas appear as `Seq Scan`, `Index Scan`, `Index Only Sca
 Whenever a query is slow, run the plan before changing anything. Look for scans on large tables, sorts you could avoid, and estimated vs actual row counts that are far apart (stale statistics).
 </Callout>
 
+## Worked example: the two latest station readings
+
+<ConceptWalkthrough
+  title="Follow the scan, sort, and composite seek"
+  nodes={[
+    { id: "table", label: "Table", x: 25, y: 29 },
+    { id: "index", label: "Index", x: 75, y: 29 },
+    { id: "sort", label: "Sort", x: 25, y: 69 },
+    { id: "result", label: "Result", x: 75, y: 69 }
+  ]}
+  frames={[
+    {
+      title: "Scan and sort",
+      note: "Find the two latest readings for station 7 at minute 20 or later. Its (minute, temperature) pairs are (10, 16), (20, 17), (30, 18) and (40, 19). Station 8 has two readings. With no secondary index, SQLite scans all 6 rows, sends the 3 matches to an ORDER BY step and returns (40, 19) then (30, 18).",
+      active: ["table", "sort", "result"],
+      values: { table: "6 rows", sort: "3 matches", result: "40/19, 30/18" },
+      edges: [{ from: "table", to: "sort" }, { from: "sort", to: "result" }]
+    },
+    {
+      title: "Seek by station, then sort",
+      note: "With an index on station_id alone, SQLite can find station 7's 4 entries without scanning station 8. It looks up their table rows to check the minute and read the temperature. Three rows pass the minute filter, and the plan still uses a temporary B-tree for ORDER BY because the index gives no minute order.",
+      active: ["index", "table", "sort", "result"],
+      values: { index: "4 entries", table: "4 rows", sort: "3 matches", result: "40/19, 30/18" },
+      edges: [{ from: "index", to: "table" }, { from: "table", to: "sort" }, { from: "sort", to: "result" }]
+    },
+    {
+      title: "Seek and walk backward",
+      note: "With an index on (station_id, minute), SQLite seeks to the high end of station 7's range and walks backward. It takes minutes 40 and 30, fetching temperatures 19 and 18 from the table. LIMIT 2 stops the walk before minute 20, even though it qualifies. No separate sort is needed.",
+      active: ["index", "table", "result"],
+      values: { index: "40, 30", table: "2 lookups", result: "40/19, 30/18" },
+      edges: [{ from: "index", to: "table" }, { from: "table", to: "result" }]
+    },
+    {
+      title: "Make the query covering",
+      note: "If the caller only needs the minutes, drop temperature from SELECT. The same composite index has every column used by the filter, order and output, so SQLite can return 40 and 30 directly from the index. Table lookups drop from 2 to 0.",
+      active: ["index", "result"],
+      values: { index: "40, 30", table: "0 lookups", result: "40, 30" },
+      edges: [{ from: "index", to: "result" }]
+    }
+  ]}
+/>
+
 ## Why an index may be ignored
 
 - The predicate wraps the column in a function (`WHERE lower(email) = ...`) unless there is an expression index.

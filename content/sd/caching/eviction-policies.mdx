@@ -37,6 +37,19 @@ A cache is smaller than the data behind it, so when it is full, inserting a new 
 
 **Advanced**: ARC, 2Q, SLRU and W-TinyLFU combine recency and frequency to resist scans and adapt to changing workloads; modern libraries (for example Caffeine in Java) use them.
 
+<ConceptWalkthrough title="Replay five reads through FIFO and LRU" nodes={[
+  { id: "request", label: "Reads", x: 50, y: 23 },
+  { id: "fifo", label: "FIFO", x: 25, y: 67 },
+  { id: "lru", label: "LRU", x: 75, y: 67 },
+]} edges={[
+  { from: "request", to: "fifo" }, { from: "request", to: "lru" },
+]} frames={[
+  { title: "Fill two slots with A and B", note: "Replay A, B, A, C, A through two initially empty caches, each with two slots. The first two reads miss and load A, then B. Both lists show A → B, with the next eviction candidate on the left.", active: ["request", "fifo", "lru"], values: { request: "A, B", fifo: "A → B", lru: "A → B" } },
+  { title: "Read A again", note: "Read 3 hits A in both caches. FIFO keeps insertion order, so A stays first. LRU moves A to the most-recent end, so B becomes the next eviction candidate.", active: ["request", "fifo", "lru"], values: { request: "A", fifo: "A → B", lru: "B → A" } },
+  { title: "Miss on C and choose a victim", note: "Read 4 misses on C in both full caches. FIFO evicts A because it was inserted first. LRU evicts B because A was touched one read ago and B was touched two reads ago. Each policy puts C at the right end.", active: ["request", "fifo", "lru"], values: { request: "C", fifo: "B → C", lru: "A → C" } },
+  { title: "Read A and count the hits", note: "Read 5 misses in FIFO, which evicts B and loads A. Read 5 hits in LRU, which moves A past C. FIFO hit on read 3 only (1/5, or 20%). LRU hit on reads 3 and 5 (2/5, or 40%).", active: ["request", "fifo", "lru"], values: { request: "A", fifo: "C → A", lru: "C → A" } },
+]} />
+
 ## Implementing LRU in O(1)
 
 A hash map gives O(1) lookup; a doubly linked list keeps entries ordered by recency (front is most recent). `get` moves the node to the front; `put` inserts at the front and, when over capacity, removes the tail. Every operation touches a constant number of pointers: O(1) time, O(capacity) space.

@@ -66,6 +66,46 @@ A request has a **method**, a **target**, **headers** and an optional **body**. 
 
 *Idempotent* matters because networks fail: if a response is lost, a client does not know whether the request ran. Retrying a PUT or DELETE is safe; retrying a POST may create a second order, which is why APIs add idempotency keys (covered in the last lesson).
 
+<ConceptWalkthrough
+  title="Retrying a PUT after the response is lost"
+  nodes={[
+    { id: "client", label: "Client", x: 20, y: 46 },
+    { id: "api", label: "API", x: 50, y: 46 },
+    { id: "store", label: "Settings", x: 80, y: 46 },
+  ]}
+  edges={[]}
+  frames={[
+    {
+      title: "Send the desired state",
+      note: "The stored volume starts at 3. To set it to 7, the client sends PUT /players/42/settings with the full JSON body {\"volume\": 7}. The request describes the desired final state.",
+      active: ["client", "api"],
+      values: { client: "PUT 7", store: "volume 3" },
+      edges: [{ from: "client", to: "api" }],
+    },
+    {
+      title: "Commit the write before the timeout",
+      note: "The API saves volume 7 and sends 204 No Content. The response is lost, so the client times out after 500 ms. At that point the client has no confirmation, even though the stored volume is already 7.",
+      active: ["api", "store"],
+      values: { client: "500 ms", api: "204 lost", store: "volume 7" },
+      edges: [{ from: "api", to: "store" }],
+    },
+    {
+      title: "Repeat the same replacement",
+      note: "After a 200 ms backoff, the client retries the identical PUT at 500 + 200 = 700 ms. With no intervening writes, replacing volume 7 with volume 7 leaves the stored state unchanged. The API may still process and log the second request.",
+      active: ["client", "api", "store"],
+      values: { client: "PUT 7", store: "volume 7" },
+      edges: [{ from: "client", to: "api" }, { from: "api", to: "store" }],
+    },
+    {
+      title: "Confirm the result",
+      note: "This time the 204 response reaches the client. Two requests reached the API, and the stored volume went from 3 to 7. Repeating an increment of 4 would have taken the volume from 3 to 7 to 11.",
+      active: ["client", "api"],
+      values: { client: "got 204", store: "volume 7" },
+      edges: [{ from: "api", to: "client" }],
+    },
+  ]}
+/>
+
 ### Status code families
 
 | Range | Meaning | Examples |
