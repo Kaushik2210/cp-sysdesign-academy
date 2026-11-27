@@ -1,4 +1,5 @@
 import { Callout } from "./Callout";
+import { ConceptWalkthrough } from "./ConceptWalkthrough";
 import { MdxBase } from "./MdxBase";
 import { Tab, Tabs } from "./Tabs";
 import { Complexity, TradeOffs } from "./Tables";
@@ -9,6 +10,7 @@ import { Problem } from "@/components/problem/Problem";
 /** Components available inside every lesson MDX file. */
 export const mdxComponents = {
   Callout,
+  ConceptWalkthrough,
   Tabs,
   Tab,
   Complexity,
