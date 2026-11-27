@@ -1,0 +1,140 @@
+---
+title: "Mo's Algorithm for Offline Range Queries"
+track: cp
+module: advanced-trees
+order: 2
+difficulty: hard
+estMinutes: 35
+prerequisites: [cp/hashing/hash-maps-counting, cp/range-queries/fenwick-trees]
+tags: [offline-queries, range-queries, square-root-decomposition, frequency]
+type: lesson
+problems: [m22-range-variety]
+furtherReading:
+  - title: Antti Laaksonen, Competitive Programmer's Handbook (Square Root Algorithms)
+    url: https://cses.fi/book/book.pdf
+  - title: CSES, Distinct Values Queries
+    url: https://cses.fi/problemset/task/1734
+---
+
+## Intuition
+
+You have a static array and a list of range queries. The next range might share almost every element with the current one. If you already have a frequency table, moving an endpoint by one position costs one update. When all queries are known in advance, choose an order that keeps those endpoint moves cheap.
+
+This is **Mo's algorithm**. Look for an answer that is easy to maintain under both insertion and deletion, but difficult to reconstruct by combining summaries. For distinct counts, the two halves might each contain three distinct values, yet their union could contain anywhere from three to six.
+
+## The window invariant
+
+For the current half-open interval `[left, right)`, keep the frequency of each value inside it. When an insertion moves a count from zero to one, increment the distinct count. When a deletion moves a count from one to zero, decrement it. All other frequency changes leave the answer unchanged.
+
+Divide left endpoints into blocks of size `B`. Process blocks in increasing order. Within an even-numbered block, sort by increasing right endpoint. Within an odd-numbered block, sort by decreasing right endpoint. This reversal often avoids sending the right endpoint all the way back across the array between blocks. Keep each query's original index.
+
+## Trace three requests
+
+On `[4, 4, 7, 1, 7, 1]`, use blocks of size 2 and start at `[0, 0)`.
+
+| Input index | Window in processing order | What changes | Distinct |
+| ---: | --- | --- | ---: |
+| 1 | `[0, 2)` | Add two copies of 4. Only the first increases the answer. | 1 |
+| 2 | `[1, 4)` | Add 7 and 1, then remove one copy of 4. | 3 |
+| 0 | `[2, 6)` | Add 7 and 1 again, then remove the final copy of 4. | 2 |
+
+Return `[2, 1, 3]` in input order. Before running the demo, predict the answer to `[4, 5)` and identify the update that removes the last copy of 1 from `[2, 6)`.
+
+## Why the sort helps
+
+For `n` elements and `q` queries, the left endpoint travels `O(qB + n)`: its movements within blocks are bounded by `B` per query, and block numbers never decrease. The right endpoint moves `O(n)` per visited block, including the boundary jump. With at most `ceil(n/B)` blocks and constant-time updates, the total time is `O(q log q + qB + n ceil(n/B))`. Taking `B` near `sqrt(n)` gives `O(q log q + (n+q)sqrt(n))`. If `q` is far from `n`, use the bound to reason about a different block size instead of treating square root as a fixed rule.
+
+## Run and change the queries
+
+<CodeRunner language="python" code={`
+from math import isqrt
+from random import Random
+
+
+def distinct_counts(values, queries):
+    block = max(1, isqrt(len(values)))
+
+    def key(index):
+        start, end = queries[index]
+        group = start // block
+        return group, -end if group % 2 else end
+
+    frequency = {}
+    answer = [0] * len(queries)
+    left = right = 0
+
+    def add(index):
+        value = values[index]
+        frequency[value] = frequency.get(value, 0) + 1
+
+    def remove(index):
+        value = values[index]
+        frequency[value] -= 1
+        if frequency[value] == 0:
+            del frequency[value]
+
+    for index in sorted(range(len(queries)), key=key):
+        start, end = queries[index]
+        while left > start:
+            left -= 1
+            add(left)
+        while right < end:
+            add(right)
+            right += 1
+        while left < start:
+            remove(left)
+            left += 1
+        while right > end:
+            right -= 1
+            remove(right)
+        answer[index] = len(frequency)
+    return answer
+
+
+values = [4, 4, 7, 1, 7, 1]
+queries = [(2, 6), (0, 2), (1, 4), (4, 5)]
+print(distinct_counts(values, queries))
+assert distinct_counts(values, queries) == [2, 1, 3, 1]
+assert distinct_counts([], [(0, 0)]) == [0]
+assert distinct_counts([5], []) == []
+
+rng = Random(22)
+for n in range(1, 41):
+    values = [rng.randrange(-4, 5) for _ in range(n)]
+    queries = []
+    for _ in range(50):
+        start = rng.randrange(n + 1)
+        end = rng.randrange(start, n + 1)
+        queries.append((start, end))
+    assert distinct_counts(values, queries) == [
+        len(set(values[start:end])) for start, end in queries
+    ]
+print("2,000 random queries matched direct counting.")
+`} />
+
+## Pitfalls
+
+- Convert 1-indexed inclusive input `[l, r]` to the 0-indexed half-open pair `(l - 1, r)`.
+- Expand the interval before shrinking it. Two disjoint query ranges can otherwise cause a removal at a position that was never active.
+- Delete zero-count entries when using the dictionary size as the answer. In a language where a dense frequency array is faster, compress the values and keep a separate distinct counter.
+- Check whether a simpler structure fits. Use prefix sums for static range sums. For static distinct counts at large constraints, sweeping right endpoints and keeping a Fenwick marker at each value’s latest occurrence answers in `O((n+q) log n)` time when queries are bucketed by right endpoint.
+- The array here stays fixed. Interleaved updates add a time dimension and require a different state transition.
+
+## Practice
+
+<Problem id="m22-range-variety" />
+
+1. **Equal-value pairs.** Count pairs of positions with the same value in each range. Derive the amount to add and subtract when a value’s frequency changes by one.
+2. **Exactly twice.** Maintain how many values occur exactly twice. List every transition that changes the answer and test a value that appears three times.
+3. **Movement budget.** Count calls to `add` and `remove` for input order and Mo order on alternating near-start and near-end queries. Then compare at least three block sizes on the same workload.
+4. **Choose a solver for larger input.** Try [CSES Distinct Values Queries](https://cses.fi/problemset/task/1734), where a right-endpoint sweep with a Fenwick tree is a good fit. For a query ending at `r`, explain why one latest-occurrence marker inside the query interval represents each distinct value exactly once.
+
+## Quiz
+
+<Quiz id="cp-m22-mos-algorithm" tags={["offline-queries", "range-queries"]} questions={[
+  { type: "mcq", q: "Which step depends on knowing the queries in advance?", options: ["Counting frequencies", "Sorting and processing the requests out of input order", "Converting indices"], answer: 1, explain: "Each answer goes back into its original slot after the window reaches the query." },
+  { type: "mcq", q: "A value's frequency goes from three to two. How does the distinct count change?", options: ["It increases by one", "It decreases by one", "It stays the same"], answer: 2, explain: "The value is still present. The distinct count changes only when crossing zero." },
+  { type: "multi", q: "Which conditions make this form of Mo's algorithm a good candidate?", options: ["Queries may be reordered", "The array is fixed", "Both endpoints can move one step cheaply", "Each query must be answered before its endpoints are disclosed"], answer: [0, 1, 2], explain: "The baseline uses offline ordering and relies on inexpensive reversible window updates." }
+]} />
+
+Next, carry the same window to a tree. In [Mo's algorithm on trees](/cp/advanced-trees/mo-on-trees/), an entry or exit event toggles a vertex instead of simply adding an array value.

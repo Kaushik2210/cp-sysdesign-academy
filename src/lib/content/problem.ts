@@ -5,6 +5,7 @@ export const COMPLEXITY_CLASSES = [
   "O(log n)",
   "O(n)",
   "O(n log n)",
+  "O(n sqrt(n))",
   "O(n^2)",
   "O(n^3)",
   "O(2^n)",
