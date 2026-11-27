@@ -62,6 +62,16 @@ query(node, lo, hi, l, r):
 
 The same "two boundary paths" argument as the plain segment tree applies: at most about `4 log n` nodes are visited, so both operations are `O(log n)`.
 
+<ConceptWalkthrough title="Update a sum and a maximum over the same segment" nodes={[
+  {"id":"n0","label":"Segment","x":17,"y":46},
+  {"id":"n1","label":"Sum","x":50,"y":46},
+  {"id":"n2","label":"Maximum","x":83,"y":46},
+]} frames={[
+  {"title":"Read the starting aggregates","note":"The complete segment contains 2, 5, 1 and 4. Its length is four, sum is 12 and maximum is 5. Predict how each aggregate changes if all four values increase by 3.","active":["n0","n1","n2"],"values":{"n0":"length 4","n1":"12","n2":"5"}},
+  {"title":"Apply the add to the sum","note":"Each position contributes an additional 3, so the sum grows by 4 × 3 = 12. The node’s sum is now 24.","active":["n0","n1"],"values":{"n0":"+3 each","n1":"24","n2":"5 → 8"}},
+  {"title":"Apply the same add to the maximum","note":"Adding the same number preserves the ordering of the values. The maximum grows by just 3, from 5 to 8. In both trees the pending tag is +3, ready to push to the children.","active":["n0","n2"],"values":{"n0":"tag +3","n1":"24","n2":"8"}},
+]} />
+
 ## Example, step by step
 
 Array `1 2 3 4 5 6 7 8` (so `n = 8`, root covers `[0, 7]`). Process `add 10 to positions 2..5`:
@@ -316,6 +326,16 @@ The skeleton stays the same; only `apply` (and what a tag means) changes.
 
 A tag must be an operation you can **compose**: applying tag `A` then tag `B` to a node has to equal applying one combined tag. Adds compose by summing. Assigns compose by keeping the last one. If you cannot describe the composition, lazy propagation is not the right tool.
 
+<ConceptWalkthrough title="Compose assignment and addition in order" nodes={[
+  {"id":"n0","label":"First","x":17,"y":46},
+  {"id":"n1","label":"Second","x":50,"y":46},
+  {"id":"n2","label":"Result","x":83,"y":46},
+]} frames={[
+  {"title":"Assign, then add","note":"Assign 5 to every element, then add 2. Every element becomes 7, so the combined effect can be represented as assigning 7.","active":["n0","n1","n2"],"values":{"n0":"set 5","n1":"add 2","n2":"set 7"}},
+  {"title":"Reverse the operations","note":"Add 2 first, then assign 5. The assignment discards the earlier values and the earlier add. Every element becomes 5.","active":["n0","n1","n2"],"values":{"n0":"add 2","n1":"set 5","n2":"set 5"}},
+  {"title":"Try a nonzero segment with a zero assignment","note":"A later assignment of 0 overwrites both previous effects. Store it as a pending assignment with value zero, distinct from the absence of a pending tag.","active":["n1","n2"],"values":{"n0":"some tag","n1":"set 0","n2":"pending 0"}},
+]} />
+
 ## Pitfalls
 
 1. **Forgetting `push` before recursing.** Children are stale; the answer is silently wrong. Push in **both** `update` and `query`.
@@ -325,6 +345,16 @@ A tag must be an operation you can **compose**: applying tag `A` then tag `B` to
 5. **Overflow.** A range add of `10^6` over `2·10^5` elements, repeated `2·10^5` times, needs 64-bit integers; in C++ and Java use `long long` / `long` for both `tree` and `lazy`.
 6. **Array size.** The recursive layout needs `4 * n` slots; `2 * n` is only enough for the bottom-up layout.
 7. **Python depth.** The recursion is only `log n` deep, so it is safe, but a Python version that must run hundreds of thousands of operations is slow; prefer an iterative or compiled solution at real scale.
+
+<ConceptWalkthrough title="Rebuild the parent after a partial update" nodes={[
+  {"id":"n0","label":"Left","x":17,"y":46},
+  {"id":"n1","label":"Parent","x":50,"y":46},
+  {"id":"n2","label":"Right","x":83,"y":46},
+]} frames={[
+  {"title":"Start with a pending add","note":"Four leaves start at 1, 2, 3, 4. A full-range +2 has already raised the parent sum to 18. Its children still store 3 and 7, and the parent has a pending +2.","active":["n1"],"values":{"n0":"3","n1":"18; tag +2","n2":"7"}},
+  {"title":"Push before descending","note":"Now add 3 to the left half. First push +2 to both children, each covering two leaves. Their sums become 7 and 11. Clear the parent’s pending add.","active":["n0","n1","n2"],"values":{"n0":"7","n1":"tag cleared","n2":"11"}},
+  {"title":"Pull the updated child sums","note":"The left child needs another 2 × 3 = 6 and grows to 13. The right child stays at 11. Recompute the parent sum as 24 so a later full-range query sees the update.","active":["n0","n1"],"values":{"n0":"13","n1":"24","n2":"11"}},
+]} />
 
 ## Practice
 
