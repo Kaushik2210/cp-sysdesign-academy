@@ -55,6 +55,16 @@ Store the timestamp of every accepted request. On a new request, drop timestamps
 
 Keep only two counters: current window and previous window. Estimate the rolling count as `prev * (1 - elapsed/W) + cur`, where `elapsed` is how far into the current window you are. It assumes requests in the previous window were evenly spread, so it is an approximation, but a very good one (Cloudflare reported it to be very accurate on real traffic) with `O(1)` memory.
 
+<ConceptWalkthrough title="Estimate the count when older traffic clusters" nodes={[
+  {"id":"n0","label":"Previous","x":17,"y":46},
+  {"id":"n1","label":"Current","x":50,"y":46},
+  {"id":"n2","label":"Rolling","x":83,"y":46},
+]} frames={[
+  {"title":"Place arrivals late in the previous bucket","note":"Four arrivals occur at 800, 850, 900 and 950 ms. Another arrives at 1,200 ms. At 1,500 ms, predict how many of those five arrivals a two-counter estimator sees.","active":["n0","n1"],"values":{"n0":"4 arrivals","n1":"1 arrival","n2":"?"}},
+  {"title":"Weight the previous bucket by overlap","note":"The rolling interval (500, 1,500] overlaps half the previous 1,000 ms bucket. The two-counter estimator uses 4 × 0.5 + 1 = 3.","active":["n0","n2"],"values":{"n0":"50% overlap","n1":"1 arrival","n2":"estimate 3"}},
+  {"title":"Compare with the exact log","note":"All four previous arrivals occurred after 500 ms. The exact log counts those four plus the current arrival, for 5. A cluster early in the previous bucket can make the estimate too high.","active":["n1","n2"],"values":{"n0":"4 retained","n1":"1 retained","n2":"exact 5"}},
+]} />
+
 ### 4. Token bucket
 
 A bucket holds up to `B` tokens (the burst size) and refills at rate `r` tokens per second. Each request consumes a token (or `cost` tokens); if none, reject. Allows bursts up to `B`, then a steady `r`. Store only `(tokens, last_refill_time)` and refill lazily on each request.
@@ -62,6 +72,16 @@ A bucket holds up to `B` tokens (the burst size) and refills at rate `r` tokens 
 ### 5. Leaky bucket
 
 Requests enter a queue (the bucket) of size `B` that drains at a constant rate. Overflow is dropped. As a *shaper* it outputs a perfectly smooth stream, which protects fragile downstreams but adds queueing delay. As a *meter* (a counter that leaks) it behaves very similarly to a token bucket.
+
+<ConceptWalkthrough title="Drain a bounded queue at a fixed pace" nodes={[
+  {"id":"n0","label":"Arrivals","x":17,"y":46},
+  {"id":"n1","label":"Queue","x":50,"y":46},
+  {"id":"n2","label":"Output","x":83,"y":46},
+]} frames={[
+  {"title":"Accept up to the queue capacity","note":"Requests A, B and C arrive at once. The waiting queue has two slots and its first drain tick is at 250 ms. A and B enter in order. C is dropped before downstream work starts.","active":["n0","n1"],"values":{"n0":"A B C","n1":"A → B","n2":"empty"}},
+  {"title":"Release one request per tick","note":"At 250 ms, send A downstream. B stays queued. There is now one free slot if another request arrives.","active":["n1","n2"],"values":{"n0":"250 ms","n1":"B","n2":"A"}},
+  {"title":"Pay waiting time for a steady rate","note":"At 500 ms, send B downstream. A waited 250 ms and B waited 500 ms. While work is queued the output is paced at one request every 250 ms.","active":["n1","n2"],"values":{"n0":"500 ms","n1":"empty","n2":"A → B"}},
+]} />
 
 <TradeOffs caption="Rate limiting algorithms compared" rows={[
   { option: "Fixed window", pros: "Tiny memory, trivial, easy with an atomic increment and TTL", cons: "Up to 2L in a short span at window boundaries", chooseWhen: "Coarse quotas where edge bursts are acceptable" },
@@ -201,6 +221,16 @@ Limits can be per user id, API key, IP address, tenant, endpoint, or a combinati
   D -- no --> F[reject 429 with Retry-After]
   E --> G[Save tokens and last_refill]
   F --> G`} />
+
+<ConceptWalkthrough title="Calculate retry time for a weighted request" nodes={[
+  {"id":"n0","label":"Key","x":17,"y":46},
+  {"id":"n1","label":"Tokens","x":50,"y":46},
+  {"id":"n2","label":"Retry","x":83,"y":46},
+]} frames={[
+  {"title":"Price the operation","note":"A tenant has one token left. Its bucket can hold five tokens and refills at two tokens per second. An export costs three tokens, so it receives HTTP 429.","active":["n0","n1"],"values":{"n0":"tenant 7","n1":"1 / 5","n2":"needs 3"}},
+  {"title":"Compute the earliest eligible retry","note":"The export needs two more tokens. At two tokens per second, a one-second wait is sufficient if no other request for this tenant consumes tokens. Use Retry-After: 1 for this response.","active":["n1","n2"],"values":{"n0":"tenant 7","n1":"deficit 2","n2":"≥ 1 s"}},
+  {"title":"Shared quota can move the boundary","note":"If another request consumes one token 500 ms into the wait, just two tokens are available at the one-second mark. Re-evaluate on arrival. A distinct tenant has its own balance.","active":["n0","n2"],"values":{"n0":"tenant 7","n1":"2 / 5","n2":"recheck"}},
+]} />
 
 ## Pitfalls
 
