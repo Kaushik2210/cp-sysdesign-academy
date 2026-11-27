@@ -39,7 +39,7 @@ client B writes to storage with token 34   -> accepted, storage remembers 34
 client A wakes up and writes with token 33 -> REJECTED (33 < 34)
 ```
 
-The key point: you **cannot** make a lock safe from the client side alone, because the client cannot know in time that it lost the lock. Safety comes from a check at the **resource**. Without fencing, a lease gives you *efficiency* (usually only one worker does the job) but not *correctness* (never two).
+Workers can keep running after their leases expire. The protected resource needs an atomic check that rejects older tokens once it has accepted a newer token. A worker that needs a clear handoff can advance the resource’s fence before treating its ownership there as active.
 
 ## Building coordination on a consensus store
 
@@ -51,6 +51,16 @@ Systems like ZooKeeper and etcd offer primitives that make these patterns easy:
 - **Recipes:** leader election (the lowest sequential node is leader and each candidate watches its predecessor), group membership, barriers and distributed queues.
 
 Keep the lock service for **coordination**, not for data; its throughput is limited (every write is a majority commit).
+
+<ConceptWalkthrough title="Watch the next candidate in the election queue" nodes={[
+  {"id":"n0","label":"Worker A","x":17,"y":46},
+  {"id":"n1","label":"Worker B","x":50,"y":46},
+  {"id":"n2","label":"Worker C","x":83,"y":46},
+]} frames={[
+  {"title":"Queue by sequence number","note":"A owns the first ephemeral sequential node, number 7, and leads. B at 8 watches A. C at 9 watches B. Each waiter watches its immediate predecessor.","active":["n0","n1","n2"],"values":{"n0":"7 leads","n1":"8 watches 7","n2":"9 watches 8"}},
+  {"title":"Re-read after a watch fires","note":"B’s session expires and node 8 disappears. The event wakes C. C lists the contenders again and sees that A still leads, so it watches node 7.","active":["n1","n2"],"values":{"n0":"7 leads","n1":"expired","n2":"9 watches 7"}},
+  {"title":"Acquire only when first","note":"A’s node disappears. C checks the list again, finds itself first and becomes leader. If a predecessor is already gone when a client attempts to watch it, repeat the list-and-check step.","active":["n0","n2"],"values":{"n0":"expired","n1":"gone","n2":"9 leads"}},
+]} />
 
 <ConceptWalkthrough title="Fence a worker whose lease expired" nodes={[
   { id: "a", label: "Worker A", x: 24, y: 27 },
@@ -86,6 +96,16 @@ Keep the lock service for **coordination**, not for data; its throughput is limi
     values: {"a":"token 41","b":"token 42","lock":"B holds","store":"reject 41"},
     edges: [{"from":"a","to":"store"}],
   },
+]} />
+
+<ConceptWalkthrough title="See what fencing guarantees during handoff" nodes={[
+  {"id":"n0","label":"Worker A","x":17,"y":46},
+  {"id":"n1","label":"Worker B","x":50,"y":46},
+  {"id":"n2","label":"Resource","x":83,"y":46},
+]} frames={[
+  {"title":"Separate the lease grant from the resource state","note":"A’s lease has expired and B holds token 42. The protected resource still has high-water mark 41 because it has yet to process a request carrying 42.","active":["n1","n2"],"values":{"n0":"expired 41","n1":"granted 42","n2":"max 41"}},
+  {"title":"Test a delayed write before activation","note":"A’s delayed request carries 41. A resource that only rejects tokens below its stored maximum can still accept it. A lease grant by itself did not advance the resource’s fence.","active":["n0","n2"],"values":{"n0":"sends 41","n1":"no write yet","n2":"accepts 41"}},
+  {"title":"Advance the fence before relying on it","note":"B atomically raises the resource’s fence to 42 before treating its ownership as active there. A later write with 41 fails. Couple the token check and mutation in one atomic operation.","active":["n1","n2"],"values":{"n0":"41 rejected","n1":"activates 42","n2":"max 42"}},
 ]} />
 
 ## Code: pausing past the lease
@@ -156,7 +176,7 @@ Code such as `if (now < lease_expiry) write()` does not help: the pause can star
 
 <TradeOffs caption="Ways to make sure only one process acts" rows={[
   { option: "Lease from a consensus store, no fencing", pros: "Simple; prevents most double work", cons: "Pauses and partitions can still produce two active holders", chooseWhen: "Efficiency locks: a duplicate run wastes work but does no harm (idempotent jobs, cache refresh)" },
-  { option: "Lease plus fencing token checked by the resource", pros: "Correct even with pauses and clock errors", cons: "The resource must support the check (a conditional write, a version column, a log sequence number)", chooseWhen: "Correctness locks: leader of a shard, exclusive file or row owner" },
+  { option: "Lease plus fencing token checked by the resource", pros: "Rejects delayed writes from older token holders after the fence advances", cons: "The resource must check the token atomically with the mutation", chooseWhen: "Correctness locks: leader of a shard, exclusive file or row owner" },
   { option: "Optimistic concurrency (compare-and-set on a version)", pros: "No lock service at all; the data store arbitrates", cons: "Conflicts cause retries; not suitable for long critical sections", chooseWhen: "Short read-modify-write updates" },
   { option: "Make the work idempotent and allow duplicates", pros: "Removes the need for exclusion", cons: "Requires idempotent design and deduplication keys", chooseWhen: "Message processing, payments with idempotency keys" },
   { option: "Single-writer partitioning (one owner per key by hashing)", pros: "No locking on the hot path", cons: "Ownership changes still need a lease or consensus", chooseWhen: "Sharded services and streams" }
@@ -174,6 +194,16 @@ Code such as `if (now < lease_expiry) write()` does not help: the pause can star
 ## What would you choose and why?
 
 Ten workers share a queue of invoices to email, and each invoice must be sent at most once. A worker takes a lock on an invoice, sends the email and marks it sent. A worker can pause for 20 seconds. Would you use a lease, fencing, an idempotency key at the mail provider, or all three? Where does the fencing check live when the email provider is an external service that does not know about your tokens?
+
+<ConceptWalkthrough title="Retry an external send with the same operation key" nodes={[
+  {"id":"n0","label":"Worker","x":17,"y":46},
+  {"id":"n1","label":"Provider","x":50,"y":46},
+  {"id":"n2","label":"Invoice","x":83,"y":46},
+]} frames={[
+  {"title":"Send succeeds and its reply is lost","note":"A sends the invoice with key invoice-7. The provider accepts the request, but A times out before writing the local sent marker. The outcome is ambiguous to A.","active":["n0","n1"],"values":{"n0":"timeout","n1":"accepted","n2":"pending"}},
+  {"title":"Replay the same logical send","note":"B later retries with the same key. Assume a provider that enforces idempotency for this key and payload during the whole retry window. It returns the earlier outcome without sending a second email.","active":["n0","n1"],"values":{"n0":"invoice-7","n1":"replays","n2":"pending"}},
+  {"title":"Record the known result","note":"B records the provider’s success and marks the invoice sent. Fencing protects a resource that checks tokens. The provider’s separate idempotency contract protects the external send in this scenario.","active":["n1","n2"],"values":{"n0":"records","n1":"1 send","n2":"sent"}},
+]} />
 
 ## Quiz
 

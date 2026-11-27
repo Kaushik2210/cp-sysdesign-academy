@@ -1044,6 +1044,16 @@ test("concept walkthroughs explain additional examples at phone width", async ({
       ["Catch up a lagging follower with a snapshot", "Resume ordinary replication"],
       ["Retry a command after losing its response", "Return the original result"],
     ]],
+    ["/cp/range-queries/lazy-propagation/", [
+      ["Update a sum and a maximum over the same segment", "Apply the same add to the maximum"],
+      ["Compose assignment and addition in order", "Try a nonzero segment with a zero assignment"],
+      ["Rebuild the parent after a partial update", "Pull the updated child sums"],
+    ]],
+    ["/sd/consensus-and-coordination/leases-locks-and-fencing/", [
+      ["Watch the next candidate in the election queue", "Acquire only when first"],
+      ["See what fencing guarantees during handoff", "Advance the fence before relying on it"],
+      ["Retry an external send with the same operation key", "Record the known result"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
