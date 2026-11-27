@@ -11,7 +11,7 @@ Legend: **Complete** = module as specified, all code/solutions executed; **Parti
 | C++/Java execution | Partial | Needs `NEXT_PUBLIC_JUDGE0_URL` |
 | Problem judge, quizzes, SM-2 review queue | Complete | Hidden tests ship to the client |
 | Visualizers | Complete (14 visualizers) | All 9 spec topics done: binary search, sorting (bubble, insertion, merge, quick), BFS and DFS on a grid, Dijkstra, union-find, segment tree, 0/1 knapsack, KMP, two pointers (plus sliding window). Every visualizer is linked from a lesson. Gallery at /visualizers/. |
-| Animated concept explanations | Partial | 80 lessons have an authored walkthrough and 8 embed an algorithm visualizer, for 88 of 224 lessons with an animated player. Every published Level 0–1 CP lesson and Level 0 System Design lesson has an animation. Additional concepts within covered lessons and the remaining lessons still need authoring. |
+| Animated concept explanations | Partial | Every published lesson has an animated example: 216 authored walkthroughs and 8 lessons with editable algorithm visualizers across 224 lessons. Coverage within individual lessons varies. |
 | Diagrams (Mermaid, React Flow) | Complete | |
 | Search (Cmd/K), learning paths, dashboard, achievements | Complete | |
 | Hiring market page | Complete | 21 sourced findings (8 high-confidence), checked 2026-10-26; mostly US data, stale quickly |

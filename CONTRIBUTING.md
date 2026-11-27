@@ -48,7 +48,7 @@ Create `content/problems/<id>.json` (schema: `src/lib/content/problem.ts`). Requ
 2. Add a renderer and register it in `src/visualizers/registry.tsx`.
 3. Use it with `<Visualizer name="your-name" />`.
 
-For a fixed worked example, add a `ConceptWalkthrough` with named nodes, optional edges and a sequence of frames. Each frame has a title, a complete explanation, and a list of active node IDs. It can also replace the visible edges or show a short value under a node. Keep node labels short, explain the state change in words, and check forward, backward, replay and reduced motion at phone width. Align every visual state with the worked example.
+Every published lesson needs an animated worked example. For a fixed example, add a `ConceptWalkthrough` with named nodes, optional edges and a sequence of frames. Each frame has a title, a complete explanation, and a list of active node IDs. It can also replace the visible edges or show a short value under a node. Keep node labels short, explain the state change in words, and check forward, backward, replay and reduced motion at phone width. Align every visual state with the worked example.
 
 ## Content style guide
 
