@@ -40,6 +40,18 @@ def first_true(lo, hi, P):
 
 Each iteration strictly shrinks the range (`lo = mid + 1` or `hi = mid` with `mid < hi`), so it always terminates, and it runs `⌈log2(hi − lo + 1)⌉` iterations.
 
+<ConceptWalkthrough title="Keep the first-true boundary in bounds" nodes={[
+  { id: "i0", label: "0", x: 12, y: 44 },
+  { id: "i1", label: "1", x: 31, y: 44 },
+  { id: "i2", label: "2", x: 50, y: 44 },
+  { id: "i3", label: "3", x: 69, y: 44 },
+  { id: "end", label: "4", x: 88, y: 44 },
+]} frames={[
+  { title: "Allow the end position", note: "The four predicate results are F, F, F, F. The answer may be index 4, which represents no true index. The search can probe indices in [0, 4), and the answer is in [0, 4].", active: ["i0", "i1", "i2", "i3", "end"], values: { i0: "F", i1: "F", i2: "F", i3: "F", end: "end" } },
+  { title: "A false midpoint excludes itself", note: "Index 2 fails. Monotonicity rules out indices 0 through 2, so set lo = 3. The answer is now in [3, 4].", active: ["i3", "end"], values: { i2: "F", i3: "lo", end: "hi" } },
+  { title: "A one-element probe still makes progress", note: "With lo = 3 and hi = 4, the midpoint is 3. Assigning lo = mid would repeat the same probe. Assign lo = mid + 1 to reach 4, the end position. Never evaluate the predicate at index 4.", active: ["end"], values: { i3: "F", end: "answer" } },
+]} />
+
 ## Watch it run
 
 Type your own array and target. Notice how `lo` and `hi` close in on the answer and which half is discarded each step.
@@ -106,6 +118,16 @@ while (lo < hi) {
 The same idea works when there is no array at all. If you can write a fast check `ok(v)` that is monotone in `v` ("is it possible with budget `v`?"), search the **value** range.
 
 Example: the smallest integer `r` with `r * r >= n`. The predicate `r*r >= n` is `F…F T…T`, so:
+
+<ConceptWalkthrough title="Search an integer answer with a feasibility test" nodes={[
+  { id: "range", label: "Range", x: 16, y: 46 },
+  { id: "probe", label: "Probe", x: 50, y: 46 },
+  { id: "test", label: "r² ≥ 50", x: 84, y: 46 },
+]} frames={[
+  { title: "Rule out the large candidates", note: "Start at [0, 50]. The first three probes are 25, 12 and 6. Their squares are 625, 144 and 36. The first two probes lower hi. The last fails and raises lo to 7.", active: ["range", "probe"], values: { range: "[7, 12]", probe: "6", test: "36 fails" } },
+  { title: "Keep a feasible probe", note: "The next probe is 9. Its square is 81, so the smallest feasible integer lies in [7, 9]. The next midpoint is 8. Predict which bound changes.", active: ["probe", "test"], values: { range: "[7, 9]", probe: "9", test: "81 passes" } },
+  { title: "Certify minimality", note: "8 passes because its square is 64. That leaves [7, 8]. The last probe is 7, whose square is 49, so lo moves to 8. The boundary is 8, with 7² below 50 and 8² at least 50.", active: ["range", "test"], values: { range: "[8, 8]", probe: "7", test: "49 fails" } },
+]} />
 
 <CodeRunner language="python" code={`n = int(input())
 lo, hi = 0, n          # answer is in [0, n]
