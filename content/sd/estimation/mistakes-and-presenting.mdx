@@ -53,6 +53,22 @@ Before you commit to an answer, run these quick checks:
 
 You estimate a photo service stores 4 TB per day and bills 1.5 PB per year. 4 TB x 365 is about 1,460 TB, about 1.5 PB. Matches. You also estimate egress of 1.2 GB per second. A single 100 Gbps (about 12.5 GB/s) network link could carry it, so a few links or a CDN are plausible. If you had gotten 120 GB/s, you would pause and re-check.
 
+<ConceptWalkthrough
+  title="Catch a tenfold error in download traffic"
+  nodes={[
+    { id: "daily", label: "Per day", x: 24, y: 24 },
+    { id: "average", label: "Avg QPS", x: 76, y: 24 },
+    { id: "peak", label: "Peak QPS", x: 76, y: 68 },
+    { id: "egress", label: "Egress", x: 24, y: 68 }
+  ]}
+  edges={[{ from: "daily", to: "average" }, { from: "average", to: "peak" }, { from: "peak", to: "egress" }]}
+  frames={[
+    { title: "Predict what the estimate implies", note: "A podcast archive serves about 2.16 million downloads per day. A draft estimate says 250 average downloads/s. Multiply that rate by 86,400 seconds and predict whether it matches the daily count.", active: ["daily", "average"], values: { daily: "2.16M", average: "250/s?" }, edges: [{ from: "average", to: "daily" }] },
+    { title: "Round-trip and correct the rate", note: "At 250 downloads/s, a day would contain 250 × 86,400 = 21.6 million downloads, ten times the assumption. Dividing 2.16 million by 86,400 gives 25 downloads/s.", active: ["daily", "average"], values: { daily: "2.16M", average: "25/s" }, edges: [{ from: "daily", to: "average" }] },
+    { title: "Carry the correction through to egress", note: "With a peak factor of 4, the corrected 25 downloads/s becomes 100 downloads/s at peak. At 6 MB per download, that is 600 MB/s of payload, or 4.8 Gbps after multiplying by eight and converting to gigabits.", active: ["average", "peak", "egress"], values: { average: "25/s", peak: "100/s", egress: "4.8 Gbps" } },
+    { title: "Present the implication", note: "Say about 5 Gbps of peak payload, assuming 6 MB per download and a fourfold peak. The unrounded 4.8 Gbps consumes 96% of a 5 Gbps link before overhead, so plan for more link capacity or serve some traffic through a CDN.", active: ["egress"], values: { egress: "96% of link" }, edges: [] }
+  ]} />
+
 ## Presenting estimates in an interview
 
 1. **State the assumptions first**, as a list, and ask the interviewer to confirm or change the important ones.

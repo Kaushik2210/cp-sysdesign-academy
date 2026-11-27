@@ -70,6 +70,22 @@ With the default inputs (10 million users, 10 actions each, 9 reads per write, 1
 It ignores replication, indexes and metadata overhead, caching (which reduces what reaches the database), traffic skew, and redundancy. The server count is a lower bound: add at least N+1 for failures and headroom of 30 to 50%. Multiply the storage by your replication factor yourself.
 </Callout>
 
+<ConceptWalkthrough
+  title="Change one input for a library catalog"
+  nodes={[
+    { id: "average", label: "Avg QPS", x: 24, y: 24 },
+    { id: "peak", label: "Peak QPS", x: 76, y: 24 },
+    { id: "storage", label: "Storage", x: 24, y: 68 },
+    { id: "servers", label: "Servers", x: 76, y: 68 }
+  ]}
+  edges={[{ from: "average", to: "peak" }, { from: "average", to: "storage" }, { from: "peak", to: "servers" }]}
+  frames={[
+    { title: "Convert daily actions to average QPS", note: "A library catalog has 864,000 daily users making 20 requests each. That gives 17.28 million requests per day, or 200 QPS after dividing by 86,400 seconds per day.", active: ["average"], values: { average: "200/s" }, edges: [] },
+    { title: "Establish baseline capacity", note: "With a peak factor of 3, the catalog reaches 200 × 3 = 600 QPS. At 400 QPS per server, 600 / 400 = 1.5, so the model rounds up to two servers before redundancy.", active: ["average", "peak", "servers"], values: { average: "200/s", peak: "600/s", servers: "2 min" }, edges: [{ from: "average", to: "peak" }, { from: "peak", to: "servers" }] },
+    { title: "Predict which outputs change", note: "Nine reads per write means one tenth of 17.28 million daily requests are writes. At 500 B per write, one year of raw storage is 1.728 million × 500 × 365 = 315.36 GB. If the peak factor alone rises from 3 to 6, what happens to storage and the minimum server count?", active: ["average", "storage"], values: { average: "200/s", storage: "315.36 GB" }, edges: [{ from: "average", to: "storage" }] },
+    { title: "Reveal the sensitivity", note: "Doubling the peak factor raises peak load to 200 × 6 = 1,200 QPS, so 1,200 / 400 calls for three servers before redundancy. Daily writes and retention stay fixed, so raw storage stays at 315.36 GB.", active: ["average", "peak", "servers"], values: { average: "200/s", peak: "1,200/s", storage: "315.36 GB", servers: "3 min" } }
+  ]} />
+
 ## A second example: how many memory reads equal one network hop?
 
 A different kind of estimate is the ratio between two operation costs. This snippet compares how many sequential record reads from memory fit into one round trip, given a record size and a memory bandwidth you assume.

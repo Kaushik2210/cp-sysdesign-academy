@@ -69,6 +69,22 @@ A "10 Gbps" network card moves at most about 1.25 GB per second, before protocol
 
 Memorise one conversion: **1 million events per day is about 12 per second.** From it you can scale: 100 million per day is about 1,200 per second, and 1 billion per day is about 12,000 per second.
 
+<ConceptWalkthrough
+  title="Can a map bundle transfer in five seconds?"
+  nodes={[
+    { id: "bundle", label: "Bundle", x: 24, y: 24 },
+    { id: "link", label: "Link", x: 76, y: 24 },
+    { id: "rate", label: "Byte rate", x: 76, y: 68 },
+    { id: "time", label: "Transfer", x: 24, y: 68 }
+  ]}
+  edges={[{ from: "link", to: "rate" }, { from: "rate", to: "time" }, { from: "bundle", to: "time" }]}
+  frames={[
+    { title: "Predict the transfer time", note: "An offline map bundle is 750 MB and the link is rated at 1 Gbps. Using decimal units and ignoring overhead, can the whole bundle arrive within five seconds?", active: ["bundle", "link"], values: { bundle: "750 MB", link: "1 Gbps" }, edges: [] },
+    { title: "Convert bits to bytes", note: "A 1 Gbps link carries 1,000 megabits per second. Divide by 8 bits per byte to get a ceiling of 125 MB/s.", active: ["link", "rate"], values: { link: "1 Gbps", rate: "125 MB/s" }, edges: [{ from: "link", to: "rate" }] },
+    { title: "Reveal the ideal transfer time", note: "At 125 MB/s, a 750 MB map bundle takes 750 / 125 = 6 seconds. It misses the five-second target even before protocol overhead.", active: ["bundle", "rate", "time"], values: { bundle: "750 MB", rate: "125 MB/s", time: "6 s" } },
+    { title: "Work backward from the deadline", note: "Sending 750 MB in five seconds requires 150 MB/s of payload. Multiply by 8 to get 1,200 Mbps, or 1.2 Gbps before overhead.", active: ["time", "rate", "link"], values: { time: "5 s", rate: "150 MB/s", link: "1.2 Gbps" }, edges: [{ from: "time", to: "rate" }, { from: "rate", to: "link" }] }
+  ]} />
+
 ## Latency numbers
 
 The table below is a descendant of the figures Jeff Dean popularised in talks and Peter Norvig published. Hardware keeps improving, and numbers vary by machine and workload, so treat every row as an **order of magnitude**, not a measurement. What matters is the *ratios*.

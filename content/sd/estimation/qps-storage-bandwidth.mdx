@@ -46,6 +46,23 @@ Each step is one line of arithmetic. The skill is choosing sensible inputs, writ
 Traffic is not flat. Users sleep, events spike, and a retry storm can multiply load. Capacity is sized for the **peak**, cost is driven by the **average**. Always compute both, and say which one you used.
 </Callout>
 
+<ConceptWalkthrough
+  title="Size a museum sensor feed"
+  nodes={[
+    { id: "daily", label: "Per day", x: 20, y: 24 },
+    { id: "average", label: "Avg QPS", x: 50, y: 24 },
+    { id: "peak", label: "Peak QPS", x: 80, y: 24 },
+    { id: "storage", label: "Storage", x: 20, y: 68 },
+    { id: "ingress", label: "Ingress", x: 80, y: 68 }
+  ]}
+  edges={[{ from: "daily", to: "average" }, { from: "average", to: "peak" }, { from: "daily", to: "storage" }, { from: "peak", to: "ingress" }]}
+  frames={[
+    { title: "Predict the average write rate", note: "A museum fleet has 3,600 sensors, each posting one reading per minute. That is 3,600 × 1,440 = 5,184,000 writes per day. How many writes per second is that on average?", active: ["daily"], values: { daily: "5.184M" }, edges: [] },
+    { title: "Compute average and peak QPS", note: "Divide 5,184,000 writes per day by 86,400 seconds per day to get 60 writes/s on average. With bursts at four times the average, size the ingest path for 240 writes/s.", active: ["daily", "average", "peak"], values: { daily: "5.184M", average: "60/s", peak: "240/s" }, edges: [{ from: "daily", to: "average" }, { from: "average", to: "peak" }] },
+    { title: "Size peak ingress", note: "At 240 writes/s and 5 KB per reading, the peak payload rate is 240 × 5 = 1,200 KB/s, or 1.2 MB/s in decimal units.", active: ["peak", "ingress"], values: { peak: "240/s", ingress: "1.2 MB/s" }, edges: [{ from: "peak", to: "ingress" }] },
+    { title: "Size retained storage", note: "At 5,184,000 readings per day and 5 KB each, one copy grows by 25.92 GB/day. Keeping 30 days with two total copies takes 25.92 × 30 × 2 = 1,555.2 GB, about 1.56 TB before overhead.", active: ["daily", "storage"], values: { daily: "5.184M", storage: "1.56 TB" }, edges: [{ from: "daily", to: "storage" }] }
+  ]} />
+
 ## Worked example 1: URL shortener
 
 **Assumptions (state them out loud):** 100 million new short URLs per month; reads outnumber writes 100 to 1; each record is about 500 bytes (long URL, short code, timestamps, user id); keep records 5 years; peak is 3x average.
