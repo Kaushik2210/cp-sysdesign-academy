@@ -109,6 +109,53 @@ Answer honestly. Each "yes" is a point.
 
 This problem is itself about streaks, the metric of a good routine.
 
+<ConceptWalkthrough
+  title="Upsolving Longest Practice Streak"
+  nodes={[
+    {id:"attempt", label:"Attempt", x:21, y:26},
+    {id:"hint", label:"Hint", x:50, y:26},
+    {id:"retry", label:"Retry", x:79, y:26},
+    {id:"log", label:"Log", x:74, y:68},
+    {id:"recall", label:"Re-solve", x:26, y:68}
+  ]}
+  edges={[
+    {from:"attempt", to:"hint"}, {from:"hint", to:"retry"},
+    {from:"retry", to:"log"}, {from:"log", to:"recall"}
+  ]}
+  frames={[
+    {
+      title:"Find where the contest attempt went wrong",
+      note:"After the contest, trace [2, 1, 0, 4, 0, 3]. Counting all positive days gives 4, but the longest consecutive run is just 2 days. The zeros split the runs.",
+      active:["attempt"],
+      values:{attempt:"4 ≠ 2"}
+    },
+    {
+      title:"Take one hint and explain it",
+      note:"The hint is to track the run ending today. Each positive day extends it by one. A zero ends the run, so reset the current length to 0 and retain the best length seen so far.",
+      active:["attempt", "hint"],
+      values:{hint:"Reset on 0"}
+    },
+    {
+      title:"Implement the idea and resubmit",
+      note:"Close the hint and write the scan yourself. For [2, 1, 0, 4, 0, 3], the current lengths are 1, 2, 0, 1, 0, 1, so the best is 2. Check an all-zero input gives 0, then submit and confirm AC.",
+      active:["hint", "retry"],
+      values:{retry:"Best 2"}
+    },
+    {
+      title:"Turn the error into a test habit",
+      note:"Record a missed condition in your mistake log. For a task that says consecutive, test two positive runs separated by a zero. That case distinguishes the longest run from the total count.",
+      active:["retry", "log"],
+      values:{log:"Test a split"}
+    },
+    {
+      title:"Re-solve from memory",
+      note:"Two days later, re-implement without notes. On [0, 3, 5, 2], trace lengths 0, 1, 2, 3 and get 3. This case checks that the best run is counted even when it reaches the last day.",
+      active:["log", "recall"],
+      values:{recall:"Best 3"}
+    }
+  ]}
+/>
+
 <Problem id="m01-longest-streak" />
 
 ### Problem ladder

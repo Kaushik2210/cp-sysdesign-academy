@@ -140,6 +140,44 @@ public class Main {
 
 ## Practice
 
+<ConceptWalkthrough
+  title="Array Total through the judge"
+  nodes={[
+    {id:"queue", label:"Queue", x:26, y:26},
+    {id:"build", label:"Compile", x:74, y:26},
+    {id:"tests", label:"Tests", x:74, y:68},
+    {id:"result", label:"Verdict", x:26, y:68}
+  ]}
+  edges={[{from:"queue", to:"build"}, {from:"build", to:"tests"}, {from:"tests", to:"result"}]}
+  frames={[
+    {
+      title:"Send the first attempt",
+      note:"Array Total asks for the sum of every stock change. For n = 3 and changes [7, −4, 2], the expected output is 5. The C++ submission waits in the judge queue.",
+      active:["queue"],
+      values:{queue:"Attempt 1"}
+    },
+    {
+      title:"Attempt 1 gets a compile error",
+      note:"The C++ print statement is missing its final semicolon. The compiler reports an error, so the judge returns CE without running any tests.",
+      active:["build", "result"],
+      values:{build:"Error", result:"CE"},
+      edges:[{from:"queue", to:"build"}, {from:"build", to:"result"}]
+    },
+    {
+      title:"Attempt 2 gets a wrong answer",
+      note:"Adding the semicolon lets the program compile. Its loop still stops after n − 1 values, so for [7, −4, 2] it prints 3 where the judge expects 5. The verdict is WA.",
+      active:["tests", "result"],
+      values:{tests:"3 ≠ 5", result:"WA"}
+    },
+    {
+      title:"Attempt 3 passes",
+      note:"Read exactly n values and accumulate them in a long long, which can hold the maximum total of 3 × 10¹². The case [7, −4, 2] now produces 5. If all judge tests pass within the limits, this new submission gets AC.",
+      active:["tests", "result"],
+      values:{tests:"5 = 5", result:"AC"}
+    }
+  ]}
+/>
+
 <Problem id="array-total" />
 
 ## Quiz

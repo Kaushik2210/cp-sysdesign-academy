@@ -104,6 +104,23 @@ Pick the part where the design can go wrong. Here it is *reliable delivery witho
 
 Retries use exponential backoff with jitter (wait about 1s, 2s, 4s and so on, each randomised) so a recovering provider is not hit by a synchronised retry wave. After a fixed number of attempts the task moves to a **dead-letter queue** for inspection.
 
+<ConceptWalkthrough
+  title="Retrying a push after a worker crash"
+  nodes={[
+    { id: "queue", label: "Queue", x: 25, y: 23 },
+    { id: "worker", label: "Worker", x: 75, y: 23 },
+    { id: "store", label: "Store", x: 25, y: 69 },
+    { id: "provider", label: "Gateway", x: 75, y: 69 },
+  ]}
+  edges={[{ from: "worker", to: "queue" }, { from: "worker", to: "store" }, { from: "worker", to: "provider" }]}
+  frames={[
+    { title: "Record the attempt before sending", note: "The worker pulls order-shipped push n_5521 from the queue and records the stable key n_5521:push in the store before calling the push gateway.", active: ["queue", "worker", "store"], values: { queue: "In flight", store: "Key saved" } },
+    { title: "The send succeeds before the crash", note: "The gateway accepts n_5521:push, but the worker crashes before saving the outcome or acknowledging the task. The queue makes the task available again. The saved key alone cannot tell the next worker whether the push was accepted.", active: ["worker", "queue", "provider"], values: { queue: "Ready again", worker: "Crashed", store: "Key saved", provider: "Accepted" } },
+    { title: "Reuse the key on redelivery", note: "A replacement worker pulls n_5521 and resends with n_5521:push. A gateway that remembers the key returns the prior result without sending a second push. The worker saves the result and acknowledges the task.", active: ["queue", "worker", "store", "provider"], values: { queue: "Acked", worker: "Same key", store: "Sent", provider: "1 push" } },
+    { title: "Choose a gateway that supports deduplication", note: "For order updates, retrying an uncertain send protects against a lost notification. If the gateway ignores the key or forgets it before the retry, it can send a second push. Choose a gateway whose key retention covers the retry window when duplicates matter.", active: ["worker", "provider"], values: { worker: "Same key", provider: "2 pushes" }, edges: [{ from: "worker", to: "provider" }] },
+  ]}
+/>
+
 ## Step 7: Bottlenecks and failure modes
 
 <TradeOffs caption="Bottlenecks found in the notification design" rows={[

@@ -62,6 +62,23 @@ Use this order for interviews and real design docs alike:
 
 *Bottlenecks:* ID generation as a single point of failure, hot pastes in the cache, expiry cleanup cost.
 
+<ConceptWalkthrough
+  title="Can a cached paste outlive its link?"
+  nodes={[
+    { id: "client", label: "Browser", x: 25, y: 23 },
+    { id: "app", label: "App", x: 75, y: 23 },
+    { id: "cache", label: "Cache", x: 75, y: 69 },
+    { id: "store", label: "Store", x: 25, y: 69 },
+  ]}
+  edges={[{ from: "client", to: "app" }]}
+  frames={[
+    { title: "Save the expiry with the paste", note: "At 12:00 the browser submits a paste with a 10-minute lifetime. The app assigns ID p7, writes the body and its 12:10 expiry to the store, then returns the link.", active: ["client", "app", "store"], values: { app: "POST", store: "Ends 12:10" }, edges: [{ from: "client", to: "app" }, { from: "app", to: "store" }] },
+    { title: "A fixed cache lifetime can break the contract", note: "At 12:09 a read misses the cache. The app fetches p7 from the store. If it caches the body for a fixed five minutes without checking the original expiry on hits, the link can still work at 12:11.", active: ["client", "app", "cache", "store"], values: { app: "GET p7", cache: "To 12:14", store: "Ends 12:10" }, edges: [{ from: "client", to: "app" }, { from: "app", to: "cache" }, { from: "app", to: "store" }] },
+    { title: "Cap cache lifetime at the paste expiry", note: "At 12:09 the app chooses the smaller of the five-minute cache lifetime and p7's one remaining minute. It can serve hot reads from cache until 12:10 while honoring the link's expiry.", active: ["app", "cache"], values: { app: "1 min left", cache: "To 12:10", store: "Ends 12:10" }, edges: [{ from: "app", to: "cache" }] },
+    { title: "Reject expired reads before cleanup", note: "At 12:11 p7 misses the cache. The store may still hold the row until a cleanup job runs. The app checks its stored 12:10 expiry and returns 404.", active: ["client", "app", "store"], values: { client: "404", cache: "Miss", store: "Expired" }, edges: [{ from: "client", to: "app" }, { from: "app", to: "store" }] },
+  ]}
+/>
+
 ## Pitfalls
 
 - Starting to draw boxes before knowing the scale.

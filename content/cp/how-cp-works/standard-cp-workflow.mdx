@@ -180,6 +180,53 @@ Resubmitting after a WA without changing your reasoning teaches you nothing and,
 
 ## Practice
 
+<ConceptWalkthrough
+  title="Best Window from hand check to submission"
+  nodes={[
+    {id:"read", label:"Read", x:21, y:26},
+    {id:"brute", label:"Brute", x:50, y:26},
+    {id:"slide", label:"Slide", x:79, y:26},
+    {id:"test", label:"Test", x:74, y:68},
+    {id:"submit", label:"Submit", x:26, y:68}
+  ]}
+  edges={[
+    {from:"read", to:"brute"}, {from:"brute", to:"slide"},
+    {from:"slide", to:"test"}, {from:"test", to:"submit"}
+  ]}
+  frames={[
+    {
+      title:"Read the exact requirement",
+      note:"For Best Window with readings [−6, −2, −4, −1] and k = 2, the answer must come from exactly two consecutive readings. Every valid sum on this input is negative.",
+      active:["read"],
+      values:{read:"k = 2"}
+    },
+    {
+      title:"Compute an answer by hand",
+      note:"Add each pair from scratch. The three window sums are −8, −6 and −5, so the expected answer is −5. This is the brute-force result to compare against.",
+      active:["read", "brute"],
+      values:{brute:"Best −5"}
+    },
+    {
+      title:"Reuse the overlapping sum",
+      note:"Start at −8. Remove −6 and add −4 to get −6. Then remove −2 and add −1 to get −5. Each slide takes constant time, so the whole scan takes O(n) time.",
+      active:["brute", "slide"],
+      values:{slide:"O(n)"}
+    },
+    {
+      title:"Let the hand check catch a bug",
+      note:"Starting the best-so-far value at 0 makes the scan print 0 on this all-negative case. Initialise it to the first window sum, −8, then rerun the check. Both methods should return −5.",
+      active:["slide", "test"],
+      values:{test:"0 → −5"}
+    },
+    {
+      title:"Submit the checked version",
+      note:"Run the samples and boundary cases such as k = n, then submit the linear scan. After the verdict, record the bug caught locally and keep the all-negative case as a regression check.",
+      active:["test", "submit"],
+      values:{test:"Match", submit:"Checked"}
+    }
+  ]}
+/>
+
 <Problem id="m01-window-sum" />
 
 ### Problem ladder

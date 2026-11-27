@@ -103,6 +103,23 @@ Order-of-magnitude costs help you judge a diagram quickly. These are approximati
 
 If a request path makes ten sequential database calls, you can read "tens of milliseconds at least" straight from the picture.
 
+<ConceptWalkthrough
+  title="Which calls make a product page wait?"
+  nodes={[
+    { id: "browser", label: "Browser", x: 25, y: 23 },
+    { id: "app", label: "App", x: 75, y: 23 },
+    { id: "db", label: "Catalog", x: 20, y: 69 },
+    { id: "events", label: "Events", x: 80, y: 69 },
+    { id: "worker", label: "Worker", x: 50, y: 69 },
+  ]}
+  edges={[{ from: "browser", to: "app" }, { from: "app", to: "db" }, { from: "app", to: "events" }]}
+  frames={[
+    { title: "Follow the request and find the durable data", note: "The browser requests product 42. The app reads its name and price from the durable catalog database in 40 ms. The page needs those fields, so the catalog call is on the path the browser waits for.", active: ["browser", "app", "db"], values: { browser: "GET /42", db: "40 ms" }, edges: [{ from: "browser", to: "app" }, { from: "app", to: "db" }] },
+    { title: "A synchronous event extends the wait", note: "After the 40 ms catalog read, the app calls the analytics API for a page-view event and waits another 180 ms. Those two sequential calls add 220 ms to the response. If analytics stalls, the page stalls too.", active: ["browser", "app", "db", "events"], values: { app: "220 ms", db: "40 ms", events: "180 ms" } },
+    { title: "Queue the event and return the page", note: "Replace the analytics API call on the request path with a 5 ms durable queue write. The app waits 40 + 5 = 45 ms for dependencies, then returns the page. A worker reads the queue and reports the event later. Choose the queue when analytics can lag and the team can handle event retries.", active: ["browser", "app", "db", "events", "worker"], values: { app: "45 ms", db: "40 ms", events: "5 ms queue", worker: "Later" }, edges: [{ from: "browser", to: "app" }, { from: "app", to: "db" }, { from: "app", to: "events" }, { from: "worker", to: "events" }] },
+  ]}
+/>
+
 ## Trade-offs between blocks
 
 <TradeOffs caption="Choosing how to absorb extra read traffic or work" rows={[

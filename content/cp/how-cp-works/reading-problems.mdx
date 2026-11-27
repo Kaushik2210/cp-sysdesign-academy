@@ -153,6 +153,43 @@ If your program passes the provided sample but you cannot explain *why* the samp
 
 ## Practice
 
+<ConceptWalkthrough
+  title="What a sample, a counterexample and a limit tell you"
+  nodes={[
+    {id:"sample", label:"Sample", x:26, y:26},
+    {id:"case", label:"New case", x:74, y:26},
+    {id:"limit", label:"Limit", x:26, y:68},
+    {id:"sort", label:"Sort + scan", x:74, y:68}
+  ]}
+  edges={[{from:"sample", to:"case"}, {from:"case", to:"sort"}, {from:"limit", to:"sort"}]}
+  frames={[
+    {
+      title:"A sample can agree with a faulty rule",
+      note:"In this illustrative Closest Pair of Values sample, [12, 4, 7] has minimum gap 3 from 4 and 7. Checking only neighbours in input order happens to give the same answer.",
+      active:["sample"],
+      values:{sample:"Gap 3"}
+    },
+    {
+      title:"A counterexample exposes the faulty rule",
+      note:"For [8, 20, 9], the input-order neighbour gaps are 12 and 11. The correct answer is 1 from 8 and 9. This valid input disproves checking only neighbours in input order.",
+      active:["sample", "case"],
+      values:{sample:"3 = 3", case:"11 ≠ 1"}
+    },
+    {
+      title:"Use the limit to rule out all pairs",
+      note:"Checking every pair fixes the correctness problem, but at the worked example's contest-scale limit of 200,000 values it takes 19,999,900,000 comparisons. Look for a faster way to find the minimum.",
+      active:["limit"],
+      values:{limit:"≈20B pairs"}
+    },
+    {
+      title:"Make the right neighbours adjacent",
+      note:"Sort [8, 20, 9] into [8, 9, 20] and compare gaps 1 and 11. Any gap spanning an intermediate sorted value is at least as large as an adjacent gap inside it. Sorting and scanning finds the answer in O(n log n) time.",
+      active:["case", "limit", "sort"],
+      values:{sort:"Gap 1"}
+    }
+  ]}
+/>
+
 <Problem id="m01-min-gap" />
 
 ### Problem ladder

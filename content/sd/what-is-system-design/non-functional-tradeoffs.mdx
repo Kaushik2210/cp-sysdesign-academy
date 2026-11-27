@@ -36,6 +36,22 @@ You cannot maximise everything. Making reads faster usually costs memory or fres
 
 **Percentiles matter.** Averages hide the slow tail. If a page needs 10 backend calls in parallel and each has a 1% chance of being slow, the page is slow about 1 minus 0.99 to the tenth, roughly 10%, of the time. So track p50, p95 and p99, not just the mean.
 
+<ConceptWalkthrough
+  title="When a slow search exhausts its pool"
+  nodes={[
+    { id: "traffic", label: "Traffic", x: 25, y: 23 },
+    { id: "pool", label: "Pool", x: 75, y: 23 },
+    { id: "reject", label: "Reject", x: 25, y: 69 },
+    { id: "search", label: "Search", x: 75, y: 69 },
+  ]}
+  edges={[{ from: "traffic", to: "pool" }, { from: "pool", to: "search" }]}
+  frames={[
+    { title: "Normal traffic fits the pool", note: "A search endpoint receives 1,000 requests per second. Each request holds a connection for 200 ms on average. Little's Law gives 200 busy connections on average, within the pool's 300 slots.", active: ["traffic", "pool", "search"], values: { traffic: "1,000/s", pool: "200 / 300", search: "200 ms" } },
+    { title: "A slowdown fills the slots", note: "Search now holds each connection for 2 seconds on average. Sustaining 1,000 completions per second would require 2,000 busy connections. With 300 slots, the pool can sustain about 150 per second at that service time, so waiting requests pile up.", active: ["traffic", "pool", "search"], values: { traffic: "1,000/s", pool: "300 / 300", search: "2 s" } },
+    { title: "Reject excess work promptly", note: "Keep the 300-slot cap and return 503 quickly when all slots are busy. At sustained load in this example, about 150 requests per second complete and 850 are rejected. This trades successful responses during the slowdown for bounded waiting and avoids asking the slow backend to handle more concurrency.", active: ["traffic", "pool", "search", "reject"], values: { traffic: "1,000/s", pool: "300 max", search: "150/s", reject: "850/s" }, edges: [{ from: "traffic", to: "pool" }, { from: "pool", to: "search" }, { from: "traffic", to: "reject" }] },
+  ]}
+/>
+
 ## Availability vs cost
 
 Availability is the fraction of time the system is up. Each extra nine is dramatically stricter:
