@@ -248,6 +248,21 @@ A graph with hundreds of millions of edges does not fit comfortably on one machi
 
 **Rerouting**: the navigation client detects that it left the route (distance from the path), asks for a new route, and the server also **pushes** a better route when traffic changes substantially on the current one.
 
+<ConceptWalkthrough
+  title="Reroute when a segment slows"
+  nodes={[
+    {id:"s",label:"Start",x:18,y:51},
+    {id:"b",label:"Bridge",x:50,y:22},
+    {id:"d",label:"Detour",x:50,y:72},
+    {id:"e",label:"End",x:82,y:51},
+  ]}
+  frames={[
+    {title:"Compare the two paths",note:"The bridge path takes 2 minutes to the bridge plus 4 to the destination, for 6 minutes. The detour takes 4 plus 5, for 9 minutes. The router chooses the bridge.",active:["s","b","e"],values:{b:"2 + 4 min",d:"4 + 5 min",e:"ETA 6 min"},edges:[{from:"s",to:"b"},{from:"b",to:"e"},{from:"s",to:"d"},{from:"d",to:"e"}]},
+    {title:"Update one road weight",note:"Live traffic raises the bridge-to-destination segment from 4 to 10 minutes. The bridge path now costs 2 + 10 = 12 minutes. The detour still costs 4 + 5 = 9 minutes.",active:["b"],values:{b:"2 + 10 min",d:"4 + 5 min"},edges:[{from:"s",to:"b"},{from:"b",to:"e"},{from:"s",to:"d"},{from:"d",to:"e"}]},
+    {title:"Choose the faster path again",note:"For a new route from the same start, the router selects the detour and returns an ETA of 9 minutes. That saves 3 minutes versus taking the congested bridge.",active:["s","d","e"],values:{b:"12 min",d:"9 min",e:"ETA 9 min"},edges:[{from:"s",to:"b"},{from:"b",to:"e"},{from:"s",to:"d"},{from:"d",to:"e"}]},
+  ]}
+/>
+
 ## Search and geocoding (briefly)
 
 Place search is a **search system** ([search systems](/sd/search-systems/inverted-indexes-and-text-analysis/)) with an index of places and addresses, ranked by text relevance, distance from the user and popularity. Geospatial lookups ("coffee near me") use a **spatial index** (geohash, quadtree or S2 cells) so that a query touches only nearby cells.

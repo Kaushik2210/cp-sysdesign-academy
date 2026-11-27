@@ -84,6 +84,45 @@ If clicks can arrive up to two minutes late, when is the 10:00 window **complete
 
 Clients and networks retry, and the log is **at-least-once** ([delivery semantics](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)). Every click carries a unique **click id**; the processor keeps the set of ids it has seen **for as long as late events can still arrive** and ignores repeats. The state is bounded by the watermark delay, not by all history.
 
+<ConceptWalkthrough
+  title="Compare two watermarks on the same clicks"
+  nodes={[
+    {"id":"event","label":"Event","x":50,"y":23},
+    {"id":"short","label":"5 s delay","x":25,"y":65},
+    {"id":"long","label":"20 s delay","x":75,"y":65}
+  ]}
+  frames={[
+    {
+      title: "Count a click in the 11:00 minute",
+      note: "Click c1 for ad A has event time 11:00:52 and lands in the 11:00 minute. With that as the maximum event time, the 5-second watermark is 11:00:47 and the 20-second watermark is 11:00:32. Both windows are open with count 1.",
+      active: ["event","short","long"],
+      values: {"event":"c1 @ :52","short":"1 open","long":"1 open"},
+      edges: [{"from":"event","to":"short"},{"from":"event","to":"long"}]
+    },
+    {
+      title: "Close the shorter window first",
+      note: "A next-minute click at 11:01:08 moves the watermarks to 11:01:03 and 11:00:48. The 5-second policy finalizes the 11:00 minute at 1 because its watermark has passed 11:01:00. The 20-second policy still has it open at 1.",
+      active: ["event","short"],
+      values: {"event":"11:01:08","short":"1 final","long":"1 open"},
+      edges: [{"from":"event","to":"short"}]
+    },
+    {
+      title: "Admit a delayed click under the longer policy",
+      note: "Click c2 now arrives with event time 11:00:58. The maximum event time stays 11:01:08. The 5-second policy drops c2 because the window is closed, while the 20-second policy counts c2 and reaches 2.",
+      active: ["event","long"],
+      values: {"event":"c2 @ :58","short":"1 final","long":"2 open"},
+      edges: [{"from":"event","to":"long"}]
+    },
+    {
+      title: "Deduplicate before the longer window closes",
+      note: "A replay of c2 leaves the open count at 2. A later click at 11:01:22 moves the 20-second watermark to 11:01:02 and closes the window. The short policy finalized earlier at 1, and the long policy finalized at 2.",
+      active: ["event","long"],
+      values: {"event":"11:01:22","short":"1 final","long":"2 final"},
+      edges: [{"from":"event","to":"long"}]
+    }
+  ]}
+/>
+
 ## The simulation
 
 The program creates 60,000 real clicks over 10 minutes for 20 ads (a few ads get most clicks) with realistic delivery problems: **90% arrive within 3 seconds, 9% within 3 to 20 seconds, 1% take 20 to 120 seconds**, and **3% are delivered twice**. It computes the **true** count per ad per one-minute window, then compares: **processing-time windows** (naive), and **event-time windows with a watermark delay of 0, 5, 30 and 150 seconds**, each **with and without deduplication**. "Exact cells" is the share of (ad, window) counts that are exactly right; "total error" is the sum of absolute errors as a share of true clicks.

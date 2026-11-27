@@ -264,6 +264,36 @@ If a single sorted set cannot hold or serve the board, shard it. Two options:
 
 For a **very large** board, an **approximate rank** is often acceptable: keep a **histogram of players per score bucket** (cheap and shardable) and report "you are in the top 3%" or a rank estimate for everyone outside the top few thousand, with **exact** ranks only for the top. Players do not care whether they are 4,201,337th or 4,201,402nd.
 
+<ConceptWalkthrough
+  title="Find the top two and an exact rank across shards"
+  nodes={[
+    {"id":"a","label":"Shard A","x":25,"y":27},
+    {"id":"b","label":"Shard B","x":75,"y":27},
+    {"id":"top","label":"Global top","x":25,"y":67},
+    {"id":"rank","label":"Fay's rank","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Fetch two leaders per shard",
+      note: "Shard A holds Ada 95, Ben 82 and Cy 74. Shard B holds Dia 99, Eli 88 and Fay 80. Each shard sends its local top two. Any omitted player already trails two players on their own shard.",
+      active: ["a","b"],
+      values: {"a":"Ada, Ben","b":"Dia, Eli","top":"pending","rank":"pending"}
+    },
+    {
+      title: "Merge leaders and count players ahead",
+      note: "Merging the four candidates gives Dia 99 and Ada 95 as the top two. Fay has 80 points. A counts Ada and Ben above 80, and B counts Dia and Eli. Fay's one-based rank is 1 + 2 + 2 = 5.",
+      active: ["a","b","top","rank"],
+      values: {"a":"2 ahead","b":"2 ahead","top":"Dia, Ada","rank":"#5"}
+    },
+    {
+      title: "Update Fay on her home shard",
+      note: "Fay gains 13 points and stays on B with 93. Now only Ada on A and Dia on B are ahead, so Fay ranks 1 + 1 + 1 = 3. B's local top two becomes Dia and Fay, while the global top two stays Dia and Ada.",
+      active: ["b","rank"],
+      values: {"a":"1 ahead","b":"1 ahead","top":"Dia, Ada","rank":"#3"}
+    }
+  ]}
+/>
+
 ## Trade-offs
 
 <TradeOffs caption="Key decisions for a leaderboard" rows={[

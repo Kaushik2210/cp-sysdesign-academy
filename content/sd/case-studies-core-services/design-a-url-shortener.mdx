@@ -227,6 +227,20 @@ Shard by `code` (hash partitioning, ideally with [consistent hashing](/sd/databa
 
 **Deduplication.** Should the same long URL always map to the same code? Per-user dedup is cheap (a secondary index on a hash of the URL per owner); global dedup leaks that someone else already shortened the URL and complicates deletion, so it is usually off.
 
+<ConceptWalkthrough
+  title="Count clicks off the redirect path"
+  nodes={[
+    {id:"r",label:"Redirect",x:23,y:34},
+    {id:"q",label:"Queue",x:50,y:34},
+    {id:"c",label:"Daily count",x:79,y:34},
+  ]}
+  frames={[
+    {title:"Return the redirect before aggregation",note:"The stored daily count for /fern is 120. A request receives a 302, and the service publishes a click event. The daily count is still 120 while the event waits in the queue.",active:["r","q"],values:{r:"302",q:"1 event",c:"120"},edges:[{from:"r",to:"q"}]},
+    {title:"Flush a batch for the same link and day",note:"Two more requests receive 302s and publish click events. The consumer combines all three events into one increment of 3 for /fern on that day. The stored count becomes 123.",active:["q","c"],values:{r:"302",q:"3 drained",c:"123"},edges:[{from:"q",to:"c"}]},
+    {title:"Keep redirecting when publishing fails",note:"The next request still receives a 302, but its click event fails to publish and is lost. Four visits reached the redirect service in this trace and only three reached the counter, which stays at 123.",active:["r","q"],values:{r:"302",q:"publish lost",c:"123"},edges:[{from:"r",to:"q"}]},
+  ]}
+/>
+
 ## 8. Bottlenecks and what you would change at 100x scale
 
 - **Redirect QPS** grows linearly: add redirect servers and cache nodes; push caching to the edge.

@@ -149,6 +149,43 @@ State machine for a seat: `available` → `held` (with `held_by` and `hold_expir
 - **Confirming the sale** must re-check the hold in one statement: `UPDATE seats SET status='sold', order_id=:o WHERE seat_id=:s AND status='held' AND held_by=:u AND hold_expires_at > now()`. If it changes zero rows, the hold lapsed before payment completed.
 - The tricky case: **payment succeeds after the hold expired and someone else took the seat.** The order cannot be completed, so the system **refunds** (a compensating action, see [sagas](/sd/distributed-theory/distributed-commit-and-sagas/)) or, better, **extends the hold when payment starts** and keeps a short grace period so the common case never happens. All payment calls use idempotency keys ([payment system](/sd/case-studies-core-services/design-a-payment-system/)).
 
+<ConceptWalkthrough
+  title="A late payment cannot claim a reassigned seat"
+  nodes={[
+    {"id":"seat","label":"Seat B7","x":25,"y":27},
+    {"id":"clock","label":"DB clock","x":75,"y":27},
+    {"id":"a","label":"A payment","x":25,"y":67},
+    {"id":"b","label":"B payment","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Hold B7 for buyer A",
+      note: "At 12:00 the seat row records buyer A and expires at 12:05. A starts a $45 payment. In this policy the payment does not extend the hold.",
+      active: ["seat","a"],
+      values: {"seat":"A held","clock":"12:00","a":"pending","b":"none"}
+    },
+    {
+      title: "Let B claim the expired hold",
+      note: "At 12:06 the database allows buyer B to replace A's expired hold with a new one through 12:11. A's payment is still pending and B starts a separate $45 payment.",
+      active: ["clock","seat","b"],
+      values: {"seat":"B held","clock":"12:06","a":"pending","b":"pending"}
+    },
+    {
+      title: "Refund A's late charge",
+      note: "At 12:07 A's $45 payment succeeds. The conditional sale for A updates zero rows because B owns the hold. A's order is closed and an idempotent $45 refund completes. B still holds the seat.",
+      active: ["clock","a","seat"],
+      values: {"seat":"B held","clock":"12:07","a":"refunded","b":"pending"}
+    },
+    {
+      title: "Sell B7 to B",
+      note: "At 12:08 B's $45 payment succeeds. B is the current holder and 12:08 is before 12:11, so the conditional sale updates one row. The seat belongs to B and A has been refunded.",
+      active: ["clock","b","seat"],
+      values: {"seat":"B sold","clock":"12:08","a":"refunded","b":"captured"},
+      edges: [{"from":"b","to":"seat"}]
+    }
+  ]}
+/>
+
 **How long should a hold last?** A longer hold is kinder to slow payers but blocks seats that abandoners never intend to buy. The simulation sells 1,000 seats to 40 buyers arriving each minute, where **half of them abandon** after choosing a seat, with three hold durations.
 
 <CodeRunner language="python" code={`import heapq, random

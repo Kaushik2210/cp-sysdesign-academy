@@ -141,6 +141,21 @@ Providers fail: APNs and FCM throttle, an SMS carrier goes down, an email provid
 
 The simulation sends 10,000 messages over 100 seconds while the primary provider is **down from second 20 to second 80** and fails 2% of calls at other times.
 
+<ConceptWalkthrough
+  title="Retry an ambiguous send with the same key"
+  nodes={[
+    {id:"w",label:"Worker",x:22,y:33},
+    {id:"p",label:"Provider",x:50,y:33},
+    {id:"u",label:"Inbox",x:78,y:33},
+    {id:"k",label:"Send key",x:50,y:69},
+  ]}
+  frames={[
+    {title:"The provider accepts the send",note:"The worker sends notification N7 with idempotency key K7 to a provider that retains keys for the retry window. The provider accepts it and sends one notification, but its API response times out.",active:["w","p","u"],values:{w:"timeout",p:"accepted",u:"1 send",k:"K7"},edges:[{from:"w",to:"p"},{from:"p",to:"u"}]},
+    {title:"Back off and reuse K7",note:"After a backoff with jitter, the worker retries N7 with K7 at the same provider. The provider finds the acceptance stored for K7 and returns that result. The recipient still has one notification.",active:["w","p","k"],values:{w:"retry",p:"known key",u:"1 send",k:"K7"},edges:[{from:"w",to:"p"}]},
+    {title:"Record the acceptance",note:"The worker records N7 as accepted and acknowledges the queue job. One provider acceptance covers both attempts with K7, and the recipient still has one notification.",active:["w","u"],values:{w:"queue ACK",p:"accepted",u:"1 send",k:"K7"}},
+  ]}
+/>
+
 <CodeRunner language="python" timeoutMs={30000} code={`import random
 
 def send_all(n, use_backup, retries, seed=11):

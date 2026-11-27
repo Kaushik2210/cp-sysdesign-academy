@@ -121,6 +121,21 @@ Networks drop packets, reorder them and cut connections in the middle of a send.
 
 Together this gives the **effect** of exactly-once, in-order delivery (see [delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)). The simulation sends 100 messages over a link that loses 30% of packets **and** acknowledgements and delays packets randomly, with and without these rules.
 
+<ConceptWalkthrough
+  title="Deliver messages across a sequence gap"
+  nodes={[
+    {id:"incoming",label:"Arrival",x:20,y:34},
+    {id:"buf",label:"Holdback",x:50,y:34},
+    {id:"app",label:"Chat UI",x:80,y:34},
+    {id:"next",label:"Next seq",x:50,y:70},
+  ]}
+  frames={[
+    {title:"Message 42 arrives first",note:"The chat already displays messages through 40. Message 42 arrives while 41 is missing, so 42 waits in the holdback buffer and the next expected sequence stays 41.",active:["incoming","buf"],values:{incoming:"#42",buf:"#42",app:"through 40",next:"41"},edges:[{from:"incoming",to:"buf"}]},
+    {title:"Message 41 closes the gap",note:"Message 41 arrives. The receiver releases 41 and then buffered 42, empties the holdback buffer and advances the next expected sequence to 43. The ACK for 41 is lost.",active:["incoming","buf","app"],values:{incoming:"#41",buf:"empty",app:"through 42",next:"43"},edges:[{from:"incoming",to:"buf"},{from:"buf",to:"app"}]},
+    {title:"A retry only needs another ACK",note:"The sender retries 41 because its ACK was lost. The receiver acknowledges 41 again and discards the duplicate. The UI still displays through 42 and the next expected sequence is 43.",active:["incoming","next"],values:{incoming:"#41 retry",buf:"empty",app:"through 42",next:"43"}},
+  ]}
+/>
+
 <CodeRunner language="python" timeoutMs={30000} code={`import random
 
 def simulate(n_messages, loss, dedupe, seed):

@@ -97,6 +97,21 @@ The client sends **events with a unique id**, to the progress service, which app
 
 A demo in the simulation below shows that processing 20 events in order and the same events shuffled with 8 duplicates produce **identical** progress.
 
+<ConceptWalkthrough
+  title="Merge delayed progress without losing completion"
+  nodes={[
+    {id:"e",label:"Event",x:22,y:32},
+    {id:"p",label:"Position",x:50,y:32},
+    {id:"c",label:"Done?",x:79,y:32},
+    {id:"l",label:"Applied IDs",x:50,y:70},
+  ]}
+  frames={[
+    {title:"A completion arrives first",note:"The server receives C7 for lesson 7 at position 180 seconds with completion set. For this trace with no seeks, the merge keeps the maximum position and sets completion when any event reports it.",active:["e","p","c","l"],values:{e:"C7 at 180 s",p:"180 s",c:"yes",l:"C7"},edges:[{from:"e",to:"p"},{from:"e",to:"l"}]},
+    {title:"A late heartbeat cannot roll progress back",note:"An offline device uploads H3, an earlier heartbeat at 75 seconds. The server applies its ID, keeps max(180, 75) = 180 seconds and preserves completion.",active:["e","p","l"],values:{e:"H3 at 75 s",p:"180 s",c:"yes",l:"C7, H3"},edges:[{from:"e",to:"p"},{from:"e",to:"l"}]},
+    {title:"Replay leaves one applied completion",note:"The device retries C7. That ID is already applied, so the retry adds no new completion. Lesson 7 stays complete at 180 seconds.",active:["e","l"],values:{e:"C7 retry",p:"180 s",c:"yes",l:"C7, H3"},edges:[{from:"e",to:"l"}]},
+  ]}
+/>
+
 ### Quizzes and exams
 
 - **Question banks** with metadata (topic, difficulty); attempts draw questions at random with a fixed per-attempt seed, so refreshing does not change the questions.

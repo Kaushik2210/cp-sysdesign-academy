@@ -94,6 +94,20 @@ If the client waited for the server before showing its own movement, every key p
 - **Entity interpolation**: other players' positions arrive only 20 to 60 times per second, so the client draws them **slightly in the past**, smoothly interpolating between the two latest snapshots instead of jumping.
 - **Lag compensation**: when you shoot, the target you saw was where it was **100 ms ago** on your screen. The server **rewinds** the world to the time the shooter saw it (within a limit) to decide whether the shot hit. This favours the shooter and is a deliberate fairness trade-off.
 
+<ConceptWalkthrough
+  title="Reconcile a predicted move with the server"
+  nodes={[
+    {id:"c",label:"Client",x:24,y:28},
+    {id:"s",label:"Server",x:76,y:28},
+    {id:"p",label:"Replay",x:50,y:69},
+  ]}
+  frames={[
+    {title:"Predict two moves locally",note:"Both sides start at position 4. The client predicts two +2 moves for inputs 51 and 52, displaying position 8 while the server snapshot still shows 4.",active:["c","p"],values:{c:"x = 8",s:"x = 4",p:"51, 52"}},
+    {title:"Receive the authoritative snapshot",note:"The server acknowledges input 51 at position 5 after clipping its movement to +1. The client adopts position 5 as its base and removes 51 from the pending list. Input 52 is still pending.",active:["s","c"],values:{c:"base = 5",s:"ack 51, x = 5",p:"52"},edges:[{from:"s",to:"c"}]},
+    {title:"Replay the remaining input",note:"The client reapplies only pending input 52. Its predicted +2 takes the displayed position from the authoritative base of 5 to 7. The server snapshot still shows 5 through input 51.",active:["p","c"],values:{c:"x = 7",s:"ack 51, x = 5",p:"52: +2"},edges:[{from:"p",to:"c"}]},
+  ]}
+/>
+
 ### Interest management
 
 A match of 100 players does not need to send every player everything. A player only needs the entities **near them** or otherwise relevant (the same idea as the spatial indexes in the [proximity service](/sd/case-studies-core-services/design-a-proximity-service/)). The server keeps a grid or region structure and sends each client only the **nearby** entities. This also hides information the player should not have (enemies behind walls), which reduces **wall-hack cheating**.

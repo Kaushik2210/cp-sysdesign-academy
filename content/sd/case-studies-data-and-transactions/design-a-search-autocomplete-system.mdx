@@ -167,6 +167,36 @@ Suggestions are only as good as the data behind them.
 
 Two cadences work together. A **daily or hourly full rebuild** gives complete, stable suggestions. A small **trending overlay** (updated every few minutes from the streaming job) holds the currently spiking queries; the serving layer merges the overlay's top entries into the trie results at request time. Rebuilding the whole trie every few minutes would be wasteful, and updating it in place on every search would require locks and constant top-k recomputation along the whole path.
 
+<ConceptWalkthrough
+  title="Rerank cached suggestions with a trending overlay"
+  nodes={[
+    {"id":"base","label":"Base top 2","x":25,"y":27},
+    {"id":"news","label":"Overlay","x":75,"y":27},
+    {"id":"one","label":"Rank 1","x":25,"y":67},
+    {"id":"two","label":"Rank 2","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Serve the daily snapshot",
+      note: "For prefix ma, the serving trie returns maps at 90 and manga at 70. Matcha has base score 40 and sits below the two cached suggestions.",
+      active: ["base","one","two"],
+      values: {"base":"maps,manga","news":"empty","one":"maps 90","two":"manga 70"}
+    },
+    {
+      title: "Merge and deduplicate candidates",
+      note: "The overlay adds boosts of 55 to matcha and 5 to maps. A score lookup supplies matcha's base 40 even though it is outside the cached top two. The merger groups by query, so maps appears once at 90 + 5 = 95. Matcha reaches 40 + 55 = 95. Alphabetical tie-breaking puts maps first, matcha second and manga third at 70.",
+      active: ["base","news","one","two"],
+      values: {"base":"maps,manga","news":"+55, +5","one":"maps 95","two":"matcha 95"}
+    },
+    {
+      title: "Expire the overlay scores",
+      note: "When both boosts expire, the daily trie still supplies maps 90 and manga 70. Matcha falls back to 40 and leaves the top two without a trie rebuild.",
+      active: ["news","two"],
+      values: {"base":"maps,manga","news":"expired","one":"maps 90","two":"manga 70"}
+    }
+  ]}
+/>
+
 ## 6. The serving architecture
 
 <Diagram kind="mermaid" code={`flowchart LR

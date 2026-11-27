@@ -76,6 +76,22 @@ A cell is a **fixed rectangle**; the search circle is not. Two problems:
 
 After fetching candidates from the cells, **filter by true distance** (the haversine great-circle formula), because a cell is only an approximation of a circle.
 
+<ConceptWalkthrough
+  title="Find a cafe across a cell boundary"
+  nodes={[
+    {id:"q",label:"Home cell",x:23,y:26},
+    {id:"n",label:"East cell",x:76,y:26},
+    {id:"a",label:"Cafe A",x:21,y:67},
+    {id:"b",label:"Cafe B",x:50,y:67},
+    {id:"p",label:"Bakery",x:79,y:67},
+  ]}
+  frames={[
+    {title:"The home cell misses a nearby cafe",note:"A 300 m search starts 50 m west of a cell boundary. The home cell contains Cafe A at 260 m. It misses Cafe B, which is 120 m away in the adjacent east cell.",active:["q","a"],values:{q:"searched",n:"unchecked",a:"260 m",b:"120 m"},edges:[{from:"q",to:"a"}]},
+    {title:"Fetch the neighbouring cells",note:"The radius is 300 m and the local grid cells are 1 km square. Query the home cell and its eight neighbours. The east cell yields Cafe B and a bakery 480 m away.",active:["q","n","a","b","p"],values:{q:"Cafe A",n:"2 places",a:"260 m",b:"120 m",p:"480 m"},edges:[{from:"q",to:"a"},{from:"n",to:"b"},{from:"n",to:"p"}]},
+    {title:"Apply the exact distance cutoff",note:"The 300 m distance filter drops the bakery at 480 m. The results ordered by distance are Cafe B at 120 m, then Cafe A at 260 m.",active:["b","a"],values:{a:"260 m (#2)",b:"120 m (#1)",p:"excluded"}},
+  ]}
+/>
+
 ## The simulation
 
 The program implements geohash encoding and decoding, finds the **8 neighbours** of a cell, and runs a real experiment: **10,000 places** scattered over about 100 by 100 kilometres, **100 random query points**, a **1 km** radius. For each query it compares the exact answer (checking every place) with a **cell-only lookup** and a **cell-plus-8-neighbours lookup**, at two geohash precisions, counting how many queries returned an **incomplete** result and how many candidates had to be checked.

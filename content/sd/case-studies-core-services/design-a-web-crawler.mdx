@@ -178,6 +178,20 @@ Every host's queue lives on exactly **one frontier node** (partition by a hash o
 
 The simulation compares a **host-blind FIFO** with 20 workers against the **polite per-host scheduler**, for 3,000 URLs spread unevenly over 50 hosts (a few hosts hold most of the URLs), with one request per host per second as the rule.
 
+<ConceptWalkthrough
+  title="Schedule around a host's cooldown"
+  nodes={[
+    {id:"a",label:"Host A",x:23,y:26},
+    {id:"b",label:"Host B",x:77,y:26},
+    {id:"w",label:"Worker",x:50,y:70},
+  ]}
+  frames={[
+    {title:"Start A's cooldown",note:"At time 0 both hosts are eligible, and the tie goes to A. The worker starts fetching A1, which takes 0.2 seconds. A2 remains queued and A next becomes eligible at 1.0 seconds.",active:["a","w"],values:{a:"next 1.0 s",b:"ready",w:"A1 at 0.0 s"},edges:[{from:"a",to:"w"}]},
+    {title:"Fetch from B while A waits",note:"At 0.2 seconds the worker is free. A2 still cannot start. B has a ready URL, so the worker starts B1 at 0.2 seconds.",active:["b","w"],values:{a:"next 1.0 s",b:"queue empty",w:"B1 at 0.2 s"},edges:[{from:"b",to:"w"}]},
+    {title:"Wait until A is eligible again",note:"B1 finishes at 0.4 seconds. With only A2 queued, the worker waits until 1.0 seconds to fetch it. The starts for A1 and A2 are exactly one second apart.",active:["a","w"],values:{a:"queue empty",b:"queue empty",w:"A2 at 1.0 s"},edges:[{from:"a",to:"w"}]},
+  ]}
+/>
+
 <CodeRunner language="python" timeoutMs={30000} code={`import heapq, random
 
 random.seed(6)

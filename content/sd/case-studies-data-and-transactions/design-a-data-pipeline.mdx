@@ -91,6 +91,45 @@ The raw data is **huge and mostly read in bulk**, so **cheap object storage with
 
 A job that can safely be **run twice** with the same result makes failures cheap: retry until it works. The standard technique is to **write each output partition atomically, replacing whatever was there** (overwrite-partition), keyed by a logical date, instead of **appending**. Modern table formats (Iceberg, Delta, Hudi) provide atomic partition overwrite and **snapshots** so readers never see a half-written partition.
 
+<ConceptWalkthrough
+  title="Retry a daily partition without double counting"
+  nodes={[
+    {"id":"raw","label":"Raw day","x":20,"y":27},
+    {"id":"stage","label":"Staged","x":50,"y":27},
+    {"id":"live","label":"Live day","x":80,"y":27},
+    {"id":"other","label":"Next day","x":50,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Read a fixed input snapshot",
+      note: "The June 12 input snapshot contains two orders worth $14 and $26. The live June 12 partition still shows $14 from an older snapshot, and June 13 shows $31.",
+      active: ["raw"],
+      values: {"raw":"$14 + $26","stage":"empty","live":"$14","other":"$31"}
+    },
+    {
+      title: "Fail before the commit",
+      note: "The June 12 run computes $40 in staging and crashes before the atomic overwrite. Readers still see $14 for June 12 and $31 for June 13.",
+      active: ["raw","stage"],
+      values: {"raw":"$14 + $26","stage":"$40","live":"$14","other":"$31"},
+      edges: [{"from":"raw","to":"stage"}]
+    },
+    {
+      title: "Retry and replace June 12",
+      note: "The retry reads the same June 12 snapshot, recomputes $40 and atomically replaces the live $14. June 13 remains $31.",
+      active: ["stage","live"],
+      values: {"raw":"$14 + $26","stage":"$40","live":"$40","other":"$31"},
+      edges: [{"from":"stage","to":"live"}]
+    },
+    {
+      title: "Replay after a lost acknowledgment",
+      note: "The same June 12 run commits again after its acknowledgment is lost. The replacement still publishes $40 for June 12 and leaves June 13 at $31. Appending both $40 results to the original $14 would leave rows totaling $94 for June 12.",
+      active: ["stage","live"],
+      values: {"raw":"$14 + $26","stage":"$40","live":"$40","other":"$31"},
+      edges: [{"from":"stage","to":"live"}]
+    }
+  ]}
+/>
+
 ### 2. Immutable inputs and backfills
 
 Because raw data is never changed, any derived table can be **recomputed** by running the same code over a date range. Backfills are a first-class operation: the orchestrator accepts "run this DAG for these dates", and overwrite semantics make them safe.

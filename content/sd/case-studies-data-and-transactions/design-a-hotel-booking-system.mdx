@@ -102,6 +102,37 @@ COMMIT;
   API->>DB: COMMIT
   API-->>G: confirmation`} caption="Every night must succeed or the whole booking rolls back" />
 
+<ConceptWalkthrough
+  title="A sold-out second night rolls back the first"
+  nodes={[
+    {"id":"mon","label":"Mon 14","x":25,"y":27},
+    {"id":"tue","label":"Tue 15","x":75,"y":27},
+    {"id":"txn","label":"Txn","x":25,"y":67},
+    {"id":"row","label":"Booking","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Request a two-night stay",
+      note: "One Queen room is requested for the nights of Monday the 14th and Tuesday the 15th. Monday has 3 of 4 rooms booked, Tuesday has 4 of 4, and the database has no row for the request.",
+      active: ["mon","tue"],
+      values: {"mon":"3/4 booked","tue":"4/4 booked","txn":"open","row":"none"}
+    },
+    {
+      title: "Update Monday tentatively",
+      note: "The conditional update for Monday changes one row because 3 is below 4. Inside the open transaction Monday now reads 4 of 4 while Tuesday is already 4 of 4.",
+      active: ["mon","txn"],
+      values: {"mon":"4/4 pending","tue":"4/4 booked","txn":"open","row":"none"},
+      edges: [{"from":"mon","to":"txn"}]
+    },
+    {
+      title: "Tuesday fails and Monday rolls back",
+      note: "Tuesday's condition fails because 4 is already equal to capacity. The transaction rolls back Monday's increment, returning it to 3 of 4, leaves Tuesday at 4 of 4, and creates no booking row.",
+      active: ["mon","tue","txn"],
+      values: {"mon":"3/4 booked","tue":"4/4 booked","txn":"rollback","row":"none"}
+    }
+  ]}
+/>
+
 ## The simulation
 
 The program below uses **SQLite** (a real SQL engine built into Python) to run the design. It books and rejects overlapping stays, proves that a failed booking leaves **no partial hold**, shows that **check-out day is free**, handles a **cancellation**, demonstrates the **read-then-write race** with and without the constraint, and simulates an **overbooking** policy. (It runs in the browser; SQLite is loaded on demand the first time you press Run.)

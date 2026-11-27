@@ -215,6 +215,36 @@ Everything depends on the **clock never going backwards on one worker**:
 - **Leap seconds and virtual machine pauses** cause surprises; test them.
 - **Skew between machines** is harmless for uniqueness (worker ids differ) and only affects **ordering** by a few milliseconds.
 
+<ConceptWalkthrough
+  title="Pause ID issuance when a worker clock moves back"
+  nodes={[
+    {"id":"clock","label":"Clock","x":25,"y":27},
+    {"id":"last","label":"Last ms","x":75,"y":27},
+    {"id":"seq","label":"Sequence","x":25,"y":67},
+    {"id":"issued","label":"New ID","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Use two sequence numbers in one millisecond",
+      note: "Worker 5 observes 23 ms after the epoch and serves two requests with sequences 0 and 1. In the lesson's bit layout those IDs are 96489472 and 96489473. The worker records last timestamp 23 and sequence 1.",
+      active: ["clock","last","seq","issued"],
+      values: {"clock":"23 ms","last":"23","seq":"1","issued":"96489473"}
+    },
+    {
+      title: "Wait through a clock rollback",
+      note: "The next request sees 22 ms while the last issued timestamp is 23 ms. The worker waits and keeps sequence 1. If it treated the rollback as a fresh millisecond, it could issue an ID already used at 22 ms.",
+      active: ["clock","last"],
+      values: {"clock":"22 ms","last":"23","seq":"1","issued":"waiting"}
+    },
+    {
+      title: "Resume in the next millisecond",
+      note: "The waiting request next sees 24 ms, above the last issued timestamp of 23 ms. Worker 5 resets the sequence to 0 and emits ID 100683776, from (24 × 2²²) + (5 × 2¹²) + 0.",
+      active: ["clock","last","seq","issued"],
+      values: {"clock":"24 ms","last":"24","seq":"0","issued":"100683776"}
+    }
+  ]}
+/>
+
 ## Other design points
 
 - **Where does it run?** Best as a **library inside each service instance** (no network call) with a leased worker id. Alternatively a small **ID service** that clients call, which adds a network hop but centralises worker-id management.

@@ -83,6 +83,21 @@ The last row is the central difficulty: with a **document-partitioned** index ea
 5. **Tier** the index. Put the **best pages** (high quality, frequently clicked, high link score) in a small, fast **tier 1**; the vast **long tail** goes in a cheaper **tier 2** consulted only when tier 1 gives too few good results. Most queries are answered from tier 1, so the expensive hardware serves a small fraction of the corpus.
 6. **Freshness**: a separate small **real-time index** for newly crawled pages and news, merged with the main results at query time, and rebuilt into the main index periodically.
 
+<ConceptWalkthrough
+  title="Use term positions to resolve a phrase"
+  nodes={[
+    {id:"r",label:"red",x:23,y:25},
+    {id:"k",label:"kite",x:77,y:25},
+    {id:"c",label:"Candidates",x:23,y:67},
+    {id:"h",label:"Phrase hits",x:77,y:67},
+  ]}
+  frames={[
+    {title:"Look up two postings lists",note:"In the query red kite, red appears in D1 at position 2 and in D3 at 4. Kite appears in D1 at 3, D2 at 1, and D3 at 6. Positions count tokens within each document.",active:["r","k"],values:{r:"D1:2 D3:4",k:"D1:3 D2:1 D3:6"}},
+    {title:"Intersect the document IDs",note:"D1 and D3 appear in both lists, so both are candidates. D2 contains kite alone and drops out of the intersection.",active:["r","k","c"],values:{r:"D1, D3",k:"D1, D2, D3",c:"D1, D3"},edges:[{from:"r",to:"c"},{from:"k",to:"c"}]},
+    {title:"Require adjacent positions in order",note:"In D1, kite is at 3, exactly one token after red at 2. In D3, kite at 6 is two tokens after red at 4. Only D1 matches the exact phrase.",active:["c","h"],values:{c:"D1, D3",h:"D1"},edges:[{from:"c",to:"h"}]},
+  ]}
+/>
+
 ## The link graph and PageRank
 
 Text matching alone is easy to manipulate: stuff a page with the right words. Links are a harder-to-fake signal of **quality**: a page that many good pages link to is probably good. **PageRank** formalises this with a **random surfer**: with probability d (the *damping factor*, typically 0.85) the surfer follows a random outgoing link, otherwise jumps to a random page. The page's rank is the long-run fraction of time the surfer spends there, computed by **power iteration**: start with equal ranks and repeatedly redistribute each page's rank among the pages it links to, until the values stop changing. Rank flows from page to page, and pages with no links send theirs to the random jump.

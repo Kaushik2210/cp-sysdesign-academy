@@ -221,6 +221,21 @@ WHERE id = :driver AND status = 'available';          -- succeeds for exactly on
 
 If zero rows change, someone else claimed that driver and the worker moves to the next candidate. The offer carries an **expiry (a lease)**, so a driver who never answers returns to `available` automatically (a background sweep or an in-memory TTL). The same pattern appears in the [payment system](/sd/case-studies-core-services/design-a-payment-system/) lesson's overdraft check. The driver state machine is `available` → `offered` → `assigned` → `on_trip` → `available`, with transitions guarded by conditions and idempotent operations, because phones disconnect and retry.
 
+<ConceptWalkthrough
+  title="Make two workers compete for one driver"
+  nodes={[
+    {id:"a",label:"Worker A",x:23,y:26},
+    {id:"b",label:"Worker B",x:77,y:26},
+    {id:"d",label:"Driver D",x:23,y:68},
+    {id:"e",label:"Driver E",x:77,y:68},
+  ]}
+  frames={[
+    {title:"Both workers select D",note:"Workers A and B handle trips T1 and T2. Both read Driver D as available and rank D first. Driver E is available as B's next candidate.",active:["a","b","d"],values:{a:"trip T1",b:"trip T2",d:"available",e:"available"},edges:[{from:"a",to:"d"},{from:"b",to:"d"}]},
+    {title:"Only A changes D's row",note:"A's conditional update wins, changing one row and offering T1 to D for 15 seconds. B's update for T2 changes zero rows because D is now offered.",active:["a","b","d"],values:{a:"1 row",b:"0 rows",d:"offered T1",e:"available"},edges:[{from:"a",to:"d"},{from:"b",to:"d"}]},
+    {title:"B claims the next candidate",note:"B tries E with the same available-state condition and changes one row. D holds an offer for T1 and E holds an offer for T2.",active:["b","e"],values:{a:"trip T1",b:"1 row",d:"offered T1",e:"offered T2"},edges:[{from:"a",to:"d"},{from:"b",to:"e"}]},
+  ]}
+/>
+
 ## 7. ETA and routing
 
 An ETA needs the **road network**, not a straight line. Model roads as a **graph** (intersections are nodes, road segments are edges with travel time as the weight) and run a shortest-path search. Travel times change with **traffic**, so the weights are updated from live driver speeds and historical patterns. The program below runs Dijkstra's algorithm ([shortest paths](/cp/graphs/dijkstra-shortest-paths/)) on a 30 by 30 block city, first in free-flowing traffic and then with a congested band across the middle.

@@ -208,6 +208,21 @@ The meeting counts and gaps are synthetic and the daylight saving rule covers on
 - **Speed**: for people who are in many meetings, **cache each user's busy intervals per week** and invalidate when their events change. For large groups (50 attendees) fetch in parallel and merge; consider approximate "best slots" scores ("46 of 50 free") instead of a perfect answer.
 - **Preferences**: working hours, time zones of attendees (avoid 03:00 for someone), and a minimum notice are applied as additional "busy" intervals.
 
+<ConceptWalkthrough
+  title="Find a 30-minute slot with a room"
+  nodes={[
+    {id:"a",label:"Ada",x:24,y:25},
+    {id:"b",label:"Ben",x:76,y:25},
+    {id:"r",label:"Room",x:24,y:65},
+    {id:"m",label:"Result",x:76,y:65},
+  ]}
+  frames={[
+    {title:"Overlap attendee calendars",note:"In the 09:00–11:00 search window, Ada is busy 09:00–09:30 and Ben is busy 09:20–10:00. Their overlapping intervals merge into 09:00–10:00.",active:["a","b","m"],values:{a:"09:00–09:30",b:"09:20–10:00",m:"busy to 10:00"}},
+    {title:"Add the room calendar",note:"Ada and Ben are both free after 10:00, but the room is busy 10:15–10:30. The free gaps for all three are 10:00–10:15 and 10:30–11:00.",active:["r","m"],values:{a:"09:00–09:30",b:"09:20–10:00",r:"10:15–10:30",m:"15 and 30 min"},edges:[{from:"r",to:"m"}]},
+    {title:"Choose the first fitting gap",note:"The 10:00 gap is only 15 minutes. The first 30-minute slot when Ada, Ben and the room are all free is 10:30–11:00.",active:["m"],values:{m:"10:30–11:00"}},
+  ]}
+/>
+
 ## Storing and querying events
 
 - **Index** events by `(calendar id, start time)` for range scans: "events in the week" fetches rows with `start < window end` and `end > window start`. A plain B-tree on the start time handles **single events** well when you also store a maximum event length or the end time in the index.

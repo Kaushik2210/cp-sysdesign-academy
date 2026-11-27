@@ -84,6 +84,38 @@ Inside a scheduler node the timers live in memory. The natural structure is a **
 
 A worker that **crashes after doing the work but before acknowledging** leaves the job's lease to expire, and the queue **gives the job to another worker**. This is the correct, safe behaviour (the alternative loses jobs), and it means **a job can run more than once**. This is **at-least-once** delivery. The effect of running twice (two emails, two charges) is prevented not by the scheduler but by **idempotent jobs**: each run carries a stable **run id** (job id plus scheduled time), and the side effect is recorded under that id so a repeat is recognised and skipped ([delivery semantics and idempotency](/sd/queues-and-streaming/delivery-semantics-and-idempotency/)).
 
+<ConceptWalkthrough
+  title="One scheduled run can have two attempts"
+  nodes={[
+    {"id":"lease","label":"Lease","x":25,"y":27},
+    {"id":"worker","label":"Worker","x":75,"y":27},
+    {"id":"ledger","label":"Credit row","x":25,"y":67},
+    {"id":"count","label":"Balance","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Worker A claims the scheduled run",
+      note: "At t=0 worker A claims run credit-09:15 through t=5. The account balance is $20 and the credit ledger has no row for that run.",
+      active: ["lease","worker"],
+      values: {"lease":"t < 5","worker":"A","ledger":"absent","count":"$20"},
+      edges: [{"from":"lease","to":"worker"}]
+    },
+    {
+      title: "The credit commits before A crashes",
+      note: "At t=2 worker A writes a $7 credit under the unique run ID credit-09:15 and updates the balance to $27 in the same transaction. A crashes before acknowledging, so the lease stays open until t=5.",
+      active: ["worker","ledger","count"],
+      values: {"lease":"t < 5","worker":"A crashed","ledger":"+$7","count":"$27"},
+      edges: [{"from":"ledger","to":"count"}]
+    },
+    {
+      title: "Worker B takes over and acknowledges",
+      note: "At t=5 the expired lease lets B claim the same run through t=10. The ledger already contains credit-09:15, so B skips the balance update and acknowledges its lease. Two attempts produced one $7 credit and a final balance of $27.",
+      active: ["worker","ledger","lease"],
+      values: {"lease":"done","worker":"B","ledger":"+$7","count":"$27"}
+    }
+  ]}
+/>
+
 ## The simulation
 
 The program has three parts:

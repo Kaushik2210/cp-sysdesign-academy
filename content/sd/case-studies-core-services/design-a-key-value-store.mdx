@@ -81,6 +81,21 @@ The building blocks:
 
 After a write has been acknowledged by W replicas, the other `N - W` replicas may still hold the old value. A read contacts R replicas; it returns **stale data only if all R replicas it asks are among the stale ones**. With random replica choices the chance is `C(N - W, R) / C(N, R)`. The simulation compares that formula with a measurement for several settings.
 
+<ConceptWalkthrough
+  title="Read across an intersecting quorum"
+  nodes={[
+    {id:"a",label:"Node A",x:20,y:26},
+    {id:"b",label:"Node B",x:50,y:26},
+    {id:"c",label:"Node C",x:80,y:26},
+    {id:"q",label:"Reader",x:50,y:69},
+  ]}
+  frames={[
+    {title:"Acknowledge at two replicas",note:"Replicas A and B acknowledge revision 8 for one key. With N=3 and W=2, the write succeeds while C still holds revision 7.",active:["a","b"],values:{a:"rev 8",b:"rev 8",c:"rev 7"}},
+    {title:"Read with one reply",note:"An R=1 read that picks C returns stale revision 7. With uniform choices and only C stale, that happens on one of the three possible reads.",active:["c","q"],values:{a:"rev 8",b:"rev 8",c:"rev 7",q:"rev 7"},edges:[{from:"c",to:"q"}]},
+    {title:"Read with two replies",note:"An R=2 read from B and C compares revisions 8 and 7 and returns 8. Every pair includes A or B, so no pair can return only revision 7 in this snapshot.",active:["b","c","q"],values:{a:"rev 8",b:"rev 8",c:"rev 7",q:"rev 8"},edges:[{from:"b",to:"q"},{from:"c",to:"q"}]},
+  ]}
+/>
+
 <CodeRunner language="python" timeoutMs={30000} code={`import random
 from math import comb
 

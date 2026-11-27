@@ -98,6 +98,21 @@ Instead of one big file, each video is encoded into **several renditions** (a **
 
 The simulation compares three players on a deliberately poor, fluctuating network: one that **always asks for the top quality**, a **rate-based** player (choose the best rendition below 80% of the last measured throughput) and a **buffer-based** player (choose by how many seconds are buffered: low buffer means low quality).
 
+<ConceptWalkthrough
+  title="Adapt the next segment after a bandwidth drop"
+  nodes={[
+    {id:"n",label:"Network",x:23,y:28},
+    {id:"s",label:"Segment",x:77,y:28},
+    {id:"b",label:"Buffer",x:23,y:68},
+    {id:"w",label:"Stall",x:77,y:68},
+  ]}
+  frames={[
+    {title:"Choose with the last measured rate",note:"The player has 5 seconds buffered and last measured 7.5 Mbit/s. Its 80% budget is 6 Mbit/s, so it picks the 4.5 Mbit/s rendition. A four-second segment at that rate contains 18 Mbit.",active:["n","s","b"],values:{n:"last 7.5 Mbps",s:"18 Mbit",b:"5 s",w:"0 s"},edges:[{from:"n",to:"s"}]},
+    {title:"The download outlasts the buffer",note:"Throughput drops to 2 Mbit/s and holds there. The 18 Mbit segment takes 9 seconds to download. The 5-second buffer runs out, playback stalls for 4 seconds, then the completed segment adds 4 seconds of video.",active:["s","b","w"],values:{n:"2 Mbps",s:"9 s download",b:"4 s",w:"4 s total"},edges:[{from:"s",to:"b"},{from:"b",to:"w"}]},
+    {title:"Pick a smaller segment next",note:"With a measured 2 Mbit/s, the new budget is 1.6 Mbit/s. The player selects 1.2 Mbit/s. The 4.8 Mbit segment downloads in 2.4 seconds, so the buffer ends at 4 - 2.4 + 4 = 5.6 seconds with no new stall.",active:["n","s","b"],values:{n:"2 Mbps",s:"4.8 Mbit",b:"5.6 s",w:"4 s total"},edges:[{from:"n",to:"s"},{from:"s",to:"b"}]},
+  ]}
+/>
+
 <CodeRunner language="python" timeoutMs={30000} code={`import random
 
 LADDER = [0.3, 0.75, 1.2, 2.5, 4.5, 8.0]            # Mbit/s renditions

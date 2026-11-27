@@ -97,6 +97,45 @@ Needs: **insert** a resting order, find the **best** price, **remove** the best,
 - **Cancel** is awkward in a heap, so the code uses **lazy deletion**: a cancelled order is removed from a dictionary of live orders and the stale heap entry is discarded when it surfaces at the top.
 - Production engines use **price levels**: a sorted structure of price levels, each holding a **FIFO queue** of orders (a linked list), plus a hash map from order id to its place. Insert at an existing level and best-price lookup are O(1); cancel is O(1). Memory is pre-allocated to avoid garbage collection pauses.
 
+<ConceptWalkthrough
+  title="Sweep two ask prices in price-time order"
+  nodes={[
+    {"id":"buy","label":"Buy $42","x":50,"y":24},
+    {"id":"a","label":"A $41","x":19,"y":65},
+    {"id":"b","label":"B $41","x":50,"y":65},
+    {"id":"c","label":"C $40","x":81,"y":65}
+  ]}
+  frames={[
+    {
+      title: "Queue three resting sells",
+      note: "Sell A arrives first with 3 shares at $41. Sell B arrives second with 3 shares at $41. Sell C arrives last with 2 shares at $40. An incoming limit buy is willing to take 6 shares at up to $42.",
+      active: ["buy","a","b","c"],
+      values: {"buy":"6 left","a":"3 left","b":"3 left","c":"2 left"}
+    },
+    {
+      title: "Fill C at the cheapest ask",
+      note: "C gets the first fill despite arriving last because $40 is the lowest ask. The buyer takes both shares from C at $40, removing C and leaving 4 shares to buy.",
+      active: ["buy","c"],
+      values: {"buy":"4 left","a":"3 left","b":"3 left","c":"filled"},
+      edges: [{"from":"buy","to":"c"}]
+    },
+    {
+      title: "Fill A before B at $41",
+      note: "A arrived before B at the same $41 price. The buyer takes all 3 shares from A at $41 and still needs 1. B still has its original 3 shares.",
+      active: ["buy","a"],
+      values: {"buy":"1 left","a":"filled","b":"3 left","c":"filled"},
+      edges: [{"from":"buy","to":"a"}]
+    },
+    {
+      title: "Partially fill B",
+      note: "The buyer takes 1 share from B at $41 and is fully filled. B's remaining 2 shares rest at $41. Across the three fills the buyer acquired 2 shares at $40 and 4 shares at $41.",
+      active: ["buy","b"],
+      values: {"buy":"filled","a":"filled","b":"2 left","c":"filled"},
+      edges: [{"from":"buy","to":"b"}]
+    }
+  ]}
+/>
+
 ## The simulation
 
 The program implements the book with heaps and checks it three ways: a **hand-made scenario** (partial fills, price-time priority, a market order sweeping the book, a cancel), then **200 random sessions of up to 300 events** (limit orders, a few market orders, cancels) in which every session is compared with a **slow brute-force matcher** that scans all resting orders for each incoming order, and checked for two **invariants**: the book is never crossed, and **quantity is conserved**.

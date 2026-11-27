@@ -87,6 +87,20 @@ Two conclusions: **filtering early** is essential (rejecting half of all traffic
 
 Outbound mail goes into a **durable queue** and an **outbound sender** pool delivers it by SMTP to the recipient's MX host. Destinations are often unreachable or slow, so the sender uses **retries with backoff** and finally a **bounce** (a non-delivery message) to the sender. Outbound senders also **sign** messages (DKIM) and respect **per-destination rate limits** so large providers do not throttle us.
 
+<ConceptWalkthrough
+  title="Keep queued mail through a short MX outage"
+  nodes={[
+    {id:"q",label:"Mail queue",x:24,y:28},
+    {id:"m",label:"Remote MX",x:76,y:28},
+    {id:"s",label:"Retry time",x:50,y:69},
+  ]}
+  frames={[
+    {title:"A temporary reply keeps the mail queued",note:"At minute 0 the destination MX replies 451 to mail M4. The sender keeps M4 in its durable queue and schedules a retry five minutes later.",active:["q","m","s"],values:{q:"M4 queued",m:"451 at 0 min",s:"5 min"},edges:[{from:"q",to:"m"},{from:"q",to:"s"}]},
+    {title:"Double the wait after each failure",note:"The MX still returns 451 at minute 5 and minute 15. The sender waits 10 minutes after the first retry and 20 after the second, so M4 remains queued until minute 35.",active:["q","m","s"],values:{q:"M4 queued",m:"451 at 15 min",s:"35 min"},edges:[{from:"q",to:"m"},{from:"q",to:"s"}]},
+    {title:"The destination accepts on the next attempt",note:"The MX recovers at minute 30. On the scheduled attempt at minute 35 it returns 250 after receiving the message. The sender removes M4 from the queue and stops retrying.",active:["q","m"],values:{q:"M4 removed",m:"250 at 35 min",s:"done"},edges:[{from:"q",to:"m"}]},
+  ]}
+/>
+
 ## The simulation
 
 The program models four mechanisms with the Python standard library only:

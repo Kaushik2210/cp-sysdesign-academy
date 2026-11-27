@@ -219,6 +219,38 @@ The laptop and the phone both edit `report.docx` while offline. Neither knows ab
 
 A **version vector** (a counter per device) distinguishes the three situations: one version **descends from** the other (a plain update), they are the **same**, or they are **concurrent** (a real conflict, since neither includes the other's changes).
 
+<ConceptWalkthrough
+  title="Preserve two offline edits of one file"
+  nodes={[
+    {"id":"lap","label":"Laptop","x":25,"y":27},
+    {"id":"phone","label":"Phone","x":75,"y":27},
+    {"id":"main","label":"Main file","x":25,"y":67},
+    {"id":"copy","label":"Copy","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Make two edits from version 8",
+      note: "Both devices start from notes.txt version 8 with vector (2,4), in laptop–phone order. The laptop adds a budget line and reaches (3,4). The phone adds a venue line and reaches (2,5).",
+      active: ["lap","phone"],
+      values: {"lap":"(3,4)","phone":"(2,5)","main":"v8 (2,4)","copy":"none"}
+    },
+    {
+      title: "Accept the laptop's update",
+      note: "The laptop reconnects first. Its expected base v8 matches the server's v8, so the server publishes v9 with vector (3,4) and the budget line. The phone still carries its venue edit based on v8.",
+      active: ["lap","main"],
+      values: {"lap":"(3,4)","phone":"(2,5)","main":"v9 (3,4)","copy":"none"},
+      edges: [{"from":"lap","to":"main"}]
+    },
+    {
+      title: "Save the phone's edit as a copy",
+      note: "The phone's expected base v8 fails against v9. In (3,4) versus (2,5), each vector is ahead in one coordinate, so the edits are concurrent. The server keeps the budget line in v9 and saves the phone's venue line in a conflict copy.",
+      active: ["phone","main","copy"],
+      values: {"lap":"(3,4)","phone":"(2,5)","main":"v9 (3,4)","copy":"(2,5)"},
+      edges: [{"from":"phone","to":"copy"}]
+    }
+  ]}
+/>
+
 <CodeRunner language="python" code={`def compare(a, b):
     ge = all(a.get(k, 0) >= b.get(k, 0) for k in set(a) | set(b))
     le = all(a.get(k, 0) <= b.get(k, 0) for k in set(a) | set(b))

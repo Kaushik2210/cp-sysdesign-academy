@@ -208,6 +208,36 @@ print(f"  wrong, the average of the averages: {mean_of_means:6.1f} ms")
 
 The hour contained one busy minute with 500 slow requests and many minutes with one or two fast ones. The **correct average from sums and counts is about 192 ms**; **averaging the per-minute averages gives about 76 ms**, weighting a minute with one request the same as a minute with 500. So rollups keep **sum, count, min and max**, and for latency they keep **histogram bucket counts**, which add correctly across time and across series (percentiles are then estimated from the merged buckets; you can never average percentiles).
 
+<ConceptWalkthrough
+  title="Merge latency rollups using sums and counts"
+  nodes={[
+    {"id":"first","label":"Minute 1","x":25,"y":27},
+    {"id":"second","label":"Minute 2","x":75,"y":27},
+    {"id":"roll","label":"Merged","x":25,"y":67},
+    {"id":"avg","label":"Mean","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Measure an uneven load",
+      note: "Minute 1 records one request at 60 ms, giving sum 60 ms and count 1. Minute 2 records three requests at 100 ms each, giving sum 300 ms and count 3.",
+      active: ["first","second"],
+      values: {"first":"60 ms / 1","second":"300 ms / 3","roll":"pending","avg":"pending"}
+    },
+    {
+      title: "Give both minute averages equal weight",
+      note: "The two minute means are 60 ms and 100 ms. Averaging those alone gives 80 ms, giving the minute with one request the same influence as the minute with three requests.",
+      active: ["first","second","avg"],
+      values: {"first":"60 ms","second":"100 ms","roll":"equal wt.","avg":"80 ms"}
+    },
+    {
+      title: "Give each request equal weight",
+      note: "Merge the minute sums to get 360 ms and the counts to get 4. Dividing 360 ms by 4 gives the true 90 ms mean even after the four raw samples expire.",
+      active: ["first","second","roll","avg"],
+      values: {"first":"60 ms / 1","second":"300 ms / 3","roll":"360 ms / 4","avg":"90 ms"}
+    }
+  ]}
+/>
+
 ## 8. Alerting
 
 Alerting is a separate, **continuously running** component: a **rule evaluator** runs each alert rule on a schedule (every 15 to 60 seconds), asks the query engine for the current value and decides whether the alert is **pending**, **firing** or **resolved**. An **alert manager** then **groups** related alerts (so one bad cluster sends one page, not 400), **deduplicates** repeats, applies **silences** (planned maintenance) and **inhibition** (do not page about the service if the whole datacenter alert is already firing), and **routes** by labels to the right team and channel.

@@ -108,6 +108,22 @@ The classic idea, **friend of a friend**: a person is a good suggestion if you s
 
 Why offline? Two-hop expansion for a billion users is a large batch graph job (MapReduce, Spark or a graph processing system), far too heavy to run per page view.
 
+<ConceptWalkthrough
+  title="Count shared friends, then apply a block"
+  nodes={[
+    {id:"u",label:"Uma",x:50,y:17},
+    {id:"l",label:"Lea",x:26,y:44},
+    {id:"r",label:"Ravi",x:74,y:44},
+    {id:"n",label:"Nia",x:26,y:74},
+    {id:"s",label:"Sol",x:74,y:74},
+  ]}
+  frames={[
+    {title:"Start from Uma's direct friends",note:"Uma's direct friends are Lea and Ravi. The candidate job expands their friend lists and excludes Uma and her existing friends.",active:["u","l","r"],values:{u:"2 friends"},edges:[{from:"u",to:"l"},{from:"u",to:"r"}]},
+    {title:"Count distinct paths",note:"Lea knows Nia and Sol. Ravi also knows Nia. Nia scores 2 shared friends and Sol scores 1, so a count-only ranking puts Nia first.",active:["l","r","n","s"],values:{n:"2 shared",s:"1 shared"},edges:[{from:"l",to:"n"},{from:"l",to:"s"},{from:"r",to:"n"}]},
+    {title:"Filter before serving",note:"Nia has blocked Uma, so the filter drops Nia despite the higher score. Sol is the only eligible suggestion and still has 1 shared friend.",active:["s"],values:{n:"blocked",s:"1 shared"}},
+  ]}
+/>
+
 ### A measured experiment
 
 The program below builds a synthetic network of 3,000 people with a few very popular members (preferential attachment), at two levels of **triadic closure**: the tendency of people to befriend **friends of their friends**. It then runs a standard test: for each of 300 people it **hides one real friendship**, produces 10 suggestions with each method, and checks whether the hidden friend appears. The methods: **random**, **most popular people**, **mutual friends count**, and **Adamic-Adar** (mutual friends, where a shared friend with few friends counts more than a shared celebrity). It also prints how much work the two-hop expansion does, with and without capping a friend's list at 50 entries.

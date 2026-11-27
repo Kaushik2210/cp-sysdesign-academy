@@ -96,6 +96,21 @@ In this sample the **top 0.01% of accounts (just 20 of 200,000) own 27% of all f
 
 The hybrid is what large networks use. The program below builds one user's feed all three ways from the same data, checks each against the ground truth, and counts the storage reads per feed request. It also shows **cursor pagination**.
 
+<ConceptWalkthrough
+  title="Build one feed with push and pull"
+  nodes={[
+    {id:"p",label:"Post log",x:25,y:25},
+    {id:"t",label:"Mia's cache",x:75,y:25},
+    {id:"c",label:"Star log",x:25,y:68},
+    {id:"f",label:"Mia's feed",x:75,y:68},
+  ]}
+  frames={[
+    {title:"Push an ordinary author's post",note:"Mia follows Leo and a celebrity account. At 10:00, Leo publishes L1. The worker copies L1 into Mia's cached timeline at write time.",active:["p","t"],values:{p:"L1 at 10:00",t:"L1"},edges:[{from:"p",to:"t"}]},
+    {title:"Keep the celebrity post in its log",note:"At 10:02 the celebrity publishes C1. The service stores it once in the celebrity's post log. Mia's cached timeline still contains only L1.",active:["c"],values:{t:"L1",c:"C1 at 10:02"}},
+    {title:"Merge on the feed read",note:"Mia opens her feed. The reader fetches L1 from her timeline and C1 from the celebrity log, then returns C1 followed by L1 in reverse time order.",active:["t","c","f"],values:{t:"L1",c:"C1",f:"C1, L1"},edges:[{from:"t",to:"f"},{from:"c",to:"f"}]},
+  ]}
+/>
+
 <CodeRunner language="python" code={`import heapq, random
 
 random.seed(3)

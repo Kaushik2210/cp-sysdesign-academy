@@ -174,6 +174,20 @@ print("\\n".join("  " + line for line in log))
 
 The handler ended in the right place (`refunded`) despite the late `authorized` event and the duplicate `captured` one, and flagged the skipped step for review.
 
+<ConceptWalkthrough
+  title="Keep a payment captured through late webhooks"
+  nodes={[
+    {id:"e",label:"Webhook",x:21,y:34},
+    {id:"p",label:"Payment",x:50,y:34},
+    {id:"r",label:"Review",x:79,y:34},
+  ]}
+  frames={[
+    {title:"Capture arrives ahead of authorization",note:"Payment P9 is pending when signed event C9 reports capture. The handler records P9 as captured and flags the skipped authorization step for reconciliation.",active:["e","p","r"],values:{e:"C9 capture",p:"captured",r:"flagged"},edges:[{from:"e",to:"p"},{from:"p",to:"r"}]},
+    {title:"Late authorization leaves capture intact",note:"Signed event A9 reports that P9 was authorized. The handler ignores the older state because P9 is already captured. The reconciliation flag remains open.",active:["e","p"],values:{e:"A9 auth",p:"captured",r:"flagged"},edges:[{from:"e",to:"p"}]},
+    {title:"Redelivery of C9 is a duplicate",note:"The provider redelivers C9. Its event ID is already recorded, so the handler skips it. P9 remains captured with the original reconciliation flag.",active:["e","p"],values:{e:"C9 again",p:"captured",r:"flagged"},edges:[{from:"e",to:"p"}]},
+  ]}
+/>
+
 ## 6. The ledger: double-entry bookkeeping
 
 Do not store "the balance" as the source of truth. Store an **append-only ledger of entries**, and treat balances as **derived** (and cached) from it. Use **double entry**: every transaction consists of two or more entries that **sum to zero**, so money is only ever **moved**, never created or destroyed.

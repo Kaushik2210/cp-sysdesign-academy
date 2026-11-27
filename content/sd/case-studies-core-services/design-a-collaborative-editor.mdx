@@ -80,6 +80,20 @@ Give **every character a unique, permanent id**. An insert says "put this charac
 
 The ordering rule for two inserts after the same character: place the one with the larger id first (id = a logical clock plus the site id, see [logical clocks](/sd/distributed-theory/clocks-and-ordering/)). Every replica applies the same rule, so they pick the same order. This is the idea of the **RGA** algorithm.
 
+<ConceptWalkthrough
+  title="Converge after concurrent inserts"
+  nodes={[
+    {id:"left",label:"Replica A",x:24,y:28},
+    {id:"right",label:"Replica B",x:76,y:28},
+    {id:"root",label:"Anchor",x:50,y:69},
+  ]}
+  frames={[
+    {title:"Start with a shared anchor",note:"Both replicas display M. Its permanent ID is (1,A), which both replicas can name as the insertion anchor.",active:["left","right","root"],values:{left:"M",right:"M",root:"(1,A)"}},
+    {title:"Insert while disconnected",note:"After M, replica A inserts x with ID (2,A), and replica B inserts y with ID (2,B). A displays Mx while B displays My.",active:["left","right","root"],values:{left:"Mx",right:"My",root:"(1,A)"},edges:[{from:"root",to:"left"},{from:"root",to:"right"}]},
+    {title:"Merge in the same sibling order",note:"After exchanging inserts, both replicas sort the children of (1,A) by descending ID. With B greater than A, (2,B) comes first, so both display Myx.",active:["left","right"],values:{left:"Myx",right:"Myx",root:"(1,A)"},edges:[{from:"root",to:"left"},{from:"root",to:"right"}]},
+  ]}
+/>
+
 ## The simulation
 
 The program is a small RGA-style CRDT. First a hand-made case: **two people type at the same spot at the same time**. Then **300 random sessions**: three editors start from the same text, make **four rounds of concurrent edits** (inserts and deletes, edits made without seeing the others'), and each replica receives the other editors' operations in a **random interleaving** (each editor's own operations stay in order, like separate network connections). For comparison the same sessions are run with **plain index-based operations** applied as they arrive, with no transformation.

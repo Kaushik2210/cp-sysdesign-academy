@@ -80,6 +80,38 @@ A **partition** is an **append-only log**: messages get consecutive **offsets** 
 - When consumers **join or leave**, partitions are **rebalanced** across the remaining members.
 - **Parallelism limit**: a group can usefully have at most as many consumers as partitions. More consumers than partitions sit idle.
 
+<ConceptWalkthrough
+  title="An uncommitted offset replays after rebalance"
+  nodes={[
+    {"id":"log","label":"Log P2","x":25,"y":27},
+    {"id":"worker","label":"Consumer","x":75,"y":27},
+    {"id":"offset","label":"Next offset","x":25,"y":67},
+    {"id":"sink","label":"Credit row","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Read from the committed position",
+      note: "The billing group has next offset 17 committed for partition P2. Consumer A reads the $9 credit record at offset 17. The sink has no row for its event ID e17.",
+      active: ["log","worker"],
+      values: {"log":"17","worker":"A","offset":"17","sink":"absent"},
+      edges: [{"from":"log","to":"worker"}]
+    },
+    {
+      title: "Crash after the sink write",
+      note: "Consumer A inserts the credit row for e17 and crashes before committing offset 18. The $9 credit is durable while the group's next offset still reads 17.",
+      active: ["worker","sink"],
+      values: {"log":"17","worker":"A crashed","offset":"17","sink":"+$9"},
+      edges: [{"from":"worker","to":"sink"}]
+    },
+    {
+      title: "Replay and advance",
+      note: "After rebalance, consumer B reads P2 offset 17 again. The sink's unique event ID e17 makes the replay a no-op. B commits next offset 18, leaving exactly one $9 credit in the sink.",
+      active: ["worker","sink","offset"],
+      values: {"log":"17","worker":"B","offset":"18","sink":"+$9"}
+    }
+  ]}
+/>
+
 ## Replication and durability
 
 Each partition has a **leader** and several **followers** on other brokers. Producers write to the leader; followers copy the log. A write is **acknowledged** when enough replicas have it (the **in-sync replicas**, ISR). If the leader dies, a follower with the full log is **elected** as the new leader (coordinated through a consensus system, see [Raft](/sd/consensus-and-coordination/raft-log-replication-and-safety/)).

@@ -83,6 +83,36 @@ A rollout to "10% of users" must pick **the same 10% every time**, without stori
 - **Fair spread**: a good hash function (SHA-256, MurmurHash) maps ids uniformly over the buckets.
 - **Which identifier?** The **bucketing key** matters: a logged-in user id keeps a person's experience consistent across devices; a device or session id works for anonymous visitors but changes when cookies are cleared. Pick it per flag, and **never change it mid-experiment**.
 
+<ConceptWalkthrough
+  title="A rollout ramp keeps users in their buckets"
+  nodes={[
+    {"id":"cut","label":"Threshold","x":50,"y":26},
+    {"id":"a","label":"Mina","x":20,"y":66},
+    {"id":"b","label":"Ravi","x":50,"y":66},
+    {"id":"c","label":"Jo","x":80,"y":66}
+  ]}
+  frames={[
+    {
+      title: "Enable buckets below 1,000",
+      note: "For one flag, the fixed buckets are Mina 842, Ravi 1,000 and Jo 2,499. At 10%, only Mina is on because the comparison is strictly below 1,000.",
+      active: ["cut","a"],
+      values: {"cut":"1,000","a":"842 on","b":"1000 off","c":"2499 off"}
+    },
+    {
+      title: "Raise the rollout to 20%",
+      note: "At 20% the cutoff increases to 2,000. Mina stays on at 842, Ravi joins at 1,000, and Jo stays off at 2,499. The flag key and user IDs keep all three buckets fixed.",
+      active: ["cut","a","b"],
+      values: {"cut":"2,000","a":"842 on","b":"1000 on","c":"2499 off"}
+    },
+    {
+      title: "Raise the rollout to 25%",
+      note: "At 25% the cutoff is 2,500. Jo joins at 2,499 while Mina and Ravi stay on. With a fixed bucketing key and no targeting overrides, each increase keeps every previously enabled user.",
+      active: ["cut","a","b","c"],
+      values: {"cut":"2,500","a":"842 on","b":"1000 on","c":"2499 on"}
+    }
+  ]}
+/>
+
 ### Targeting rules
 
 Rules are evaluated **in a fixed order**, first match wins: **blocked users** (explicitly off), **allowed users** (explicitly on, for testers), **attribute rules** (for example country is Germany, plan is enterprise), then the **percentage rollout**, then the **default**. A clear order makes behaviour predictable and debuggable; the dashboard should show **which rule matched**.

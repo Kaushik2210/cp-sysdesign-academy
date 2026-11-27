@@ -111,6 +111,45 @@ Every step must be **idempotent** and the saga must be **recoverable**: store th
 
 `PENDING` (stock reserved, awaiting payment) to `PAID` to `SHIPPED` to `DELIVERED`, with `CANCELLED` reachable from `PENDING` and `PAID` (before shipping, with a refund). Allowed transitions are checked in code, and the update is conditional (`WHERE status = 'PENDING'`) so two racing callbacks cannot both transition the order.
 
+<ConceptWalkthrough
+  title="Resume a cancellation after a lost refund reply"
+  nodes={[
+    {"id":"order","label":"Order 91","x":25,"y":27},
+    {"id":"pay","label":"Payment","x":75,"y":27},
+    {"id":"stock","label":"Free stock","x":25,"y":67},
+    {"id":"saga","label":"Cancel step","x":75,"y":67}
+  ]}
+  frames={[
+    {
+      title: "Start with a paid, unshipped order",
+      note: "Order 91 has captured $36 for two mugs. Two of the original five mugs are reserved for the order, leaving three available. The order is paid and has not shipped.",
+      active: ["order","pay","stock"],
+      values: {"order":"paid","pay":"$36 taken","stock":"3 free","saga":"none"}
+    },
+    {
+      title: "Claim cancellation and lose the reply",
+      note: "The order service records cancellation intent before requesting the refund, so shipping can no longer claim order 91. The provider commits a $36 refund keyed by refund-91, but the orchestrator crashes before recording the reply. The two mugs remain reserved.",
+      active: ["saga","pay"],
+      values: {"order":"paid","pay":"$36 back","stock":"3 free","saga":"in flight"},
+      edges: [{"from":"saga","to":"pay"}]
+    },
+    {
+      title: "Recover the same refund result",
+      note: "The restarted orchestrator sees the pending cancellation and retries refund-91. The provider returns the first refund result without moving another $36. The orchestrator records refund completion, and three mugs are still available.",
+      active: ["saga","pay"],
+      values: {"order":"paid","pay":"$36 back","stock":"3 free","saga":"refunded"},
+      edges: [{"from":"saga","to":"pay"}]
+    },
+    {
+      title: "Release stock and finish cancellation",
+      note: "Inventory releases order 91's two reserved mugs once, restoring availability from three to five. A replay of that release finds no active reservation. With refund and release confirmed, the order becomes cancelled.",
+      active: ["saga","stock","order"],
+      values: {"order":"cancelled","pay":"$36 back","stock":"5 free","saga":"done"},
+      edges: [{"from":"order","to":"stock"}]
+    }
+  ]}
+/>
+
 ## The simulation
 
 The program uses SQLite to run the design: stock with `reserved` and `on_hand`, the reservation, an idempotent checkout, payment success and failure, an expiry sweeper, price snapshots, and finally a **flash sale race** comparing read-then-write with a conditional update. (It runs in the browser; SQLite loads on demand when you press Run.)
