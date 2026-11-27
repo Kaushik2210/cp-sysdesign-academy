@@ -1,10 +1,10 @@
 /* Fails (exit 1) on invalid frontmatter, MDX syntax errors, unknown prerequisites/problems, duplicate orders
  * or quiz ids, invalid problem files, and broken internal links. Optional arg: lesson-id prefix filter. */
-import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { getAllLessons, getLessonSource } from "../src/lib/content/loader";
 import { getAllProblems } from "../src/lib/content/problems";
+import { getPaths } from "../src/lib/content/paths";
 import { getPatterns } from "../src/lib/content/patterns";
 import { getTemplates } from "../src/lib/content/templates";
 import { getGlossary } from "../src/lib/content/glossary";
@@ -25,9 +25,12 @@ try {
 }
 
 const ids = new Set(lessons.map((l) => l.id));
-const pathSlugs = fs.existsSync("content/paths")
-  ? fs.readdirSync("content/paths").map((f) => f.replace(/\.json$/, ""))
-  : [];
+let pathSlugs: string[] = [];
+try {
+  pathSlugs = getPaths().map((learningPath) => learningPath.slug);
+} catch (e) {
+  errors.push(String(e instanceof Error ? e.message : e));
+}
 const routes = new Set<string>([
   "/",
   "/cp/",

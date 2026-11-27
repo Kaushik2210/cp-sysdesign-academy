@@ -9,8 +9,8 @@ const pathSchema = z.object({
   description: z.string(),
   track: z.enum(TRACKS),
   days: z.number().int().positive(),
-  /** Module slugs in order. Slugs with no written lessons yet are skipped. */
-  modules: z.array(z.string()).min(1),
+  /** Published modules in track order, or an explicit ordered selection. */
+  modules: z.union([z.literal("all"), z.array(z.string()).min(1)]),
 });
 
 export interface LearningPath {
@@ -38,8 +38,17 @@ export function getPaths(): LearningPath[] {
     .map((file) => {
       const slug = file.replace(/\.json$/, "");
       const spec = pathSchema.parse(JSON.parse(fs.readFileSync(path.join(DIR, file), "utf8")));
-      const bySlug = new Map(getModules(spec.track).map((m) => [m.slug, m]));
-      const lessons = spec.modules.flatMap((m) => bySlug.get(m)?.lessons ?? []);
+      const published = getModules(spec.track).filter((module) => module.lessons.length > 0);
+      const bySlug = new Map(published.map((module) => [module.slug, module]));
+      const moduleSlugs = spec.modules === "all" ? [...bySlug.keys()] : spec.modules;
+      if (new Set(moduleSlugs).size !== moduleSlugs.length) {
+        throw new Error(`Learning path "${slug}" lists a module more than once`);
+      }
+      const lessons = moduleSlugs.flatMap((moduleSlug) => {
+        const courseModule = bySlug.get(moduleSlug);
+        if (!courseModule) throw new Error(`Learning path "${slug}" references unpublished module "${spec.track}/${moduleSlug}"`);
+        return courseModule.lessons;
+      });
       const nDays = Math.max(1, Math.min(spec.days, lessons.length));
       const days: LearningPath["days"] = Array.from({ length: nDays }, (_, i) => ({ day: i + 1, lessons: [] }));
       lessons.forEach((l, i) => {
@@ -56,8 +65,8 @@ export function getPaths(): LearningPath[] {
         days,
         totalLessons: lessons.length,
         totalMinutes: lessons.reduce((n, l) => n + l.estMinutes, 0),
-        plannedModules: spec.modules.length,
-        availableModules: spec.modules.filter((m) => bySlug.get(m)?.lessons.length).length,
+        plannedModules: moduleSlugs.length,
+        availableModules: moduleSlugs.length,
       };
     });
 }
