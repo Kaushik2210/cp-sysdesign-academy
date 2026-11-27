@@ -1054,6 +1054,16 @@ test("concept walkthroughs explain additional examples at phone width", async ({
       ["See what fencing guarantees during handoff", "Advance the fence before relying on it"],
       ["Retry an external send with the same operation key", "Record the known result"],
     ]],
+    ["/cp/range-queries/sparse-table/", [
+      ["Build a sparse-table cell from disjoint halves", "Combine the halves into one cell"],
+      ["See why overlapping blocks cannot answer a sum", "Choose disjoint blocks for a sum"],
+      ["Find a common ancestor with a depth minimum", "Return the vertex at the depth minimum"],
+    ]],
+    ["/sd/consensus-and-coordination/raft-leader-election/", [
+      ["Keep a vote across a crash", "Recover the recorded vote"],
+      ["Test the heartbeat margin against delays", "Try a longer stall"],
+      ["Follow leadership across a network partition", "Repair the term when the network heals"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

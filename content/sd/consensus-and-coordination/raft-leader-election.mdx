@@ -23,7 +23,7 @@ furtherReading:
 
 A group of servers replicates a log. One of them, the **leader**, receives every client command, appends it to its log and replicates it to the others. Having a single leader removes most of the difficulty: there is one place that decides the order.
 
-The difficulty moves to **choosing and replacing the leader**. If the leader crashes, the others must elect a new one, quickly, and they must **never end up with two leaders in the same period** (two leaders could order commands differently). Raft solves this with **terms**, **votes** and **randomised timeouts**.
+The difficulty moves to **choosing and replacing the leader**. If the leader crashes, the others need to elect a new one quickly. Raft uses **terms**, **votes** and **randomised timeouts** to elect at most one leader per term. An isolated old leader can still believe it leads an earlier term. It needs a majority to commit new entries.
 
 ## Definition
 
@@ -52,6 +52,16 @@ The difficulty moves to **choosing and replacing the leader**. If the leader cra
   Candidate --> Leader: votes from a majority
   Candidate --> Follower: sees a valid leader or higher term
   Leader --> Follower: sees a higher term`} caption="Raft server states and the events that move between them" />
+
+<ConceptWalkthrough title="Keep a vote across a crash" nodes={[
+  {"id":"n0","label":"Candidate A","x":17,"y":46},
+  {"id":"n1","label":"Voter C","x":50,"y":46},
+  {"id":"n2","label":"Candidate B","x":83,"y":46},
+]} frames={[
+  {"title":"Count a majority in term 8","note":"In a five-server cluster, A has votes from A and E. B receives votes from B, C and D and becomes leader. Both candidates’ logs are eligible at C. C persisted its vote for B before replying.","active":["n0","n1","n2"],"values":{"n0":"A + E","n1":"voted B","n2":"B + C + D"}},
+  {"title":"Crash after sending the vote","note":"C restarts in term 8 and sees A’s vote request before hearing B’s next heartbeat. If C forgets its vote, A could count A, E and C. Predict what storage prevents.","active":["n0","n1"],"values":{"n0":"asks C","n1":"restarts","n2":"already won"}},
+  {"title":"Recover the recorded vote","note":"C reloads its term and vote for B, so it refuses A’s request in term 8. Persisting votes keeps a server from joining two election majorities in the same term.","active":["n1","n2"],"values":{"n0":"2 votes","n1":"refuses A","n2":"3 votes"}},
+]} />
 
 ## Choosing the timeout
 
@@ -89,6 +99,16 @@ The election timeout must be **much larger than the heartbeat interval and the n
     values: {"a":"follow","b":"leader","c":"follow"},
     edges: [{"from":"b","to":"a"},{"from":"b","to":"c"}],
   },
+]} />
+
+<ConceptWalkthrough title="Test the heartbeat margin against delays" nodes={[
+  {"id":"n0","label":"Leader","x":17,"y":46},
+  {"id":"n1","label":"Arrival","x":50,"y":46},
+  {"id":"n2","label":"Follower","x":83,"y":46},
+]} frames={[
+  {"title":"Set an example timing budget","note":"Suppose a heartbeat arrives at time 0, the leader sends every 50 ms and the follower drew a 150 ms timeout. The packet sent at 50 ms is lost.","active":["n0","n2"],"values":{"n0":"50 ms apart","n1":"50 lost","n2":"expires 150"}},
+  {"title":"Follow the next successful delivery","note":"The leader sends again at 100 ms. With 30 ms of delivery and processing time, it arrives at 130 ms. The follower can refresh its timer before 150 ms.","active":["n0","n1","n2"],"values":{"n0":"send 100","n1":"arrives 130","n2":"reset"}},
+  {"title":"Try a longer stall","note":"Instead give the 100 ms heartbeat a 70 ms delay. The follower’s timer fires at 150 ms before the heartbeat arrives at 170 ms. Use measured delays and stall distributions to set timeout margins.","active":["n1","n2"],"values":{"n0":"send 100","n1":"arrives 170","n2":"times out"}},
 ]} />
 
 ## Code: how much spread do randomised timeouts need?
@@ -148,6 +168,16 @@ The spread has to be wide compared with the **message delay** (here 5 to 15 ms):
 - **Pre-vote.** A server that was partitioned away keeps timing out and raising its term. When it rejoins, its higher term forces the healthy leader to step down. The **pre-vote** extension makes a server first ask "would you vote for me?" without incrementing the term, which avoids this disruption (implemented in etcd and others).
 - **Leader leases and read safety.** A deposed leader may not know it was deposed. Linearizable reads must either go through the log, or the leader must confirm it still has a majority (a *read index* round trip) or hold a time-based lease with bounded clock drift.
 - **Membership changes** (adding or removing servers) must keep majorities overlapping; Raft uses joint consensus or one server at a time.
+
+<ConceptWalkthrough title="Follow leadership across a network partition" nodes={[
+  {"id":"n0","label":"Minority","x":17,"y":46},
+  {"id":"n1","label":"Majority","x":50,"y":46},
+  {"id":"n2","label":"Election","x":83,"y":46},
+]} frames={[
+  {"title":"Split a five-server group","note":"Leader A in term 8 can reach only B. C, D and E can still reach each other. A and B have two replicas, below the three needed to commit a new write.","active":["n0","n1"],"values":{"n0":"A + B","n1":"C + D + E","n2":"needs 3"}},
+  {"title":"Elect on the majority side","note":"Assume C has an eligible log and times out first on the majority side. C gets all three votes and becomes leader in term 9. A can still locally believe it leads term 8.","active":["n1","n2"],"values":{"n0":"A: term 8","n1":"3 votes","n2":"C: term 9"}},
+  {"title":"Repair the term when the network heals","note":"A receives a valid AppendEntries request with term 9. It updates its term and becomes a follower. B can also catch up from C. Only a side with a majority can commit fresh entries.","active":["n0","n1","n2"],"values":{"n0":"A steps down","n1":"C leads","n2":"term 9"}},
+]} />
 
 ## Trade-offs
 
