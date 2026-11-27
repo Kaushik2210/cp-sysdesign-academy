@@ -71,6 +71,20 @@ test("full system design path reaches case studies and AI systems", async ({ pag
   await expect(page.getByRole("link", { name: /Designing Reliable AI Agents/ })).toBeVisible();
 });
 
+test("wide lesson tables scroll independently on a phone", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto("/sd/databases-1/normalization-and-schema-design/");
+  const table = page.getByRole("region", { name: "Lesson table" }).first();
+  await expect(table.getByRole("table")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(375);
+  expect(await table.evaluate((element) => element.scrollWidth)).toBeGreaterThan(
+    await table.evaluate((element) => element.clientWidth),
+  );
+  await table.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+});
+
 test("distributed systems lessons render with a runnable program and a quiz", async ({ page }) => {
   for (const [path, title] of [
     ["/sd/distributed-theory/consistency-models/", "Consistency Models and PACELC"],
