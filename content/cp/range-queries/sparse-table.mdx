@@ -35,6 +35,16 @@ sp[k][i] = min( sp[k-1][i], sp[k-1][i + 2^(k-1)] )       two halves
 
 There are about `log2(n)` levels with up to `n` entries each: time and memory `O(n log n)`.
 
+<ConceptWalkthrough title="Build a sparse-table cell from disjoint halves" nodes={[
+  {"id":"n0","label":"Left half","x":17,"y":46},
+  {"id":"n1","label":"Right half","x":50,"y":46},
+  {"id":"n2","label":"New cell","x":83,"y":46},
+]} frames={[
+  {"title":"Start from the array entries","note":"For [8, 6, 4, 9, 2, 7], level zero stores each singleton unchanged. Build the length-four cell starting at index 1.","active":["n2"],"values":{"n0":"[1,2]","n1":"[3,4]","n2":"sp[2][1]"}},
+  {"title":"Read the two length-two minima","note":"The left half [1, 2] holds 6 and 4, so sp[1][1] is 4. The right half [3, 4] holds 9 and 2, so sp[1][3] is 2.","active":["n0","n1"],"values":{"n0":"4","n1":"2","n2":"?"}},
+  {"title":"Combine the halves into one cell","note":"The child blocks are disjoint and together cover [1, 4]. The minimum of 4 and 2 is 2. The right half starts at 1 + 2 because each half has length two.","active":["n0","n1","n2"],"values":{"n0":"min 4","n1":"min 2","n2":"min 2"}},
+]} />
+
 **Query** `[l, r]` (0-based, inclusive): let `k` be the largest integer with `2^k <= r - l + 1`, that is `k = (r - l + 1).bit_length() - 1`. Then
 
 ```text
@@ -61,7 +71,7 @@ The first block starts at the left end, the second ends at the right end, both h
 
 ## Idempotent operations only
 
-An operation `f` is **idempotent** when `f(x, x) = x`. Minimum, maximum, gcd, bitwise AND and OR are. **Sum is not**: counting the overlap twice gives the wrong total.
+An operation `f` is **idempotent** when `f(x, x) = x`. The overlapping query also requires **associativity**, so the same range can be grouped into blocks. Minimum, maximum, gcd, bitwise AND and OR satisfy both properties. Sum is associative, and its overlap contributes twice.
 
 | operation | sparse table with overlap trick? |
 | --- | --- |
@@ -69,6 +79,16 @@ An operation `f` is **idempotent** when `f(x, x) = x`. Minimum, maximum, gcd, bi
 | gcd, AND, OR | yes |
 | sum, product, xor | no, use a prefix array or split the range into disjoint power-of-two blocks (`O(log n)` per query) |
 | anything with updates | no, use a segment tree |
+
+<ConceptWalkthrough title="See why overlapping blocks cannot answer a sum" nodes={[
+  {"id":"n0","label":"Left block","x":17,"y":46},
+  {"id":"n1","label":"Right block","x":50,"y":46},
+  {"id":"n2","label":"Answer","x":83,"y":46},
+]} frames={[
+  {"title":"Reuse the overlapping query shape","note":"To cover [1, 5] in [8, 6, 4, 9, 2, 7], the minimum query reads [1, 4] and [2, 5]. Their sums are 21 and 22. Predict what their sum would count twice.","active":["n0","n1"],"values":{"n0":"[1,4]: 21","n1":"[2,5]: 22","n2":"?"}},
+  {"title":"Identify the double-counted values","note":"Adding the two block sums gives 43. Positions 2, 3 and 4 contribute 4 + 9 + 2 = 15 twice. The actual sum is 28.","active":["n0","n1","n2"],"values":{"n0":"21","n1":"22","n2":"43 ≠ 28"}},
+  {"title":"Choose disjoint blocks for a sum","note":"Take [1, 4] and [5, 5] instead. They cover the query without overlap and give 21 + 7 = 28. A prefix sum can also answer this static sum in constant time.","active":["n0","n1","n2"],"values":{"n0":"[1,4]: 21","n1":"[5,5]: 7","n2":"28"}},
+]} />
 
 ## Code
 
@@ -182,6 +202,16 @@ A sparse table is also the engine behind `O(1)` **LCA**: take the Euler tour of 
 4. **Wrong second block start.** It is `r - 2^k + 1`, so the block *ends* at `r`.
 5. **Level sizes.** Level `k` has `n - 2^k + 1` entries, not `n`; indexing beyond that is out of range.
 6. **Memory.** `n log n` numbers: `2·10^5 * 18` is 3.6 million, fine in compiled languages but heavy for Python lists, so consider `array` or NumPy.
+
+<ConceptWalkthrough title="Find a common ancestor with a depth minimum" nodes={[
+  {"id":"n0","label":"First visit","x":17,"y":46},
+  {"id":"n1","label":"Tour slice","x":50,"y":46},
+  {"id":"n2","label":"Shallowest","x":83,"y":46},
+]} frames={[
+  {"title":"Record vertices and returns","note":"Root 0 has children 1 and 2. Vertex 1 has children 3 and 4. Record a vertex at entry and after returning from each child. The tour is 0, 1, 3, 1, 4, 1, 0, 2, 0.","active":["n1"],"values":{"n0":"3 → 2","n1":"Euler tour","n2":"4 → 4"}},
+  {"title":"Query between the first occurrences","note":"Vertices 3 and 4 first occur at tour indices 2 and 4. This slice visits 3, 1, 4 with depths 2, 1, 2. Predict which vertex the depth minimum selects.","active":["n0","n1"],"values":{"n0":"[2,4]","n1":"2, 1, 2","n2":"?"}},
+  {"title":"Return the vertex at the depth minimum","note":"The shallowest visit is at tour index 3, which holds vertex 1. The tour climbs to this common ancestor before entering the other subtree. Store a depth and its tour index so the query can return the vertex.","active":["n1","n2"],"values":{"n0":"indices 2–4","n1":"tour idx 3","n2":"vertex 1"}},
+]} />
 
 ## Practice
 
