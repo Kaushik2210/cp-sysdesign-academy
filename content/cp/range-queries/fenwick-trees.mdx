@@ -45,6 +45,24 @@ Everything is `O(log n)` and memory is `n + 1` numbers.
 
 For example `sum(7)` adds `bit[7]` (position 7), `bit[6]` (positions 5..6) and `bit[4]` (positions 1..4): three nodes that exactly tile `1..7`.
 
+<ConceptWalkthrough
+  title="Trace an update and prefix sum in a Fenwick tree"
+  nodes={[
+    {id:"b3",label:"BIT 3",x:18,y:22},
+    {id:"b4",label:"BIT 4",x:50,y:22},
+    {id:"b6",label:"BIT 6",x:82,y:22},
+    {id:"idx",label:"Index",x:24,y:64},
+    {id:"sum",label:"Sum",x:74,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Identify the stored blocks",note:"For the one-based array [2, 1, 4, 3, 5, 2], BIT[3] stores position 3 alone (4), BIT[4] stores positions 1 through 4 (10), and BIT[6] stores positions 5 through 6 (7).",active:["b3","b4","b6"],values:{b3:"4",b4:"10",b6:"7"}},
+    {title:"Add 3 at position 3",note:"BIT[3] increases from 4 to 7. The lowbit of 3 is 1, so jump to 4 and raise BIT[4] from 10 to 13. The lowbit of 4 is 4, so the next index is 8 and the update stops beyond size 6. BIT[6] stays at 7.",active:["b3","b4","idx"],values:{b3:"7",b4:"13",b6:"7",idx:"3 → 4 → 8"},edges:[{from:"b3",to:"b4"}]},
+    {title:"Read the last block of the prefix",note:"For prefix 1 through 6, start at BIT[6] and add its sum of 7 for positions 5 and 6. The lowbit of 6 is 2, so move to 6 − 2 = 4.",active:["b6","idx","sum"],values:{b6:"7",idx:"6 → 4",sum:"7"},edges:[{from:"b6",to:"sum"}]},
+    {title:"Read the rest of the prefix",note:"At BIT[4], add 13 for positions 1 through 4. Subtract its lowbit 4 to reach 0 and stop. The two disjoint blocks give prefix sum 7 + 13 = 20.",active:["b4","idx","sum"],values:{b4:"13",idx:"4 → 0",sum:"20"},edges:[{from:"b4",to:"sum"}]},
+  ]}
+/>
+
 ## Code
 
 <Tabs>

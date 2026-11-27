@@ -41,6 +41,22 @@ Iterating `mask` in increasing order is valid: adding a bit always makes the num
 
 The number of set bits already identifies the worker, so no extra dimension is needed. If an extra fact must be tracked (the last vertex visited, say) it becomes the second dimension: `dp[mask][last]`.
 
+<ConceptWalkthrough
+  title="Assign two tasks with bitmask DP"
+  nodes={[
+    {id:"empty",label:"00",x:16,y:42},
+    {id:"a",label:"01",x:50,y:22},
+    {id:"b",label:"10",x:50,y:64},
+    {id:"full",label:"11",x:84,y:42},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Start with both tasks free",note:"A is bit 0 and B is bit 1. Worker 0 costs 4 for A or 1 for B. Worker 1 costs 2 for A or 7 for B. The empty mask 00 costs 0.",active:["empty"],values:{empty:"0"},edges:[]},
+    {title:"Place worker 0",note:"Mask 00 has zero set bits, so worker 0 goes next. Assigning A costs 0 + 4 = 4 at mask 01. Assigning B costs 0 + 1 = 1 at mask 10.",active:["empty","a","b"],values:{empty:"0",a:"4",b:"1"},edges:[{from:"empty",to:"a"},{from:"empty",to:"b"}]},
+    {title:"Place worker 1",note:"Each one-bit mask leaves one task. From 01, give B to worker 1 for 4 + 7 = 11. From 10, give A to worker 1 for 1 + 2 = 3. Mask 11 keeps the cheaper cost, 3.",active:["a","b","full"],values:{a:"4",b:"1",full:"3"},edges:[{from:"a",to:"full"},{from:"b",to:"full"}]},
+  ]}
+/>
+
 ## Bit operations you need
 
 | goal | expression |

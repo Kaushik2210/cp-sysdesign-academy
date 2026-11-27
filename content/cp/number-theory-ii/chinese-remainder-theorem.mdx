@@ -96,6 +96,23 @@ m = mNew;
 
 After several merges `m` is the lcm of many moduli and can be huge. In the merge, `m * t` is about `m * (m2 / g)`, which is roughly the new lcm. **If the final lcm fits in a signed 64-bit integer (below `9 * 10^18`) every product here fits too**; if it does not, use 128-bit arithmetic (`__int128` in C++, `BigInteger` in Java, BigInt in JavaScript, native integers in Python).
 
+<ConceptWalkthrough
+  title="Merge x ≡ 2 mod 6 and x ≡ 8 mod 10"
+  nodes={[
+    {id:"first",label:"Mod 6",x:18,y:22},
+    {id:"next",label:"Mod 10",x:50,y:22},
+    {id:"delta",label:"Gap",x:82,y:22},
+    {id:"t",label:"t",x:27,y:64},
+    {id:"x",label:"x",x:73,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Substitute the first congruence",note:"Write x = 2 + 6t. The second congruence requires 6t ≡ 8 − 2 = 6 modulo 10. The gcd of 6 and 10 is 2, which divides the gap 6.",active:["first","next","delta"],values:{first:"2",next:"8",delta:"6",t:"6t ≡ 6"}},
+    {title:"Solve for t",note:"Divide the coefficients and modulus by 2 to get 3t ≡ 3 modulo 5. The inverse of 3 is 2 because 3 × 2 ≡ 1 modulo 5. Multiplying by 2 gives t ≡ 6 ≡ 1 modulo 5.",active:["delta","t"],values:{delta:"6/2 = 3",t:"1 mod 5"}},
+    {title:"Find the merged congruence",note:"Using t = 1 gives x = 2 + 6 = 8, which leaves remainder 2 modulo 6 and remainder 8 modulo 10. Each increase of 5 in t adds 30 to x, so all solutions are x ≡ 8 modulo 30.",active:["t","x"],values:{first:"2",next:"8",t:"1 mod 5",x:"8 mod 30"},edges:[{from:"t",to:"x"}]},
+  ]}
+/>
+
 ## Experiment
 
 The program runs the merge on thousands of random systems with non-coprime moduli and checks every answer by brute force over one full period, then shows the textbook formula failing and reconstructs a 12-digit number from its remainders modulo 11 primes.

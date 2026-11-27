@@ -51,6 +51,22 @@ Walk from the root to the leaf containing `x` (go left if `x <= mid`, otherwise 
 
 For **minimum** queries, flip the comparisons (or store negated lines). A line `y = m x + b` can also be replaced by a **segment** valid only on an interval: insert it into the `O(log C)` nodes covering that interval (each insertion then costs `O(log^2 C)`).
 
+<ConceptWalkthrough
+  title="Store and query two lines on 0 through 6"
+  nodes={[
+    {id:"root",label:"[0,6]",x:49,y:23},
+    {id:"right",label:"[4,6]",x:80,y:64},
+    {id:"query",label:"Max",x:18,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Store the first line at the root",note:"For maximum queries on integer x from 0 through 6, insert A(x) = 2x. The root interval [0,6] is empty, so store A there.",active:["root"],values:{root:"2x"},edges:[]},
+    {title:"Insert a line that wins at the midpoint",note:"Insert B(x) = x + 4. At middle point 3, B gives 7 and A gives 6, so B stays at the root. A loses at x = 0 (0 versus 4) but wins at x = 6 (12 versus 10). Store A in the empty right child [4,6].",active:["root","right"],values:{root:"x+4",right:"2x"},edges:[{from:"root",to:"right"}]},
+    {title:"Query x = 5 along the right path",note:"The root gives B(5) = 9. The right child gives A(5) = 10, and its next child is empty. Return the maximum, 10.",active:["root","right","query"],values:{root:"9",right:"10",query:"10"},edges:[{from:"root",to:"right"},{from:"right",to:"query"}]},
+    {title:"Query x = 1 along the left path",note:"The root gives B(1) = 5. The left child is empty, so the search ends and returns 5. The other line would give A(1) = 2.",active:["root","query"],values:{root:"5",right:"2x",query:"5"},edges:[{from:"root",to:"query"}]},
+  ]}
+/>
+
 ### Code
 
 <Tabs>

@@ -254,6 +254,24 @@ while (!pq.isEmpty() && taken < m) {
 </Tab>
 </Tabs>
 
+<ConceptWalkthrough
+  title="Merge three sorted streams one head at a time"
+  nodes={[
+    {id:"a",label:"A",x:18,y:22},
+    {id:"b",label:"B",x:50,y:22},
+    {id:"c",label:"C",x:82,y:22},
+    {id:"heap",label:"Heap",x:24,y:64},
+    {id:"out",label:"Output",x:72,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Seed with the heads",note:"The streams are A = [2, 8], B = [4], and C = [1, 6]. Seed the min-heap with 2 from A, 4 from B, and 1 from C. The next output is the smallest head, 1.",active:["a","b","c","heap"],values:{a:"2",b:"4",c:"1",heap:"1,2,4"},edges:[{from:"a",to:"heap"},{from:"b",to:"heap"},{from:"c",to:"heap"}]},
+    {title:"Emit 1 from C",note:"Pop 1 from C and push C's next value, 6. The heap now contains 2, 4, and 6. The output is [1].",active:["c","heap","out"],values:{a:"2",b:"4",c:"6",heap:"2,4,6",out:"1"},edges:[{from:"c",to:"heap"},{from:"heap",to:"out"}]},
+    {title:"Emit 2 from A",note:"Pop 2 from A and push A's next value, 8. The heap now contains 4, 6, and 8. The output is [1, 2].",active:["a","heap","out"],values:{a:"8",b:"4",c:"6",heap:"4,6,8",out:"1,2"},edges:[{from:"a",to:"heap"},{from:"heap",to:"out"}]},
+    {title:"Drain the heap",note:"Pop 4 from B, 6 from C, and 8 from A in that order. Each of those streams is exhausted when its last value is popped. The final output is [1, 2, 4, 6, 8].",active:["heap","out"],values:{heap:"empty",out:"1,2,4,6,8"},edges:[{from:"heap",to:"out"}]},
+  ]}
+/>
+
 ## When a heap is not the right tool
 
 - You need the **median** or the **k-th smallest of a changing set** with deletions: a plain heap exposes only one end. Use two heaps (next lesson) or a Fenwick tree (the lesson after).

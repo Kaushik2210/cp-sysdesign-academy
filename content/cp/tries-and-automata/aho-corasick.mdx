@@ -65,6 +65,24 @@ for each letter c of the text:
 
 Total time: building `O(total pattern length * alphabet)` with a dense table; scanning `O(text length)`. Memory: one table row per node.
 
+<ConceptWalkthrough
+  title="Find overlapping matches of ab, b and ba"
+  nodes={[
+    {id:"root",label:"ε",x:50,y:16},
+    {id:"a",label:"a",x:23,y:47},
+    {id:"b",label:"b",x:77,y:47},
+    {id:"ab",label:"ab",x:23,y:78},
+    {id:"ba",label:"ba",x:77,y:78},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Build the trie and failure links",note:"The patterns are ab, b and ba. The one-letter nodes a and b fail to the empty root. Node ab fails to b, and ba fails to a, because each target is the longest proper suffix in the trie. Terminal states b and ba report 1 each. State ab reports 2 because it also inherits b.",active:["root","a","b","ab","ba"],values:{root:"0",a:"0",b:"1",ab:"2",ba:"1"},edges:[{from:"root",to:"a"},{from:"root",to:"b"},{from:"a",to:"ab"},{from:"b",to:"ba"}]},
+    {title:"Read a at index 0",note:"From the empty root, follow a to state a. This state has no matching pattern, so the running count is 0.",active:["root","a"],values:{a:"+0"},edges:[{from:"root",to:"a"}]},
+    {title:"Read b at index 1",note:"From a, follow b to ab. Report ab at indices 0–1 and b at index 1 through the failure link. Add 2 for a running count of 2.",active:["a","ab","b"],values:{ab:"ab",b:"b"},edges:[{from:"a",to:"ab"},{from:"ab",to:"b"}]},
+    {title:"Read a at index 2",note:"State ab has no trie child for a. Its failure state b does, so the completed transition goes to ba. Report ba at indices 1–2, giving 3 total matches.",active:["ab","b","ba"],values:{ba:"+1, total 3"},edges:[{from:"ab",to:"b"},{from:"b",to:"ba"}]},
+  ]}
+/>
+
 ### Code
 
 <Tabs>

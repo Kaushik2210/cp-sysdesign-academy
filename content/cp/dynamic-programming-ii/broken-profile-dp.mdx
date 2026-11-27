@@ -45,6 +45,23 @@ After the last cell the profile must be empty, so the answer is `dp[0]`. There a
 
 Processing a whole row at once and enumerating the next row's mask for each current mask has `4^m` transitions. The **broken profile** processes **one cell at a time**, so the frontier is "broken" along a staircase, and each state has only two transitions: much simpler and about `m` times faster.
 
+<ConceptWalkthrough
+  title="Trace the frontier on a 2 × 2 board"
+  nodes={[
+    {id:"zero",label:"00",x:16,y:46},
+    {id:"one",label:"01",x:39,y:46},
+    {id:"two",label:"10",x:61,y:46},
+    {id:"three",label:"11",x:84,y:46},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Process the top-left cell",note:"Start before (0,0) with mask 00 and 1 way. The rightmost bit represents column 0. A vertical domino sets that bit for the cell below, giving mask 01. A horizontal domino sets column 1, giving mask 10. Each new mask has 1 way.",active:["zero","one","two"],values:{zero:"start: 1",one:"1",two:"1"},edges:[{from:"zero",to:"one"},{from:"zero",to:"two"}]},
+    {title:"Process the top-right cell",note:"From 01, column 1 is free. A vertical domino sets bit 1, giving 11. From 10, column 1 is already covered, so clear bit 1 to get 00. Each resulting mask has 1 way.",active:["one","two","three","zero"],values:{zero:"1",three:"1"},edges:[{from:"one",to:"three"},{from:"two",to:"zero"}]},
+    {title:"Process the bottom-left cell",note:"From 11, column 0 is covered. Clearing bit 0 gives 10. From 00, place a horizontal domino to set bit 1 and also get 10. The two histories add to 2 ways for mask 10.",active:["three","zero","two"],values:{two:"2"},edges:[{from:"three",to:"two"},{from:"zero",to:"two"}]},
+    {title:"Process the bottom-right cell",note:"Mask 10 says the last cell is already covered. Clear bit 1 and move both ways to 00. The empty final profile counts 2 complete tilings, one with two vertical dominoes and one with two horizontal dominoes.",active:["two","zero"],values:{zero:"2"},edges:[{from:"two",to:"zero"}]},
+  ]}
+/>
+
 ### Code
 
 <Tabs>

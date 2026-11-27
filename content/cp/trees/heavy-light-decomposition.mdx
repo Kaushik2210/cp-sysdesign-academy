@@ -83,6 +83,25 @@ Query the path **4 to 9** (it is `4, 2, 1, 3, 8, 9`):
 
 Three range queries for a path of six vertices. On a million-vertex tree the same loop needs at most about 20 pieces.
 
+<ConceptWalkthrough
+  title="Take the maximum from C to E across two chains"
+  nodes={[
+    {id:"r",label:"R",x:16,y:22},
+    {id:"a",label:"A",x:39,y:22},
+    {id:"b",label:"B",x:62,y:22},
+    {id:"c",label:"C",x:85,y:22},
+    {id:"d",label:"D",x:16,y:64},
+    {id:"e",label:"E",x:39,y:64},
+    {id:"out",label:"Max",x:78,y:64},
+  ]}
+  edges={[{from:"r",to:"a"},{from:"a",to:"b"},{from:"b",to:"c"},{from:"r",to:"d"},{from:"d",to:"e"}]}
+  frames={[
+    {title:"Lay out the chains",note:"Root R has branches R–A–B–C and R–D–E. The subtrees of A and D have sizes 3 and 2, so R–A is heavy. Heavy-first order assigns positions 0 through 5 to R, A, B, C, D, E.",active:["r","a","b","c","d","e"],values:{r:"pos 0",a:"pos 1",b:"pos 2",c:"pos 3",d:"pos 4",e:"pos 5"}},
+    {title:"Read the deeper chain",note:"For the path from C to E, their chain heads are R and D. Head D is deeper. Query positions [4, 5] from D to E, where the weights are 7 and 3. The maximum so far is 7. Jump from D to its parent R.",active:["d","e","r","out"],values:{d:"7",e:"3",out:"7"}},
+    {title:"Read the last chain",note:"R and C share a chain. Query positions [0, 3] from R to C, with weights 4, 9, 1, and 6. Its maximum is 9, so the maximum on the full path is max(7, 9) = 9.",active:["r","a","b","c","out"],values:{r:"4",a:"9",b:"1",c:"6",out:"9"}},
+  ]}
+/>
+
 ## Code
 
 Compute everything iteratively (BFS order) so a path-shaped tree cannot overflow the call stack.

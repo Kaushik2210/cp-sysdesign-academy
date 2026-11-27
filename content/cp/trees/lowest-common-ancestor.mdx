@@ -44,6 +44,25 @@ There are about `log2(n)` levels, so building takes `O(n log n)` time and memory
 
 Step 3 is a binary search on "how far can both rise while still being different": jumps that would land on the same vertex (the LCA or above) are refused.
 
+<ConceptWalkthrough
+  title="Find the LCA of C and E with binary lifting"
+  nodes={[
+    {id:"r",label:"R",x:16,y:22},
+    {id:"a",label:"A",x:39,y:22},
+    {id:"b",label:"B",x:62,y:22},
+    {id:"c",label:"C",x:85,y:22},
+    {id:"d",label:"D",x:39,y:64},
+    {id:"e",label:"E",x:62,y:64},
+  ]}
+  edges={[{from:"r",to:"a"},{from:"a",to:"b"},{from:"b",to:"c"},{from:"r",to:"d"},{from:"d",to:"e"}]}
+  frames={[
+    {title:"Measure depths",note:"The two branches from root R are R–A–B–C and R–D–E. C is at depth 3 and E is at depth 2, so C must rise by one edge.",active:["c","e"],values:{r:"0",a:"1",b:"2",c:"3",d:"1",e:"2"}},
+    {title:"Align C with E",note:"Lift C one edge to its parent B. The candidates B and E now both have depth 2.",active:["c","b","e"],values:{b:"Depth 2",c:"Depth 3",e:"Depth 2"}},
+    {title:"Try a joint jump",note:"A jump of 2 from B or E reaches R, as do all longer power-of-two jumps with the root pointing to itself. Skip those jumps. A jump of 1 reaches A from B and D from E, so move both up.",active:["a","b","d","e"],values:{a:"Depth 1",b:"Depth 2",d:"Depth 1",e:"Depth 2"}},
+    {title:"Return the common parent",note:"The candidates A and D are distinct and both have parent R. Their common parent R is the lowest common ancestor of C and E.",active:["r","a","d"],values:{r:"LCA"}},
+  ]}
+/>
+
 ## Code
 
 <Tabs>

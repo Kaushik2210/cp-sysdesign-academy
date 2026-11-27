@@ -66,6 +66,25 @@ Branches of 3: `{1, 2}` (via 1), `{4}`, `{5}`. Depths from 3: vertex 1 at 1, ver
 
 Four pairs, all through centroid 3. Then 3 is removed and the pieces `{1, 2}`, `{4}`, `{5}` are processed the same way; none contains a pair at distance 2. Answer: **4**.
 
+<ConceptWalkthrough
+  title="Count length-2 paths using the centroid of a chain"
+  nodes={[
+    {id:"c",label:"C",x:50,y:22},
+    {id:"out",label:"Count",x:80,y:22},
+    {id:"a",label:"A",x:16,y:64},
+    {id:"b",label:"B",x:39,y:64},
+    {id:"d",label:"D",x:62,y:64},
+    {id:"e",label:"E",x:85,y:64},
+  ]}
+  edges={[{from:"a",to:"b"},{from:"b",to:"c"},{from:"c",to:"d"},{from:"d",to:"e"}]}
+  frames={[
+    {title:"Find the centroid",note:"On the path A–B–C–D–E, start at A. The side toward B holds 4 vertices, and from B the side toward C holds 3. Both exceed 5 / 2. At C the two sides have size 2 each, so C is the centroid.",active:["a","b","c"],values:{a:"side 4",b:"side 3",c:"2 + 2",out:"0"}},
+    {title:"Process the left branch",note:"Start with C counted at depth 0. In the left branch, B has depth 1 and finds no partner at depth 1. A has depth 2 and pairs with C, giving 1 path. Then record one left vertex at each depth 1 and 2.",active:["a","b","c","out"],values:{a:"depth 2",b:"depth 1",c:"depth 0",out:"1"}},
+    {title:"Process the right branch",note:"In the right branch, D at depth 1 pairs with B at depth 1. E at depth 2 pairs with C at depth 0. Add these two paths to reach 3. Record the right depths only after checking both vertices.",active:["b","c","d","e","out"],values:{b:"depth 1",c:"depth 0",d:"depth 1",e:"depth 2",out:"3"}},
+    {title:"Recurse on the remaining pieces",note:"Removing C leaves the two components A–B and D–E. Each contains only a single edge, so neither contributes a path of length 2. The final three paths are A–B–C, B–C–D, and C–D–E.",active:["a","b","d","e","out"],values:{out:"3"},edges:[{from:"a",to:"b"},{from:"d",to:"e"}]},
+  ]}
+/>
+
 ## Code
 
 Recursion on a path-shaped tree is `n` deep, so this version uses a stack of components and BFS.

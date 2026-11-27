@@ -297,6 +297,47 @@ Max flow is a **modelling** tool: many problems that do not mention water are fl
 | **Assignment with capacities** | people to jobs with limits on both sides, as in matching but with capacities above 1. |
 | **Project selection** | profits and dependencies as a min cut (advanced). |
 
+<ConceptWalkthrough
+  title="Dinic needs two BFS phases"
+  nodes={[
+    {id: "s", label: "S", x: 13, y: 46},
+    {id: "a", label: "A", x: 38, y: 24},
+    {id: "b", label: "B", x: 39, y: 70},
+    {id: "c", label: "C", x: 66, y: 70},
+    {id: "t", label: "T", x: 87, y: 46},
+  ]}
+  edges={[{from: "s", to: "a"}, {from: "a", to: "t"}, {from: "s", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "t"}]}
+  frames={[
+    {
+      title: "Build the first level graph",
+      note: "The directed paths S→A→T and S→B→C→T share only S and T. Every edge has capacity 2. From S, BFS labels S=0, A=B=1 and C=T=2.",
+      active: ["s", "a", "b", "c", "t"],
+      values: {s: "L0", a: "L1", b: "L1", c: "L2", t: "L2"},
+    },
+    {
+      title: "Send the first blocking flow",
+      note: "The first BFS places both C and T at level 2, so C→T is excluded. The level graph can send 2 units along S→A→T, saturating both edges. Total flow is 2.",
+      active: ["s", "a", "t"],
+      values: {a: "2 sent", t: "flow 2"},
+      edges: [{from: "s", to: "a"}, {from: "a", to: "t"}],
+    },
+    {
+      title: "Rebuild and send again",
+      note: "With S→A saturated, residual BFS discovers S, B, C and T at levels 0, 1, 2 and 3. Dinic sends 2 units along S→B→C→T, raising the total to 4.",
+      active: ["s", "b", "c", "t"],
+      values: {s: "L0", b: "L1", c: "L2", t: "flow 4"},
+      edges: [{from: "s", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "t"}],
+    },
+    {
+      title: "Certify the maximum",
+      note: "Both edges leaving S, S→A and S→B, now carry 2 of 2 units. The cut consisting of S alone has capacity 4, equal to the flow of 4.",
+      active: ["s", "a", "b"],
+      values: {a: "2/2", b: "2/2", t: "flow 4"},
+      edges: [{from: "s", to: "a"}, {from: "s", to: "b"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Forgetting the reverse edges.** Without twins with capacity 0 the algorithm is just greedy path packing and gives wrong answers on cross-linked networks.

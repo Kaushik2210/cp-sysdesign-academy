@@ -84,6 +84,24 @@ So `ans[1] = 6`: distances `1 + 1 + 2 + 2`.
 
 Check vertex 3 by hand: distances to 1, 2, 4, 5 are `1, 2, 1, 1`, total 5. ✓.
 
+<ConceptWalkthrough
+  title="Reroot distance sums along a four-vertex path"
+  nodes={[
+    {id:"a",label:"A",x:16,y:22},
+    {id:"b",label:"B",x:39,y:22},
+    {id:"c",label:"C",x:62,y:22},
+    {id:"d",label:"D",x:85,y:22},
+    {id:"sum",label:"Sum",x:50,y:64},
+  ]}
+  edges={[{from:"a",to:"b"},{from:"b",to:"c"},{from:"c",to:"d"}]}
+  frames={[
+    {title:"Compute the starting sum",note:"Root the unweighted path A–B–C–D at A. Its subtree sizes are 4, 3, 2, and 1. Distances from A are 0, 1, 2, and 3, so the starting sum is 6.",active:["a","sum"],values:{a:"size 4",b:"size 3",c:"size 2",d:"size 1",sum:"6"}},
+    {title:"Move from A to B",note:"B, C, and D each get one edge closer, and A gets one edge farther. Sum[B] = 6 − 3 + 1 = 4.",active:["a","b","sum"],values:{a:"6",b:"4",sum:"4"}},
+    {title:"Move from B to C",note:"C and D get one edge closer, while A and B get one edge farther. Sum[C] = 4 − 2 + 2 = 4.",active:["b","c","sum"],values:{b:"4",c:"4",sum:"4"}},
+    {title:"Move from C to D",note:"Only D gets one edge closer. A, B, and C each get one edge farther, so Sum[D] = 4 − 1 + 3 = 6. The sums in path order are 6, 4, 4, and 6.",active:["c","d","sum"],values:{a:"6",b:"4",c:"4",d:"6",sum:"6"}},
+  ]}
+/>
+
 ## The general pattern
 
 Not every answer reroots as neatly as a sum. The recipe for a general reroot:

@@ -51,6 +51,22 @@ Binary search finds `k` in `O(log n)`, so the total is `O(n log n)`.
 `tails` has the right *length*, but its contents can mix elements that do not form a real subsequence together. For `2 5 3 7`, `tails` ends as `[2, 3, 7]` and that is a real rise here, but in general only the length is guaranteed. To print an actual subsequence, store for each element the index of its predecessor and walk back from the last one.
 </Callout>
 
+<ConceptWalkthrough
+  title="Track the smallest tails for 3, 5, 2, 6"
+  nodes={[
+    {id:"a",label:"Length 1",x:19,y:46},
+    {id:"b",label:"Length 2",x:50,y:46},
+    {id:"c",label:"Length 3",x:81,y:46},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Start with 3",note:"Read 3, the first element of 3, 5, 2, 6. The best ending value for length 1 is 3.",active:["a"],values:{a:"3"},edges:[]},
+    {title:"Extend with 5",note:"Since 5 exceeds 3, append 5 as the smallest ending value seen for length 2. The tails are now 3 and 5.",active:["a","b"],values:{a:"3",b:"5"},edges:[{from:"a",to:"b"}]},
+    {title:"Replace the first tail with 2",note:"The first tail at least 2 is 3 at length 1. Replace it with 2. Length 2 can still end in 5 via 3, 5. The tails 2 and 5 describe separate subsequences.",active:["a"],values:{a:"2",b:"5"},edges:[]},
+    {title:"Extend with 6",note:"Since 6 exceeds the largest tail, 5, append it at length 3. The tails are 2, 5 and 6, and a longest increasing subsequence is 3, 5, 6.",active:["b","c"],values:{a:"2",b:"5",c:"6"},edges:[{from:"b",to:"c"}]},
+  ]}
+/>
+
 ## Code
 
 <Tabs>

@@ -118,6 +118,23 @@ Using the coefficient `x` from `ext_gcd(a mod m, m)` (which satisfies `a*x + m*y
 
 Solvable in integers exactly when `gcd(a, b)` divides `c`. One solution is `(x * c/g, y * c/g)` from `ext_gcd`; all solutions are `x + k * (b/g)`, `y - k * (a/g)` for integer `k`. Adding the constraint `x ≥ 0, y ≥ 0` turns finding a solution into choosing `k` in a range.
 
+<ConceptWalkthrough
+  title="Solve 14x ≡ 8 modulo 30"
+  nodes={[
+    {id:"a",label:"14",x:18,y:22},
+    {id:"m",label:"30",x:50,y:22},
+    {id:"b",label:"8",x:82,y:22},
+    {id:"g",label:"GCD",x:24,y:64},
+    {id:"x",label:"x",x:70,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Find the gcd",note:"Euclid gives 30 = 2 × 14 + 2 and 14 = 7 × 2, so gcd(14, 30) = 2. It divides 8, so the congruence has solutions.",active:["a","m","b","g"],values:{b:"2 divides 8",g:"2"},edges:[{from:"a",to:"g"},{from:"m",to:"g"}]},
+    {title:"Back-substitute",note:"From the first division, 2 = 30 − 2 × 14. Multiply by 4 to get 8 = 4 × 30 − 8 × 14, so x = −8 satisfies 14x ≡ 8 modulo 30.",active:["a","m","b","x"],values:{a:"−2",m:"1",b:"4 × 2",x:"−8"},edges:[{from:"a",to:"x"},{from:"b",to:"x"}]},
+    {title:"List the residues",note:"All solutions differ by 30 / 2 = 15. Reduce −8 modulo 15 to get 7. The residues modulo 30 are 7 and 22, and 14 × 7 = 98 and 14 × 22 = 308 both leave remainder 8.",active:["g","x"],values:{g:"30/2 = 15",x:"7, 22"},edges:[{from:"g",to:"x"}]},
+  ]}
+/>
+
 ## Experiment
 
 The program checks Bézout's identity, compares inverses with Python's built-in `pow(a, -1, m)`, and counts the solutions of random congruences by brute force.

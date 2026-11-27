@@ -216,6 +216,36 @@ The hard part in contests is **recognising** it. Signals: every item has exactly
 
 "At most one of `k`" costs `k^2` clauses done naively; there is a prefix-variable trick that does it in `O(k)`. A restriction on **three** variables at a time ("at least one of `a, b, c`") is 3-SAT, which is NP-hard: no known linear algorithm, so 2-SAT cannot absorb it.
 
+<ConceptWalkthrough
+  title="Four clauses force a contradiction"
+  nodes={[
+    {id: "x", label: "x", x: 22, y: 24},
+    {id: "nx", label: "¬x", x: 78, y: 24},
+    {id: "y", label: "y", x: 22, y: 70},
+    {id: "ny", label: "¬y", x: 78, y: 70},
+  ]}
+  frames={[
+    {
+      title: "Translate each clause",
+      note: "The formula contains (x ∨ y), (¬x ∨ y), (x ∨ ¬y) and (¬x ∨ ¬y). A clause p ∨ q gives ¬p→q and ¬q→p, so these four clauses contribute eight directed edges.",
+      active: ["x", "nx", "y", "ny"],
+      edges: [{from: "nx", to: "y"}, {from: "ny", to: "x"}, {from: "x", to: "y"}, {from: "ny", to: "nx"}, {from: "nx", to: "ny"}, {from: "y", to: "x"}, {from: "x", to: "ny"}, {from: "y", to: "nx"}],
+    },
+    {
+      title: "Follow x to its negation",
+      note: "If x is true, (¬x ∨ y) forces y true. Then (¬x ∨ ¬y) forces x false. The implication path x→y→¬x rules out x = true.",
+      active: ["x", "y", "nx"],
+      edges: [{from: "x", to: "y"}, {from: "y", to: "nx"}],
+    },
+    {
+      title: "Follow the reverse path",
+      note: "If x is false, (x ∨ y) forces y true. Then (x ∨ ¬y) forces x true. The paths ¬x→y→x and x→y→¬x put x and ¬x in the same SCC, so the formula is unsatisfiable.",
+      active: ["nx", "y", "x"],
+      edges: [{from: "nx", to: "y"}, {from: "y", to: "x"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Adding only one implication per clause.** Both `not a -> b` and `not b -> a` are needed; with one edge the graph is not symmetric and the theorem fails.

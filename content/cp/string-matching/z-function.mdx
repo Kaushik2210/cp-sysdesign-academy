@@ -69,6 +69,28 @@ for s in ["aabxaab", "abababab", "aaaaa", "abcdef"]:
     print(s, z_function(s), z_function(s) == z_naive(s))
 `} />
 
+<ConceptWalkthrough
+  title="Reuse the Z window in aabaabaa"
+  nodes={[
+    {id:"a",label:"0:a",x:14,y:16},
+    {id:"b",label:"1:a",x:38,y:16},
+    {id:"c",label:"2:b",x:62,y:16},
+    {id:"d",label:"3:a",x:86,y:16},
+    {id:"e",label:"4:a",x:14,y:47},
+    {id:"f",label:"5:b",x:38,y:47},
+    {id:"g",label:"6:a",x:62,y:47},
+    {id:"h",label:"7:a",x:86,y:47},
+    {id:"box",label:"Window",x:50,y:78},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Find the first short match",note:"For aabaabaa, set z[0] = 8 by convention. At index 1, match a, then compare b with a and stop. Set z[1] = 1 and the window to [1,2). Index 2 starts with b, so z[2] = 0.",active:["a","b","c","box"],values:{a:"8",b:"1",c:"0",box:"[1,2)"},edges:[{from:"a",to:"b"}]},
+    {title:"Open a longer window",note:"Starting at index 3, aabaa matches the first five letters. The suffix ends there, so z[3] = 5 and the rightmost window is now [3,8).",active:["d","box"],values:{a:"8",b:"1",c:"0",d:"5",box:"[3,8)"},edges:[{from:"d",to:"box"}]},
+    {title:"Reuse two values inside the window",note:"Index 4 mirrors offset 4 − 3 = 1. Its starting match is min(4, z[1]) = 1 and the next letters b and a differ. Index 5 mirrors offset 2, so start at 0 and stop on b versus a. Store z[4] = 1 and z[5] = 0.",active:["b","c","e","f"],values:{a:"8",b:"1",c:"0",d:"5",e:"1",f:"0",box:"[3,8)"},edges:[{from:"b",to:"e"},{from:"c",to:"f"}]},
+    {title:"Clip the copied match at the right edge",note:"Index 6 copies from offset 3, but only 8 − 6 = 2 letters remain, so min(2, z[3]) = 2. Index 7 copies from offset 4 with room for 1 letter, so min(1, z[4]) = 1. Both matches already reach the end.",active:["d","e","g","h"],values:{a:"8",b:"1",c:"0",d:"5",e:"1",f:"0",g:"2",h:"1",box:"[3,8)"},edges:[{from:"d",to:"g"},{from:"e",to:"h"}]},
+  ]}
+/>
+
 ## Code
 
 <Tabs>

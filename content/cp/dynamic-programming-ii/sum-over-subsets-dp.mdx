@@ -43,6 +43,22 @@ After processing bits `0..b`, `f[mask]` holds the sum over the submasks that dif
 
 Cost: `bits * 2^bits` additions (half of the masks have each bit, so `bits * 2^(bits-1)`).
 
+<ConceptWalkthrough
+  title="Accumulate submask sums one bit at a time"
+  nodes={[
+    {id:"a",label:"00",x:14,y:45},
+    {id:"b",label:"01",x:38,y:45},
+    {id:"c",label:"10",x:62,y:45},
+    {id:"d",label:"11",x:86,y:45},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Load the exact-mask values",note:"For masks 00, 01, 10 and 11, start with weights 2, 1, 4 and 3. Each entry initially counts just its own mask.",active:["a","b","c","d"],values:{a:"2",b:"1",c:"4",d:"3"},edges:[]},
+    {title:"Allow dropping bit 0",note:"Only masks ending in 1 read a second value. Add the value of 00 to 01 to get 1 + 2 = 3. Add the value of 10 to 11 to get 3 + 4 = 7. Masks 00 and 10 keep 2 and 4.",active:["a","b","c","d"],values:{a:"2",b:"3",c:"4",d:"7"},edges:[{from:"a",to:"b"},{from:"c",to:"d"}]},
+    {title:"Allow dropping bit 1",note:"Mask 10 reads 00 to get 4 + 2 = 6. Mask 11 reads 01 to get 7 + 3 = 10. The final sums for 00, 01, 10 and 11 are 2, 3, 6 and 10. Mask 11 now includes all four weights.",active:["a","b","c","d"],values:{a:"2",b:"3",c:"6",d:"10"},edges:[{from:"a",to:"c"},{from:"b",to:"d"}]},
+  ]}
+/>
+
 ### Variations
 
 | need | change |

@@ -234,6 +234,39 @@ Labels come out in **topological order of the condensation**: an edge between tw
 - **2-SAT.** Each variable and its negation become vertices, each clause adds two implication edges, and the formula is satisfiable exactly when no variable shares an SCC with its negation.
 - **Tarjan's algorithm** finds the same components in one DFS using `tin` and `low`, like the [bridges lesson](/cp/graphs/bridges/). Kosaraju is easier to remember; Tarjan needs no reversed graph.
 
+<ConceptWalkthrough
+  title="Kosaraju separates a singleton from a cycle"
+  nodes={[
+    {id: "a", label: "A", x: 18, y: 45},
+    {id: "b", label: "B", x: 47, y: 45},
+    {id: "c", label: "C", x: 76, y: 23},
+    {id: "d", label: "D", x: 76, y: 70},
+  ]}
+  edges={[{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "d"}, {from: "d", to: "b"}]}
+  frames={[
+    {
+      title: "Run DFS on the original graph",
+      note: "The directed edges are A→B, B→C, C→D and D→B. DFS starting at A reaches D via B and C. D sees B on the DFS stack, so it finishes first. The complete finish order is D, C, B, A.",
+      active: ["a", "b", "c", "d"],
+      values: {a: "4th", b: "3rd", c: "2nd", d: "1st"},
+    },
+    {
+      title: "Reverse edges and start at A",
+      note: "Kosaraju scans in decreasing finish order A, B, C, D. The reversed graph has B→A, C→B, D→C and B→D. A has no outgoing edge, so the first component is {A}.",
+      active: ["a"],
+      values: {a: "SCC 1"},
+      edges: [{from: "b", to: "a"}, {from: "c", to: "b"}, {from: "d", to: "c"}, {from: "b", to: "d"}],
+    },
+    {
+      title: "Collect the remaining cycle",
+      note: "The next unassigned vertex B reaches D then C in the reversed graph and skips the already assigned A. The second component is {B, C, D}. In the original graph, the only edge between components is A→B, so the condensation is SCC 1 → SCC 2.",
+      active: ["b", "c", "d"],
+      values: {a: "SCC 1", b: "SCC 2", c: "SCC 2", d: "SCC 2"},
+      edges: [{from: "b", to: "d"}, {from: "d", to: "c"}, {from: "c", to: "b"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Using the wrong order in pass 2.** You must sweep from the **latest** finisher. Scanning `order` from the front merges components.

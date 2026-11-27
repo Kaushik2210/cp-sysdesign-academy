@@ -263,6 +263,46 @@ print("200 random tiny networks agree with the brute force over all integer flow
 
 **Exactly `F` units instead of the maximum**: stop augmenting when the flow reaches `F` (and push only `min(f, F - flow)` in the last round).
 
+<ConceptWalkthrough
+  title="Rerouting a two-job assignment"
+  nodes={[
+    {id: "i", label: "I", x: 18, y: 24},
+    {id: "j", label: "J", x: 18, y: 70},
+    {id: "a", label: "Job A", x: 80, y: 24},
+    {id: "b", label: "Job B", x: 80, y: 70},
+  ]}
+  edges={[{from: "i", to: "a"}, {from: "i", to: "b"}, {from: "j", to: "a"}, {from: "j", to: "b"}]}
+  frames={[
+    {
+      title: "List the assignment costs",
+      note: "Workers I and J can each cover one job, and each job takes one worker. Costs are I→A = 1, I→B = 3, J→A = 2 and J→B = 9. Source-to-worker and job-to-sink edges have unit capacity and cost 0.",
+      active: ["i", "j", "a", "b"],
+      values: {i: "A1 B3", j: "A2 B9"},
+    },
+    {
+      title: "Choose the cheapest first job",
+      note: "The cheapest first augmentation assigns I to A for 1. The flow is 1, and the residual graph now has A→I at cost −1, which can undo that assignment.",
+      active: ["i", "a"],
+      values: {i: "A", a: "cost 1"},
+      edges: [{from: "i", to: "a"}],
+    },
+    {
+      title: "Compare the remaining paths",
+      note: "The direct J→B augmentation costs 9. The residual route J→A→I→B costs 2 − 1 + 3 = 4, so augment along that route for one unit.",
+      active: ["j", "a", "i", "b"],
+      values: {j: "+2", a: "−1", i: "+3", b: "net +4"},
+      edges: [{from: "j", to: "a"}, {from: "a", to: "i"}, {from: "i", to: "b"}],
+    },
+    {
+      title: "Read the new matching",
+      note: "The reverse step canceled I→A. The resulting assignments J→A and I→B give maximum flow 2 and minimum cost 2 + 3 = 5. The only other full matching costs 1 + 9 = 10.",
+      active: ["i", "j", "a", "b"],
+      values: {a: "J · 2", b: "I · 3"},
+      edges: [{from: "j", to: "a"}, {from: "i", to: "b"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Negative prices in the input.** The residual graph then starts with negative edges, and Dijkstra needs valid potentials: compute them with one Bellman-Ford pass first. With a negative **cycle** in the input, cancel it first or the algorithm does not terminate correctly.

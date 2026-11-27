@@ -43,6 +43,22 @@ answer = min( sp[k][l], sp[k][r - 2^k + 1] )
 
 The first block starts at the left end, the second ends at the right end, both have length `2^k`, together they cover `[l, r]`, and they may overlap. Each query is `O(1)`.
 
+<ConceptWalkthrough
+  title="Query a minimum with overlapping blocks"
+  nodes={[
+    {id:"left",label:"[1,4]",x:22,y:22},
+    {id:"right",label:"[2,5]",x:78,y:22},
+    {id:"len",label:"Length",x:22,y:64},
+    {id:"out",label:"Min",x:78,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Choose the level",note:"In the zero-based array [8, 6, 4, 9, 2, 7], query the inclusive range [1, 5]. Its length is 5, so the largest fitting power of two is 4 = 2².",active:["len"],values:{len:"5 → 4"}},
+    {title:"Read the two block minima",note:"The length-4 block starting at 1 is [1, 4] with values 6, 4, 9, and 2. The block ending at 5 starts at 5 − 4 + 1 = 2 and has values 4, 9, 2, and 7. Both precomputed minima are 2.",active:["left","right"],values:{left:"2",right:"2"}},
+    {title:"Combine the cached answers",note:"The blocks overlap at positions 2 through 4. The minimum 2 at position 4 appears in both blocks, and min(2, 2) = 2. The blocks cover all of [1, 5], so the query returns 2.",active:["left","right","out"],values:{left:"2",right:"2",out:"2"},edges:[{from:"left",to:"out"},{from:"right",to:"out"}]},
+  ]}
+/>
+
 ## Idempotent operations only
 
 An operation `f` is **idempotent** when `f(x, x) = x`. Minimum, maximum, gcd, bitwise AND and OR are. **Sum is not**: counting the overlap twice gives the wrong total.

@@ -185,6 +185,45 @@ Both give a tree of the same total weight (the tree itself may differ when weigh
 2. **Clustering.** Remove the `k - 1` heaviest MST edges to get `k` groups with the largest gaps between them.
 3. **Second-best MST, MST with a forced edge:** small variations that start from the MST and swap one edge.
 
+<ConceptWalkthrough
+  title="Kruskal skips a cheap cycle edge"
+  nodes={[
+    {id: "a", label: "A", x: 18, y: 24},
+    {id: "b", label: "B", x: 47, y: 24},
+    {id: "c", label: "C", x: 47, y: 70},
+    {id: "d", label: "D", x: 86, y: 70},
+  ]}
+  edges={[{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "a", to: "c"}, {from: "c", to: "d"}, {from: "b", to: "d"}]}
+  frames={[
+    {
+      title: "Sort the cables",
+      note: "Four stations have undirected cables AB=1, BC=2, AC=3, CD=5 and BD=7. Kruskal processes them in that order, starting with four separate components and cost 0.",
+      active: ["a", "b", "c", "d"],
+    },
+    {
+      title: "Join three stations",
+      note: "Kruskal accepts AB at cost 1 and BC at cost 2. A, B and C now share one component, D remains alone, and the forest costs 3.",
+      active: ["a", "b", "c"],
+      values: {a: "group 1", b: "group 1", c: "group 1", d: "group 2"},
+      edges: [{from: "a", to: "b"}, {from: "b", to: "c"}],
+    },
+    {
+      title: "Skip the triangle edge",
+      note: "AC costs 3, but A and C are already connected by A–B–C. Adding AC would create a cycle, so the selected edges remain AB and BC at total cost 3.",
+      active: ["a", "c"],
+      values: {a: "same set", c: "same set"},
+      edges: [{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "a", to: "c"}],
+    },
+    {
+      title: "Connect the last station",
+      note: "CD at cost 5 connects D to the existing component. The spanning tree is AB, BC and CD with cost 1 + 2 + 5 = 8. Kruskal can stop after three accepted edges, before BD.",
+      active: ["c", "d"],
+      values: {c: "+5", d: "total 8"},
+      edges: [{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "d"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Forgetting disconnected graphs.** Count the edges taken; fewer than `n - 1` means no spanning tree.

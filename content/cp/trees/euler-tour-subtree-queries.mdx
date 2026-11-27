@@ -51,6 +51,24 @@ With that array:
 | is `a` an ancestor of `b`? | `tin[a] <= tin[b] <= tout[a]`, in `O(1)` |
 | size of a subtree | `tout[v] - tin[v] + 1` |
 
+<ConceptWalkthrough
+  title="Flatten a subtree into one range"
+  nodes={[
+    {id:"a",label:"A",x:18,y:22},
+    {id:"b",label:"B",x:50,y:22},
+    {id:"c",label:"C",x:82,y:22},
+    {id:"d",label:"D",x:18,y:64},
+    {id:"sum",label:"Sum",x:60,y:64},
+  ]}
+  edges={[{from:"a",to:"b"},{from:"b",to:"c"},{from:"a",to:"d"}]}
+  frames={[
+    {title:"Enter A and B",note:"Root A has children B and D in that order, and B has child C. The weights of A, B, C, and D are 4, 6, 3, and 8. Visit A at index 1, then B at index 2.",active:["a","b"],values:{a:"tin 1",b:"tin 2"}},
+    {title:"Visit C and close B",note:"Visit C at index 3. C is B's only child, so finish B with tout 3. All vertices in B's subtree occupy the inclusive interval [2, 3].",active:["b","c"],values:{b:"[2,3]",c:"tin 3"}},
+    {title:"Finish the tour",note:"After leaving B, visit D at index 4 and finish A. In entry order A, B, C, D, the flattened weights are [4, 6, 3, 8].",active:["a","d"],values:{a:"[1,4]",b:"[2,3]",c:"[3,3]",d:"[4,4]"}},
+    {title:"Sum B's interval",note:"Positions 2 and 3 in the flattened array are B with weight 6 and C with weight 3. Their sum is 6 + 3 = 9.",active:["b","c","sum"],values:{b:"6",c:"3",sum:"9"},edges:[{from:"b",to:"sum"},{from:"c",to:"sum"}]},
+  ]}
+/>
+
 ## Computing tin and tout
 
 Recursion overflows on a path of `10^5` vertices in Python, so use an explicit stack.

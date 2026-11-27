@@ -53,6 +53,23 @@ down[p] = max(down[p], branch)
 
 Keeping only the best branch seen so far is enough to find the best *pair*: when the second-best arrives, it is paired with the best.
 
+<ConceptWalkthrough
+  title="Find a weighted diameter below the root"
+  nodes={[
+    {id:"r",label:"R",x:18,y:22},
+    {id:"a",label:"A",x:50,y:22},
+    {id:"b",label:"B",x:82,y:22},
+    {id:"d",label:"D",x:18,y:64},
+    {id:"c",label:"C",x:70,y:64},
+  ]}
+  edges={[{from:"r",to:"a"},{from:"a",to:"b"},{from:"a",to:"c"},{from:"r",to:"d"}]}
+  frames={[
+    {title:"Start at the leaves",note:"The weighted edges are R–A = 2, R–D = 1, A–B = 5, and A–C = 4. Leaves B, C, and D each have downward length 0.",active:["b","c","d"],values:{b:"down 0",c:"down 0",d:"down 0"}},
+    {title:"Combine the branches at A",note:"From A, the branch to B has length 5 and the branch to C has length 4. Store down[A] = 5. Joining both branches gives B–A–C length 5 + 4 = 9.",active:["a","b","c"],values:{a:"down 5",b:"branch 5",c:"branch 4"}},
+    {title:"Compare the path through R",note:"At R, the branch via A has length 2 + 5 = 7 and the branch to D has length 1. A path through R can reach length 7 + 1 = 8. The largest candidate is 9, so B–A–C is the diameter.",active:["r","a","d"],values:{r:"through 8",a:"through 9",d:"branch 1"}},
+  ]}
+/>
+
 ## Code
 
 <Tabs>

@@ -63,6 +63,24 @@ extend(c):
 
 Why the clone is needed: after adding `c`, the strings of `q` that are not longer than `len[p] + 1` now occur at one more end position than the longer strings of `q`, so their `endpos` sets differ and the state must be split in two. The amortised analysis (each step moves along the suffix links of `last`, whose depth increases by at most one per letter) gives total time **`O(n)`** transitions (times the alphabet handling).
 
+<ConceptWalkthrough
+  title="Split a state while building the automaton for abb"
+  nodes={[
+    {id:"root",label:"Root",x:17,y:24},
+    {id:"a",label:"A",x:50,y:24},
+    {id:"ab",label:"AB",x:83,y:24},
+    {id:"abb",label:"ABB",x:83,y:68},
+    {id:"clone",label:"Clone",x:41,y:68},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Append a",note:"For input abb, reading a creates state A with maximum length 1. The root gets an a transition to A, and A links back to the root.",active:["root","a"],values:{root:"len 0",a:"len 1"},edges:[{from:"root",to:"a"}]},
+    {title:"Append the first b",note:"Adding b creates AB with maximum length 2. Both A and the root get b transitions to AB. AB links to the root. In the prefix ab, b and ab share end position 1, so they share state AB.",active:["root","a","ab"],values:{root:"len 0",a:"len 1",ab:"len 2"},edges:[{from:"root",to:"a"},{from:"root",to:"ab"},{from:"a",to:"ab"}]},
+    {title:"Append the second b and split",note:"Create ABB with maximum length 3 and add a b transition from AB to ABB. The root already has a b transition to AB, whose length 2 exceeds the root length plus one. Clone AB at length 1, copying its b transition and root suffix link. Redirect the root’s b transition to the clone.",active:["root","ab","abb","clone"],values:{root:"len 0",a:"len 1",ab:"len 2",abb:"len 3",clone:"len 1"},edges:[{from:"root",to:"a"},{from:"root",to:"clone"},{from:"a",to:"ab"},{from:"ab",to:"abb"},{from:"clone",to:"abb"}]},
+    {title:"Update suffix links and count substrings",note:"AB and ABB now link to the clone. The substring b ends at indices 1 and 2, while ab ends only at 1. Subtract each suffix-link length from the state length. A, AB, ABB and the clone contribute 1, 1, 2 and 1, for 5 distinct substrings.",active:["a","ab","abb","clone"],values:{a:"+1",ab:"+1",abb:"+2",clone:"+1"},edges:[{from:"a",to:"root"},{from:"ab",to:"clone"},{from:"abb",to:"clone"},{from:"clone",to:"root"}]},
+  ]}
+/>
+
 ### Code
 
 <Tabs>

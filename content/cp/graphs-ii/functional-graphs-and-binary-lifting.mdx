@@ -203,6 +203,47 @@ What it shows:
 
 So walks in a random function are short, around `sqrt(n)`. Adversarial inputs (one big cycle through every vertex, or one long tail) are the ones that make naive simulation slow, which is why the problem tests include them.
 
+<ConceptWalkthrough
+  title="Use binary lifting to jump seven steps"
+  nodes={[
+    {id: "a", label: "A", x: 12, y: 45},
+    {id: "b", label: "B", x: 37, y: 45},
+    {id: "c", label: "C", x: 65, y: 22},
+    {id: "d", label: "D", x: 85, y: 48},
+    {id: "e", label: "E", x: 63, y: 72},
+  ]}
+  edges={[{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "d"}, {from: "d", to: "e"}, {from: "e", to: "c"}]}
+  frames={[
+    {
+      title: "Set up the query",
+      note: "The successors are A→B→C→D→E→C. Starting at A, find the vertex after 7 transitions. Since 7 = 4 + 2 + 1, apply the jump rows in that order.",
+      active: ["a"],
+      values: {a: "7 left"},
+    },
+    {
+      title: "Take the four-step jump",
+      note: "Two applications of the two-step row give up[2][A] = up[1][up[1][A]] = up[1][C] = E. The walk A→B→C→D→E consumes 4 transitions and leaves 3.",
+      active: ["a", "b", "c", "d", "e"],
+      values: {a: "start", e: "3 left"},
+      edges: [{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "d"}, {from: "d", to: "e"}],
+    },
+    {
+      title: "Take the two-step jump",
+      note: "The two-step row gives up[1][E] = D because E→C→D. After the 4-step and 2-step jumps from A, the current vertex is D with 1 transition left.",
+      active: ["e", "c", "d"],
+      values: {e: "from", d: "1 left"},
+      edges: [{from: "e", to: "c"}, {from: "c", to: "d"}],
+    },
+    {
+      title: "Take the last step",
+      note: "One successor step from D reaches E. The 4-, 2- and 1-step jumps from A land at E, D and E respectively, so the answer after exactly 7 transitions is E.",
+      active: ["d", "e"],
+      values: {e: "7 taken"},
+      edges: [{from: "d", to: "e"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Number range of `k`.** `10^18` fits a signed 64-bit integer but not a JavaScript double. Use `BigInt` there, `long long` in C++ and `long` in Java.

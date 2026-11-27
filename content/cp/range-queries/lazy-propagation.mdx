@@ -87,6 +87,24 @@ Only **two** nodes were tagged and no leaf was touched. Now ask `sum of position
 
 The memo was delivered exactly along the path the query needed, and nowhere else.
 
+<ConceptWalkthrough
+  title="Push a pending addition when a query splits a node"
+  nodes={[
+    {id:"root",label:"[0,1]",x:28,y:22},
+    {id:"tag",label:"Lazy",x:73,y:22},
+    {id:"left",label:"[0,0]",x:20,y:64},
+    {id:"right",label:"[1,1]",x:50,y:64},
+    {id:"out",label:"Query",x:81,y:64},
+  ]}
+  edges={[{from:"root",to:"left"},{from:"root",to:"right"}]}
+  frames={[
+    {title:"Start with two leaves",note:"The array [4, 7] has leaf sums 4 and 7, so the root covering [0, 1] stores sum 11 and pending addition 0.",active:["root","tag","left","right"],values:{root:"11",tag:"0",left:"4",right:"7"}},
+    {title:"Tag a fully covered node",note:"Add 3 to the full range [0, 1]. The root sum becomes 11 + 2 × 3 = 17, and its pending addition becomes 3. The leaves still store 4 and 7.",active:["root","tag"],values:{root:"17",tag:"3",left:"4",right:"7"}},
+    {title:"Push before descending",note:"A query for [1, 1] partly covers the root, so push the pending 3 to both leaves. Their sums become 4 + 3 = 7 and 7 + 3 = 10. Clear the root tag to 0. The root sum stays 17.",active:["root","tag","left","right"],values:{root:"17",tag:"0",left:"7",right:"10"}},
+    {title:"Read the right leaf",note:"Only [1, 1] is inside the query. Its updated sum is 10, so the query returns 10.",active:["right","out"],values:{root:"17",tag:"0",left:"7",right:"10",out:"10"},edges:[{from:"right",to:"out"}]},
+  ]}
+/>
+
 ## Code
 
 The recursive layout is the standard form. `4 * n` slots are enough for the tree arrays.

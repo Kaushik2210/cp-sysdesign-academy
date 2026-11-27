@@ -124,6 +124,24 @@ C(n, k) ≡ product over digit positions of C(n_i, k_i)   (mod p),     and the r
 
 Each digit is below `p`, so small binomials (a precomputed table or the factorial method up to `p - 1`) suffice.
 
+<ConceptWalkthrough
+  title="Compute C(6, 2) modulo 11"
+  nodes={[
+    {id:"n",label:"6!",x:18,y:22},
+    {id:"k",label:"2!",x:50,y:22},
+    {id:"rest",label:"4!",x:82,y:22},
+    {id:"den",label:"Denom",x:22,y:64},
+    {id:"inv",label:"Inverse",x:50,y:64},
+    {id:"out",label:"C(6,2)",x:78,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Reduce factorials",note:"Using C(6, 2) = 6! / (2! × 4!), reduce the factorials modulo 11. They are 720 ≡ 5, 2 ≡ 2, and 24 ≡ 2. The denominator is 2 × 2 = 4 modulo 11.",active:["n","k","rest","den"],values:{n:"5",k:"2",rest:"2",den:"4"},edges:[{from:"k",to:"den"},{from:"rest",to:"den"}]},
+    {title:"Invert the denominator",note:"The inverse of 4 modulo 11 is 3 since 4 × 3 = 12 ≡ 1. Equivalently, Fermat's little theorem gives 4⁹ ≡ 3 modulo 11.",active:["den","inv"],values:{den:"4",inv:"3"},edges:[{from:"den",to:"inv"}]},
+    {title:"Multiply by the inverse",note:"Multiply the reduced numerator 5 by the inverse 3 to get 15 ≡ 4 modulo 11. The ordinary count C(6, 2) = 15 has the same remainder.",active:["n","inv","out"],values:{n:"5",inv:"3",out:"4"},edges:[{from:"n",to:"out"},{from:"inv",to:"out"}]},
+  ]}
+/>
+
 ## Counting formulas worth knowing
 
 - **Stars and bars:** the number of ways to distribute `n` identical items among `k` people is `C(n + k - 1, k - 1)`; if each person must get at least one, `C(n - 1, k - 1)`.

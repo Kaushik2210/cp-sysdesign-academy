@@ -169,6 +169,45 @@ print("300 random graphs agree with the exhaustive check")
 3. **Bounding structure:** grids and trees are bipartite (colour by the parity of `row + column`, or by depth), which is the idea behind chessboard-colouring arguments.
 4. **Parity constraints** such as "these two must differ" or "these two must be equal" are solved with the same colouring, with union-find carrying a parity bit.
 
+<ConceptWalkthrough
+  title="Two-coloring a five-station loop"
+  nodes={[
+    {id: "a", label: "A", x: 20, y: 30},
+    {id: "b", label: "B", x: 50, y: 20},
+    {id: "c", label: "C", x: 80, y: 30},
+    {id: "d", label: "D", x: 72, y: 70},
+    {id: "e", label: "E", x: 28, y: 70},
+  ]}
+  edges={[{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "d"}, {from: "d", to: "e"}, {from: "e", to: "a"}]}
+  frames={[
+    {
+      title: "Color the start",
+      note: "The undirected loop is A–B–C–D–E–A. Start BFS at A with color 0 and queue [A]. B, C, D and E are uncolored.",
+      active: ["a"],
+      values: {a: "0"},
+    },
+    {
+      title: "Color both neighbors",
+      note: "Processing A (color 0) assigns color 1 to B and E. With neighbors visited alphabetically, the queue is [B, E].",
+      active: ["a", "b", "e"],
+      values: {a: "0", b: "1", e: "1"},
+    },
+    {
+      title: "Expand both branches",
+      note: "B gives C color 0 and E gives D color 0. After processing B and E, the queue is [C, D] and the colors in A–E order are [0, 1, 0, 0, 1].",
+      active: ["b", "c", "d", "e"],
+      values: {a: "0", b: "1", c: "0", d: "0", e: "1"},
+    },
+    {
+      title: "Find the conflict",
+      note: "When BFS processes C, its neighbor D already has the same color 0. Edge C–D closes the odd cycle A–B–C–D–E–A of length 5, so the graph is not bipartite.",
+      active: ["c", "d"],
+      values: {a: "0", b: "1", c: "0", d: "0", e: "1"},
+      edges: [{from: "c", to: "d"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Starting only from vertex 1.** A graph with several components needs a BFS from each uncoloured vertex.

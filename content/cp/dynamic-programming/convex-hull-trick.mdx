@@ -82,6 +82,23 @@ Heights `1, 2, 4, 7`, `C = 3`. Stone 1 (index 0) has `dp = 0`.
 
 Answer `dp = 23`. Check the last step directly: jumping from stone 3 costs `11 + (7-4)^2 + 3 = 23`, from stone 2 `4 + 25 + 3 = 32`, from stone 1 `0 + 36 + 3 = 39`. ✓
 
+<ConceptWalkthrough
+  title="Query the lower envelope for four stones"
+  nodes={[
+    {id:"a",label:"Line 1",x:17,y:24},
+    {id:"b",label:"Line 2",x:50,y:24},
+    {id:"c",label:"Line 3",x:83,y:24},
+    {id:"q",label:"dp",x:50,y:68},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Create the first line",note:"Heights are 1, 3, 4 and 6, with jump constant C = 2. The first stone has dp = 0, so m = −2 × 1 = −2 and b = 0 + 1² = 1.",active:["a","q"],values:{a:"−2x+1",q:"0"},edges:[]},
+    {title:"Query at height 3",note:"Line 1 gives −2 × 3 + 1 = −5, so dp = 3² + 2 − 5 = 6. Stone 2 adds line 2 with m = −6 and b = 6 + 3² = 15.",active:["a","q"],values:{a:"−5",b:"−6x+15",q:"6"},edges:[{from:"a",to:"q"}]},
+    {title:"Query at height 4",note:"Lines 1 and 2 give −7 and −9 at x = 4. Pop line 1 from the front because line 2 has the steeper negative slope and wins now and at all later heights. The new dp is 4² + 2 − 9 = 9. Stone 3 adds line 3 with m = −8 and b = 9 + 4² = 25.",active:["b","q"],values:{a:"−7",b:"−9",c:"−8x+25",q:"9"},edges:[{from:"b",to:"q"}]},
+    {title:"Query at height 6",note:"Lines 2 and 3 give −6 × 6 + 15 = −21 and −8 × 6 + 25 = −23. Pop line 2 and use line 3. The final dp is 6² + 2 − 23 = 15.",active:["c","q"],values:{b:"−21",c:"−23",q:"15"},edges:[{from:"c",to:"q"}]},
+  ]}
+/>
+
 ## Code
 
 <Tabs>

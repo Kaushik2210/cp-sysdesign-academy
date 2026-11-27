@@ -109,6 +109,26 @@ long kth(long k) {
 </Tab>
 </Tabs>
 
+<ConceptWalkthrough
+  title="Find the fourth smallest with Fenwick binary lifting"
+  nodes={[
+    {id:"b1",label:"BIT 1",x:16,y:22},
+    {id:"b2",label:"BIT 2",x:39,y:22},
+    {id:"b3",label:"BIT 3",x:62,y:22},
+    {id:"b4",label:"BIT 4",x:85,y:22},
+    {id:"idx",label:"Index",x:24,y:64},
+    {id:"rank",label:"Rank",x:50,y:64},
+    {id:"out",label:"Answer",x:76,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Build the frequency tree",note:"The sorted keys are 4, 9, 12, and 20 with multiplicities 1, 2, 0, and 2. Their one-based Fenwick cells store 1, 3, 0, and 5. To find rank 4, start at index 0.",active:["b1","b2","b3","b4"],values:{b1:"1",b2:"3",b3:"0",b4:"5",idx:"0",rank:"4"}},
+    {title:"Try a jump of 4",note:"BIT cell 4 covers all five elements. Since 5 is at least the remaining rank 4, the fourth element is inside that block. Keep index 0 and rank 4.",active:["b4","idx","rank"],values:{b4:"5",idx:"0",rank:"4"}},
+    {title:"Skip the first two keys",note:"For a jump of 2, BIT cell 2 counts three elements at keys 4 and 9. Since 3 < 4, skip them. Move to index 2 and reduce the remaining rank to 4 − 3 = 1.",active:["b2","idx","rank"],values:{b2:"3",idx:"2",rank:"1"}},
+    {title:"Skip the empty key",note:"For a jump of 1, BIT cell 3 counts zero copies of 12. Since 0 < 1, advance to index 3 with rank 1 still pending. The next index, 4, represents key 20, so the fourth smallest value is 20.",active:["b3","idx","out"],values:{b3:"0",idx:"3",rank:"1",out:"20"}},
+  ]}
+/>
+
 ## Experiment
 
 The program wraps these ideas in a small class over values `0..m-1` and checks them against a sorted list and brute force.

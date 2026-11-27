@@ -72,6 +72,24 @@ After 30 steps you have the maximising partner, and `best` is the xor value. One
 | count of numbers with `a xor x < k` | walk `x` and `k` together, adding the `passes` of subtrees that are entirely below `k` |
 | xor queries with deletions | keep `passes` counters and delete by decrementing |
 
+<ConceptWalkthrough
+  title="Find the largest XOR with 011"
+  nodes={[
+    {id:"root",label:"ε",x:50,y:17},
+    {id:"zero",label:"0…",x:18,y:43},
+    {id:"one",label:"1",x:66,y:42},
+    {id:"ten",label:"10",x:46,y:66},
+    {id:"eleven",label:"11…",x:84,y:66},
+    {id:"leaf",label:"101",x:21,y:77},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Choose the high bit",note:"Store the 3-bit numbers 001 (1), 101 (5) and 110 (6). Query 011 (3), from high bit to low bit. Query bit 0 prefers 1. Both branches exist, so take 1 and set the high XOR bit, worth 4.",active:["root","one"],values:{one:"4 so far"},edges:[{from:"root",to:"zero"},{from:"root",to:"one"}]},
+    {title:"Choose the middle bit",note:"At prefix 1, query bit 1 prefers 0. Both 10 and 11 exist, so take 10, the prefix of 101. The middle XOR bit adds 2 for a running value of 6.",active:["one","ten"],values:{ten:"6 so far"},edges:[{from:"root",to:"one"},{from:"one",to:"ten"},{from:"one",to:"eleven"}]},
+    {title:"Use the only low bit",note:"At prefix 10, query bit 1 prefers 0, but 100 is absent. Follow the same bit to 101, adding 0. The best partner is 5 and 011 XOR 101 = 110, or 6.",active:["ten","leaf"],values:{leaf:"XOR 6"},edges:[{from:"one",to:"ten"},{from:"ten",to:"leaf"}]},
+  ]}
+/>
+
 ### Code
 
 <Tabs>

@@ -249,6 +249,48 @@ print("500 random graphs agree with remove-one-edge brute force")
 - **Articulation points** (cut vertices) use the same DFS with a slightly different test: a non-root vertex `p` is a cut vertex if some child `c` has `low[c] >= tin[p]` (with `>=`, because removing a vertex also removes the edge that would have been the backup). The root is a cut vertex only if it has two or more DFS children.
 - **Directed graphs** are a different problem (strongly connected components); do not reuse this test there.
 
+<ConceptWalkthrough
+  title="Low-link on a square with a spur"
+  nodes={[
+    {id: "a", label: "A", x: 20, y: 25},
+    {id: "b", label: "B", x: 55, y: 25},
+    {id: "c", label: "C", x: 55, y: 68},
+    {id: "d", label: "D", x: 20, y: 68},
+    {id: "e", label: "E", x: 86, y: 68},
+  ]}
+  edges={[{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "d"}, {from: "d", to: "a"}, {from: "c", to: "e"}]}
+  frames={[
+    {
+      title: "Descend around the square",
+      note: "In the undirected graph A–B–C–D–A with spur C–E, DFS starts at A and visits B, C and D before E. Discovery times for A, B, C and D are 0, 1, 2 and 3. Labels show tin/low.",
+      active: ["a", "b", "c", "d"],
+      values: {a: "0/0", b: "1/1", c: "2/2", d: "3/3"},
+      edges: [{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "d"}],
+    },
+    {
+      title: "Use the back edge",
+      note: "D sees the back edge D–A, lowering low[D] from 3 to 0. Returning to C lowers low[C] from 2 to 0, so C–D fails the bridge test 0 > 2. Labels show tin/low.",
+      active: ["a", "c", "d"],
+      values: {a: "0/0", b: "1/1", c: "2/0", d: "3/0"},
+      edges: [{from: "c", to: "d"}, {from: "d", to: "a"}],
+    },
+    {
+      title: "Return from the spur",
+      note: "DFS enters E from C at time 4. E only sees its parent edge, so low[E] stays 4. Because 4 > tin[C] = 2, C–E is a bridge. Labels show tin/low.",
+      active: ["c", "e"],
+      values: {a: "0/0", b: "1/1", c: "2/0", d: "3/0", e: "4/4"},
+      edges: [{from: "c", to: "e"}],
+    },
+    {
+      title: "Finish the DFS",
+      note: "C returns low = 0 to B, and B returns low = 0 to A. No square edge passes low[child] > tin[parent]. Deleting the sole bridge C–E isolates E. Labels show final tin/low.",
+      active: ["c", "e"],
+      values: {a: "0/0", b: "1/0", c: "2/0", d: "3/0", e: "4/4"},
+      edges: [{from: "c", to: "e"}],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Skipping the parent by vertex instead of by edge id.** It hides parallel cables and reports them as bridges. Always pass the edge id down.

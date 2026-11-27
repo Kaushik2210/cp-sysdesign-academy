@@ -249,6 +249,45 @@ What it shows:
 - **Drawing a figure without lifting the pen**, and **DNA fragment assembly** (an Euler path through a k-mer graph).
 - **Chinese postman**: if odd vertices exist, pair them up with shortest paths and duplicate those edges (a min-cost matching, see the matching module).
 
+<ConceptWalkthrough
+  title="Splicing a cycle into an open Euler trail"
+  nodes={[
+    {id: "s", label: "S", x: 14, y: 27},
+    {id: "a", label: "A", x: 48, y: 27},
+    {id: "t", label: "T", x: 85, y: 27},
+    {id: "b", label: "B", x: 32, y: 70},
+    {id: "c", label: "C", x: 69, y: 70},
+  ]}
+  edges={[{from: "s", to: "a"}, {from: "a", to: "t"}, {from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "a"}]}
+  frames={[
+    {
+      title: "Choose the endpoints",
+      note: "The directed graph has S→A, A→T, A→B, B→C and C→A. Outdegree minus indegree is +1 at S, −1 at T and 0 at A, B and C, so the Euler trail must start at S and end at T.",
+      active: ["s", "t"],
+      values: {s: "+1", a: "0", t: "−1", b: "0", c: "0"},
+    },
+    {
+      title: "Hit the endpoint early",
+      note: "From S, consume S→A and then choose A→T before A→B. T has no outgoing edge, so pop T. The stack is now [S, A] and the reverse output is [T].",
+      active: ["s", "a", "t"],
+      values: {a: "top", t: "popped"},
+      edges: [{from: "s", to: "a"}, {from: "a", to: "t"}],
+    },
+    {
+      title: "Walk the remaining cycle",
+      note: "The stack top A still has unused edge A→B. Follow A→B→C→A, consuming all three cycle edges. The stack becomes [S, A, B, C, A] and the reverse output is still [T].",
+      active: ["a", "b", "c"],
+      values: {a: "top"},
+      edges: [{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "c", to: "a"}],
+    },
+    {
+      title: "Pop and reverse",
+      note: "Every outgoing edge has now been used. Popping the stack appends A, C, B, A, S after T. Reversing [T, A, C, B, A, S] gives S→A→B→C→A→T, which uses all five edges once.",
+      active: ["s", "a", "b", "c", "t"],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Forgetting the degree check.** Without it Hierholzer still returns something, but the path is not an Euler path. Test degrees first or confirm the path has `m + 1` vertices afterwards (this also catches disconnected edges).

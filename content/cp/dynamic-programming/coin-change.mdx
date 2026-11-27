@@ -39,6 +39,27 @@ Unreachable amounts hold infinity. The answer is `dp[T]` (or `-1` if infinity). 
 
 This is the **unbounded knapsack**: unlike the [0/1 version](/cp/dynamic-programming/knapsack/), an item can be reused. In the one-array formulation the capacity loop therefore goes **upwards**, so `dp[c - k]` may already include the same coin. (In the 0/1 case going upwards was the bug; here it is the feature.)
 
+<ConceptWalkthrough
+  title="Make 7 with coins 1, 3 and 4"
+  nodes={[
+    {id:"zero",label:"0",x:13,y:24},
+    {id:"one",label:"1",x:37,y:24},
+    {id:"two",label:"2",x:63,y:24},
+    {id:"three",label:"3",x:87,y:24},
+    {id:"four",label:"4",x:13,y:65},
+    {id:"five",label:"5",x:37,y:65},
+    {id:"six",label:"6",x:63,y:65},
+    {id:"seven",label:"7",x:87,y:65},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Fill amounts 0 through 3",note:"Amount 0 takes 0 coins. Using coin 1 gives costs 1 and 2 for amounts 1 and 2. At amount 3, taking coin 3 from amount 0 costs 1, beating the cost 2 + 1 = 3 from amount 2.",active:["zero","one","two","three"],values:{zero:"0",one:"1",two:"2",three:"1"},edges:[{from:"zero",to:"one"},{from:"one",to:"two"},{from:"two",to:"three"},{from:"zero",to:"three"}]},
+    {title:"Fill amounts 4 and 5",note:"For 4, last coins 1, 3 and 4 leave amounts 3, 1 and 0, giving costs 2, 2 and 1. For 5 they leave 4, 2 and 1, giving costs 2, 3 and 2. Store 1 for amount 4 and 2 for amount 5.",active:["four","five"],values:{zero:"0",one:"1",two:"2",three:"1",four:"1",five:"2"},edges:[]},
+    {title:"Fill amount 6",note:"Last coins 1, 3 and 4 leave amounts 5, 3 and 2. Their costs plus one are 3, 2 and 3. Store 2 for amount 6 by using two 3s.",active:["five","three","two","six"],values:{two:"2",three:"1",four:"1",five:"2",six:"2"},edges:[{from:"five",to:"six"},{from:"three",to:"six"},{from:"two",to:"six"}]},
+    {title:"Choose the last coin for 7",note:"Last coins 1, 3 and 4 leave amounts 6, 4 and 3 and give costs 3, 2 and 2. The minimum is 2 coins, using 3 and 4 in either order.",active:["six","four","three","seven"],values:{three:"1",four:"1",six:"2",seven:"2"},edges:[{from:"six",to:"seven"},{from:"four",to:"seven"},{from:"three",to:"seven"}]},
+  ]}
+/>
+
 ## Code
 
 <Tabs>

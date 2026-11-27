@@ -46,6 +46,27 @@ The counts explode, so problems ask for the answer **modulo** a prime such as `1
 (a + b) mod p == ((a mod p) + (b mod p)) mod p
 ```
 
+<ConceptWalkthrough
+  title="Count right-and-down routes around a block"
+  nodes={[
+    {id:"a",label:"(0,0)",x:17,y:16},
+    {id:"b",label:"(0,1)",x:50,y:16},
+    {id:"c",label:"(0,2)",x:83,y:16},
+    {id:"d",label:"(1,0)",x:17,y:47},
+    {id:"e",label:"(1,1)",x:50,y:47},
+    {id:"f",label:"(1,2)",x:83,y:47},
+    {id:"g",label:"(2,0)",x:17,y:78},
+    {id:"h",label:"(2,1)",x:50,y:78},
+    {id:"i",label:"(2,2)",x:83,y:78},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Seed a 3 × 3 grid",note:"The start at (0,0) has 1 route and the blocked cell (0,1) has 0. The top-right cell can only be reached from the blocked cell, so it also gets 0.",active:["a","b","c"],values:{a:"1",b:"0 (wall)",c:"0"},edges:[]},
+    {title:"Fill the middle row",note:"Cell (1,0) gets 1 route from above. Cell (1,1) gets 0 + 1 = 1 from above and left. Cell (1,2) likewise gets 0 + 1 = 1.",active:["d","e","f"],values:{a:"1",b:"0 (wall)",c:"0",d:"1",e:"1",f:"1"},edges:[{from:"a",to:"d"},{from:"b",to:"e"},{from:"d",to:"e"},{from:"c",to:"f"},{from:"e",to:"f"}]},
+    {title:"Add the two ways into the finish",note:"Cell (2,0) inherits 1 from above. Cell (2,1) gets 1 + 1 = 2. At (2,2), add 1 from above and 2 from the left for 3 total routes.",active:["f","g","h","i"],values:{a:"1",b:"0 (wall)",c:"0",d:"1",e:"1",f:"1",g:"1",h:"2",i:"3"},edges:[{from:"d",to:"g"},{from:"e",to:"h"},{from:"g",to:"h"},{from:"f",to:"i"},{from:"h",to:"i"}]},
+  ]}
+/>
+
 ## Code
 
 <Tabs>

@@ -57,6 +57,24 @@ For the stick problem `w(i, j) = p[j] - p[i]` holds with **equality** in the fir
 
 Fix the length `gap = j - i`. The ranges searched for the intervals of this length are `[opt[i][j-1], opt[i+1][j]]`. Consecutive intervals `[i, j]` and `[i+1, j+1]` share an endpoint of their ranges: the upper end of the first, `opt[i+1][j]`, is the lower end of the second, `opt[i+1][j]`. The ranges therefore **telescope**: their total length over one `gap` is at most `n` plus the number of intervals. With `n` values of `gap`, the total is `O(n^2)`.
 
+<ConceptWalkthrough
+  title="Use neighboring splits to cut a stick"
+  nodes={[
+    {id:"a",label:"[0,3]",x:17,y:16},
+    {id:"b",label:"[2,7]",x:50,y:16},
+    {id:"c",label:"[3,10]",x:83,y:16},
+    {id:"d",label:"[0,7]",x:26,y:47},
+    {id:"e",label:"[2,10]",x:74,y:47},
+    {id:"f",label:"[0,10]",x:50,y:78},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Start with single cuts",note:"The stick spans 0 to 10 and needs cuts at positions 2, 3 and 7. Pieces with no interior cut cost 0. Pieces [0,3], [2,7] and [3,10] each require one cut, so they cost their lengths 3, 5 and 7.",active:["a","b","c"],values:{a:"3 @ 2",b:"5 @ 3",c:"7 @ 7"},edges:[]},
+    {title:"Find the bounds for [0,10]",note:"For [0,7], cutting first at 2 costs 7 + 5 = 12, while 3 costs 7 + 3 = 10. For [2,10], cutting first at 3 costs 8 + 7 = 15, while 7 costs 8 + 5 = 13. The winning positions are 3 and 7.",active:["a","b","c","d","e"],values:{a:"3 @ 2",b:"5 @ 3",c:"7 @ 7",d:"10 @ 3",e:"13 @ 7"},edges:[{from:"a",to:"d"},{from:"b",to:"d"},{from:"b",to:"e"},{from:"c",to:"e"}]},
+    {title:"Search only from 3 to 7",note:"The neighboring optima bound the first cut of [0,10] to positions 3 through 7, so skip 2. Cutting at 3 costs 10 + 3 + 7 = 20 and cutting at 7 costs 10 + 10 + 0 = 20. Keep the smaller position, 3, at cost 20.",active:["d","e","f"],values:{a:"3 @ 2",b:"5 @ 3",c:"7 @ 7",d:"10 @ 3",e:"13 @ 7",f:"20 @ 3"},edges:[{from:"d",to:"f"},{from:"e",to:"f"}]},
+  ]}
+/>
+
 ### The stick problem in code
 
 Points `p[0] = 0 < p[1] < ... < p[k] < p[k+1] = L`. `dp[i][i+1] = 0`; for longer intervals `m` ranges over the interior points, clamped to `i + 1 .. j - 1`.

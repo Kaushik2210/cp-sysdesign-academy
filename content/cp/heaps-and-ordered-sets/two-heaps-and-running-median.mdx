@@ -96,6 +96,22 @@ for (long x : stream) {
 </Tab>
 </Tabs>
 
+<ConceptWalkthrough
+  title="Maintain the median of 8, 2, 5, 1"
+  nodes={[
+    {id:"low",label:"Low max",x:22,y:22},
+    {id:"high",label:"High min",x:78,y:22},
+    {id:"med",label:"Median",x:50,y:64},
+  ]}
+  edges={[{from:"low",to:"med"},{from:"high",to:"med"}]}
+  frames={[
+    {title:"Insert 8",note:"Put 8 in the empty lower max-heap. The upper min-heap is empty. The lower heap has one extra value, so its maximum, 8, is the median.",active:["low","med"],values:{low:"8",high:"empty",med:"8"}},
+    {title:"Insert 2",note:"Since 2 is at most 8, push it into the lower heap. Move 8 to the upper heap to balance the sizes. The lower heap now has 2 and the upper heap has 8, so the median is (2 + 8) / 2 = 5.",active:["low","high","med"],values:{low:"2",high:"8",med:"5"}},
+    {title:"Insert 5",note:"Push 5 into the upper heap because 5 > 2. Move the upper minimum, 5, to the lower heap. The lower heap contains 2 and 5, the upper heap contains 8, and the median is the lower maximum, 5.",active:["low","high","med"],values:{low:"5,2",high:"8",med:"5"}},
+    {title:"Insert 1",note:"Push 1 into the lower heap and move its maximum, 5, to the upper heap. The lower heap contains 1 and 2, and the upper heap contains 5 and 8. The median is (2 + 5) / 2 = 3.5.",active:["low","high","med"],values:{low:"2,1",high:"5,8",med:"3.5"}},
+  ]}
+/>
+
 ## What a sorted array costs, and a window of values
 
 Keeping a sorted array and inserting with binary search finds the position in `O(log n)`, but **inserting shifts every later element**: `O(n)` per number, `O(n^2)` overall. For `n = 20000` random numbers the shifts add up to about **99 million moves**, against roughly **900,000 steps** for the heaps (3 heap operations of about 15 steps per number).

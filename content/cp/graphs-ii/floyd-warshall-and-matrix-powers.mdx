@@ -282,6 +282,46 @@ What it shows:
 - The same loops with `or` and `and` give the transitive closure: **1,561 of 1,600** ordered pairs are reachable, matching exactly the finite distance entries.
 - The min-plus matrix power equals step-by-step DP for `k = 0, 1, 2, 3, 7, 12, 25`. For `k = 10^9` it needs only **43 matrix products** (about `2 log2 k`), where the DP would need a billion rounds.
 
+<ConceptWalkthrough
+  title="Shortest paths versus exact-length walks"
+  nodes={[
+    {id: "a", label: "A", x: 16, y: 42},
+    {id: "b", label: "B", x: 50, y: 21},
+    {id: "c", label: "C", x: 84, y: 42},
+    {id: "result", label: "A to C", x: 50, y: 72},
+  ]}
+  edges={[{from: "a", to: "b"}, {from: "b", to: "c"}, {from: "a", to: "c"}]}
+  frames={[
+    {
+      title: "Initialize direct distances",
+      note: "The graph has directed edges A→B of weight 4, B→C of weight 2 and A→C of weight 9, with no self-loops. Floyd–Warshall starts with dist[A][C] = 9 before allowing intermediate vertices.",
+      active: ["a", "c", "result"],
+      values: {b: "A→B: 4", c: "B→C: 2", result: "dist 9"},
+    },
+    {
+      title: "Allow B as an intermediate",
+      note: "Floyd–Warshall compares the direct A→C cost 9 with A→B→C at 4 + 2 = 6. It records dist[A][C] = 6, which is the final unrestricted shortest distance.",
+      active: ["a", "b", "c", "result"],
+      values: {b: "+4", c: "+2", result: "dist 6"},
+      edges: [{from: "a", to: "b"}, {from: "b", to: "c"}],
+    },
+    {
+      title: "Require two real edges",
+      note: "For exactly two edges, the min-plus square W²[A][C] takes the minimum of W[A][v] + W[v][C] over v = A, B, C. Only v = B gives two real edges, so W²[A][C] = 4 + 2 = 6.",
+      active: ["a", "b", "c", "result"],
+      values: {b: "+4", c: "+2", result: "2 edges: 6"},
+      edges: [{from: "a", to: "b"}, {from: "b", to: "c"}],
+    },
+    {
+      title: "Require three real edges",
+      note: "After taking A→C or A→B→C, the walk stops at C because C has no outgoing edge. No three-edge walk exists from A to C, so W³[A][C] = ∞. The zero diagonals used to initialize Floyd–Warshall must stay ∞ in W here because the graph has no self-loops.",
+      active: ["c", "result"],
+      values: {c: "outdegree 0", result: "3 edges: ∞"},
+      edges: [],
+    },
+  ]}
+/>
+
 ## Pitfalls
 
 1. **Wrong loop order.** `k` outermost. Putting `k` innermost computes something different and wrong.

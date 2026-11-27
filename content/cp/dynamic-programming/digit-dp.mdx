@@ -68,6 +68,23 @@ Count `x` in `[0, 234]` with digit sum `S = 5`. Digits of `N`: `2, 3, 4`.
 
 For `c = 0` in the first row, the six free suffixes are `05, 14, 23, 32, 41, 50`, which are the numbers 5, 14, 23, 32, 41 and 50 (all below 200, so they first differ from `234` at the hundreds digit). Every other row reads the same way. The brute-force check below confirms 15.
 
+<ConceptWalkthrough
+  title="Count digit sum 4 up to 123"
+  nodes={[
+    {id:"h",label:"Hundreds",x:19,y:25},
+    {id:"t",label:"Tens",x:50,y:25},
+    {id:"u",label:"Ones",x:81,y:25},
+    {id:"total",label:"Total",x:50,y:66},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Go below 123 at the hundreds digit",note:"Write each number from 0 to 123 with three digits. A leading 0 leaves two free digits summing to 4. The suffixes 04, 13, 22, 31 and 40 contribute 5.",active:["h","total"],values:{h:"+5",total:"5"},edges:[{from:"h",to:"total"}]},
+    {title:"Go below 123 at the tens digit",note:"Keep the leading 1. Tens digit 0 leaves sum 3 for the ones digit, giving 103. Tens digit 1 leaves sum 2, giving 112. These add 2 for a running total of 7.",active:["t","total"],values:{h:"+5",t:"+2",total:"7"},edges:[{from:"t",to:"total"}]},
+    {title:"Go below 123 at the ones digit",note:"Keep prefix 12, whose digit sum is 3. Of the smaller ones digits 0, 1 and 2, only 1 reaches digit sum 4, giving 121. Add 1 for a running total of 8.",active:["u","total"],values:{h:"+5",t:"+2",u:"+1",total:"8"},edges:[{from:"u",to:"total"}]},
+    {title:"Check the bound itself",note:"123 has digit sum 1 + 2 + 3 = 6. It adds 0, so exactly 8 numbers in the range 0 through 123 have digit sum 4.",active:["total"],values:{h:"+5",t:"+2",u:"+1",total:"8"},edges:[]},
+  ]}
+/>
+
 ## Code
 
 <Tabs>
