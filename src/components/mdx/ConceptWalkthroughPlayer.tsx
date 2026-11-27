@@ -30,7 +30,7 @@ export function ConceptWalkthroughPlayer({ title, nodes, edges, frames }: Walkth
   }
 
   return (
-    <section aria-labelledby={titleId} className="not-prose my-6 overflow-hidden rounded-lg border border-border bg-card">
+    <section aria-labelledby={titleId} className="not-prose my-6 scroll-mt-28 overflow-hidden rounded-lg border border-border bg-card">
       <div className="border-b border-border px-4 py-3 sm:px-5">
         <h3 id={titleId} className="text-lg font-semibold tracking-tight">{title}</h3>
       </div>
