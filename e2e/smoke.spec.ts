@@ -1003,6 +1003,18 @@ test("concept walkthrough plays, pauses and replays", async ({ page }) => {
   await expect(walkthrough.getByRole("status")).toContainText("Step 1 of 4");
 });
 
+test("concept walkthroughs make duplicate bounds and burst limits visible", async ({ page }) => {
+  for (const [path, title, firstResult] of [
+    ["/cp/sorting-and-searching/binary-search/", "Find both edges of a duplicate run", "Equality sends the searches apart"],
+    ["/sd/scalability/rate-limiting-algorithms/", "Compare limits across a window boundary", "Try a second burst"],
+  ]) {
+    await page.goto(path);
+    const walkthrough = page.getByRole("region", { name: title });
+    await walkthrough.getByRole("button", { name: "Next step" }).click();
+    await expect(walkthrough.getByRole("status")).toContainText(firstResult);
+  }
+});
+
 test.describe("matching and assignment lessons", () => {
   const lessons = [
     ["bipartite-matching", "Bipartite Matching with Augmenting Paths"],

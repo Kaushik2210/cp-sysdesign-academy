@@ -41,6 +41,16 @@ Store the timestamp of every accepted request. On a new request, drop timestamps
 
 *Exact*, but memory is `O(L)` per client and each request does cleanup work.
 
+<ConceptWalkthrough title="Compare limits across a window boundary" nodes={[
+  { id: "clock", label: "Time", x: 17, y: 45 },
+  { id: "fixed", label: "Fixed", x: 50, y: 45 },
+  { id: "rolling", label: "Rolling", x: 83, y: 45 },
+]} frames={[
+  { title: "Fill the limit near the boundary", note: "Allow three requests per 1,000 ms. Requests arrive at 990, 991 and 992 ms. Both algorithms accept all three. Predict what happens when the next request arrives at exactly 1,000 ms.", active: ["clock", "fixed", "rolling"], values: { clock: "992 ms", fixed: "3 accepted", rolling: "3 accepted" } },
+  { title: "Try a second burst", note: "Three more requests arrive at 1,000, 1,001 and 1,002 ms. The fixed counter starts a fresh bucket at 1,000 ms and accepts all three. The rolling log still holds the earlier three arrivals and rejects the new attempts.", active: ["fixed", "rolling"], values: { clock: "1,002 ms", fixed: "6 accepted", rolling: "3 accepted" } },
+  { title: "Release capacity when the oldest arrival expires", note: "Use the interval (now − 1,000, now]. At 1,990 ms the request at 990 ms falls out of the rolling window. Two retained requests remain, so the next request can use the freed slot.", active: ["clock", "rolling"], values: { clock: "1,990 ms", fixed: "bucket 1", rolling: "slot freed" } },
+]} />
+
 ### 3. Sliding window counter
 
 Keep only two counters: current window and previous window. Estimate the rolling count as `prev * (1 - elapsed/W) + cur`, where `elapsed` is how far into the current window you are. It assumes requests in the previous window were evenly spread, so it is an approximation, but a very good one (Cloudflare reported it to be very accurate on real traffic) with `O(1)` memory.
