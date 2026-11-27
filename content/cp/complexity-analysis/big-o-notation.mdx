@@ -111,6 +111,23 @@ def solve(a):                 # a has n elements
 
 The double loop does `n + (n-1) + ... + 1 = n(n+1)/2 = Theta(n^2)` steps, the sort `Theta(n log n)`. Total `Theta(n^2)`: the larger term dominates. The space is `O(1)` extra apart from whatever `sort` uses internally.
 
+<ConceptWalkthrough
+  title="Count the inner loop for four elements"
+  nodes={[
+    { id: "i0", label: "i = 0", x: 24, y: 28 },
+    { id: "i1", label: "i = 1", x: 76, y: 28 },
+    { id: "i2", label: "i = 2", x: 24, y: 68 },
+    { id: "i3", label: "i = 3", x: 76, y: 68 },
+  ]}
+  frames={[
+    { title: "Start at index 0", note: "For n = 4, the inner loop starts at j = i and stops before j = 4. With i = 0, it visits indices 0, 1, 2, and 3. Count 4 executions of the inner body.", active: ["i0"], values: { i0: "4 visits" } },
+    { title: "Start at index 1", note: "With i = 1, the inner loop visits indices 1, 2, and 3. The starting index moved right by one, so this pass adds 3 visits and brings the running total to 7.", active: ["i1"], values: { i0: "4 visits", i1: "3 visits" } },
+    { title: "Start at index 2", note: "With i = 2, only indices 2 and 3 are in range. Add 2 visits to the previous 7 for a running total of 9.", active: ["i2"], values: { i0: "4 visits", i1: "3 visits", i2: "2 visits" } },
+    { title: "Start at index 3", note: "With i = 3, only index 3 is in range. Add 1 visit to reach 10 total. Because the inner bound depends on i, sum the pass lengths: 4 + 3 + 2 + 1 = 10.", active: ["i3"], values: { i0: "4 visits", i1: "3 visits", i2: "2 visits", i3: "1 visit" } },
+    { title: "Turn the sum into a tight bound", note: "For n elements, the lengths are n, n - 1, down to 1. Pair the sum with a copy in reverse order to get n pairs of n + 1, then divide by 2. The inner body runs n(n + 1)/2 times, which lies between n^2/2 and n^2 for n >= 1. That gives Theta(n^2).", active: ["i0", "i1", "i2", "i3"], values: { i0: "4 visits", i1: "3 visits", i2: "2 visits", i3: "1 visit" } },
+  ]}
+/>
+
 ## Beyond a single `n`: what is the input size?
 
 Sometimes `n` is a *value*, not a count of items. Trial division on a number `n` takes `O(sqrt n)` divisions, which is exponential in the number of bits of `n` (`b = log2 n` bits gives `2^(b/2)`). Euclid's gcd runs in `O(log n)`, i.e. linear in the bit length. When the statement says `n <= 10^12`, decide whether `n` is a count (you can only afford a few operations per unit) or a value (a loop to `sqrt n` or a logarithmic algorithm).

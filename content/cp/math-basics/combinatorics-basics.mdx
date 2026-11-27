@@ -66,6 +66,41 @@ for (let i = 0; i <= N; i++) {
 console.log(C[5][2], C[10][5], C[10].reduce((a, b) => a + b, 0));
 ` }} />
 
+<ConceptWalkthrough
+  title="Count pairs from six items modulo 8"
+  nodes={[
+    {"id":"withSixth","label":"Use item 6","x":25,"y":25},
+    {"id":"withoutSixth","label":"Skip item 6","x":75,"y":25},
+    {"id":"total","label":"Total mod 8","x":50,"y":69},
+  ]}
+  frames={[
+    {
+      title: "Split the pairs into two groups",
+      note: "Choose two distinct items from six, with order irrelevant. Every pair either includes item 6 or omits it. These disjoint groups can be counted separately and added.",
+      active: ["withSixth","withoutSixth"],
+    },
+    {
+      title: "Count pairs that include item 6",
+      note: "Item 6 fills one spot, so choose one of the other five items for the second spot. This group contributes C(5, 1) = 5, which is already in the range 0 through 7.",
+      active: ["withSixth"],
+      values: {"withSixth":"5"},
+    },
+    {
+      title: "Count pairs that omit item 6",
+      note: "Choose both items from the first five. The exact count is C(5, 2) = 5 × 4 / 2 = 10, since each unordered pair has two orderings. The corresponding Pascal entry modulo 8 is 2.",
+      active: ["withoutSixth"],
+      values: {"withSixth":"5","withoutSixth":"2"},
+    },
+    {
+      title: "Add the two residues",
+      note: "Pascal's recurrence gives C(6, 2) = C(5, 1) + C(5, 2). Add the residues and reduce: (5 + 2) mod 8 = 7. The exact count is 15, which also leaves remainder 7. The recurrence uses only addition, so it works with the composite modulus 8.",
+      active: ["withSixth","withoutSixth","total"],
+      values: {"withSixth":"5","withoutSixth":"2","total":"7"},
+      edges: [{"from":"withSixth","to":"total"},{"from":"withoutSixth","to":"total"}],
+    },
+  ]}
+/>
+
 ## Method 2: factorials and inverses, O(n + log p)
 
 For huge `n` (up to `10^6` or `10^7`), precompute `fact[i] = i! mod p` once. Then

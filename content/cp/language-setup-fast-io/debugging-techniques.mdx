@@ -155,6 +155,22 @@ res = a[k:] + a[:k]          # for k > n: a[k:] is empty, a[:k] is the whole arr
 
 For `a = [1,2,3]`, `k = 4` this gives `[1,2,3]`, but the correct answer (rotate by `4 mod 3 = 1`) is `[2,3,1]`. The shrinking step finds this: with `n = 3` and `k = 4` the output is already wrong. The hypothesis "`k` is not reduced" is then confirmed by `print(k, n)`, and the fix is a single line `k %= n`. The key habit: **always test `k = 0`, `k = n`, `k = n + 1`**.
 
+<ConceptWalkthrough
+  title="Shrink a failing left rotation"
+  nodes={[
+    { id: "input", label: "Array", x: 50, y: 24 },
+    { id: "shift", label: "Shift", x: 16, y: 70 },
+    { id: "actual", label: "Actual", x: 48, y: 70 },
+    { id: "expected", label: "Expected", x: 82, y: 70 },
+  ]}
+  frames={[
+    { title: "Reproduce the wrong answer", note: "Rotate [8, 3, 6, 1] left by 5 using a[k:] + a[:k]. The slices are empty and the whole array, so the program returns [8, 3, 6, 1]. Four moves return to the start and the fifth moves 8 to the end, so expect [3, 6, 1, 8].", active: ["input", "shift", "actual", "expected"], values: { input: "[8,3,6,1]", shift: "5", actual: "[8,3,6,1]", expected: "[3,6,1,8]" } },
+    { title: "Keep the condition that triggers the bug", note: "Shorten the array to [8, 3] and set k = 3 to keep the shift one larger than n. The code still returns [8, 3], while three moves on two elements should produce [3, 8]. A one-element array always looks the same after rotation.", active: ["input", "shift", "actual", "expected"], values: { input: "[8,3]", shift: "3", actual: "[8,3]", expected: "[3,8]" } },
+    { title: "Check the shift before slicing", note: "On [8, 3], inspect k immediately before slicing. The raw shift is 3, but the split point for a left rotation must be in [0, 2). Reduce it to 3 % 2 = 1. Now a[1:] is [3] and a[:1] is [8], giving the expected [3, 8].", active: ["shift", "actual"], values: { input: "[8,3]", shift: "3 → 1", actual: "[3,8]", expected: "[3,8]" }, edges: [{ from: "shift", to: "actual" }] },
+    { title: "Re-run the failure and the boundary", note: "On the original array, 5 % 4 = 1 gives [3, 6, 1, 8], so the original failure is fixed too. Then try k = 4 on that same array. The reduced shift is 0, and the expected and actual outputs are both [8, 3, 6, 1].", active: ["shift", "actual", "expected"], values: { input: "[8,3,6,1]", shift: "4 → 0", actual: "[8,3,6,1]", expected: "[8,3,6,1]" }, edges: [{ from: "actual", to: "expected" }] },
+  ]}
+/>
+
 ## Practice
 
 <Problem id="m02-rotate-left" />

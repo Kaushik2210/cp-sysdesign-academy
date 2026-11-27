@@ -68,6 +68,23 @@ console.log(totalCopies(n, c => c * 2), totalCopies(n, c => c + 10));
 Any constant factor `k > 1` gives `O(1)` amortized. Real libraries differ: GCC's `std::vector` doubles, MSVC and Java's `ArrayList` grow by about 1.5, CPython lists by about 1.125 plus a constant. Smaller factors waste less memory but copy more often.
 </Callout>
 
+<ConceptWalkthrough
+  title="Five appends into a doubling array"
+  nodes={[
+    { id: "size", label: "Size", x: 24, y: 28 },
+    { id: "capacity", label: "Capacity", x: 76, y: 28 },
+    { id: "copies", label: "Total copies", x: 24, y: 68 },
+    { id: "writes", label: "New writes", x: 76, y: 68 },
+  ]}
+  frames={[
+    { title: "Append A into the empty array", note: "The array starts empty with capacity 1. A fits in its only slot, so the first append costs one new-element write and zero copies.", active: ["size", "writes"], values: { size: "1", capacity: "1", copies: "0", writes: "1" } },
+    { title: "Append B and double to 2", note: "Size equals capacity, so allocate 2 slots. Copy A and write B. This append costs 2 element operations, and the running total is 1 copy plus 2 new-element writes.", active: ["capacity", "copies"], values: { size: "2", capacity: "2", copies: "1", writes: "2" } },
+    { title: "Append C and double to 4", note: "The 2 slots are full. Allocate 4 slots, copy A and B, then write C. This append costs 3 element operations, bringing the copy count to 1 + 2 = 3.", active: ["capacity", "copies"], values: { size: "3", capacity: "4", copies: "3", writes: "3" } },
+    { title: "Append D into the spare slot", note: "Size 3 is below capacity 4, so write D into the last slot without resizing. This append costs 1 element operation, and the copy count stays at 3.", active: ["size", "writes"], values: { size: "4", capacity: "4", copies: "3", writes: "4" } },
+    { title: "Append E and total the work", note: "All 4 slots are full, so double to 8, copy 4 elements, and write E. This append costs 5 element operations. Across all five appends there were 1 + 2 + 4 = 7 copies and 5 new-element writes, or 12/5 = 2.4 element operations per append over this sequence.", active: ["capacity", "copies", "writes"], values: { size: "5", capacity: "8", copies: "7", writes: "5" } },
+  ]}
+/>
+
 ## Example 2: two pointers
 
 Longest subarray of positive numbers with sum at most `K`:

@@ -50,6 +50,23 @@ Step 4 is a short *argument*, not a proof in the formal sense: "the best segment
 
 because a segment ending at `j` is either just `a[j]`, or a segment ending at `j-1` extended by `a[j]`. The answer is `max_j cur(j)`.
 
+<ConceptWalkthrough
+  title="Decide when to restart a segment"
+  nodes={[
+    { id: "item", label: "a[j]", x: 18, y: 49 },
+    { id: "ending", label: "cur", x: 50, y: 49 },
+    { id: "best", label: "best", x: 82, y: 49 },
+  ]}
+  edges={[{ from: "item", to: "ending" }, { from: "ending", to: "best" }]}
+  frames={[
+    { title: "Start with the first element", note: "Scan [-4, 3, -2, 5, -6]. At index 0 the only non-empty segment is [-4], so cur = -4 and best = -4. Here cur tracks segments ending at the current index, while best tracks segments ending anywhere so far.", active: ["item", "ending", "best"], values: { item: "-4", ending: "-4", best: "-4" } },
+    { title: "Restart at 3", note: "At index 1, extending gives -4 + 3 = -1. Starting at 3 gives 3, so discard the negative prefix and set cur = 3. This also beats the previous best of -4.", active: ["item", "ending", "best"], values: { item: "3", ending: "3", best: "3" } },
+    { title: "Keep a segment through a dip", note: "At index 2, extending [3] gives 3 + (-2) = 1. Starting at -2 gives -2, so keep [3, -2] as the best segment ending here. The overall best stays at 3.", active: ["item", "ending"], values: { item: "-2", ending: "1", best: "3" } },
+    { title: "Turn the dip into a new best", note: "At index 3, extending gives 1 + 5 = 6, which beats starting at 5. The segment [3, -2, 5] now gives cur = 6 and improves the overall best from 3 to 6.", active: ["item", "ending", "best"], values: { item: "5", ending: "6", best: "6" } },
+    { title: "Return the best across all ends", note: "At index 4, extending gives 6 + (-6) = 0, which beats starting at -6. The scan ends with cur = 0 and best = 6, so return 6. Brute force also gets 6 after checking all 15 non-empty segments. Kadane reaches the answer in five element visits.", active: ["ending", "best"], values: { item: "-6", ending: "0", best: "6" } },
+  ]}
+/>
+
 <CodeRunner language="python" code={`import random
 
 def brute(a):

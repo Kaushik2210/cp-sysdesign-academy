@@ -142,6 +142,53 @@ console.log(String(cappedLcm(10n ** 9n, 10n ** 9n - 1n)));
 console.log(String(cappedLcm(10n ** 9n + 1n, 10n ** 9n)));
 ` }} />
 
+<ConceptWalkthrough
+  title="Find the GCD and LCM of 99 and 63"
+  nodes={[
+    {"id":"a","label":"a","x":17,"y":25},
+    {"id":"b","label":"b","x":50,"y":25},
+    {"id":"remainder","label":"a mod b","x":82,"y":25},
+    {"id":"gcd","label":"GCD","x":30,"y":68},
+    {"id":"lcm","label":"LCM","x":70,"y":68},
+  ]}
+  frames={[
+    {
+      title: "Reduce the pair (99, 63)",
+      note: "99 = 1 × 63 + 36. Replace (99, 63) with (63, 36) because the two pairs have the same common divisors.",
+      active: ["a","b","remainder"],
+      values: {"a":"99","b":"63","remainder":"36"},
+      edges: [{"from":"b","to":"remainder"}],
+    },
+    {
+      title: "Reduce the pair (63, 36)",
+      note: "63 = 1 × 36 + 27. The remainder is positive, so continue with (36, 27).",
+      active: ["a","b","remainder"],
+      values: {"a":"63","b":"36","remainder":"27"},
+      edges: [{"from":"b","to":"remainder"}],
+    },
+    {
+      title: "Reduce the pair (36, 27)",
+      note: "36 = 1 × 27 + 9. Replace the pair with (27, 9).",
+      active: ["a","b","remainder"],
+      values: {"a":"36","b":"27","remainder":"9"},
+      edges: [{"from":"b","to":"remainder"}],
+    },
+    {
+      title: "Stop at remainder zero",
+      note: "27 = 3 × 9 + 0. The next pair would be (9, 0), so the last nonzero divisor, 9, is the GCD.",
+      active: ["b","remainder","gcd"],
+      values: {"a":"27","b":"9","remainder":"0","gcd":"9"},
+    },
+    {
+      title: "Divide first to get the LCM",
+      note: "Use the original inputs and the GCD of 9. Divide 99 by 9 to get 11, then multiply by 63 to get 693. This order avoids forming the larger product 99 × 63 before division.",
+      active: ["gcd","lcm"],
+      values: {"a":"99","b":"63","gcd":"9","lcm":"693"},
+      edges: [{"from":"gcd","to":"lcm"}],
+    },
+  ]}
+/>
+
 ### GCD / LCM of many numbers
 
 Both operations are associative, so fold: `g = gcd(g, a[i])` for the gcd. The running gcd only shrinks and stays a divisor of the first element, so it cannot overflow. The running **LCM** can blow up quickly (the LCM of `1..43` already exceeds `2^63`), so decide early whether you need it exactly, capped, or modulo a prime. Modulo a prime you cannot just reduce the running LCM: you would need prime factorisations or inverses.

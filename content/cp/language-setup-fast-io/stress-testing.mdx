@@ -152,6 +152,23 @@ for i in $(seq 1 1000); do
 done
 ```
 
+<ConceptWalkthrough
+  title="Replay a seeded Nearest Twin mismatch"
+  nodes={[
+    { id: "input", label: "Input", x: 50, y: 23 },
+    { id: "brute", label: "Brute", x: 22, y: 49 },
+    { id: "fast", label: "Fast", x: 78, y: 49 },
+    { id: "check", label: "Check", x: 50, y: 75 },
+  ]}
+  frames={[
+    { title: "Generate one shared input", note: "Run the file-based Python generator with seed 3634. It draws n = 5 and then [3, 1, 2, 3, 3] from the value range 1 through 4. Feed that exact array to both solvers. The repeated 3s make it possible for two consecutive sightings to be closer than the first two sightings.", active: ["input", "brute", "fast"], values: { input: "3 1 2 3 3" }, edges: [{ from: "input", to: "brute" }, { from: "input", to: "fast" }] },
+    { title: "Enumerate equal pairs", note: "Using zero-based indices, the brute force finds equal pairs (0, 3), (0, 4), and (3, 4). Their distances are 3, 4, and 1. The smallest is 1, which becomes the expected output.", active: ["brute"], values: { input: "3 1 2 3 3", brute: "1" } },
+    { title: "Trace the stale index", note: "The buggy solver records 3 at index 0. At index 3 it computes 3 - 0 = 3 and leaves the stored index at 0. At index 4 it computes 4 - 0 = 4, so its best stays at 3 and it never considers the distance from index 3 to index 4.", active: ["fast"], values: { input: "3 1 2 3 3", brute: "1", fast: "3" } },
+    { title: "Stop and save the failure", note: "The checker compares the two integer answers, 1 and 3. They differ, so stop and save seed 3634, the array [3, 1, 2, 3, 3], and both outputs. That gives you the same failing case to re-run after the fix.", active: ["brute", "fast", "check"], values: { input: "3 1 2 3 3", brute: "1", fast: "3", check: "Mismatch" }, edges: [{ from: "brute", to: "check" }, { from: "fast", to: "check" }] },
+    { title: "Update the latest sighting and replay", note: "Store the current index after each lookup, even when the value has appeared before. After processing index 3, the stored index for 3 is now 3. At index 4 the fixed solver computes 4 - 3 = 1, and on the saved input both solvers return 1.", active: ["brute", "fast", "check"], values: { input: "3 1 2 3 3", brute: "1", fast: "1", check: "Match" }, edges: [{ from: "brute", to: "check" }, { from: "fast", to: "check" }] },
+  ]}
+/>
+
 <Callout type="tip" title="Compare with sanitizers on">
 Compile the solution with `-fsanitize=address,undefined` while stress testing, so crashes and overflows are caught in addition to wrong answers.
 </Callout>

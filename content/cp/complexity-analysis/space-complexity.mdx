@@ -126,6 +126,23 @@ Even better, a single row can be updated in place when you process columns in th
 
 <Complexity time="O(n * m)" space="O(min(n, m))" note="the same time as the full table but a factor of n smaller memory" />
 
+<ConceptWalkthrough
+  title="Count paths through a blocked grid with one row"
+  nodes={[
+    { id: "c1", label: "Col 1", x: 17, y: 44 },
+    { id: "c2", label: "Col 2", x: 39, y: 44 },
+    { id: "c3", label: "Col 3", x: 61, y: 44 },
+    { id: "c4", label: "Col 4", x: 83, y: 44 },
+  ]}
+  frames={[
+    { title: "Seed the starting cell", note: "Count paths moving only right or down on a 3-by-4 grid with just row 2, column 2 blocked. Before scanning the first row, seed column 1 with 1 for the start and set the other entries to 0.", active: ["c1"], values: { c1: "1", c2: "0", c3: "0", c4: "0" } },
+    { title: "Scan the open top row", note: "Column 1 keeps its seed of 1. In columns 2 through 4, the old entry contributes 0 and the updated entry to the left contributes 1. Processing left to right gives [1, 1, 1, 1].", active: ["c1", "c2", "c3", "c4"], values: { c1: "1", c2: "1", c3: "1", c4: "1" } },
+    { title: "Reset the blocked cell", note: "On row 2, column 1 keeps the 1 path from above. Column 2 is blocked, so overwrite its old 1 with 0. Columns 3 and 4 still hold the counts from row 1.", active: ["c2"], values: { c1: "1", c2: "0", c3: "1", c4: "1" } },
+    { title: "Use the old value above and the new value on the left", note: "On row 2, column 3 gets 1 from above plus 0 from the blocked cell to its left, for 1. Column 4 then gets 1 from above plus the updated 1 from column 3, for 2. Row 2 ends as [1, 0, 1, 2].", active: ["c3", "c4"], values: { c1: "1", c2: "0", c3: "1", c4: "2" }, edges: [{ from: "c2", to: "c3" }, { from: "c3", to: "c4" }] },
+    { title: "Finish with four paths", note: "Row 3 is open. Column 1 keeps 1, then the next entries become 0 + 1 = 1, 1 + 1 = 2, and 2 + 2 = 4. The bottom-right answer is 4. The DP visits all 12 cells and stores 4 counts instead of a 12-entry table, so for height h and width w its time is O(h * w) and its auxiliary DP space is O(w).", active: ["c4"], values: { c1: "1", c2: "1", c3: "2", c4: "4" } },
+  ]}
+/>
+
 ## Techniques for saving memory
 
 1. **Rolling arrays.** If layer `i` depends only on layer `i - 1`, keep two (or one) layers.

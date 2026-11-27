@@ -93,6 +93,22 @@ for (const [name, c] of costs) console.log(name.padEnd(12), c.toExponential(2), 
 
 Try `n = 5000`, `n = 20`, `n = 100000` by editing the input.
 
+<ConceptWalkthrough
+  title="Budget repeated range-sum queries"
+  nodes={[
+    { id: "budget", label: "Budget", x: 24, y: 28 },
+    { id: "scan", label: "Rescan", x: 76, y: 28 },
+    { id: "build", label: "Build", x: 24, y: 68 },
+    { id: "query", label: "Queries", x: 76, y: 68 },
+  ]}
+  frames={[
+    { title: "Read both limits", note: "A fixed array can have 100,000 numbers and there can be 100,000 range-sum queries. For this one-second thought experiment, use the lesson's rough budget of 100 million simple operations.", active: ["budget"], values: { budget: "100M steps" } },
+    { title: "Reject a scan per query", note: "Every query may ask for the entire array. Starting each sum from zero then takes 100,000 additions per query, for 10 billion additions across 100,000 queries. The additions alone are 100 times the rough budget.", active: ["budget", "scan"], values: { budget: "100M steps", scan: "10B adds" } },
+    { title: "Build prefix sums once", note: "Because the array never changes, set P[0] = 0 and let P[k] hold the sum of the first k elements. Build P[1] through P[100000] in one pass, adding the next array element each time for 100,000 additions.", active: ["build"], values: { budget: "100M steps", scan: "10B adds", build: "100K adds" } },
+    { title: "Choose preprocessing plus constant-time queries", note: "For a 1-based inclusive range [L, R], subtract P[L - 1] from P[R] to remove the sum before L. All 100,000 queries take 100,000 subtractions, for 200,000 arithmetic operations including the build. The estimate leaves room for loop overhead and I/O.", active: ["build", "query"], values: { budget: "100M steps", scan: "10B adds", build: "100K adds", query: "100K subs" } },
+  ]}
+/>
+
 ## Beyond the headline `n`
 
 1. **Multiple test cases.** If the statement says "sum of `n` over all tests is at most `2 * 10^5`", the total work is bounded by the sum, so `O(n log n)` per test is fine. If instead there are `10^4` tests each with `n = 2 * 10^5` there is no such guarantee and you must read the limits carefully.

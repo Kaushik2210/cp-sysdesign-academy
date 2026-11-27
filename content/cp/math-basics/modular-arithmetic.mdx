@@ -63,6 +63,45 @@ const a = 3, b = 10;
 console.log(((a - b) % m + m) % m); // 1000000000
 ` }} />
 
+<ConceptWalkthrough
+  title="Normalize a negative remainder modulo 7"
+  nodes={[
+    {"id":"difference","label":"3 − 15","x":23,"y":25},
+    {"id":"signed","label":"JS % 7","x":77,"y":25},
+    {"id":"residue","label":"Residue","x":23,"y":68},
+    {"id":"answer","label":"× 4 mod 7","x":77,"y":68},
+  ]}
+  frames={[
+    {
+      title: "Subtract before taking the remainder",
+      note: "Find ((3 − 15) × 4) mod 7. First compute 3 − 15 = −12.",
+      active: ["difference"],
+      values: {"difference":"−12"},
+    },
+    {
+      title: "Read the signed remainder",
+      note: "JavaScript truncates −12 / 7 toward zero, giving quotient −1. Since −12 = (−1) × 7 − 5, JavaScript gives −12 % 7 = −5.",
+      active: ["difference","signed"],
+      values: {"difference":"−12","signed":"−5"},
+      edges: [{"from":"difference","to":"signed"}],
+    },
+    {
+      title: "Shift into the range 0 through 6",
+      note: "Add one copy of 7 to the signed remainder and reduce again. (−5 + 7) % 7 = 2, so 2 is the canonical residue of −12.",
+      active: ["signed","residue"],
+      values: {"signed":"−5","residue":"2"},
+      edges: [{"from":"signed","to":"residue"}],
+    },
+    {
+      title: "Multiply using the normalized residue",
+      note: "Use 2 in place of −12 because their difference is a multiple of 7. Then 2 × 4 = 8 and 8 mod 7 = 1. The original product is −48 = (−7) × 7 + 1, which gives the same residue.",
+      active: ["residue","answer"],
+      values: {"residue":"2","answer":"1"},
+      edges: [{"from":"residue","to":"answer"}],
+    },
+  ]}
+/>
+
 ## Why 1 000 000 007?
 
 Almost every "answer modulo" problem uses `10^9 + 7` (or `998 244 353`). The reasons are practical:

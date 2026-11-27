@@ -95,6 +95,22 @@ for (const k of [10, 15, 20]) {
 }
 ` }} />
 
+<ConceptWalkthrough
+  title="Track a recursion tree whose work halves at each level"
+  nodes={[
+    { id: "root", label: "1 call", x: 24, y: 28 },
+    { id: "two", label: "2 calls", x: 76, y: 28 },
+    { id: "four", label: "4 calls", x: 24, y: 68 },
+    { id: "eight", label: "8 leaves", x: 76, y: 68 },
+  ]}
+  frames={[
+    { title: "Count the root's local work", note: "Take T(n) = 2T(n/2) + n^2 with T(1) = 1 and n a power of two. At n = 8, the root does 8^2 = 64 units of local work before counting either recursive call.", active: ["root"], values: { root: "64 units" } },
+    { title: "Count both size-4 calls", note: "The size-8 call creates two size-4 calls. Each contributes 4^2 = 16 units of local work, so this level contributes 32. Doubling the call count and quartering the work per call halves the level total.", active: ["two"], values: { root: "64 units", two: "32 units" } },
+    { title: "Count the size-2 calls and size-1 leaves", note: "The two size-4 calls create four size-2 calls, which contribute 4 times 2^2 = 16 units. Those calls create eight size-1 leaves. Each leaf costs 1 and stops, so the last level contributes 8 units.", active: ["four", "eight"], values: { root: "64 units", two: "32 units", four: "16 units", eight: "8 units" } },
+    { title: "Use the geometric sum", note: "At n = 8, the exact total is 64 + 32 + 16 + 8 = 120. In general the root alone costs n^2 and the successive levels each cost half as much, so the total stays below 2n^2. The tight bound is Theta(n^2), matching Master Theorem case 3: n^2 grows faster than n, and 2(n/2)^2 = n^2/2 satisfies regularity.", active: ["root", "two", "four", "eight"], values: { root: "64 units", two: "32 units", four: "16 units", eight: "8 units" } },
+  ]}
+/>
+
 ## Recurrences the master theorem does not cover
 
 Subtracting a constant instead of dividing by one:

@@ -77,6 +77,22 @@ What each piece buys you:
 | `cin.tie(nullptr)` | Avoids a flush on every read |
 | `'\n'` not `endl` | `endl` flushes the buffer every line, which is slow for large output |
 
+<ConceptWalkthrough
+  title="Follow the tokens across a line break"
+  nodes={[
+    { id: "read", label: "cin", x: 19, y: 35 },
+    { id: "left", label: "Left", x: 50, y: 35 },
+    { id: "sum", label: "Sum", x: 81, y: 35 },
+    { id: "out", label: "cout", x: 81, y: 72 },
+  ]}
+  frames={[
+    { title: "Read the count", note: "The input has three lines: 4, then 12 -5, then 9 4. With the template's single-test setting, the first token is n = 4. That count tells us to read four more integers. Start the sum at 0.", active: ["read", "left"], values: { read: "4", left: "4", sum: "0" }, edges: [{ from: "read", to: "left" }] },
+    { title: "Consume the first two values", note: "Using the read-and-add loop below, extract 12 and -5. After two of the four values, the sum is 12 + (-5) = 7 and two values remain.", active: ["read", "left", "sum"], values: { read: "12 -5", left: "2", sum: "7" }, edges: [{ from: "read", to: "left" }, { from: "left", to: "sum" }] },
+    { title: "Continue on the next line", note: "Integer extraction with cin skips whitespace, so the newline before 9 acts like a space. Read 9 and then 4 to get 7 + 9 + 4 = 20. The loop stops because it has consumed all four values.", active: ["read", "left", "sum"], values: { read: "9 4", left: "0", sum: "20" }, edges: [{ from: "read", to: "left" }, { from: "left", to: "sum" }] },
+    { title: "Write one answer line", note: "Send 20 followed by a newline to cout. For this batch input, the judge only needs the completed output. The newline ends the answer line without requesting a flush, and normal program termination flushes cout.", active: ["sum", "out"], values: { left: "0", sum: "20", out: "20" }, edges: [{ from: "sum", to: "out" }] },
+  ]}
+/>
+
 <Callout type="pitfall" title="After sync_with_stdio(false), never mix C and C++ I/O">
 Do not use `scanf`/`printf` together with `cin`/`cout` in one program once synchronisation is off; the order of output can become scrambled. Also, `cout << flush` or `endl` is needed only for **interactive** problems.
 </Callout>
