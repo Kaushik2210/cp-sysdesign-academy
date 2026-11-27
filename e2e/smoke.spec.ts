@@ -1015,6 +1015,40 @@ test("concept walkthroughs make duplicate bounds and burst limits visible", asyn
   }
 });
 
+test("concept walkthroughs explain the remaining examples on three lessons", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const lessons = [
+    ["/cp/sorting-and-searching/binary-search/", [
+      ["Keep the first-true boundary in bounds", "A one-element probe still makes progress"],
+      ["Search an integer answer with a feasibility test", "Certify minimality"],
+    ]],
+    ["/sd/scalability/rate-limiting-algorithms/", [
+      ["Estimate the count when older traffic clusters", "Compare with the exact log"],
+      ["Drain a bounded queue at a fixed pace", "Pay waiting time for a steady rate"],
+      ["Calculate retry time for a weighted request", "Shared quota can move the boundary"],
+    ]],
+    ["/sd/caching/invalidation-and-stampedes/", [
+      ["Follow an authoritative cache version", "Read and fill the versioned key"],
+      ["Reject a stale cache fill with a lease", "Reject the late version-1 fill"],
+      ["Spread reads across copies of one hot key", "Budget for invalidation and node loss"],
+    ]],
+  ] as const;
+
+  for (const [path, walkthroughs] of lessons) {
+    await page.goto(path);
+    for (const [title, finalStep] of walkthroughs) {
+      const walkthrough = page.getByRole("region", { name: title, exact: true });
+      const next = walkthrough.getByRole("button", { name: "Next step", exact: true });
+      await next.click();
+      await next.click();
+      await expect(walkthrough.getByRole("status")).toContainText(finalStep);
+      await expect(next).toBeDisabled();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(375);
+  }
+});
+
 test.describe("matching and assignment lessons", () => {
   const lessons = [
     ["bipartite-matching", "Bipartite Matching with Augmenting Paths"],

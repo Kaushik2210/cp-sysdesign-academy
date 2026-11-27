@@ -35,6 +35,16 @@ A well-known joke says there are two hard problems in computer science: naming t
 
 **5. Leases and tokens** (Facebook's memcache design): on a miss the cache hands one client a lease token; only that client may fill the key; if an invalidation arrives meanwhile, the token is invalidated so the stale fill is rejected. This addresses both the stale-set race and herd protection.
 
+<ConceptWalkthrough title="Follow an authoritative cache version" nodes={[
+  {"id":"n0","label":"Version","x":17,"y":46},
+  {"id":"n1","label":"Old key","x":50,"y":46},
+  {"id":"n2","label":"New key","x":83,"y":46},
+]} frames={[
+  {"title":"Read the current version","note":"The authoritative version for profile 42 is 17. Readers use profile:42:v17 and see version-17 content.","active":["n0","n1"],"values":{"n0":"17","n1":"v17","n2":"empty"}},
+  {"title":"Publish the new version","note":"The writer commits profile version 18 together with its authoritative version pointer. The version-17 cache entry can still exist.","active":["n0","n2"],"values":{"n0":"18","n1":"v17","n2":"miss"}},
+  {"title":"Read and fill the versioned key","note":"A reader that sees pointer 18 uses profile:42:v18 and fills it from the matching version. The old entry can expire. A reader with an outdated pointer can still see old content.","active":["n0","n2"],"values":{"n0":"18","n1":"expires","n2":"v18"}},
+]} />
+
 ### The stale-fill race
 
 Reader R misses and reads the old value `v1` from the database. Writer W commits `v2` and deletes the cache key. R then sets the cache to `v1`. The cache now holds stale data until TTL. Fixes: short TTL, leases, or versioned fills (only set if the version is not older than what the cache already knows).
@@ -50,6 +60,16 @@ Reader R misses and reads the old value `v1` from the database. Writer W commits
   W->>C: DELETE k
   R->>C: SET k = v1 (stale!)
   Note over C: Cache holds v1 until TTL`} />
+
+<ConceptWalkthrough title="Reject a stale cache fill with a lease" nodes={[
+  {"id":"n0","label":"Reader","x":17,"y":46},
+  {"id":"n1","label":"Cache","x":50,"y":46},
+  {"id":"n2","label":"Source","x":83,"y":46},
+]} frames={[
+  {"title":"Give one reader a lease","note":"The cache misses and issues lease L7 to the reader. The reader obtains v1 from the source. Predict what happens if the value changes before the reader fills.","active":["n0","n1"],"values":{"n0":"holds L7","n1":"lease L7","n2":"v1"}},
+  {"title":"Invalidate the key and its lease","note":"The writer commits v2 and its invalidation reaches the cache. The cache removes the value and revokes L7 even though the value slot was empty.","active":["n1","n2"],"values":{"n0":"holds L7","n1":"L7 revoked","n2":"v2"}},
+  {"title":"Reject the late version-1 fill","note":"The reader submits v1 with L7. The cache rejects the fill because the lease has been revoked. A new lease holder can fetch and cache v2.","active":["n0","n1"],"values":{"n0":"v1 + L7","n1":"rejected","n2":"v2"}},
+]} />
 
 ## Consistency levels you can offer
 
@@ -142,6 +162,16 @@ Mitigations:
   { id: "db", label: "Database", x: 590, y: 150, role: "Source of truth; sees at most one rebuild per key per interval.", failureModes: ["Still overloads if many different keys miss together"], tradeoffs: ["Protected but a cold or flushed cache still stresses it"] }
 ]} edges={[
   { from: "req", to: "local" }, { from: "local", to: "shared", label: "miss" }, { from: "shared", to: "lock", label: "expired" }, { from: "lock", to: "db", label: "rebuild" }
+]} />
+
+<ConceptWalkthrough title="Spread reads across copies of one hot key" nodes={[
+  {"id":"n0","label":"Demand","x":17,"y":46},
+  {"id":"n1","label":"Copies","x":50,"y":46},
+  {"id":"n2","label":"Nodes","x":83,"y":46},
+]} frames={[
+  {"title":"Find the bottleneck","note":"One key receives 6,000 reads per second. Its cache node handles 2,000 reads per second at the chosen latency target. Sharding other keys leaves this demand on one node.","active":["n0","n2"],"values":{"n0":"6,000/s","n1":"1 copy","n2":"2,000/s"}},
+  {"title":"Distribute the read demand","note":"Put four copies on four separate nodes and choose among them uniformly. Expected demand is 1,500 reads per second per node. Predict what happens when a node goes offline.","active":["n1","n2"],"values":{"n0":"6,000/s","n1":"4 copies","n2":"1,500/s"}},
+  {"title":"Budget for invalidation and node loss","note":"With one node offline and uniform redistribution, the remaining nodes average 2,000 reads per second each. There is no spare headroom at that target. A writer must invalidate all live copies, and a returning node must refresh before serving.","active":["n1","n2"],"values":{"n0":"6,000/s","n1":"3 live","n2":"2,000/s"}},
 ]} />
 
 ## Trade-offs
