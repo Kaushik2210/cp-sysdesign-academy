@@ -951,6 +951,44 @@ test.describe("advanced tree lessons", () => {
   }
 });
 
+test("concept walkthrough supports keyboard steps and a transcript on a reduced-motion phone", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto("/cp/advanced-trees/mo-algorithm/");
+  const walkthrough = page.getByRole("region", { name: "Move Mo's window" });
+  await expect(walkthrough.getByRole("status")).toContainText("Step 1 of 4");
+  const next = walkthrough.getByRole("button", { name: "Next step" });
+  await next.focus();
+  await page.keyboard.press("Enter");
+  await expect(walkthrough.getByRole("status")).toContainText("Step 2 of 4");
+  await expect(walkthrough.getByRole("status")).toContainText("Two copies, one distinct value");
+  await walkthrough.getByRole("button", { name: "Previous step" }).click();
+  await expect(walkthrough.getByRole("status")).toContainText("Step 1 of 4");
+  await walkthrough.getByRole("button", { name: "Restart" }).click();
+  await expect(walkthrough.getByRole("status")).toContainText("Step 1 of 4");
+  await walkthrough.getByText("Read all steps").click();
+  await expect(walkthrough.getByText("Record the last answer", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(375);
+});
+
+test("concept walkthrough plays, pauses and replays", async ({ page }) => {
+  await page.goto("/sd/caching/caching-strategies/");
+  const walkthrough = page.getByRole("region", { name: "Follow the first cache-aside read" });
+  await page.clock.install();
+  await walkthrough.getByRole("button", { name: "Play", exact: true }).click();
+  await page.clock.runFor(3500);
+  await expect(walkthrough.getByRole("status")).toContainText("Get the source value");
+  await walkthrough.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.clock.runFor(3500);
+  await expect(walkthrough.getByRole("status")).toContainText("Step 2 of 4");
+  const next = walkthrough.getByRole("button", { name: "Next step" });
+  await next.click();
+  await next.click();
+  await expect(walkthrough.getByRole("status")).toContainText("The next read hits");
+  await walkthrough.getByRole("button", { name: "Replay", exact: true }).click();
+  await expect(walkthrough.getByRole("status")).toContainText("Step 1 of 4");
+});
+
 test.describe("matching and assignment lessons", () => {
   const lessons = [
     ["bipartite-matching", "Bipartite Matching with Augmenting Paths"],
