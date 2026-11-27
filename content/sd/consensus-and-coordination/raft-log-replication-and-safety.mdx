@@ -31,6 +31,16 @@ Each log entry has an **index**, a **term** (the term of the leader that created
 
 **AppendEntries.** The leader sends followers the new entries together with the **index and term of the entry just before them** (`prevLogIndex`, `prevLogTerm`). A follower accepts only if its own log contains an entry at that position with that term. Otherwise it rejects, and the leader steps back one entry at a time (or jumps back using hints) until the logs agree, then overwrites the follower's conflicting suffix with its own entries.
 
+<ConceptWalkthrough title="Repair a follower’s conflicting suffix" nodes={[
+  {"id":"n0","label":"Leader","x":17,"y":46},
+  {"id":"n1","label":"Follower","x":50,"y":46},
+  {"id":"n2","label":"Anchor","x":83,"y":46},
+]} frames={[
+  {"title":"Compare the previous entry","note":"Term-4 leader A wants to send entry 4 with anchor 3:t4. B has term 3 at index 3, so it rejects without modifying its log.","active":["n0","n1"],"values":{"n0":"3:t4","n1":"3:t3","n2":"mismatch"}},
+  {"title":"Retry at the shared prefix","note":"A backs up and resends entries 3 and 4 anchored at 2:t2. B has the same entry at index 2. Predict what happens to B’s uncommitted entry at index 3.","active":["n0","n1","n2"],"values":{"n0":"send 3–4","n1":"2:t2","n2":"match"}},
+  {"title":"Replace the conflicting suffix","note":"B keeps entries through 2, removes its conflicting suffix from 3 and appends A’s entries. Both now have 3:t4 and 4:t4. Commitment still follows the leader’s commit rule.","active":["n0","n1"],"values":{"n0":"4:t4","n1":"4:t4","n2":"keep ≤ 2"}},
+]} />
+
 This enforces the **Log Matching Property**: if two logs contain an entry with the same index and term, then the logs are identical in all entries up to that index.
 
 **Commit.** An entry is committed once the leader has stored it on a majority of servers **and** it belongs to the leader's own term. The leader tells followers the commit index in later `AppendEntries` messages, and each server applies committed entries to its state machine in order. (Entries from earlier terms are committed *indirectly*, when a later entry of the current term is committed on top of them; the paper's Figure 8 shows what goes wrong otherwise.)
@@ -53,7 +63,17 @@ candidate is up to date  if  its last entry has a higher term,
                          or  the same last term and an equal or greater log length
 ```
 
-Because a committed entry is on a majority and a winning candidate needs votes from a majority, **at least one voter has the committed entry**, and that voter will only vote for a candidate that also has it. So **every leader's log contains all committed entries** (the **Leader Completeness Property**).
+Consider the first later election that could produce a leader missing an entry committed by counting replicas in its own term. The election quorum intersects the replication quorum at a voter that accepted the entry. That voter still holds it because every intervening leader contains it. If the candidate’s last log term matches the voter’s, it must reach at least the voter’s last index to pass the freshness check. Log Matching then gives the committed prefix. If the candidate ends in a higher log term, that entry came from an intervening leader whose log already contains the committed entry. Log Matching gives the prefix in this case too. Entries committed indirectly are part of the same prefix. This is **Leader Completeness**. See §5.4.3 of the Raft paper for the full proof.
+
+<ConceptWalkthrough title="Compare the last term before the last index" nodes={[
+  {"id":"n0","label":"Voter","x":17,"y":46},
+  {"id":"n1","label":"Candidate","x":50,"y":46},
+  {"id":"n2","label":"Decision","x":83,"y":46},
+]} frames={[
+  {"title":"Hold the election term fixed","note":"The voter’s last entry is 6:t2. A candidate in election term 4 ends with 4:t3. Compare their last log entries separately from the election term.","active":["n0","n1"],"values":{"n0":"6:t2","n1":"4:t3","n2":"?"}},
+  {"title":"The later log term outranks length","note":"Term 3 outranks term 2. The candidate passes the freshness check with fewer entries. A vote still requires an eligible election term and an available vote.","active":["n1","n2"],"values":{"n0":"6:t2","n1":"4:t3","n2":"passes"}},
+  {"title":"Use index as the tiebreaker","note":"If the candidate ended with 4:t2, both last entries would have term 2. Index 4 trails 6, so the candidate fails the freshness check.","active":["n0","n1","n2"],"values":{"n0":"6:t2","n1":"4:t2","n2":"reject"}},
+]} />
 
 The five properties of Raft together:
 
@@ -169,6 +189,16 @@ Without the rule, roughly two elections in three crowned a leader that lacked da
 - **Throughput.** One leader per group is a bottleneck; large systems run many groups (one per shard) and use batching.
 - **Idempotency.** A client whose request timed out cannot tell whether it committed; commands need request ids so that retries are applied once.
 
+<ConceptWalkthrough title="Catch up a lagging follower with a snapshot" nodes={[
+  {"id":"n0","label":"Snapshot","x":17,"y":46},
+  {"id":"n1","label":"Follower","x":50,"y":46},
+  {"id":"n2","label":"Log tail","x":83,"y":46},
+]} frames={[
+  {"title":"Find the missing prefix","note":"The leader compacted its applied prefix through index 8, term 3. A follower only has entries through 3. Entries 4 through 8 are no longer available to send individually.","active":["n0","n1"],"values":{"n0":"8:t3","n1":"through 3","n2":"9 onward"}},
+  {"title":"Install the checkpoint","note":"Send the state at index 8 with the last included index and term. The follower can reconstruct the committed state through 8 without replaying the missing commands.","active":["n0","n1"],"values":{"n0":"send 8:t3","n1":"through 8","n2":"9 onward"}},
+  {"title":"Resume ordinary replication","note":"Send entry 9 with anchor 8:t3, which the follower recognizes from snapshot metadata. It can now replicate the tail and apply it as the commit index advances.","active":["n1","n2"],"values":{"n0":"8:t3","n1":"anchor 8:t3","n2":"send 9"}},
+]} />
+
 ## Trade-offs
 
 <TradeOffs caption="Replication strategies for a log" rows={[
@@ -176,6 +206,16 @@ Without the rule, roughly two elections in three crowned a leader that lacked da
   { option: "Primary with asynchronous replicas", pros: "Fast commit; simple", cons: "A failover can lose acknowledged writes; needs external failover logic", chooseWhen: "When a little data loss on failure is acceptable and latency matters most" },
   { option: "Primary with synchronous replica(s)", pros: "No loss if the sync replica survives", cons: "A slow or dead replica blocks writes unless demoted", chooseWhen: "Traditional databases with a two-node durability goal" },
   { option: "Leaderless quorum", pros: "Always writable during failures", cons: "No total order; conflicts and read repair", chooseWhen: "High availability, eventually consistent data" }
+]} />
+
+<ConceptWalkthrough title="Retry a command after losing its response" nodes={[
+  {"id":"n0","label":"Client","x":17,"y":46},
+  {"id":"n1","label":"Log","x":50,"y":46},
+  {"id":"n2","label":"State","x":83,"y":46},
+]} frames={[
+  {"title":"Commit and apply request 42","note":"Client C sends request 42 to increment a counter. Applying the committed command changes the counter from 8 to 9. The state machine records the ID and result with the effect.","active":["n1","n2"],"values":{"n0":"C:42","n1":"commit 42","n2":"counter 9"}},
+  {"title":"Retry with the same ID","note":"The reply was lost, so C retries request 42 after a leader change. It uses the same client ID and sequence number. Predict what happens to the counter.","active":["n0","n1"],"values":{"n0":"C:42 again","n1":"retry","n2":"counter 9"}},
+  {"title":"Return the original result","note":"If the retry reaches application, the new leader’s state machine finds C:42 and returns 9 without incrementing. Retain this deduplication record in snapshots for the supported retry window.","active":["n0","n2"],"values":{"n0":"result 9","n1":"C:42 seen","n2":"counter 9"}},
 ]} />
 
 ## Pitfalls

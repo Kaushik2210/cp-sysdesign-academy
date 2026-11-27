@@ -1015,7 +1015,7 @@ test("concept walkthroughs make duplicate bounds and burst limits visible", asyn
   }
 });
 
-test("concept walkthroughs explain the remaining examples on three lessons", async ({ page }) => {
+test("concept walkthroughs explain additional examples at phone width", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 800 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   const lessons = [
@@ -1032,6 +1032,17 @@ test("concept walkthroughs explain the remaining examples on three lessons", asy
       ["Follow an authoritative cache version", "Read and fill the versioned key"],
       ["Reject a stale cache fill with a lease", "Reject the late version-1 fill"],
       ["Spread reads across copies of one hot key", "Budget for invalidation and node loss"],
+    ]],
+    ["/cp/range-queries/fenwick-trees/", [
+      ["Turn two prefixes into a range sum", "Convert assignment into a delta"],
+      ["Count inversions without counting ties", "Count the final contribution"],
+      ["Build a range update from two difference events", "Watch the stop event cancel"],
+    ]],
+    ["/sd/consensus-and-coordination/raft-log-replication-and-safety/", [
+      ["Repair a follower’s conflicting suffix", "Replace the conflicting suffix"],
+      ["Compare the last term before the last index", "Use index as the tiebreaker"],
+      ["Catch up a lagging follower with a snapshot", "Resume ordinary replication"],
+      ["Retry a command after losing its response", "Return the original result"],
     ]],
   ] as const;
 
