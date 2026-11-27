@@ -1,0 +1,271 @@
+---
+title: "Mo's Algorithm on Trees"
+track: cp
+module: advanced-trees
+order: 3
+difficulty: hard
+estMinutes: 40
+prerequisites: [cp/advanced-trees/mo-algorithm, cp/trees/lowest-common-ancestor]
+tags: [trees, mo, euler-tour, lca, offline-queries]
+type: lesson
+furtherReading:
+  - title: "animeshf, Mo's Algorithm on Trees tutorial (Codeforces)"
+    url: https://codeforces.com/blog/entry/43230
+  - title: "SPOJ COT2, Count on a Tree II (original problem statement)"
+    url: https://www.spoj.com/problems/COT2/
+---
+
+## Intuition
+
+Every vertex in a tree has a colour. Given a batch of pairs `(u, v)`, count the distinct colours on each simple path, including both endpoints. The colours are fixed, and all queries are known in advance. Walking each path can take `O(nq)` on a long chain with `n` vertices and `q` queries.
+
+Array Mo's algorithm reorders queries so successive windows share most of their elements. A tree path can cross several branches, so a window in preorder can pick up vertices from unrelated branches. Give each vertex **two** positions instead. When a window contains both positions, their contributions cancel. When it contains exactly one, the vertex contributes once. This lets a single window represent a path with at most one vertex to add separately.
+
+## Definition
+
+Root the tree and run depth-first search. Append each vertex `x` on entry at `tin[x]` and again on exit at `tout[x]`. This **double Euler tour** has `2n` positions. Here `tout[x]` is the index of the exit event itself, and all windows include both endpoints.
+
+Maintain a Boolean `active[x]`. Whenever a position crosses a window boundary in either direction, flip `active[tour[position]]`. A vertex is active exactly when it occurs an odd number of times in the current window. Track the frequency of each colour among active vertices. The number of colours with positive frequency is the distinct count.
+
+For a query, swap endpoints if needed so `tin[u] <= tin[v]`. Compute `w = LCA(u, v)` and choose a window.
+
+| Case | Inclusive window | Extra vertex |
+| --- | --- | --- |
+| `w == u` | `[tin[u], tin[v]]` | None |
+| `w != u` | `[tout[u], tin[v]]` | `w` |
+
+**Why these windows work.** The current DFS ancestry chain contains exactly the vertices that have been entered and have yet to be exited. A vertex changes membership between two snapshots of that chain exactly when it has an odd number of events between them.
+
+- If `w == u`, compare the chain just **before entering `u`** with the chain just **after entering `v`**. The ancestors strictly above `u` appear in both. The vertices from `u` down to `v` appear only in the second.
+- Otherwise, compare the chain just **before exiting `u`** with the chain just **after entering `v`**. These are the root-to-`u` and root-to-`v` chains. Their common prefix ends at `w` and cancels, leaving the two branches below `w`. Temporarily toggle `w` in, read the answer, and toggle it back out to restore the window invariant.
+
+### Ordering and cost
+
+Let `m = 2n` and choose a block width `B`. Sort queries by the block of their left endpoint, then by increasing right endpoint in even blocks and decreasing right endpoint in odd blocks. Keep each query's original index for output.
+
+Within a block, the left pointer moves fewer than `B` positions between queries. Across block boundaries it always moves forward, and those jumps cover disjoint stretches of the tour, totalling `O(m)`. The right pointer makes at most one sweep of length `m` per block, plus at most `m` positions when moving to the next block. This gives `O(qB + m ceil(m/B))` window toggles, or `O((n + q) sqrt(n))` with `B` near `sqrt(m)`. Each toggle uses expected `O(1)` dictionary work. Binary lifting adds `O(n log n)` preprocessing and `O(log n)` per query, sorting adds `O(q log q)`, and memory is `O(n log n + q)`.
+
+## Worked example
+
+Root this tree at `0` and visit children from left to right.
+
+~~~text
+        0 (gold)
+       /        \
+   1 (blue)    2 (blue)
+    /   \           \
+3 (red)  4 (green)   5 (red)
+
+index   0  1  2  3  4  5  6  7  8  9  10  11
+tour    0  1  3  3  4  4  1  2  5  5   2   0
+~~~
+
+For `(1, 4)`, the LCA is `1`. The window `[1, 4]` contains `1, 3, 3, 4`. Vertex `3` toggles twice, leaving `1` and `4` active. The distinct count is **2**.
+
+For `(3, 5)`, the LCA is `0`. The window starts at the **exit** of `3`, so `[3, 8]` contains `3, 4, 4, 1, 2, 5`.
+
+| Position processed from an empty window | Event | Active vertices |
+| --- | --- | --- |
+| 3 | Exit `3` | `3` |
+| 4 | Enter `4` | `3, 4` |
+| 5 | Exit `4` | `3` |
+| 6 | Exit `1` | `1, 3` |
+| 7 | Enter `2` | `1, 2, 3` |
+| 8 | Enter `5` | `1, 2, 3, 5` |
+| After moving both pointers | Temporarily add `0` | `0, 1, 2, 3, 5` |
+
+The branches contribute blue and red. Adding the LCA contributes gold, so the distinct count is **3**. Toggle `0` out before moving the pointers again. An exit event can activate a vertex because window membership depends on parity.
+
+## Code
+
+The solver takes colours, an undirected edge list for a nonempty tree with vertices numbered from `0`, and a list of query pairs. The iterative DFS records both tour events and the immediate parents. The LCA helper uses the entry and exit times to test ancestry, then lifts one endpoint to just below the common ancestor.
+
+Run the example and the differential tests together. The tests compare the solver with direct path searches that use only the adjacency list. They cover every ordered endpoint pair on each generated tree, including identical endpoints and ancestor queries.
+
+<CodeRunner language="python" code={`from math import isqrt
+from random import Random
+
+
+def adjacency(n, edges):
+    graph = [[] for _ in range(n)]
+    for u, v in edges:
+        graph[u].append(v)
+        graph[v].append(u)
+    return graph
+
+
+def distinct_on_paths(colours, edges, queries):
+    n = len(colours)
+    graph = adjacency(n, edges)
+    tin, tout = [0] * n, [0] * n
+    parent, tour = [0] * n, []
+    stack = [(0, 0, False)]
+
+    while stack:
+        u, p, exiting = stack.pop()
+        if exiting:
+            tout[u] = len(tour)
+            tour.append(u)
+            continue
+
+        parent[u] = p
+        tin[u] = len(tour)
+        tour.append(u)
+        stack.append((u, p, True))
+        for v in reversed(graph[u]):
+            if v != p:
+                stack.append((v, u, False))
+
+    up = [parent]
+    for _ in range(1, n.bit_length()):
+        prev = up[-1]
+        up.append([prev[prev[v]] for v in range(n)])
+
+    def is_ancestor(u, v):
+        return tin[u] <= tin[v] and tout[v] <= tout[u]
+
+    def lca(u, v):
+        if is_ancestor(u, v):
+            return u
+        for level in reversed(up):
+            candidate = level[u]
+            if not is_ancestor(candidate, v):
+                u = candidate
+        return parent[u]
+
+    windows = []
+    for index, (u, v) in enumerate(queries):
+        if tin[u] > tin[v]:
+            u, v = v, u
+        w = lca(u, v)
+        if w == u:
+            windows.append((tin[u], tin[v], index, None))
+        else:
+            windows.append((tout[u], tin[v], index, w))
+
+    width = isqrt(len(tour))
+
+    def mo_key(window):
+        left, right, _, _ = window
+        block = left // width
+        return block, -right if block % 2 else right
+
+    windows.sort(key=mo_key)
+    active = [False] * n
+    frequency = {}
+
+    def toggle(u):
+        colour = colours[u]
+        if active[u]:
+            frequency[colour] -= 1
+            if frequency[colour] == 0:
+                del frequency[colour]
+        else:
+            frequency[colour] = frequency.get(colour, 0) + 1
+        active[u] = not active[u]
+
+    answers = [0] * len(windows)
+    left, right = 0, -1  # Empty inclusive window.
+    for lo, hi, index, extra in windows:
+        while left > lo:
+            left -= 1
+            toggle(tour[left])
+        while right < hi:
+            right += 1
+            toggle(tour[right])
+        while left < lo:
+            toggle(tour[left])
+            left += 1
+        while right > hi:
+            toggle(tour[right])
+            right -= 1
+
+        if extra is not None:
+            toggle(extra)
+        answers[index] = len(frequency)
+        if extra is not None:
+            toggle(extra)
+
+    return answers
+
+
+def direct_count(colours, graph, source, target):
+    # Search from source, then retrace the unique path from target.
+    previous = {source: source}
+    stack = [source]
+    while stack:
+        u = stack.pop()
+        if u == target:
+            break
+        for v in graph[u]:
+            if v not in previous:
+                previous[v] = u
+                stack.append(v)
+
+    seen = {colours[source]}
+    while target != source:
+        seen.add(colours[target])
+        target = previous[target]
+    return len(seen)
+
+
+def check_all_pairs(colours, edges, rng):
+    n = len(colours)
+    graph = adjacency(n, edges)
+    queries = [(u, v) for u in range(n) for v in range(n)]
+    rng.shuffle(queries)
+    expected = [direct_count(colours, graph, u, v) for u, v in queries]
+    actual = distinct_on_paths(colours, edges, queries)
+    assert actual == expected, (colours, edges, queries, expected, actual)
+    return len(queries)
+
+
+colours = ["gold", "blue", "blue", "red", "green", "red"]
+edges = [(0, 1), (0, 2), (1, 3), (1, 4), (2, 5)]
+queries = [(1, 4), (3, 5), (3, 4), (5, 3), (0, 0)]
+example = distinct_on_paths(colours, edges, queries)
+assert example == [2, 3, 3, 3, 1], example
+assert distinct_on_paths(colours, edges, []) == []
+print("Example answers:", example)
+
+rng = Random(37)
+checked = check_all_pairs(colours, edges, rng)
+checked += check_all_pairs([0], [], rng)
+checked += check_all_pairs(list(range(12)), [(v - 1, v) for v in range(1, 12)], rng)
+checked += check_all_pairs([7] * 12, [(0, v) for v in range(1, 12)], rng)
+
+for _ in range(80):
+    n = rng.randint(1, 16)
+    labels = list(range(n))
+    rng.shuffle(labels)
+    edges = [(labels[v], labels[rng.randrange(v)]) for v in range(1, n)]
+    rng.shuffle(edges)
+    colours = [rng.randrange(-2, 3) for _ in range(n)]
+    checked += check_all_pairs(colours, edges, rng)
+
+print(f"{checked:,} path queries agree with direct search.")
+`} />
+
+## Pitfalls
+
+- **Mixing tour conventions.** A preorder subtree interval often uses an exclusive end. Here `tout[u]` is an actual tour position and the non-ancestor window includes it.
+- **Toggling a colour instead of a vertex.** Two blue vertices on a path contribute two to the blue frequency and one to the distinct count. Only the two events for the same vertex cancel.
+- **Using a truthiness check for the extra LCA.** The root is vertex `0` in the code, so use `extra is not None`. Restore the LCA immediately after recording the answer.
+- **Losing path order.** The active set retains membership and colour frequencies. A query asking for the first matching vertex from `u` also needs the order of those vertices along the path.
+- **Forgetting the offline assumption.** This version reorders queries over fixed colours. Interleaved colour updates require a different algorithm or a version of Mo's algorithm that also tracks update time.
+
+## Practice
+
+1. For `(3, 4)` in the worked tree, write the window and list the active vertices before and after adding the LCA. Which colour does the LCA contribute?
+2. Change the colour of vertex `0` in the example to blue. Predict the answer for `(3, 5)` and trace the blue frequency through both temporary toggles.
+3. Adapt the solver to count unordered pairs of distinct path vertices with matching colours. If a colour already has frequency `f`, derive how many pairs inserting one vertex creates, then derive the removal rule.
+4. Give each edge a colour and count distinct edge colours on a path. Store each edge's colour on the child endpoint under the current root. Work out when to exclude the LCA and what to return for `(u, u)`.
+
+## Quiz
+
+<Quiz id="cp-m22-mo-on-trees" tags={["trees", "mo", "euler-tour", "lca"]} questions={[
+  { type: "mcq", q: "When is a vertex active in the current window?", options: ["When its colour occurs an odd number of times", "When at least one of its two events is in the window", "When exactly one of its two events is in the window", "Only when its entry event is in the window"], answer: 2, explain: "A window can contain zero, one, or two events for a vertex. The two events for one vertex toggle it twice and cancel." },
+  { type: "mcq", q: "After ordering the endpoints by entry time, which window represents the path when u is the LCA?", options: ["[tin[u], tin[v]]", "[tout[u], tin[v]]", "[tin[u], tout[v]]", "[tout[u], tout[v]]"], answer: 0, explain: "Starting just before the entry of u includes u itself. Ending just after the entry of v leaves the full chain from u to v active." },
+  { type: "mcq", q: "For two endpoints in different child branches of their LCA, what does the window omit from the path?", options: ["The earlier endpoint", "Both endpoints", "The LCA", "The later endpoint"], answer: 2, explain: "The common root-to-LCA prefix is present in both snapshots. Its vertices cancel, including the LCA itself." },
+  { type: "mcq", q: "Why toggle the extra LCA a second time after recording the answer?", options: ["To reverse the query's endpoints", "To restore the active set represented by the current window", "To visit its subtree", "To advance the right pointer"], answer: 1, explain: "The pointers have stayed in place. Removing the extra LCA makes the active set match the unchanged window before the next query." },
+]} />

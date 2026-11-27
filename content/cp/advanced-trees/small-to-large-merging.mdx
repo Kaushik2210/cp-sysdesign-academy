@@ -22,13 +22,22 @@ furtherReading:
 
 You are asked something about **every subtree** of a rooted tree: how many distinct colours does it contain, which colour is the most frequent, what is the median value? The natural plan is bottom-up: each vertex keeps a container describing its subtree and **merges the containers of its children** into its own. The risk is the merge cost. On a path of `n` vertices the container grows to size `n` and, if every merge copies it, the total work is `1 + 2 + ... + n`, which is quadratic.
 
-**Small-to-large merging** fixes this with one rule: when two containers meet, **pour the smaller into the larger** and keep the larger one as the result. No element is copied more than `log2 n` times, so the total is `O(n log n)` insertions.
+**Small-to-large merging** fixes this with one rule: when two containers meet, **pour the smaller into the larger** and keep the larger one as the result. Across the tree this takes `O(n log n)` insertion attempts, even when colours overlap.
+
+Before choosing a technique, identify what each query selects.
+
+| Query shape | Start with |
+| --- | --- |
+| A frequency table for every rooted subtree | Small-to-large merging, covered here |
+| A mutable sum or maximum on arbitrary paths | [Heavy-light decomposition](/cp/trees/heavy-light-decomposition/) |
+| A distinct count on arbitrary paths, with all requests known in advance | [Mo's algorithm on trees](/cp/advanced-trees/mo-on-trees/) |
+| Distances among a small set of marked vertices | [Virtual trees](/cp/advanced-trees/virtual-trees/) |
 
 ## Definition
 
 **The rule.** To merge containers `A` and `B`, iterate over the smaller one, insert each element into the larger, and keep the larger as the new container (swap references, never copy).
 
-**Why `O(n log n)`.** Follow one element. It is moved only when it lives in the **smaller** container, and after the move it lives in a container at least **twice** as big as before (the larger already had at least as many elements, and now holds the smaller's elements too). A container cannot double more than `log2 n` times before reaching `n` elements, so every element moves at most `log2 n` times. Summed over `n` elements that is `n log2 n` insertions. With hash sets each insertion is `O(1)` expected; with ordered sets it is `O(log n)`, giving `O(n log^2 n)`.
+**Why `O(n log n)`.** Suppose the two groups being merged represent `a` and `b` original vertices. Their containers hold at most `a` and `b` entries, respectively, so scanning the smaller container costs at most `min(a, b)` iterations. Charge at most one iteration to each vertex of the group with fewer original vertices. Each charged vertex enters a group at least twice as large as before, even if many colours collide. A vertex is charged at most `floor(log2 n)` times. Hash sets give expected `O(n log n)` time, and ordered sets give `O(n log² n)` time.
 
 **What "container" can be.**
 
@@ -177,7 +186,7 @@ def demo():
             s2l = solve(n, col, par, True)[1]
             naive = solve(n, col, par, False)[1]
             print(f"  n = {n:5d} {kind:6s}: small-to-large {s2l:8,} ({s2l / (n * math.log2(n)):.2f} per n log2 n)   always child-into-parent {naive:11,} ({naive / n:,.0f} per vertex)")
-    print("the bound: every element moves only when it sits in the smaller set, so its set at least doubles; at most log2 n moves per element")
+    print("the bound charges attempts to vertices in the smaller original group; each charged group at least doubles")
 
 
 demo()
@@ -217,7 +226,7 @@ What it shows:
 
 <Quiz id="cp-m22-small-to-large" tags={["tree", "small-to-large", "sets"]} questions={[
   { type: "mcq", q: "What is the small-to-large rule?", options: ["Merge the children in increasing label order", "Insert the elements of the smaller container into the larger one and keep the larger", "Always keep the parent's container", "Sort the containers first"], answer: 1, explain: "Keeping the larger container means an element only moves when it sits in the smaller one." },
-  { type: "mcq", q: "Why does each element move at most log2 n times?", options: ["Because the tree has depth log2 n", "Each move puts it in a container at least twice as large, and a container cannot exceed n elements", "Because sets are balanced trees", "Because merging is commutative"], answer: 1, explain: "After a move its container holds at least twice as many elements as before." },
+  { type: "mcq", q: "What at least doubles when a vertex is charged for a merge?", options: ["The tree depth", "The number of original vertices in its group", "The number of distinct colours in every merge", "The number of child subtrees"], answer: 1, explain: "Charging by group size keeps the bound valid even when duplicate colours collapse." },
   { type: "predict", q: "A path of 16000 vertices with all colours distinct. Roughly how many insertions does small-to-large need in total?", code: "# parent[v] = v - 1, processed from v = n down to 2\n# at each step a 1-element set meets the big set", options: ["About 16,000", "About 224,000 (n log2 n)", "About 128 million", "About 8,000"], answer: 0, explain: "Every merge pours a single element into the big set. The experiment counted 15,999." },
   { type: "mcq", q: "When is the naive rule (always insert the child into the parent) catastrophic?", options: ["On a star", "On a path, where a big child set is poured into a tiny parent set at every step", "On a complete binary tree only", "Never"], answer: 1, explain: "The experiment counted 127,992,000 insertions on a path of 16,000 against 15,999 for small-to-large." },
   { type: "multi", q: "Which of these are real pitfalls?", options: ["Copying the sets instead of swapping references", "Reading ans[v] before all children are merged", "Recursion depth on a path-shaped tree", "Using a hash set at all"], answer: [0, 1, 2], explain: "Hash sets are fine; the other three break correctness or the time bound." },

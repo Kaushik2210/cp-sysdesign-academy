@@ -1,0 +1,230 @@
+---
+title: Virtual Trees
+track: cp
+module: advanced-trees
+order: 4
+difficulty: hard
+estMinutes: 35
+prerequisites: [cp/trees/lowest-common-ancestor, cp/trees/euler-tour-subtree-queries]
+tags: [trees, virtual-tree, lca, dfs, tree-dp]
+type: lesson
+furtherReading:
+  - title: AtCoder ABC340 G, Leaf Color editorial
+    url: https://atcoder.jp/contests/abc340/editorial/9256?lang=en
+  - title: AtCoder ABC359 G, Sum of Tree Distance
+    url: https://atcoder.jp/contests/abc359/tasks/abc359_g?lang=en
+---
+
+## Intuition
+
+Suppose a fixed weighted tree has 200,000 vertices. Each query marks a handful of vertices and asks for the sum of distances over all unordered pairs of marked vertices. A full tree DP scans 200,000 vertices per query. Even after preprocessing LCA, asking for each pair's distance takes quadratically many pair queries.
+
+A **virtual tree** keeps the marked vertices (called *terminals*) and the junctions where their paths meet. It replaces each chain between retained vertices with a single weighted edge. With `k` distinct terminals, there are at most `2k - 1` retained vertices. A bottom-up pass on that small tree can account for all pairs through edge contributions.
+
+## Definition
+
+Root the original tree once. For a nonempty terminal set `S`, keep every terminal and the original-tree LCA of every pair of terminals. The virtual root is the LCA of all of `S`, which is the terminal itself for a singleton. Each other retained vertex attaches to its deepest retained **strict** ancestor. For an empty set, return an empty virtual tree.
+
+For a virtual edge from ancestor `p` to descendant `v`, use weight `dist_root[v] - dist_root[p]`, the sum along the original `p`–`v` path. Paths between terminals go through their retained LCA. Expanding the virtual edges on such a path gives exactly the original path, so terminal distances are preserved.
+
+### Why adjacent LCAs suffice
+
+Sort the distinct terminals by DFS entry time `tin`. Consider any pair with LCA `a`. If `a` is a terminal, the construction already keeps it. Otherwise the two terminals lie in different child subtrees of `a`. Every child subtree occupies one contiguous DFS interval, and the entire subtree of `a` occupies one interval too. In the sorted terminal list, take the last terminal in the earlier pair member's child subtree and the first terminal in the next nonempty child subtree of `a`. These two entries are consecutive in the full list, and their LCA is `a`.
+
+Thus the terminal set plus the LCAs between consecutive terminals gives exactly the required vertex set. There are at most `k - 1` such LCAs for `k > 0`, even before deduplication.
+
+### Stack construction
+
+1. Sort the terminals by `tin`, compute the consecutive LCAs, then deduplicate and sort the combined set by `tin` again.
+2. Scan the combined order. For each vertex `v`, pop while the stack top is outside the ancestor chain of `v`. Check ancestry with `tin[p] <= tin[v] < tout[p]`, using an exclusive exit boundary.
+3. If a top remains, emit an edge from it to `v`. Push `v`.
+
+Every retained strict ancestor of `v` appears earlier in preorder and stays on the stack until the scan leaves its subtree. Once a vertex is popped, its DFS interval has ended for the rest of the scan. After the pops, the top is therefore the deepest retained ancestor. The first vertex is the virtual root, and each vertex is pushed once and popped at most once.
+
+Binary lifting takes `O(n log n)` time and space to preprocess a tree of `n` vertices. After deduplication, each query takes `O(k log k + k log n)` time and `O(k)` extra space. Reading and deduplicating an input list of `m` entries also costs `O(m)` expected time.
+
+## Worked example
+
+Root this tree at `0` and visit children in the displayed order. Numbers in parentheses are edge weights.
+
+```text
+0
+├── 1 (2)
+│   ├── 2 (3) *
+│   │   ├── 3 (4)
+│   │   │   └── 4 (1) *
+│   │   └── 5 (6) *
+│   └── 6 (5)
+│       └── 7 (2) *
+└── 8 (9)
+```
+
+The starred terminals occur in order `2, 4, 5, 7`. Their adjacent LCAs are `2, 2, 1`, so the combined scan order is `1, 2, 4, 5, 7`. At `5`, pop `4` and attach to `2`. At `7`, pop `5` and `2`, then attach to `1`. The edge from `2` to `4` absorbs the path through `3` and has weight `4 + 1 = 5`.
+
+To sum distances, let `c` be the number of terminals below a virtual edge, counting its child endpoint if marked. Taking one terminal from each side gives `c * (k - c)` unordered pairs whose paths use that edge. Each such pair contributes the edge weight once. Compute `c` by adding child counts to parents in reverse preorder.
+
+| Virtual edge | Weight | `c` | Contribution |
+| --- | ---: | ---: | ---: |
+| `1 → 2` | 3 | 3 | 9 |
+| `2 → 4` | 5 | 1 | 15 |
+| `2 → 5` | 6 | 1 | 18 |
+| `1 → 7` | 7 | 1 | 21 |
+
+The total is **63**. The count below `1 → 2` includes terminal `2` as well as `4` and `5`.
+
+## Code and differential validation
+
+The runner builds the example and checks its exact virtual edges. It then compares the pairwise distance sum with a brute-force traversal on the **original** tree from each terminal. The reference reads edge weights directly and uses no LCA table, DFS intervals, or virtual edges. The checks include empty and singleton queries, repeated terminals, a marked original root, zero-weight edges, and seeded random queries over paths, stars, and random trees.
+
+<CodeRunner language="python" code={`from random import Random
+
+
+class Tree:
+    def __init__(self, n, edges):
+        self.adj = [[] for _ in range(n)]
+        for u, v, weight in edges:
+            self.adj[u].append((v, weight))
+            self.adj[v].append((u, weight))
+
+        self.tin = [0] * n
+        self.tout = [0] * n
+        self.dist_root = [0] * n
+        parent = [0] * n
+        timer = 0
+        stack = [(0, 0, False)]
+        while stack:
+            v, p, exiting = stack.pop()
+            if exiting:
+                self.tout[v] = timer
+                continue
+            parent[v] = p
+            self.tin[v] = timer
+            timer += 1
+            stack.append((v, p, True))
+            for child, weight in reversed(self.adj[v]):
+                if child != p:
+                    self.dist_root[child] = self.dist_root[v] + weight
+                    stack.append((child, v, False))
+
+        self.up = [parent]
+        for _ in range(1, n.bit_length()):
+            previous = self.up[-1]
+            self.up.append([previous[p] for p in previous])
+
+    def is_ancestor(self, u, v):
+        return self.tin[u] <= self.tin[v] < self.tout[u]
+
+    def lca(self, u, v):
+        if self.is_ancestor(u, v):
+            return u
+        for jump in reversed(self.up):
+            if not self.is_ancestor(jump[u], v):
+                u = jump[u]
+        return self.up[0][u]
+
+    def virtual_tree(self, terminals):
+        ordered = sorted(terminals, key=self.tin.__getitem__)
+        retained = set(ordered)
+        for u, v in zip(ordered, ordered[1:]):
+            retained.add(self.lca(u, v))
+
+        vertices = sorted(retained, key=self.tin.__getitem__)
+        stack = []
+        edges = []
+        for v in vertices:
+            while stack and not self.is_ancestor(stack[-1], v):
+                stack.pop()
+            if stack:
+                p = stack[-1]
+                edges.append((p, v, self.dist_root[v] - self.dist_root[p]))
+            stack.append(v)
+        return vertices, edges
+
+    def pair_distance_sum(self, marked):
+        terminals = set(marked)
+        k = len(terminals)
+        vertices, edges = self.virtual_tree(terminals)
+        count = {v: int(v in terminals) for v in vertices}
+        total = 0
+        # Edges were emitted in child preorder, so children contribute first here.
+        for p, v, weight in reversed(edges):
+            c = count[v]
+            total += weight * c * (k - c)
+            count[p] += c
+        return total
+
+
+def brute_sum(adj, marked):
+    terminals = set(marked)
+    total = 0
+    for start in terminals:
+        stack = [(start, -1, 0)]
+        while stack:
+            v, p, distance = stack.pop()
+            if v > start and v in terminals:
+                total += distance
+            for child, weight in adj[v]:
+                if child != p:
+                    stack.append((child, v, distance + weight))
+    return total
+
+
+example = Tree(9, [(0, 1, 2), (1, 2, 3), (2, 3, 4), (3, 4, 1),
+                   (2, 5, 6), (1, 6, 5), (6, 7, 2), (0, 8, 9)])
+terminals = {2, 4, 5, 7}
+vertices, edges = example.virtual_tree(terminals)
+assert vertices == [1, 2, 4, 5, 7]
+assert edges == [(1, 2, 3), (2, 4, 5), (2, 5, 6), (1, 7, 7)]
+answer = example.pair_distance_sum(terminals)
+assert answer == brute_sum(example.adj, terminals) == 63
+print("Virtual edges (parent, child, weight):", edges)
+print("Pairwise distance sum:", answer)
+
+rng = Random(42)
+checked = 0
+for shape in ("path", "star", "random"):
+    for _ in range(40):
+        n = rng.randint(1, 24)
+        edges = []
+        for v in range(1, n):
+            p = {"path": v - 1, "star": 0}.get(shape)
+            if p is None:
+                p = rng.randrange(v)
+            edges.append((p, v, rng.randint(0, 20)))
+        tree = Tree(n, edges)
+        sample = [rng.randrange(n) for _ in range(rng.randint(0, 2 * n))]
+        for marked in ([], [n - 1], [n - 1, n - 1], [0, n - 1], range(n), sample):
+            got = tree.pair_distance_sum(marked)
+            want = brute_sum(tree.adj, marked)
+            assert got == want, (shape, edges, list(marked), got, want)
+            checked += 1
+print(f"Passed {checked} differential queries.")
+`} />
+
+## Pitfalls
+
+- **Use DFS entry order for both sorts.** Vertex labels and depths can interleave sibling subtrees, breaking the adjacent-LCA argument and the stack invariant.
+- **Distinguish terminals from retained junctions.** An added LCA starts with count zero unless the query marks it. Deduplicate input when the query has set semantics. If repeated entries represent distinct tokens, keep one vertex structurally and initialize its count to its multiplicity.
+- **Choose the query root deliberately.** The worked example starts at `1`. If a DP needs paths to the original root, include that root in the construction and count it as a terminal only when marked.
+- **Store the path aggregate your DP needs.** Root-distance subtraction gives path sums. For minimum edge weight, query the minimum along each compressed path, for example with a minimum table alongside binary lifting.
+
+## Practice
+
+1. On the worked tree, mark only `4, 5, 7`. Trace the stack and compute the new pairwise distance sum.
+2. Find the total weight of the union of paths connecting all terminals. Give an input where this differs from the pairwise distance sum.
+3. Every vertex has a color. Sum the distances between all same-color pairs. Show how the total size of the color groups bounds the cost across all virtual trees.
+4. Each terminal holds a number of tokens. Sum distances over unordered pairs of individual tokens, including pairs on the same vertex. Decide which parts of the construction and the counting need to change.
+
+## Quiz
+
+<Quiz id="cp-advanced-trees-virtual-trees" tags={["trees", "virtual-tree", "lca"]} questions={[
+  { type: "mcq", q: "A nonterminal vertex a is the LCA of two terminals. Which adjacent pair certifies that a must be kept?", options: ["The first two terminals in the subtree of a", "The last terminal of one nonempty child block and the first terminal of the next nonempty child block", "The two terminals with the largest DFS exit times"], answer: 1, explain: "Consecutive child blocks meet at an adjacent pair in terminal preorder. Their endpoints lie in different child subtrees of a." },
+  { type: "mcq", q: "In the worked example, which vertices are popped immediately before attaching 7?", options: ["5 and 2", "4 and 5", "2 and 1"], answer: 0, explain: "Vertex 4 was popped before attaching 5. Vertex 7 lies outside both the subtree of 5 and the subtree of 2." },
+  { type: "mcq", q: "For k = 6, a virtual edge of weight 4 has two terminals on its child side. How much does it contribute?", options: ["8", "16", "32"], answer: 2, explain: "There are 2 times 4 unordered pairs crossing the edge. Each contributes weight 4." },
+  { type: "mcq", q: "If all k distinct terminals lie on one root-to-leaf path and k is at least 3, how many vertices does the virtual tree retain?", options: ["k", "k + 1", "2k - 1"], answer: 0, explain: "The LCA of two terminals on the same path is the shallower terminal, which is already retained." },
+]} />
+
+## Further reading
+
+- See how the contest editorial uses auxiliary trees to run a DP for each color group. [AtCoder ABC340 G editorial, Leaf Color](https://atcoder.jp/contests/abc340/editorial/9256?lang=en)
+- Apply the edge-contribution formula to same-color pairs on an unweighted tree. [AtCoder ABC359 G, Sum of Tree Distance](https://atcoder.jp/contests/abc359/tasks/abc359_g?lang=en)

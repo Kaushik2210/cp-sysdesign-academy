@@ -1,1 +1,1 @@
-{ "title": "Advanced Trees", "level": "Level 3: Advanced Structures", "order": 22, "summary": "Mergeable subtree data with small-to-large merging, plus further tree techniques." }
+{ "title": "Advanced Trees", "level": "Level 3: Advanced Structures", "order": 22, "summary": "Merge subtree summaries, reorder offline queries with Mo's algorithm, and compress selected vertices into virtual trees." }
