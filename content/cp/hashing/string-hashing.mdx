@@ -44,6 +44,22 @@ Define `P[0] = 0` and `P[i+1] = P[i] * B + c(s_i)  (mod M)`. So `P[i]` is the ha
 
 *Why:* `P[r]` is `P[l]` shifted left by `r - l` places plus the substring's digits. Subtracting the shifted prefix leaves exactly the substring's number.
 
+<ConceptWalkthrough
+  title="Extract the hash of ab from eab"
+  nodes={[
+    {id:"pl",label:"P[1]",x:18,y:25},
+    {id:"pr",label:"P[3]",x:82,y:25},
+    {id:"shift",label:"Shifted",x:18,y:65},
+    {id:"out",label:"Hash",x:82,y:65},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Choose two prefixes",note:"In eab, the slice [1, 3) spells ab. With a = 1, b = 2, e = 5, base 7 and modulus 23, P[1] = 5, P[2] = (5 × 7 + 1) mod 23 = 13, and P[3] = (13 × 7 + 2) mod 23 = 1. Predict how far to shift the prefix e before subtracting it.",active:["pl","pr"],values:{pl:"5",pr:"1"}},
+    {title:"Align the prefix",note:"The slice ab has two characters, so shift the prefix e by two base-7 places. Its contribution is 5 × 7² = 245, which reduces to 15 modulo 23. Predict the nonnegative residue after subtracting 15 from 1.",active:["pl","shift"],values:{pl:"5",pr:"1",shift:"15"},edges:[{from:"pl",to:"shift"}]},
+    {title:"Subtract and check",note:"The difference 1 − 15 = −14 has residue 9 modulo 23 because −14 + 23 = 9. Hashing ab directly gives (1 × 7 + 2) mod 23 = 9 as well. The shifted subtraction removed exactly the contribution of e.",active:["pr","shift","out"],values:{pl:"5",pr:"1",shift:"15",out:"9"},edges:[{from:"pr",to:"out"},{from:"shift",to:"out"}]},
+  ]}
+/>
+
 <Tabs>
 <Tab label="C++">
 

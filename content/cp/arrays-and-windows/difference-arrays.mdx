@@ -64,6 +64,26 @@ for i in range(n):
 print(res)
 `} />
 
+<ConceptWalkthrough
+  title="Record overlapping updates at their boundaries"
+  nodes={[
+    { id: "d0", label: "d[0]", x: 17, y: 23 },
+    { id: "d1", label: "d[1]", x: 39, y: 23 },
+    { id: "d2", label: "d[2]", x: 61, y: 23 },
+    { id: "d3", label: "d[3]", x: 83, y: 23 },
+    { id: "a0", label: "a[0]", x: 17, y: 72 },
+    { id: "a1", label: "a[1]", x: 39, y: 72 },
+    { id: "a2", label: "a[2]", x: 61, y: 72 },
+  ]}
+  edges={[]}
+  frames={[
+    { title: "Add 4 across all three positions", note: "Start with three zeros and add 4 on the inclusive range [0, 2]. Write +4 at d[0] and -4 at d[3], the extra slot just past the array.", active: ["d0", "d3"], values: { d0: "4", d1: "0", d2: "0", d3: "-4" }, edges: [] },
+    { title: "Predict the stop entry for a negative update", note: "Now add -2 on the inclusive range [1, 1]. The start entry d[1] drops from 0 to -2. What change must d[2] record to end that decrement before index 2?", active: ["d1"], values: { d0: "4", d1: "-2", d3: "-4" }, edges: [] },
+    { title: "Cancel the decrement with +2", note: "The stop entry subtracts the update amount. Here d[2] becomes 0 - (-2) = 2, which offsets the -2 that started at index 1.", active: ["d1", "d2"], values: { d0: "4", d1: "-2", d2: "2", d3: "-4" }, edges: [{ from: "d1", to: "d2" }] },
+    { title: "Recover the three array values", note: "Sum the differences from left to right. The totals are 4 at index 0, 4 - 2 = 2 at index 1, and 2 + 2 = 4 at index 2. The output is [4, 2, 4], ending before the extra slot d[3].", active: ["d0", "d1", "d2", "a0", "a1", "a2"], values: { d0: "4", d1: "-2", d2: "2", d3: "-4", a0: "4", a1: "2", a2: "4" }, edges: [{ from: "d0", to: "a0" }, { from: "d1", to: "a1" }, { from: "d2", to: "a2" }, { from: "a0", to: "a1" }, { from: "a1", to: "a2" }] },
+  ]}
+/>
+
 ## Event-style use: maximum overlap
 
 Difference arrays are the array form of a **sweep**. For intervals `[s, e)` on small coordinates, `d[s] += 1; d[e] -= 1` and a prefix pass gives how many intervals cover each point. The maximum of that is the busiest moment. When coordinates are huge (up to `10^9`), store the events in a sorted list instead, which is the subject of [Sorting for Problem Solving](/cp/sorting-and-searching/sorting-for-problem-solving/).

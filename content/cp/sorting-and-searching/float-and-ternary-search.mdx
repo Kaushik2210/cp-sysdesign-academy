@@ -111,6 +111,52 @@ print(round(x, 6))   # 2.5
 
 How many iterations? Each shrinks by `2/3`; reducing a width of `10^9` to `10^-9` is a factor `10^18`, needing `ln(10^18) / ln(1.5)` which is about 102. So 100 to 200 iterations is a safe default.
 
+<ConceptWalkthrough
+  title="Narrow an interval with two ternary-search probes"
+  nodes={[
+    { id: "lo", label: "lo", x: 14, y: 48 },
+    { id: "m1", label: "m1", x: 38, y: 48 },
+    { id: "m2", label: "m2", x: 62, y: 48 },
+    { id: "hi", label: "hi", x: 86, y: 48 }
+  ]}
+  edges={[{ from: "lo", to: "m1" }, { from: "m1", to: "m2" }, { from: "m2", to: "hi" }]}
+  frames={[
+    {
+      title: "Predict which end moves first",
+      note: "Minimise f(x) = (x − 4)² + 2 on [0, 9]. The width is 9, so the probes one third in from each end are 3 and 6. Which probe has the lower cost, and which end of the interval can move inward?",
+      active: ["m1", "m2"],
+      values: { lo: "0", m1: "3", m2: "6", hi: "9" }
+    },
+    {
+      title: "Keep the left side through six",
+      note: "At x = 3 the cost is (3 − 4)² + 2 = 3. At x = 6 it is (6 − 4)² + 2 = 6. If the minimum were beyond 6, both probes would be on the decreasing side and the cost at 6 would be lower. Keep [0, 6].",
+      active: ["lo", "m1", "m2"],
+      values: { lo: "0", m1: "3: f=3", m2: "6: f=6", hi: "9" },
+      edges: [{ from: "lo", to: "m1" }, { from: "m1", to: "m2" }]
+    },
+    {
+      title: "Predict the second comparison",
+      note: "On [0, 6] the width is 6, so the probes are 0 + 2 = 2 and 6 − 2 = 4. Compare the costs of 2 and 4 in f(x) = (x − 4)² + 2 and predict the next interval.",
+      active: ["m1", "m2"],
+      values: { lo: "0", m1: "2", m2: "4", hi: "6" }
+    },
+    {
+      title: "Keep the right side from two",
+      note: "The costs are f(2) = 6 and f(4) = 2. If the minimum were below 2, both probes would be on the increasing side and the cost at 4 would be higher. Keep [2, 6].",
+      active: ["m1", "m2", "hi"],
+      values: { lo: "0", m1: "2: f=6", m2: "4: f=2", hi: "6" },
+      edges: [{ from: "m1", to: "m2" }, { from: "m2", to: "hi" }]
+    },
+    {
+      title: "Check the new bracket",
+      note: "Two ternary-search rounds reduce the width from 9 to 6 to 4. The bracket [2, 6] still contains the minimum at x = 4, where the squared term vanishes and the cost is 2. A search using only cost comparisons would continue shrinking the bracket.",
+      active: ["lo", "hi"],
+      values: { lo: "2", hi: "6" },
+      edges: [{ from: "lo", to: "hi" }]
+    }
+  ]}
+/>
+
 ### Integer ternary search
 
 On integers stop when the range is tiny and scan:

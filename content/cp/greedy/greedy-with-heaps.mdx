@@ -73,6 +73,24 @@ print(merge_cost([1, 2, 3, 4, 5]))
 
 The answer is 33: merges cost `3, 6, 9, 15`. Time `O(n log n)`.
 
+<ConceptWalkthrough
+  title="Merge four piles with a min-heap"
+  nodes={[
+    {id:"a",label:"Pile A",x:18,y:22},
+    {id:"b",label:"Pile B",x:50,y:22},
+    {id:"c",label:"Pile C",x:82,y:22},
+    {id:"d",label:"Pile D",x:18,y:64},
+    {id:"heap",label:"Heap",x:50,y:64},
+    {id:"cost",label:"Cost",x:82,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Merge 2 and 3",note:"The heap starts with piles A = 2, B = 3, C = 7, and D = 9. Pop 2 and 3, then push 5. The heap contains 5, 7, and 9, and the total cost is 5.",active:["a","b","heap"],values:{a:"2",b:"3",c:"7",d:"9",heap:"5,7,9",cost:"5"},edges:[{from:"a",to:"heap"},{from:"b",to:"heap"}]},
+    {title:"Merge 5 and 7",note:"Pop the two smallest piles, 5 and 7, and push 12. The heap contains 9 and 12, and the total cost rises to 5 + 12 = 17.",active:["c","heap","cost"],values:{c:"7",d:"9",heap:"9,12",cost:"17"},edges:[{from:"c",to:"heap"}]},
+    {title:"Merge 9 and 12",note:"Pop 9 and 12 and push 21. Only the pile of size 21 remains, and the total merge cost is 17 + 21 = 38.",active:["d","heap","cost"],values:{d:"9",heap:"21",cost:"38"},edges:[{from:"d",to:"heap"}]},
+  ]}
+/>
+
 ## Pattern 2: scheduling unit jobs with deadlines and profits
 
 Each job takes one time unit, has a deadline `d` and a profit `p`. Maximise total profit.

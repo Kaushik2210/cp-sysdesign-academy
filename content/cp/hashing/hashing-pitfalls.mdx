@@ -130,6 +130,22 @@ Every hash-based algorithm is *Monte Carlo*: correct with probability `1 - epsil
 
 prefer a deterministic tool: KMP / Z-function (matching, borders, periods), suffix array + LCP (repeats, distinct substrings), suffix automaton, or Manacher (palindromes). Hashing's advantage is flexibility and simplicity, not guaranteed correctness.
 
+<ConceptWalkthrough
+  title="Count distinct windows when two hashes tie"
+  nodes={[
+    {id:"first",label:"ab",x:22,y:25},
+    {id:"second",label:"be",x:78,y:25},
+    {id:"bucket",label:"Bucket",x:50,y:43},
+    {id:"count",label:"Distinct",x:50,y:76},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Store the first window",note:"Count the distinct length-two windows of abe using base 4, modulus 7, and letter codes a = 1, b = 2, e = 5. The first window ab hashes to (1 × 4 + 2) mod 7 = 6, so bucket 6 stores ab and the distinct count is 1. Predict the hash of be.",active:["first","bucket","count"],values:{first:"6",bucket:"ab",count:"1"},edges:[{from:"first",to:"bucket"}]},
+    {title:"Find a hash tie",note:"The next window be hashes to (2 × 4 + 5) mod 7 = 6. Bucket 6 already contains ab. Should be increase the distinct count? Compare the actual windows before deciding.",active:["first","second","bucket"],values:{first:"6",second:"6",bucket:"ab",count:"1"},edges:[{from:"first",to:"bucket"},{from:"second",to:"bucket"}]},
+    {title:"Compare the characters",note:"The first letters of ab and be differ, so be is a new distinct window. Keep both strings in bucket 6 and raise the count to 2. A set containing only the residue 6 would count one window instead of two.",active:["first","second","bucket","count"],values:{first:"6",second:"6",bucket:"ab, be",count:"2"},edges:[{from:"first",to:"bucket"},{from:"second",to:"bucket"}]},
+  ]}
+/>
+
 ## A safe default recipe
 
 1. Prime modulus: `2^61 - 1` with `__int128` multiplication, or **two** moduli near `10^9` combined into one 64-bit key.

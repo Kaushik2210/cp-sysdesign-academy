@@ -61,6 +61,26 @@ Each index is pushed once and popped at most once (from the back or the front): 
 
 ## Watch it run
 
+<ConceptWalkthrough
+  title="Track window maxima in 9, 2, 6, 4, 7"
+  nodes={[
+    {id:"i0",label:"a[0]",x:12,y:23},
+    {id:"i1",label:"a[1]",x:31,y:23},
+    {id:"i2",label:"a[2]",x:50,y:23},
+    {id:"i3",label:"a[3]",x:69,y:23},
+    {id:"i4",label:"a[4]",x:88,y:23},
+    {id:"deque",label:"Deque",x:28,y:67},
+    {id:"max",label:"Window max",x:72,y:67}
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Predict what stays when 6 arrives",note:"Set the window size to 3. After reading 9 and 2, the deque holds indices [0, 1] from front to back. When 6 arrives at index 2, which earlier indices will survive back cleanup?",active:["i0","i1","deque"],values:{i0:"9",i1:"2",i2:"6",i3:"4",i4:"7",deque:"[0, 1]",max:"pending"},edges:[{from:"i0",to:"i1"}]},
+    {title:"6 displaces 2",note:"Pop index 1 because 6 is larger than 2 and will stay in the window longer. Index 0 survives because 9 is larger than 6. The deque is [0, 2] and the first full window has maximum 9.",active:["i0","i2","deque","max"],values:{i0:"9",i1:"2",i2:"6",i3:"4",i4:"7",deque:"[0, 2]",max:"9"},edges:[{from:"deque",to:"i0"}]},
+    {title:"9 expires from the front",note:"Append index 3 because 4 is smaller than 6. The window now spans indices 1 through 3, so remove index 0 from the front. The deque is [2, 3] and its front gives maximum 6.",active:["i2","i3","deque","max"],values:{i0:"9",i1:"2",i2:"6",i3:"4",i4:"7",deque:"[2, 3]",max:"6"},edges:[{from:"i2",to:"i3"}]},
+    {title:"7 clears both candidates",note:"At index 4, pop index 3 for 4 and then index 2 for 6 because both values are smaller than 7. Index 4 is the only remaining candidate, so the last window has maximum 7 and the three outputs are 9, 6, 7.",active:["i4","deque","max"],values:{i0:"9",i1:"2",i2:"6",i3:"4",i4:"7",deque:"[4]",max:"7"},edges:[]}
+  ]}
+/>
+
 <CodeRunner snippets={{ python: `from collections import deque
 
 def window_max(a, k):

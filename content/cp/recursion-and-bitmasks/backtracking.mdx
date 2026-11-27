@@ -157,6 +157,23 @@ The bounds `s > S` and `s + suffix[i] < S` are sound because every value is posi
 Pruning shrinks typical runs, not the worst-case bound. If the data is adversarial (for example, many zero values or sums that all sit just below the target), the search can still be exponential. Always compute the **worst case** before trusting a backtracking solution, and compare it with the limits: `n!` is fine up to about `n = 10`, `2^n` up to about `n = 25`.
 </Callout>
 
+<ConceptWalkthrough
+  title="Backtrack to make a sum of 9"
+  nodes={[
+    { id: "start", label: "{}", x: 25, y: 19 },
+    { id: "six", label: "{6}", x: 50, y: 46 },
+    { id: "four", label: "{6, 4}", x: 24, y: 74 },
+    { id: "three", label: "{6, 3}", x: 76, y: 74 },
+  ]}
+  edges={[]}
+  frames={[
+    { title: "Choose 6", note: "Find a subset of [6, 4, 3] with sum 9 by trying to include each item first. After choosing 6, only 3 more is needed. If the next choice adds 4, can that branch still reach 9?", active: ["start", "six"], values: { start: "sum 0", six: "sum 6" }, edges: [{ from: "start", to: "six" }] },
+    { title: "Prune the branch that adds 4", note: "Choosing 4 after 6 gives 10. The only remaining item is positive, so including it would raise the sum and skipping it would leave the sum at 10.", active: ["six", "four"], values: { six: "sum 6", four: "sum 10" }, edges: [{ from: "six", to: "four" }] },
+    { title: "Undo the choice of 4", note: "Remove the chosen 4 and subtract it from the running sum. This restores the subset {6} with sum 6. On the branch that skips 4, the next candidate is 3.", active: ["six"], values: { six: "sum 6" }, edges: [{ from: "start", to: "six" }] },
+    { title: "Try the next available item", note: "With 4 skipped, choosing 3 gives 6 + 3 = 9. The subset {6, 3} meets the target, so the search for one solution can stop.", active: ["six", "three"], values: { six: "sum 6", three: "sum 9" }, edges: [{ from: "six", to: "three" }] },
+  ]}
+/>
+
 ## Worked analysis: how big is the search?
 
 - Subsets: `2^n` leaves, `2^(n+1) - 1` nodes.

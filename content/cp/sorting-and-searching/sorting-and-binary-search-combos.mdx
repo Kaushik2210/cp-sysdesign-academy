@@ -59,6 +59,51 @@ print(a[j])                                                  # largest <= 4 -> 3
 
 In C++ the same functions are `lower_bound` and `upper_bound`; in Java you write the loop yourself or use `Arrays.binarySearch` with care (it returns any matching index and a negative insertion point otherwise).
 
+<ConceptWalkthrough
+  title="Count values in a range with duplicate endpoints"
+  nodes={[
+    { id: "i0", label: "[0]", x: 10, y: 26 },
+    { id: "i1", label: "[1]", x: 26, y: 26 },
+    { id: "i2", label: "[2]", x: 42, y: 26 },
+    { id: "i3", label: "[3]", x: 58, y: 26 },
+    { id: "i4", label: "[4]", x: 74, y: 26 },
+    { id: "i5", label: "[5]", x: 90, y: 26 },
+    { id: "left", label: "Left", x: 22, y: 70 },
+    { id: "count", label: "Count", x: 50, y: 70 },
+    { id: "right", label: "Right", x: 80, y: 70 }
+  ]}
+  edges={[]}
+  frames={[
+    {
+      title: "Sort the input and predict the bounds",
+      note: "Sort [6, 4, 9, 2, 6, 4] into [2, 4, 4, 6, 6, 9]. To count values in the inclusive range [4, 6], predict the zero-based index of the first value at least 4 and the first value greater than 6.",
+      active: ["left", "right"],
+      values: { i0: "2", i1: "4", i2: "4", i3: "6", i4: "6", i5: "9" }
+    },
+    {
+      title: "The lower bound includes both fours",
+      note: "For lower_bound(4), the first probe is index 3 in the search window [0, 6). Its value 6 meets the threshold, so move the upper bound to 3. Index 1 also meets the threshold with 4, so move it to 1. Index 0 holds 2, so move the lower bound to 1. The bounds meet at index 1.",
+      active: ["i1", "left"],
+      values: { i0: "2", i1: "4", i2: "4", i3: "6", i4: "6", i5: "9", left: "1" },
+      edges: [{ from: "left", to: "i1" }]
+    },
+    {
+      title: "The upper bound comes after both sixes",
+      note: "For upper_bound(6), index 3 holds 6, so move the lower bound to 4. Index 5 holds 9, so move the upper bound to 5. Index 4 holds 6, so move the lower bound to 5. The bounds meet at index 5, the first value strictly greater than 6.",
+      active: ["i5", "right"],
+      values: { i0: "2", i1: "4", i2: "4", i3: "6", i4: "6", i5: "9", left: "1", right: "5" },
+      edges: [{ from: "left", to: "i1" }, { from: "right", to: "i5" }]
+    },
+    {
+      title: "Subtract the boundary indices",
+      note: "The qualifying slice is [1, 5) in index space. It contains indices 1 through 4 and values 4, 4, 6, 6. Subtract the start index from the exclusive end index to get 5 − 1 = 4.",
+      active: ["i1", "i2", "i3", "i4", "count"],
+      values: { i0: "2", i1: "4", i2: "4", i3: "6", i4: "6", i5: "9", left: "1", right: "5", count: "5 − 1 = 4" },
+      edges: [{ from: "i1", to: "i2" }, { from: "i2", to: "i3" }, { from: "i3", to: "i4" }]
+    }
+  ]}
+/>
+
 ## Coordinate compression
 
 Many structures (count arrays, Fenwick trees, difference arrays) want indices `0..m-1`, but the values are up to `10^9`. **Compression** replaces each value by its rank among the distinct values; order is preserved, which is all that comparisons need.

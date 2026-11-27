@@ -43,6 +43,22 @@ A hash match is only *probably* a real match. Two ways to deal with that:
 - **Monte Carlo**: trust the hash (use a ~`10^18` hash space; error probability is negligible).
 - **Las Vegas**: verify each hash match by direct comparison. The answer is always correct; expected time stays `O(n + m)` because false matches are rare, though a string with *many* true matches costs `O(m)` per match for the verification.
 
+<ConceptWalkthrough
+  title="Roll a length-three window across dacab"
+  nodes={[
+    {id:"window",label:"Window",x:25,y:25},
+    {id:"hash",label:"Hash",x:75,y:25},
+    {id:"change",label:"Slide",x:25,y:65},
+    {id:"target",label:"Target",x:75,y:65},
+  ]}
+  edges={[{from:"window",to:"hash"},{from:"hash",to:"target"}]}
+  frames={[
+    {title:"Hash the first window",note:"Search dacab for cab using a = 1, b = 2, c = 3, d = 4, base 5 and modulus 17. The target cab hashes to 82 mod 17 = 14. The first window dac hashes to 108 mod 17 = 6. Predict which letters leave and enter on the first slide.",active:["window","hash","target"],values:{window:"dac",hash:"6",target:"14"}},
+    {title:"Slide to aca",note:"Moving from dac to aca removes d and appends a. The leading-place weight is 5² mod 17 = 8, so the new hash is ((6 − 4 × 8) × 5 + 1) mod 17 = 7. Predict the hash when the next slide drops a and appends b.",active:["change","window","hash"],values:{window:"aca",hash:"7",change:"−d, +a",target:"14"},edges:[{from:"change",to:"window"},{from:"window",to:"hash"}]},
+    {title:"Slide to cab and confirm",note:"Moving from aca to cab removes a and appends b. The new hash is ((7 − 1 × 8) × 5 + 2) mod 17 = 14. It equals the target hash. Comparing the three characters confirms cab at zero-based index 2.",active:["change","window","hash","target"],values:{window:"cab",hash:"14",change:"−a, +b",target:"14"},edges:[{from:"change",to:"window"},{from:"window",to:"hash"},{from:"hash",to:"target"}]},
+  ]}
+/>
+
 <CodeRunner language="python" code={`import random
 
 def rabin_karp(t, p):

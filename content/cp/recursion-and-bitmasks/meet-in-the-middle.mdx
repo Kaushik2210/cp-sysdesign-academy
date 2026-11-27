@@ -82,6 +82,23 @@ print(sum(right.get(S - v, 0) for v in sums(a[:h])) >= 1)
 
 (The planted target guarantees at least one subset, so it prints `True`. Each half has `2^17 = 131,072` sums.)
 
+<ConceptWalkthrough
+  title="Count pairs of half-subsets that sum to 8"
+  nodes={[
+    { id: "left", label: "Left sum", x: 18, y: 34 },
+    { id: "need", label: "Need", x: 50, y: 34 },
+    { id: "right", label: "Matches", x: 82, y: 34 },
+    { id: "total", label: "Total", x: 82, y: 71 },
+  ]}
+  edges={[{ from: "left", to: "need" }, { from: "need", to: "right" }, { from: "right", to: "total" }]}
+  frames={[
+    { title: "Split and list the sums", note: "To count subsets of [2, 5, 3, 3] that sum to 8, split into [2, 5] and [3, 3]. The left sums are 0, 2, 5, 7. The right sums are 0, 3, 3, 6. If the left sum is 5, what right sum is needed, and how many right subsets have it?", active: ["left", "need"], values: { left: "5", need: "?", right: "?", total: "0" } },
+    { title: "Count both copies of the complement", note: "For left sum 5, the complement is 8 − 5 = 3. Either of the two right-hand positions can supply a 3, so this left subset contributes two distinct subsets.", active: ["left", "need", "right", "total"], values: { left: "5", need: "3", right: "2", total: "2" } },
+    { title: "Match the left sum of 2", note: "For left sum 2, the complement is 8 − 2 = 6. The right subset containing both 3s is the only match, so the running total rises from two to three.", active: ["left", "need", "right", "total"], values: { left: "2", need: "6", right: "1", total: "3" } },
+    { title: "Check the remaining left sums", note: "The remaining left sums, 0 and 7, require right sums of 8 and 1 respectively. Neither occurs among the right sums 0, 3, 3, 6, so the final count is three.", active: ["left", "need", "right"], values: { left: "0, 7", need: "8, 1", right: "0 each", total: "3" } },
+  ]}
+/>
+
 ## Complexity
 
 - Enumeration: `O(2^(n/2))` per half.

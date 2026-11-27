@@ -73,6 +73,22 @@ print("Smith's rule matches brute force:", ok)
 
 Special cases are well known: all weights equal gives "shortest job first" (minimises the average completion time); all processing times equal gives "heaviest first".
 
+<ConceptWalkthrough
+  title="Swap two jobs to lower weighted completion cost"
+  nodes={[
+    {id:"a",label:"Job A",x:24,y:22},
+    {id:"b",label:"Job B",x:76,y:22},
+    {id:"order",label:"Order",x:24,y:64},
+    {id:"cost",label:"Cost",x:76,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Compare the ratios",note:"Job A takes 4 time units and has weight 2, so its time-to-weight ratio is 2. Job B takes 2 time units and has weight 5, so its ratio is 0.4. The smaller ratio goes first.",active:["a","b"],values:{a:"4/2 = 2",b:"2/5 = 0.4"}},
+    {title:"Score A then B",note:"Starting at time 0, A completes at 4 and B completes at 6. The weighted completion cost is 2 × 4 + 5 × 6 = 38.",active:["a","b","order","cost"],values:{a:"Finish 4",b:"Finish 6",order:"A, B",cost:"38"},edges:[{from:"a",to:"b"}]},
+    {title:"Score B then A",note:"After the swap, B completes at 2 and A still completes at 6. The weighted cost is 5 × 2 + 2 × 6 = 22, a reduction of 16. Both orders finish at time 6, so any later jobs keep their completion times.",active:["a","b","order","cost"],values:{a:"Finish 6",b:"Finish 2",order:"B, A",cost:"22"},edges:[{from:"a",to:"b"}]},
+  ]}
+/>
+
 ## Theorem 2: minimise the maximum lateness
 
 Jobs have processing time `t_i` and deadline `d_i`. Run them back to back from time 0. Lateness of job `i` is `C_i - d_i` (negative means early). Minimise the **maximum** lateness.

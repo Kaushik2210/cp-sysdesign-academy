@@ -150,6 +150,22 @@ print(count_subarrays([1, -1, 1, -1], 0))     # 4
 
 This works with **negative numbers and zeros**, where a two-pointer window fails. Variants: subarrays whose sum is divisible by `m` (key = prefix `mod m`), equal number of `0`s and `1`s (map `0 -> -1`, key = prefix), longest subarray with sum `k` (store the *first* index of each prefix instead of a count).
 
+<ConceptWalkthrough
+  title="Count zero-sum subarrays in [-2, 2, 0]"
+  nodes={[
+    {id:"prefix",label:"Prefix",x:22,y:25},
+    {id:"freq",label:"Seen",x:50,y:64},
+    {id:"total",label:"Total",x:78,y:25},
+  ]}
+  edges={[{from:"prefix",to:"freq"},{from:"freq",to:"total"}]}
+  frames={[
+    {title:"Seed the map",note:"To count zero-sum subarrays, look up the current prefix sum among earlier prefixes. Before reading any elements of [-2, 2, 0], store the empty prefix sum 0 once. Predict how many matches the first element, -2, adds.",active:["prefix","freq"],values:{prefix:"0",freq:"{0:1}",total:"0"}},
+    {title:"Read -2",note:"The running sum becomes -2. No earlier prefix has sum -2, so the lookup adds zero subarrays. Store -2 with count 1.",active:["prefix","freq"],values:{prefix:"-2",freq:"{0:1, -2:1}",total:"0"}},
+    {title:"Read 2",note:"The running sum becomes -2 + 2 = 0. The map contains one earlier zero prefix, so [-2, 2] adds one to the total. Inserting the current prefix raises the count for 0 to 2. Predict how many matches the final 0 adds.",active:["prefix","freq","total"],values:{prefix:"0",freq:"{0:2, -2:1}",total:"1"}},
+    {title:"Read 0",note:"The running sum stays 0. The two earlier zero prefixes give two new subarrays, [-2, 2, 0] and [0]. The total becomes 1 + 2 = 3. Then the map increments the count for 0 to 3.",active:["prefix","freq","total"],values:{prefix:"0",freq:"{0:3, -2:1}",total:"3"}},
+  ]}
+/>
+
 ## The C++ trap: `unordered_map` can be made quadratic
 
 Hash tables give `O(1)` *expected* time only if keys spread out. `std::unordered_map<int, ...>` uses a fixed, public hash (identity for integers) and a known set of bucket counts (prime sizes). On sites with open hacking (Codeforces), an adversary can submit inputs whose keys are all multiples of a bucket count, forcing every key into one bucket: `n` insertions cost `O(n^2)` and your solution times out.

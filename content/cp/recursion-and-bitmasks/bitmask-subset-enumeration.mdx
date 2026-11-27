@@ -89,6 +89,23 @@ while True:
 
 Why it works: `s - 1` flips the lowest set bit of `s` and all bits below it to 1; the `& m` then drops everything that is not in `m`. The result is exactly the next smaller submask in numeric order, so every submask is visited once, in decreasing order.
 
+<ConceptWalkthrough
+  title="Enumerate the submasks of 10010"
+  nodes={[
+    { id: "mask", label: "mask", x: 20, y: 26 },
+    { id: "sub", label: "sub", x: 20, y: 65 },
+    { id: "minus", label: "sub − 1", x: 50, y: 65 },
+    { id: "next", label: "AND", x: 80, y: 46 },
+  ]}
+  edges={[{ from: "mask", to: "next" }, { from: "sub", to: "minus" }, { from: "minus", to: "next" }]}
+  frames={[
+    { title: "Start with both allowed bits", note: "All values are binary. Start with sub = mask = 10010, whose set bits are at positions 4 and 1. Subtracting 1 gives 10001. What remains after AND with 10010?", active: ["mask", "sub", "minus"], values: { mask: "10010", sub: "10010", minus: "10001" } },
+    { title: "Drop the disallowed bit", note: "The AND of 10001 and 10010 is 10000. Bit 0 was set by subtraction, but the original mask disallows it. The next submask contains only bit 4.", active: ["mask", "minus", "next"], values: { mask: "10010", sub: "10010", minus: "10001", next: "10000" } },
+    { title: "Keep an allowed bit set by borrowing", note: "Now sub = 10000. Subtracting 1 gives 01111, and AND with 10010 leaves 00010. Of the four lower ones introduced by borrowing, only bit 1 is allowed.", active: ["mask", "sub", "minus", "next"], values: { mask: "10010", sub: "10000", minus: "01111", next: "00010" } },
+    { title: "Reach the empty submask", note: "From 00010, subtract 1 to get 00001. The AND with 10010 gives 00000. The full descending list is 10010, 10000, 00010, 00000. Include zero for the empty subset, then stop.", active: ["mask", "sub", "minus", "next"], values: { mask: "10010", sub: "00010", minus: "00001", next: "00000" } },
+  ]}
+/>
+
 ### Why the total over all masks is 3^n
 
 Sum, over all masks `m`, of the number of submasks `2^popcount(m)`. Count the pairs `(s, m)` with `s` a submask of `m` directly: each of the `n` items is in exactly one of three states, **not in `m`**, **in `m` but not in `s`**, **in both**. That gives `3^n` pairs. Equivalently, by the binomial theorem the sum is `sum_k C(n, k) * 2^k = (1 + 2)^n = 3^n`.

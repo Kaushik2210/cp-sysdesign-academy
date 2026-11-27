@@ -94,6 +94,25 @@ Trace for `([)]`:
 
 Why is this correct? If the string is balanced, the matching partner of a closing bracket is the nearest unmatched opener to its left, which is the stack top by the invariant. Conversely, if the algorithm never fails and ends with an empty stack, the pops pair every bracket with a partner of the right kind in properly nested order.
 
+<ConceptWalkthrough
+  title="Match the nested brackets in [{}]"
+  nodes={[
+    {id:"openSquare",label:"[",x:14,y:23},
+    {id:"openBrace",label:"{",x:38,y:44},
+    {id:"closeBrace",label:"}",x:62,y:44},
+    {id:"closeSquare",label:"]",x:86,y:23},
+    {id:"bottom",label:"Bottom",x:30,y:77},
+    {id:"top",label:"Top slot",x:70,y:77}
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Push the square opener",note:"Scan [{}] from left to right. The first character, [, goes into the bottom slot and is also the stack top while it is the only entry.",active:["openSquare","bottom"],values:{bottom:"[",top:"empty"},edges:[]},
+    {title:"Predict which opener closes first",note:"Push { above [. The stack now holds [ then { from bottom to top. The next character is }. Which opener will the algorithm compare with it?",active:["openBrace","top"],values:{bottom:"[",top:"{",closeBrace:"next"},edges:[]},
+    {title:"The brace closer pops the top",note:"The } matches { because { is the most recent unmatched opener. Pop it, leaving [ as the only entry and the new stack top.",active:["openBrace","closeBrace","bottom"],values:{bottom:"[",top:"empty"},edges:[{from:"openBrace",to:"closeBrace"}]},
+    {title:"The square closer empties the stack",note:"The final ] matches the remaining [. Pop [ and reach the end with an empty stack, so [{}] is balanced.",active:["openSquare","closeSquare"],values:{bottom:"empty",top:"empty"},edges:[{from:"openSquare",to:"closeSquare"}]}
+  ]}
+/>
+
 <CodeRunner language="python" code={`def balanced(s):
     pair = {')': '(', ']': '[', '}': '{'}
     st = []

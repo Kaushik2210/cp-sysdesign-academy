@@ -61,6 +61,24 @@ print(has_pair(a, 2))    # None
 
 <Complexity time="O(n)" space="O(1)" note="after sorting, which is O(n log n) if the input is not sorted" />
 
+<ConceptWalkthrough
+  title="Discard one endpoint at a time"
+  nodes={[
+    { id: "a0", label: "a[0]", x: 17, y: 24 },
+    { id: "a1", label: "a[1]", x: 39, y: 24 },
+    { id: "a2", label: "a[2]", x: 61, y: 24 },
+    { id: "a3", label: "a[3]", x: 83, y: 24 },
+    { id: "sum", label: "Pair sum", x: 35, y: 72 },
+    { id: "target", label: "Target", x: 68, y: 72 },
+  ]}
+  edges={[]}
+  frames={[
+    { title: "Predict which endpoint can go", note: "In the sorted array [2, 4, 7, 10], the endpoints at indices 0 and 3 sum to 2 + 10 = 12. The target is 11. Which endpoint can you discard without losing a possible match?", active: ["a0", "a3", "sum"], values: { a0: "2 (i)", a1: "4", a2: "7", a3: "10 (j)", sum: "12", target: "11" }, edges: [{ from: "a0", to: "sum" }, { from: "a3", to: "sum" }] },
+    { title: "Move the right pointer to 7", note: "Even the smallest available partner, 2, makes the sum with 10 too large, so discard 10. The new pair at indices 0 and 2 sums to 2 + 7 = 9. Which endpoint can you discard now?", active: ["a0", "a2", "sum"], values: { a0: "2 (i)", a1: "4", a2: "7 (j)", a3: "10", sum: "9", target: "11" }, edges: [{ from: "a0", to: "sum" }, { from: "a2", to: "sum" }] },
+    { title: "Move the left pointer and find the pair", note: "Even the largest remaining partner, 7, makes the sum with 2 too small, so discard 2. The next pair at indices 1 and 2 gives 4 + 7 = 11, exactly the target.", active: ["a1", "a2", "sum", "target"], values: { a0: "2", a1: "4 (i)", a2: "7 (j)", a3: "10", sum: "11", target: "11" }, edges: [{ from: "a1", to: "sum" }, { from: "a2", to: "sum" }, { from: "sum", to: "target" }] },
+  ]}
+/>
+
 ### Counting pairs with duplicates
 
 Counting all pairs with sum `T` needs care when values repeat. When `a[i] != a[j]`, count the block of copies of `a[i]` times the block of copies of `a[j]`, then skip both blocks. When `a[i] == a[j]` the whole remaining range is one value `v` with `2v = T`, giving `m(m-1)/2` pairs for a block of size `m`.

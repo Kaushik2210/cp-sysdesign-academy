@@ -66,6 +66,23 @@ print(fractional([(60, 10), (100, 20), (120, 30)], 50))
 
 The answer is 240.0: take items 1 and 2 whole (30 weight, 160 value) and 20 of the third (80 value).
 
+<ConceptWalkthrough
+  title="Fill a fractional knapsack of capacity 7"
+  nodes={[
+    {id:"a",label:"A",x:18,y:22},
+    {id:"b",label:"B",x:50,y:22},
+    {id:"c",label:"C",x:82,y:22},
+    {id:"room",label:"Room",x:32,y:64},
+    {id:"worth",label:"Value",x:68,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Rank by density",note:"A has weight 3 and value 15 (5 per unit), B has weight 6 and value 18 (3 per unit), and C has weight 4 and value 8 (2 per unit). Start with capacity 7 and value 0.",active:["a","b","c"],values:{a:"5/unit",b:"3/unit",c:"2/unit",room:"7",worth:"0"}},
+    {title:"Take all of A",note:"A has the highest value per unit. Its weight 3 leaves 7 − 3 = 4 units of capacity, and its value raises the total to 15.",active:["a","room","worth"],values:{a:"3 of 3",room:"4",worth:"15"}},
+    {title:"Fill with part of B",note:"Take 4 of B's 6 weight units at value 3 per unit. They add 4 × 3 = 12 for a total of 27. With capacity 0, take none of C.",active:["b","room","worth"],values:{a:"3 of 3",b:"4 of 6",c:"0 of 4",room:"0",worth:"27"}},
+  ]}
+/>
+
 ## A greedy that fails: 0/1 knapsack
 
 The same ratio rule on the **indivisible** version (take an item whole or not at all) is wrong on the same data. By ratio the items rank `6, 5, 4`. Greedy takes the first two (weight 30, value 160) and cannot add the third (weight 30 would exceed capacity 50). But taking items 2 and 3 gives weight 50 and value 220.

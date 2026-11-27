@@ -116,6 +116,22 @@ console.log("bit 3 set?", (x >> 3) & 1);
 console.log("toggle bit 6", (x ^ (1 << 6)).toString(2));
 ` }} />
 
+<ConceptWalkthrough
+  title="Count set bits by clearing one at a time"
+  nodes={[
+    { id: "x", label: "x", x: 20, y: 42 },
+    { id: "previous", label: "x − 1", x: 50, y: 42 },
+    { id: "result", label: "AND", x: 80, y: 42 },
+  ]}
+  edges={[{ from: "x", to: "previous" }, { from: "previous", to: "result" }]}
+  frames={[
+    { title: "Predict the first AND", note: "Start with x = 110100 in binary. Subtracting 1 turns the rightmost 1 into a 0 and the two trailing zeros into ones, giving 110011. Which bits survive x & (x − 1)?", active: ["x", "previous"], values: { x: "110100", previous: "110011" } },
+    { title: "Clear the rightmost 1", note: "The AND of 110100 and 110011 is 110000. The two leading ones survive because both operands have them. The new trailing ones in x − 1 disappear because x has zeros there. One bit has been cleared.", active: ["x", "previous", "result"], values: { x: "110100", previous: "110011", result: "110000" } },
+    { title: "Repeat with the result", note: "Use 110000 as the new x. Its predecessor is 101111, so their AND is 100000. Two bits have now been cleared.", active: ["x", "previous", "result"], values: { x: "110000", previous: "101111", result: "100000" } },
+    { title: "Stop at zero", note: "The AND of 100000 and 011111 is 000000. Each iteration cleared exactly one set bit, so three iterations tell us the original value had three set bits.", active: ["x", "previous", "result"], values: { x: "100000", previous: "011111", result: "000000" } },
+  ]}
+/>
+
 ## Worked example: the two lonely numbers
 
 An array holds every value twice except two values `p != q`, each once. Xor of everything is `x = p ^ q`, non-zero. Pick any set bit of `x`, say `low = x & -x`. At that bit `p` and `q` differ, so splitting all numbers by that bit puts `p` and `q` in different groups; each duplicated value stays together in one group and cancels. Xor each group to get `p` and `q`. One pass, `O(1)` memory.

@@ -83,6 +83,23 @@ for _ in range(500):
 print("non-canonical systems:", bad_systems, "of 500; Kozen-Zaks bound held:", bound_ok)
 `} />
 
+<ConceptWalkthrough
+  title="Break largest-coin-first with a target of 10"
+  nodes={[
+    {id:"a",label:"Coin 1",x:18,y:22},
+    {id:"b",label:"Coin 5",x:50,y:22},
+    {id:"c",label:"Coin 7",x:82,y:22},
+    {id:"left",label:"Left",x:32,y:64},
+    {id:"used",label:"Used",x:68,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Take the largest coin",note:"For target 10 with unlimited coins of values 1, 5, and 7, largest-coin-first takes 7. That leaves 10 − 7 = 3 and uses one coin.",active:["c","left","used"],values:{left:"3",used:"1"}},
+    {title:"Finish the greedy run",note:"With 3 left, only value 1 fits. Take three 1s to reach 10 using 7 + 1 + 1 + 1, a total of four coins.",active:["a","left","used"],values:{left:"0",used:"4"}},
+    {title:"Build the optimum",note:"Use two 5s to reach 10 in two coins. Since no denomination equals 10, one coin cannot work. The minimum is two coins.",active:["b","left","used"],values:{left:"0",used:"2"}},
+  ]}
+/>
+
 ## Weighted interval scheduling: when the weight breaks greedy
 
 Activity selection (maximise the **number**) is greedy. Give every interval a **weight** and maximise the total weight, and "earliest finish" fails: a short cheap interval can block one big valuable interval. The correct approach is dynamic programming over intervals sorted by end: `dp[i] = max(dp[i-1], w_i + dp[p(i)])`, where `p(i)` is the number of intervals that end no later than interval `i` starts.

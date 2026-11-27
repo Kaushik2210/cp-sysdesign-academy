@@ -78,6 +78,23 @@ print("compressed     :", [rank[x] for x in a])
 print("restore        :", [u[rank[x] - 1] for x in a])
 `} />
 
+<ConceptWalkthrough
+  title="Compress [70, -4, 70, 12] to zero-based ranks"
+  nodes={[
+    {id:"input",label:"Input",x:25,y:25},
+    {id:"sorted",label:"Sorted",x:75,y:25},
+    {id:"keys",label:"Distinct",x:75,y:65},
+    {id:"result",label:"Ranks",x:25,y:65},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Compare values",note:"Compress [70, -4, 70, 12] using zero-based ranks. Predict whether the two occurrences of 70 will have the same rank.",active:["input"],values:{input:"70,-4,70,12"}},
+    {title:"Sort a copy",note:"Sorting produces [-4, 12, 70, 70]. The original sequence [70, -4, 70, 12] still determines the order of the output.",active:["input","sorted"],values:{input:"70,-4,70,12",sorted:"-4,12,70,70"},edges:[{from:"input",to:"sorted"}]},
+    {title:"Deduplicate and assign ranks",note:"The sorted distinct list [-4, 12, 70] assigns ranks -4 → 0, 12 → 1, and 70 → 2. Both occurrences of 70 share rank 2 because the distinct list contains one entry for 70. Predict the order of the four ranks in the output.",active:["sorted","keys"],values:{sorted:"-4,12,70,70",keys:"-4,12,70"},edges:[{from:"sorted",to:"keys"}]},
+    {title:"Map in input order",note:"Looking up 70, -4, 70, and 12 in that order gives [2, 0, 2, 1]. Rank 2 appears twice because the input contains 70 twice.",active:["input","keys","result"],values:{input:"70,-4,70,12",keys:"-4,12,70",result:"2,0,2,1"},edges:[{from:"input",to:"result"},{from:"keys",to:"result"}]},
+  ]}
+/>
+
 ### Why compress?
 
 - **Fenwick / segment tree over values:** "count of smaller elements to my left" over values up to `10^9` becomes a tree of size `n`.

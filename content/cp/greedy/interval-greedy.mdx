@@ -76,6 +76,25 @@ for name, iv in (("A", a), ("B", b)):
           "by length:", pick(iv, lambda x: x[1] - x[0]))
 `} />
 
+<ConceptWalkthrough
+  title="Choose the earliest finishing compatible activity"
+  nodes={[
+    {id:"a",label:"A",x:16,y:22},
+    {id:"b",label:"B",x:39,y:22},
+    {id:"c",label:"C",x:62,y:22},
+    {id:"d",label:"D",x:85,y:22},
+    {id:"end",label:"End",x:32,y:64},
+    {id:"pick",label:"Picks",x:68,y:64},
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Choose A first",note:"In finish order the half-open intervals are A = [1, 3), B = [2, 5), C = [3, 6), and D = [6, 8). Pick A because it finishes first, at 3.",active:["a","end"],values:{a:"[1,3)",b:"[2,5)",c:"[3,6)",d:"[6,8)",end:"3",pick:"A"}},
+    {title:"Skip B",note:"B starts at 2, before A finishes at 3, so it overlaps A. Keep A and leave the last finish at 3.",active:["b","end"],values:{b:"2 < 3",end:"3",pick:"A"}},
+    {title:"Take C",note:"C starts at 3, exactly when A ends. Half-open intervals can touch at an endpoint, so take C and set the last finish to 6.",active:["a","c","end"],values:{c:"3 = 3",end:"6",pick:"A, C"}},
+    {title:"Take D",note:"D starts at 6, exactly when C ends. Take D to finish at 8 with three compatible activities, A, C, and D.",active:["c","d","pick"],values:{d:"6 = 6",end:"8",pick:"A, C, D"}},
+  ]}
+/>
+
 ## 2. Merging intervals
 
 Sort by start and sweep, extending the current block while the next interval starts at or before the block's end.

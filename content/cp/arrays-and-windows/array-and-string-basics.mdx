@@ -96,6 +96,25 @@ and the answer is the largest `cur` ever seen. Extending is only worth it when t
 
 Answer 6, the streak `5, -1, 2`.
 
+<ConceptWalkthrough
+  title="Restart or extend the streak?"
+  nodes={[
+    { id: "a0", label: "a[0]", x: 17, y: 23 },
+    { id: "a1", label: "a[1]", x: 39, y: 23 },
+    { id: "a2", label: "a[2]", x: 61, y: 23 },
+    { id: "a3", label: "a[3]", x: 83, y: 23 },
+    { id: "cur", label: "cur", x: 39, y: 72 },
+    { id: "best", label: "best", x: 61, y: 72 },
+  ]}
+  edges={[]}
+  frames={[
+    { title: "Start with 2", note: "For [2, -5, 4, 3], the only non-empty streak ending at index 0 is [2], so both cur and best start at 2.", active: ["a0", "cur", "best"], values: { a0: "2", a1: "-5", a2: "4", a3: "3", cur: "2", best: "2" }, edges: [{ from: "a0", to: "cur" }] },
+    { title: "Extend through -5", note: "At index 1, extending gives 2 - 5 = -3, which beats starting at -5. Best stays 2. When 4 arrives, predict whether extending from -3 or starting at 4 gives a larger cur.", active: ["a1", "cur"], values: { a0: "2", a1: "-5", a2: "4", a3: "3", cur: "-3", best: "2" }, edges: [{ from: "a1", to: "cur" }] },
+    { title: "Restart at 4", note: "At index 2, extending gives -3 + 4 = 1. Starting fresh gives 4, so cur becomes 4 and raises best to 4.", active: ["a2", "cur", "best"], values: { a0: "2", a1: "-5", a2: "4", a3: "3", cur: "4", best: "4" }, edges: [{ from: "a2", to: "cur" }] },
+    { title: "Finish with 7", note: "At index 3, extending gives 4 + 3 = 7, which beats starting at 3. Best rises to 7, the sum of the streak [4, 3].", active: ["a3", "cur", "best"], values: { a0: "2", a1: "-5", a2: "4", a3: "3", cur: "7", best: "7" }, edges: [{ from: "a3", to: "cur" }] },
+  ]}
+/>
+
 <CodeRunner language="python" code={`n = int(input())
 a = list(map(int, input().split()))
 best = cur = a[0]          # start from the first element, NOT from 0

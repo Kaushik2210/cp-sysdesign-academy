@@ -87,6 +87,24 @@ Implement a queue using only stacks `inbox` and `outbox`:
 
 A single `pop` can cost `O(n)`, but each element is moved from `inbox` to `outbox` **at most once** in its lifetime and popped at most once. So `n` operations cost at most `3n` element touches: `O(1)` amortised.
 
+<ConceptWalkthrough
+  title="Pay for a two-stack queue transfer with potential"
+  nodes={[
+    {id:"inbox",label:"Inbox",x:28,y:23},
+    {id:"outbox",label:"Outbox",x:72,y:23},
+    {id:"potential",label:"Potential",x:18,y:67},
+    {id:"actual",label:"Actual",x:50,y:67},
+    {id:"amortized",label:"Amortised",x:82,y:67}
+  ]}
+  edges={[]}
+  frames={[
+    {title:"Predict the cost of the first dequeue",note:"Enqueue A, B and C in that order into an empty queue. Stacks are shown bottom to top. Count one unit per stack push or pop and set potential to twice the inbox size. The three enqueues cost 3 actual and 9 amortised in total, leaving potential 6. How many stack operations will the first dequeue take?",active:["inbox","potential"],values:{inbox:"[A, B, C]",outbox:"empty",potential:"6",actual:"3",amortized:"9"},edges:[]},
+    {title:"The transfer uses the stored potential",note:"The empty outbox triggers a transfer of C, B and A in that order. Three inbox pops and three outbox pushes cost 6, then popping A costs 1 more. The inbox empties and potential falls from 6 to 0, so this dequeue costs 7 − 6 = 1 amortised.",active:["inbox","outbox","potential","actual","amortized"],values:{inbox:"empty",outbox:"[C, B]",potential:"0",actual:"7",amortized:"1"},edges:[{from:"inbox",to:"outbox"}]},
+    {title:"Enqueue D while B and C wait",note:"Push D onto the inbox for one actual operation. The potential rises from 0 to 2, so the amortised cost is 1 + 2 = 3. The outbox still has B on top and C below it.",active:["inbox","potential","actual","amortized"],values:{inbox:"[D]",outbox:"[C, B]",potential:"2",actual:"1",amortized:"3"},edges:[]},
+    {title:"Dequeue B directly from the outbox",note:"The outbox still has B on top, so one pop returns B. The inbox stays the same and potential stays at 2, giving amortised cost 1 + 0 = 1. Across the full sequence, actual cost 12 equals amortised cost 14 minus the final potential 2.",active:["outbox","actual","amortized"],values:{inbox:"[D]",outbox:"[C]",potential:"2",actual:"1",amortized:"1"},edges:[]}
+  ]}
+/>
+
 <CodeRunner language="python" code={`class TwoStackQueue:
     def __init__(self):
         self.inbox, self.outbox = [], []

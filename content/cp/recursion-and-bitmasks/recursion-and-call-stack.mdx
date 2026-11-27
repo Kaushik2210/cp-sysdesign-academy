@@ -53,6 +53,23 @@ Two consequences matter in contests:
 - **Time** is the number of calls times the work done inside each call (excluding the sub-calls).
 - **Memory** is the maximum **depth**, not the total number of calls. A recursion with `2^n` calls but depth `n` (like towers of Hanoi) uses only `O(n)` stack.
 
+<ConceptWalkthrough
+  title="Sum the digits of 407"
+  nodes={[
+    { id: "outer", label: "sum(407)", x: 18, y: 30 },
+    { id: "middle", label: "sum(40)", x: 50, y: 48 },
+    { id: "base", label: "sum(4)", x: 82, y: 66 },
+  ]}
+  edges={[]}
+  frames={[
+    { title: "Save the ones digit", note: "To sum the digits of 407, save 407 % 10 = 7 and call sum(40), since integer division by 10 drops the ones digit. What will sum(40) save, and what call will it make?", active: ["outer", "middle"], values: { outer: "hold 7" }, edges: [{ from: "outer", to: "middle" }] },
+    { title: "Suspend a second call", note: "The call sum(40) saves 40 % 10 = 0 and calls sum(4), since 40 divided by 10 is 4. Both callers wait for the single-digit base case.", active: ["middle", "base"], values: { outer: "hold 7", middle: "hold 0" }, edges: [{ from: "outer", to: "middle" }, { from: "middle", to: "base" }] },
+    { title: "Return from the base case", note: "The digit sum of a single digit is the digit itself, so sum(4) returns 4 to sum(40). What will each waiting call return after adding its saved digit?", active: ["middle", "base"], values: { outer: "hold 7", middle: "hold 0", base: "return 4" }, edges: [{ from: "base", to: "middle" }] },
+    { title: "Resume the inner caller", note: "The call sum(40) adds its saved 0 to the returned 4 and sends 4 back to sum(407).", active: ["outer", "middle"], values: { outer: "hold 7", middle: "return 4" }, edges: [{ from: "middle", to: "outer" }] },
+    { title: "Finish the outer call", note: "The call sum(407) adds its saved 7 to the returned 4. The final digit sum is 11.", active: ["outer"], values: { outer: "return 11" }, edges: [] },
+  ]}
+/>
+
 ## The recursion tree
 
 Draw one node per call. The size of that tree tells you the running time.
