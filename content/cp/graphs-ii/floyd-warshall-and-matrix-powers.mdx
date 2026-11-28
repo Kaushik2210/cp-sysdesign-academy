@@ -42,7 +42,7 @@ Variants and facts:
 
 - **Path reconstruction**: keep `next[i][j]`, the first step on the best path. On improvement set `next[i][j] = next[i][k]`. Follow `next` from `i` until `j`.
 - **Transitive closure**: replace `min` and `+` by `or` and `and`. Same three loops, a boolean table.
-- **Negative cycles**: after the loops, a vertex `i` lies on a negative cycle when `d[i][i] < 0`. Distances that involve such vertices are unreliable.
+- **Negative cycles**: a negative diagonal `d[i][i]` certifies a negative closed walk through `i`. For any source that can reach `i` and any target reachable from `i`, the walk cost is unbounded below.
 - Negative edges are fine as long as there is no negative cycle.
 - It is worth it when the graph is dense or `n` is small (`n` up to about 400). For sparse graphs with non-negative weights, `n` runs of Dijkstra cost `O(n m log n)`, which is better when `m` is much smaller than `n^2`.
 
@@ -323,6 +323,22 @@ What it shows:
 />
 
 ## Pitfalls
+
+A negative cycle only changes answers for pairs that can reach it and then leave it for the requested destination. Trace both reachability checks.
+
+<ConceptWalkthrough
+  title="Find which distances a negative cycle invalidates"
+  nodes={[
+    {"id": "n0", "label": "Source S", "x": 19, "y": 50},
+    {"id": "n1", "label": "Vertex C", "x": 50, "y": 50},
+    {"id": "n2", "label": "Target T", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Find a negative diagonal", "note": "The distance table has d[C][C] = \u22122. This certifies a negative closed walk at C. The graph also has S \u2192 C and C \u2192 T.", "active": ["n1"], "values": {"n0": "can reach C", "n1": "\u22122 per loop", "n2": "reachable"}, "edges": [{"from": "n0", "to": "n1"}, {"from": "n1", "to": "n2"}]},
+    {"title": "Repeat the closed walk", "note": "Take S \u2192 C, loop at C repeatedly, then continue to T. Every extra loop reduces the cost by another 2, so S to T has no finite minimum.", "active": ["n0", "n1", "n2"], "values": {"n0": "enter", "n1": "repeat", "n2": "exit"}, "edges": [{"from": "n0", "to": "n1"}, {"from": "n1", "to": "n2"}]},
+    {"title": "Check reachability on both sides", "note": "Suppose T has no outgoing edges. T cannot return to C, so the negative cycle cannot change T to T. Its empty walk still has cost 0. Test both directions of reachability for each ordered pair.", "active": ["n2"], "values": {"n0": "unbounded", "n1": "negative", "n2": "cost 0"}},
+  ]}
+/>
 
 1. **Wrong loop order.** `k` outermost. Putting `k` innermost computes something different and wrong.
 2. **Infinity overflow.** `INF + INF` wraps around in fixed-width integers. Guard with `if d[i][k] < INF and d[k][j] < INF`, or pick an infinity that cannot overflow when added twice.

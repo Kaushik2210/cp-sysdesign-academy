@@ -1188,6 +1188,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/scalability/load-shedding-and-bulkheads/", [
       ["Keep interactive capacity with a bulkhead", "Admit the interactive request"],
     ]],
+    ["/cp/graphs-ii/floyd-warshall-and-matrix-powers/", [
+      ["Find which distances a negative cycle invalidates", "Check reachability on both sides"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
