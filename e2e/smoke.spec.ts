@@ -1215,6 +1215,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/dynamic-programming/grid-paths/", [
       ["Turn a grid count into a minimum-cost DP", "Take the cheaper predecessor"],
     ]],
+    ["/cp/dynamic-programming/interval-dp/", [
+      ["Split a balloon interval at the last burst", "Add the final burst and choose 39"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
