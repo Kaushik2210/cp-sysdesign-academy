@@ -319,6 +319,16 @@ print("300 random trees agree with the brute force")
 | path with a maximum or minimum of some value | keep, per depth, the best value seen so far; combine with the current branch |
 | assign labels so that equal labels have a larger label on the path | the centroid tree depth gives the label (Codeforces 321C) |
 
+<ConceptWalkthrough title="Query a branch before publishing its distances" nodes={[
+  {"id":"n0","label":"Branch","x":17,"y":46},
+  {"id":"n1","label":"Seen","x":50,"y":46},
+  {"id":"n2","label":"Pair","x":83,"y":46},
+]} frames={[
+  {"title":"Set up the potential false pair","note":"Centroid C has a branch through H, with leaves X and Y attached to H. Three other leaves attach directly to C, so the H branch has size 3 out of 7 total vertices. X and Y both have depth 2 from C.","active":["n0","n1"],"values":{"n0":"X:2 / Y:2","n1":"depth 0","n2":"K = 4"}},
+  {"title":"Try inserting too early","note":"If you insert X’s depth before checking Y, a lookup for 4 − 2 finds X. That would count a path through C of length 4, although the unique path X–H–Y has length 2.","active":["n0","n1","n2"],"values":{"n0":"insert X","n1":"match depth 2","n2":"false pair"}},
+  {"title":"Delay inserting the entire branch","note":"Query all depths in the H branch using only C and earlier branches. Then add the H depths. Paths staying inside that branch belong to its recursive call.","active":["n0","n1","n2"],"values":{"n0":"query first","n1":"insert after","n2":"count later"}},
+]} />
+
 ## Pitfalls
 
 1. **Counting a branch against itself.** Add a branch's depths to `cnt` only after scanning it. Otherwise pairs inside one branch (whose path avoids the centroid) are counted.
@@ -328,6 +338,16 @@ print("300 random trees agree with the brute force")
 5. **Array bounds.** Depths are below the component size, so `cnt` of length `total + 1` is enough; guard `K - d` against negative or too large.
 6. **Recursion depth.** The recursive version overflows on a path of `2·10^5` vertices when computing sizes. Use BFS order and an explicit stack, as above.
 7. **Overflow.** A star with `K = 2` has about `n^2 / 2` pairs: use 64-bit counts.
+
+<ConceptWalkthrough title="Find the nearest marked vertex through centroid ancestors" nodes={[
+  {"id":"n0","label":"Via 1","x":17,"y":46},
+  {"id":"n1","label":"Via 3","x":50,"y":46},
+  {"id":"n2","label":"Best","x":83,"y":46},
+]} frames={[
+  {"title":"Mark the far endpoint of a chain","note":"Use the chain 0 through 6. Its first centroid is 3, and the left component’s centroid is 1. Mark vertex 6, which records distance 3 at centroid 3. Query from vertex 0.","active":["n1","n2"],"values":{"n0":"none marked","n1":"3 + 3","n2":"6"}},
+  {"title":"Mark vertex 1 next","note":"Marking 1 stores distance 0 at centroid 1. At centroid 3 the best marked distance becomes 2. Query 0 again along its centroid ancestors.","active":["n0","n1"],"values":{"n0":"best = 0","n1":"best = 2","n2":"?"}},
+  {"title":"Take the smallest candidate","note":"Via centroid 1 the distance is 1 + 0 = 1. Via centroid 3 the candidate is 3 + 2 = 5. The minimum returns the true distance to marked vertex 1.","active":["n0","n1","n2"],"values":{"n0":"1 + 0","n1":"3 + 2","n2":"1"}},
+]} />
 
 ## Practice
 

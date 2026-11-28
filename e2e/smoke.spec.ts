@@ -1144,6 +1144,14 @@ test.describe("concept walkthroughs at phone width", () => {
       ["Test a field addition in both compatibility directions", "Check forward compatibility"],
       ["Translate a historical event during replay", "Preserve the original history"],
     ]],
+    ["/cp/trees/tree-dp-and-diameter/", [
+      ["Break the two-search trick with a negative edge", "Inspect the other side of the negative edge"],
+      ["Compare taking and skipping the parent in tree DP", "Skip A and optimize both child subtrees"],
+    ]],
+    ["/cp/trees/centroid-decomposition/", [
+      ["Query a branch before publishing its distances", "Delay inserting the entire branch"],
+      ["Find the nearest marked vertex through centroid ancestors", "Take the smallest candidate"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
