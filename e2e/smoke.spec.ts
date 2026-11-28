@@ -1245,6 +1245,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/queues-and-streaming/kafka-rabbitmq-sqs/", [
       ["Find the limit of consumer-group parallelism", "Leave the fourth consumer idle"],
     ]],
+    ["/sd/databases-1/indexes-and-query-plans/", [
+      ["Track which fields force a base-row lookup", "Add a projected field and recheck coverage"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

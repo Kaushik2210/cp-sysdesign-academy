@@ -63,6 +63,22 @@ It cannot efficiently serve `WHERE created_at > ?` alone, because the leading co
 
 ## Covering indexes
 
+Assume a B-tree secondary index with no implicit copy of the `label` column. A station page asks for the latest reading's timestamp, value and label.
+
+<ConceptWalkthrough
+  title="Track which fields force a base-row lookup"
+  nodes={[
+    {"id": "n0", "label": "Index", "x": 24, "y": 25},
+    {"id": "n1", "label": "Query", "x": 50, "y": 67},
+    {"id": "n2", "label": "Base row", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Locate the latest matching key", "note": "An index on (station, time) can narrow to one station and find its latest timestamp. The index entry identifies a row, but it cannot supply value or label by itself.", "active": ["n0", "n2"], "values": {"n0": "station, time", "n1": "time,value,label", "n2": "fetch row"}},
+    {"title": "Cover the original two-field query", "note": "An index that also stores value has all payload fields needed for a query returning only time and value. This makes an index-only plan possible, depending on the database and visibility checks.", "active": ["n0", "n1"], "values": {"n0": "adds value", "n1": "time, value", "n2": "may skip"}},
+    {"title": "Add a projected field and recheck coverage", "note": "Request label again. If it is absent from the index, a plan using this index must get label elsewhere. Adding payload fields may help this read at the cost of more index space and write work.", "active": ["n1", "n2"], "values": {"n0": "no label", "n1": "adds label", "n2": "fetch label"}},
+  ]}
+/>
+
 If an index contains every column the query needs, the engine answers from the index alone and never touches the table. It is called a *covering* index. Wider indexes cost more space and write work, so cover only your hottest queries.
 
 ## Reading query plans: a real, verified example
