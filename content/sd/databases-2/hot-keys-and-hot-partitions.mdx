@@ -54,10 +54,10 @@ First compare the query paths for an append-heavy time-series key. Use a toy tab
 <ConceptWalkthrough
   title="Spread timestamp writes and merge the reads"
   nodes={[
-    {"id": "n0", "label": "Bucket 0", "x": 13, "y": 50},
-    {"id": "n1", "label": "Bucket 1", "x": 38, "y": 50},
-    {"id": "n2", "label": "Bucket 2", "x": 62, "y": 50},
-    {"id": "n3", "label": "Range query", "x": 87, "y": 50},
+    {"id": "n0", "label": "Bucket 0", "x": 18, "y": 24},
+    {"id": "n1", "label": "Bucket 1", "x": 50, "y": 24},
+    {"id": "n2", "label": "Bucket 2", "x": 82, "y": 24},
+    {"id": "n3", "label": "Range query", "x": 50, "y": 72},
   ]}
   frames={[
     {"title": "Send increasing times to one range", "note": "With timestamp as the leading key, incoming writes all target the bucket that owns the current upper range. Older buckets receive none of this new traffic.", "active": ["n2"], "values": {"n0": "older range", "n1": "older range", "n2": "new writes"}},
