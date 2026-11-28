@@ -1182,6 +1182,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/queues-and-streaming/delivery-semantics-and-idempotency/", [
       ["Handle out-of-order events by payload type", "Ignore an old snapshot and detect delta gaps"],
     ]],
+    ["/sd/caching/why-cache/", [
+      ["Calculate mean latency from cache hits and misses", "Check the cold-cache case"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

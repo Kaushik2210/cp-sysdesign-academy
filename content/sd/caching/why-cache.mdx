@@ -40,6 +40,22 @@ Caching therefore helps three things:
 
 ## Hit ratio math
 
+Consider 100 requests, a 2 ms cache check and a 40 ms origin read. Assume sequential lookups and ignore queuing and cache-fill time.
+
+<ConceptWalkthrough
+  title="Calculate mean latency from cache hits and misses"
+  nodes={[
+    {"id": "n0", "label": "Cache hits", "x": 19, "y": 50},
+    {"id": "n1", "label": "Origin reads", "x": 50, "y": 50},
+    {"id": "n2", "label": "Mean", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Measure the origin baseline", "note": "Without a cache, every request goes to the origin. The mean is 40 ms.", "active": ["n1", "n2"], "values": {"n0": "none", "n1": "100", "n2": "40 ms"}},
+    {"title": "Serve 90 hits locally", "note": "Every request pays 2 ms for the check. Ten misses pay another 40 ms. The mean is 2 + 0.1 \u00d7 40 = 6 ms, while each miss takes 42 ms.", "active": ["n0", "n2"], "values": {"n0": "90", "n1": "10", "n2": "6 ms"}},
+    {"title": "Check the cold-cache case", "note": "At a 0% hit rate, every request pays both costs. The mean becomes 42 ms. This example tracks the mean; the miss path still matters for tail latency.", "active": ["n1", "n2"], "values": {"n0": "0", "n1": "100", "n2": "42 ms"}},
+  ]}
+/>
+
 Let `h` be the hit ratio, `t_c` the cache lookup time and `t_s` the cost of going to the source on a miss. Expected latency (assuming a miss also pays the cache lookup, then the source):
 
 `T = t_c + (1 - h) * t_s`
