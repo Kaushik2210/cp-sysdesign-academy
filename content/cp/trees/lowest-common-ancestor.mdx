@@ -215,6 +215,16 @@ print("2000 random queries agree with the slow climb")
 | Euler tour + sparse table | `O(n log n)` | `O(1)` | fastest queries, more code |
 | offline Tarjan (with [union-find](/cp/graphs/union-find/)) | `O(n + q)` | amortized almost constant | all queries known in advance |
 
+<ConceptWalkthrough title="Jump to an ancestor using the set bits" nodes={[
+  {"id":"n0","label":"Vertex","x":17,"y":46},
+  {"id":"n1","label":"Remaining","x":50,"y":46},
+  {"id":"n2","label":"Jump","x":83,"y":46},
+]} frames={[
+  {"title":"Write the distance as powers of two","note":"In the chain 0 through 13 rooted at 0, find the ancestor 11 edges above vertex 13. The bits of 11 select jumps of 8, 2 and 1.","active":["n0","n1","n2"],"values":{"n0":"13","n1":"11 edges","n2":"8 + 2 + 1"}},
+  {"title":"Spend the largest jump","note":"The 8-edge lookup moves 13 to 5. The next set bit selects a jump of 2, moving from 5 to 3.","active":["n0","n1","n2"],"values":{"n0":"5 → 3","n1":"1 edge left","n2":"8, then 2"}},
+  {"title":"Spend the final bit","note":"Move one edge to vertex 2. The jumps total 11, which matches the depth difference 13 − 2.","active":["n0","n1","n2"],"values":{"n0":"2","n1":"0 edges","n2":"answer 2"}},
+]} />
+
 ## Pitfalls
 
 1. **Making the root's parent `0`.** Jumping past the root must stay at the root (point it to itself), or the comparison `up[k][u] != up[k][v]` breaks.
@@ -223,6 +233,16 @@ print("2000 random queries agree with the slow climb")
 4. **Returning `u` instead of `up[0][u]`** after the loop. At that point both are just below the LCA.
 5. **Recursive DFS for depths on a path of `10^5` vertices** overflows the recursion limit in Python; use the input order if parents are numbered smaller, or an explicit stack.
 6. **Memory.** `n * log n` ints is fine up to `2·10^5` in compiled languages; in Python use flat lists or `array`.
+
+<ConceptWalkthrough title="Cancel the shared part of two root paths" nodes={[
+  {"id":"n0","label":"Depth u","x":17,"y":46},
+  {"id":"n1","label":"Depth v","x":50,"y":46},
+  {"id":"n2","label":"Shared","x":83,"y":46},
+]} frames={[
+  {"title":"Mark the shared ancestor","note":"Suppose u has depth 3, v has depth 2 and their lowest common ancestor has depth 1. Adding the depths counts the shared edge from the root twice.","active":["n0","n1","n2"],"values":{"n0":"3","n1":"2","n2":"depth 1"}},
+  {"title":"Count only the two branches","note":"From u to the ancestor takes 3 − 1 = 2 edges. From the ancestor down to v takes 2 − 1 = 1 edge.","active":["n0","n1"],"values":{"n0":"2 up","n1":"1 down","n2":"shared out"}},
+  {"title":"Add the branch lengths","note":"The path between the two vertices has 3 edges. In general use depth[u] + depth[v] − 2 × depth[lca]. If u equals v the same calculation gives zero.","active":["n0","n1","n2"],"values":{"n0":"2 + 1","n1":"3 edges","n2":"same node: 0"}},
+]} />
 
 ## Practice
 
