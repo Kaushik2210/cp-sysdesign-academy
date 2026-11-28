@@ -1112,6 +1112,38 @@ test.describe("concept walkthroughs at phone width", () => {
       ["Recover a durable two-phase commit decision", "Replay the same decision after recovery"],
       ["Compensate one reservation while preserving a later sale", "Release the two units once"],
     ]],
+    ["/cp/trees/lowest-common-ancestor/", [
+      ["Jump to an ancestor using the set bits", "Spend the final bit"],
+      ["Cancel the shared part of two root paths", "Add the branch lengths"],
+    ]],
+    ["/cp/trees/euler-tour-subtree-queries/", [
+      ["Recognize a subtree and its first excluded index", "Test the boundary"],
+      ["Update all root paths that pass through one vertex", "Point-query the updated paths"],
+    ]],
+    ["/cp/trees/rerooting/", [
+      ["Exclude one direction from a maximum", "Cross the edge into B"],
+      ["Reroot a distance sum across a weighted edge", "Account for the vertices that get farther"],
+    ]],
+    ["/cp/trees/heavy-light-decomposition/", [
+      ["Include a light edge and exclude the LCA slot", "Exclude the LCA on the shared chain"],
+      ["Keep the traversal direction when joining path chunks", "Combine in path order"],
+    ]],
+    ["/sd/microservice-patterns/service-boundaries-and-availability/", [
+      ["Calculate availability for required dependencies", "Model an optional service separately"],
+      ["Move a service boundary without two writers", "Choose rollback with ownership in mind"],
+    ]],
+    ["/sd/microservice-patterns/retry-amplification-and-circuit-breakers/", [
+      ["Count nested retries as a product of attempts", "Choose one place to retry"],
+      ["Spread retries and enforce the caller deadline", "Check before waiting"],
+    ]],
+    ["/sd/microservice-patterns/cqrs-and-event-sourcing/", [
+      ["Replay the tail after loading a snapshot", "Keep projection progress separate"],
+      ["Reject a stale append to an event stream", "Reload and recheck the business rule"],
+    ]],
+    ["/sd/microservice-patterns/evolving-apis-and-events/", [
+      ["Test a field addition in both compatibility directions", "Check forward compatibility"],
+      ["Translate a historical event during replay", "Preserve the original history"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

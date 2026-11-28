@@ -39,6 +39,16 @@ Model a record as fields with a type, a *required* flag and an optional default.
 - **Types** may only widen on the reading side (an `int` can be read as a `float`, not the other way).
 - **Renaming** a field is a removal plus an addition, and is therefore breaking unless you keep both for a while (or use aliases, as Avro does).
 
+<ConceptWalkthrough title="Test a field addition in both compatibility directions" nodes={[
+  {"id":"n0","label":"Old data","x":17,"y":46},
+  {"id":"n1","label":"New field","x":50,"y":46},
+  {"id":"n2","label":"Reader","x":83,"y":46},
+]} frames={[
+  {"title":"Introduce one field","note":"Version 1 has amountCents and all legacy records use USD. Version 2 adds currency. First consider a new reader with no reader-side default.","active":["n0","n1","n2"],"values":{"n0":"amount only","n1":"currency","n2":"v2 reader"}},
+  {"title":"Check backward compatibility","note":"A v2 reader can read v1 records when it supplies currency = USD for the absent field. Without that default a reader that requires currency would reject older records.","active":["n0","n1","n2"],"values":{"n0":"v1 record","n1":"default USD","n2":"v2 succeeds"}},
+  {"title":"Check forward compatibility","note":"A v1 reader receives a v2 record. Under this lesson’s tolerant reader rules it consumes amountCents and ignores currency. If a new currency changes the old field’s meaning, schema compatibility alone cannot make the migration safe.","active":["n0","n1","n2"],"values":{"n0":"v2 record","n1":"unknown field","n2":"v1 ignores"}},
+]} />
+
 ## Code: classify the common changes
 
 The program defines a base schema and nine typical changes. For each change it **predicts** compatibility with the rules above, then **checks** by generating 200 random old records and 200 random new records and actually parsing them with the other version's reader.
@@ -187,6 +197,16 @@ For HTTP APIs, additive changes go in place; breaking changes get a **new versio
 - **Consumer-driven contracts** (Pact): each consumer records the fields it actually uses; the provider's CI verifies it still honours every consumer's contract before release. This finds breaking changes without a shared integration environment.
 - **Tolerant reader:** consumers ignore unknown fields and unknown enum values (map them to a safe default) instead of failing.
 - **Upcasters** for event-sourced data: translate old event versions to the current shape at read time.
+
+<ConceptWalkthrough title="Translate a historical event during replay" nodes={[
+  {"id":"n0","label":"Stored v1","x":17,"y":46},
+  {"id":"n1","label":"Upcaster","x":50,"y":46},
+  {"id":"n2","label":"Current v2","x":83,"y":46},
+]} frames={[
+  {"title":"Read the old record as written","note":"A v1 shipping event stores feeCents = 250 and the v1 contract says all fees are USD. The stored event has no currency field.","active":["n0","n1"],"values":{"n0":"feeCents 250","n1":"v1 USD","n2":"pending"}},
+  {"title":"Convert to the current shape","note":"During replay, translate v1 into a v2 fee object with amountCents = 250 and currency = USD. The upcaster can infer that value from the historical contract.","active":["n0","n1","n2"],"values":{"n0":"same record","n1":"v1 → v2","n2":"250 / USD"}},
+  {"title":"Preserve the original history","note":"The projector receives the canonical v2 shape. The stored v1 record remains intact. A genuine v2 event uses its recorded currency and skips this conversion.","active":["n0","n1","n2"],"values":{"n0":"v1 intact","n1":"v2 passes","n2":"project v2"}},
+]} />
 
 ## Trade-offs
 
