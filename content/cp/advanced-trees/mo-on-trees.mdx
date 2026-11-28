@@ -135,6 +135,22 @@ The branches contribute blue and red. Adding the LCA contributes gold, so the di
 
 ## Code
 
+For edge-colour queries, store each edge's colour on its deeper endpoint. Use the same tour windows, then adjust which vertices contribute.
+
+<ConceptWalkthrough
+  title="Convert a tree path into an edge path"
+  nodes={[
+    {"id": "n0", "label": "LCA 1", "x": 19, "y": 50},
+    {"id": "n1", "label": "Vertex 3", "x": 50, "y": 50},
+    {"id": "n2", "label": "Vertex 5", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Start with the LCA convention", "note": "For a path between 3 and 5 with LCA 1, both endpoints contribute their incoming edges. Any intermediate descendants on the path contribute theirs as well.", "active": ["n1", "n2"], "values": {"n0": "incoming edge?", "n1": "include", "n2": "include"}},
+    {"title": "Skip the extra LCA", "note": "In the non-ancestor case, the tour window already omits 1. Leave it out: its incoming edge lies above the path.", "active": ["n1", "n2"], "values": {"n0": "omit", "n1": "include", "n2": "include"}},
+    {"title": "Remove the LCA for an ancestor query", "note": "For path (1, 5), the ancestor window includes 1. Exclude its incoming edge when reading the answer. A path from 1 to itself has zero edges.", "active": ["n2"], "values": {"n0": "exclude", "n1": "outside path", "n2": "include"}},
+  ]}
+/>
+
 The solver takes colours, an undirected edge list for a nonempty tree with vertices numbered from `0`, and a list of query pairs. The iterative DFS records both tour events and the immediate parents. The LCA helper uses the entry and exit times to test ancestry, then lifts one endpoint to just below the common ancestor.
 
 Run the example and the differential tests together. The tests compare the solver with direct path searches that use only the adjacency list. They cover every ordered endpoint pair on each generated tree, including identical endpoints and ancestor queries.

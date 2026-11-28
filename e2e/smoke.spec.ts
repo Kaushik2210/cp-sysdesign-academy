@@ -1155,6 +1155,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/advanced-trees/mo-algorithm/", [
       ["Compare ascending and alternating Mo blocks", "Reverse the odd block"],
     ]],
+    ["/cp/advanced-trees/mo-on-trees/", [
+      ["Convert a tree path into an edge path", "Remove the LCA for an ancestor query"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
