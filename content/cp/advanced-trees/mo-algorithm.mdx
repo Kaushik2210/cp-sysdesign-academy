@@ -56,6 +56,22 @@ Return `[2, 1, 3]` in input order. Before running the demo, predict the answer t
 
 ## Why the sort helps
 
+Fix block size 3 for a twelve-element array. Before stepping, predict how reversing the second block changes the total motion of the right endpoint.
+
+<ConceptWalkthrough
+  title="Compare ascending and alternating Mo blocks"
+  nodes={[
+    {"id": "n0", "label": "Even block", "x": 19, "y": 50},
+    {"id": "n1", "label": "Odd block", "x": 50, "y": 50},
+    {"id": "n2", "label": "Right moves", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Finish the even block at 10", "note": "The processed ranges are [0, 3) and [1, 10). Starting from zero, the right endpoint moves 3 + 7 = 10 positions.", "active": ["n0", "n2"], "values": {"n0": "3 \u2192 10", "n1": "pending", "n2": "10"}},
+    {"title": "Try increasing order again", "note": "The odd block holds [3, 5) and [4, 11). Going 10 \u2192 5 \u2192 11 costs another 5 + 6 = 11 moves.", "active": ["n1", "n2"], "values": {"n0": "ends at 10", "n1": "5 \u2192 11", "n2": "21"}},
+    {"title": "Reverse the odd block", "note": "Going 10 \u2192 11 \u2192 5 costs 1 + 6 = 7 moves, for 17 overall. This comparison measures right-endpoint travel alone. The left endpoint also has work to do.", "active": ["n1", "n2"], "values": {"n0": "ends at 10", "n1": "11 \u2192 5", "n2": "17"}},
+  ]}
+/>
+
 For `n` elements and `q` queries, the left endpoint travels `O(qB + n)`: its movements within blocks are bounded by `B` per query, and block numbers never decrease. The right endpoint moves `O(n)` per visited block, including the boundary jump. With at most `ceil(n/B)` blocks and constant-time updates, the total time is `O(q log q + qB + n ceil(n/B))`. Taking `B` near `sqrt(n)` gives `O(q log q + (n+q)sqrt(n))`. If `q` is far from `n`, use the bound to reason about a different block size instead of treating square root as a fixed rule.
 
 ## Run and change the queries

@@ -1152,6 +1152,9 @@ test.describe("concept walkthroughs at phone width", () => {
       ["Query a branch before publishing its distances", "Delay inserting the entire branch"],
       ["Find the nearest marked vertex through centroid ancestors", "Take the smallest candidate"],
     ]],
+    ["/cp/advanced-trees/mo-algorithm/", [
+      ["Compare ascending and alternating Mo blocks", "Reverse the odd block"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
