@@ -329,9 +329,9 @@ A negative cycle only changes answers for pairs that can reach it and then leave
 <ConceptWalkthrough
   title="Find which distances a negative cycle invalidates"
   nodes={[
-    {"id": "n0", "label": "Source S", "x": 19, "y": 50},
-    {"id": "n1", "label": "Vertex C", "x": 50, "y": 50},
-    {"id": "n2", "label": "Target T", "x": 81, "y": 50},
+    {"id": "n0", "label": "Source S", "x": 23, "y": 26},
+    {"id": "n1", "label": "Vertex C", "x": 50, "y": 69},
+    {"id": "n2", "label": "Target T", "x": 77, "y": 26},
   ]}
   frames={[
     {"title": "Find a negative diagonal", "note": "The distance table has d[C][C] = \u22122. This certifies a negative closed walk at C. The graph also has S \u2192 C and C \u2192 T.", "active": ["n1"], "values": {"n0": "can reach C", "n1": "\u22122 per loop", "n2": "reachable"}, "edges": [{"from": "n0", "to": "n1"}, {"from": "n1", "to": "n2"}]},

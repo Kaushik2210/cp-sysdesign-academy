@@ -48,9 +48,9 @@ Trace the successor chain `A → B → C → D → E → C`. Predict the destina
 <ConceptWalkthrough
   title="Reduce a large jump after entering the cycle"
   nodes={[
-    {"id": "n0", "label": "Tail", "x": 19, "y": 50},
-    {"id": "n1", "label": "Cycle entry", "x": 50, "y": 50},
-    {"id": "n2", "label": "Destination", "x": 81, "y": 50},
+    {"id": "n0", "label": "Tail", "x": 23, "y": 26},
+    {"id": "n1", "label": "Cycle entry", "x": 50, "y": 69},
+    {"id": "n2", "label": "Destination", "x": 77, "y": 26},
   ]}
   frames={[
     {"title": "Count the steps to entry", "note": "From A, two jumps reach C. The tail length is 2 and the cycle is C \u2192 D \u2192 E \u2192 C, with length 3.", "active": ["n0", "n1"], "values": {"n0": "A \u2192 B", "n1": "C at step 2", "n2": "pending"}, "edges": [{"from": "n0", "to": "n1"}]},
