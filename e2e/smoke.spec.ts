@@ -1242,6 +1242,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/databases-1/normalization-and-schema-design/", [
       ["Keep a denormalized total consistent", "Commit the line and its total together"],
     ]],
+    ["/sd/queues-and-streaming/kafka-rabbitmq-sqs/", [
+      ["Find the limit of consumer-group parallelism", "Leave the fourth consumer idle"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

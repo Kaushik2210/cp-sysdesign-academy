@@ -59,6 +59,22 @@ That difference drives replay, ordering, fan-out and throughput characteristics.
 
 ## Worked example: choosing partitions
 
+Suppose a keyed log has three partitions and two consumer instances in the same group. Processing within each assigned partition is sequential in this example.
+
+<ConceptWalkthrough
+  title="Find the limit of consumer-group parallelism"
+  nodes={[
+    {"id": "n0", "label": "P0", "x": 24, "y": 25},
+    {"id": "n1", "label": "P1, P2", "x": 50, "y": 67},
+    {"id": "n2", "label": "More workers", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Assign three partitions to two workers", "note": "One possible assignment gives P0 to worker A and P1 and P2 to worker B. Each partition has one current owner in the group.", "active": ["n0", "n1"], "values": {"n0": "A", "n1": "B, B", "n2": "pending"}},
+    {"title": "Give each partition its own consumer", "note": "Add a third consumer. After rebalance, each consumer can own one partition. This increases parallelism across partitions.", "active": ["n0", "n1", "n2"], "values": {"n0": "A", "n1": "B, C", "n2": "3 active"}},
+    {"title": "Leave the fourth consumer idle", "note": "With four consumers and three partitions, one consumer has no assignment. If P0 is hot because of one key, adding consumers cannot split that key's ordered lane.", "active": ["n2"], "values": {"n0": "A", "n1": "B, C", "n2": "1 idle"}},
+  ]}
+/>
+
 An order-events topic must sustain 30,000 messages per second, and a consumer instance can process about 2,000 messages per second. You need at least `30000 / 2000 = 15` consumers in the group, so at least 15 partitions. Add headroom for growth and for rebalancing (Kafka cannot easily reduce partitions, and increasing them changes the key-to-partition mapping), so choose a number like 24 or 32. Key by `order_id` so each order's events stay ordered. Partition counts are an approximation exercise; measure real consumer throughput first.
 
 <Diagram kind="mermaid" code={`flowchart LR
