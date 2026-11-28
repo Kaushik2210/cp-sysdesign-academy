@@ -78,6 +78,16 @@ In a call chain the problem compounds. If the edge service retries 3 times, and 
   },
 ]} />
 
+<ConceptWalkthrough title="Count nested retries as a product of attempts" nodes={[
+  {"id":"n0","label":"Layer A","x":17,"y":46},
+  {"id":"n1","label":"Layer B","x":50,"y":46},
+  {"id":"n2","label":"Layer C","x":83,"y":46},
+]} frames={[
+  {"title":"Set the same policy at each layer","note":"A calls B, B calls C and C calls storage. Each layer makes up to three attempts total, including its first call. Assume storage always fails and every retry is permitted.","active":["n0","n1","n2"],"values":{"n0":"3 attempts","n1":"3 attempts","n2":"3 attempts"}},
+  {"title":"Expand the call tree","note":"A can invoke B three times. Each invocation can call C three times, for nine C calls. Each C call can issue three storage attempts, for up to 27 at storage.","active":["n0","n1","n2"],"values":{"n0":"3 calls","n1":"9 calls","n2":"27 to store"}},
+  {"title":"Choose one place to retry","note":"If only A retries while B and C each make one attempt per invocation, storage sees at most three attempts. An end-to-end deadline can cut that bound further.","active":["n0","n1","n2"],"values":{"n0":"3 attempts","n1":"1 per call","n2":"3 to store"}},
+]} />
+
 ## Code: how many calls reach the dependency?
 
 A three-tier chain: **edge**, **middle**, **dependency**. The dependency fails a fixed fraction of calls. We compare five setups: no retries, retries at the edge only, retries (3 attempts) at both layers, both layers with a retry budget (each first attempt earns 0.1 of a retry), and the budget plus a circuit breaker in front of the dependency (opens after 5 consecutive failures, fails fast for 50 calls, then probes).
@@ -178,6 +188,16 @@ A retried request may have succeeded the first time with the reply lost. Only re
 | breaker cooldown | hammers a recovering service | slow recovery after the fault is fixed |
 
 Set timeouts from measured latency (a bit above the 99th or 99.9th percentile), give each layer a **smaller** deadline than the layer above, and monitor breaker state changes: an open breaker is an alert, not just a code path.
+
+<ConceptWalkthrough title="Spread retries and enforce the caller deadline" nodes={[
+  {"id":"n0","label":"Clients","x":17,"y":46},
+  {"id":"n1","label":"Delay","x":50,"y":46},
+  {"id":"n2","label":"Budget","x":83,"y":46},
+]} frames={[
+  {"title":"Start with a synchronized failure","note":"Three clients fail at the same time. A fixed 200 ms retry delay brings them back together at 200 ms. A jitter policy can spread their follow-up attempts over a range.","active":["n0","n1"],"values":{"n0":"3 failed","n1":"200 each","n2":"same burst"}},
+  {"title":"Draw different delays","note":"With full jitter in [0, 200] ms, suppose the clients draw 20, 90 and 170 ms. These example draws spread arrivals compared with a single fixed delay.","active":["n0","n1","n2"],"values":{"n0":"3 draws","n1":"20, 90, 170","n2":"spread out"}},
+  {"title":"Check before waiting","note":"A client with 100 ms remaining draws a 90 ms delay and requires a 60 ms downstream attempt budget. The total is 150 ms. Skip this retry or pass a shorter supported deadline.","active":["n1","n2"],"values":{"n0":"90 ms wait","n1":"60 ms work","n2":"150 > 100"}},
+]} />
 
 ## Trade-offs
 
