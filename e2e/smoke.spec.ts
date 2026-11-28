@@ -1173,6 +1173,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/caching/caching-strategies/", [
       ["Compare when cache writes become durable", "Wait for the database before acknowledging"],
     ]],
+    ["/sd/caching/eviction-policies/", [
+      ["Separate freshness from recency", "Expire A despite its recent hit"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

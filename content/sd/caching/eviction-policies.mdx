@@ -160,6 +160,22 @@ On a *static* skewed distribution frequency wins clearly, and LRU beats FIFO by 
 
 ## Choosing and configuring
 
+Use a two-entry cache and a five-second TTL measured from insertion. Hits update recency without extending TTL. Predict what happens when the most recently used item expires.
+
+<ConceptWalkthrough
+  title="Separate freshness from recency"
+  nodes={[
+    {"id": "n0", "label": "Clock", "x": 19, "y": 50},
+    {"id": "n1", "label": "Entry A", "x": 50, "y": 50},
+    {"id": "n2", "label": "Entry B", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Insert at different times", "note": "Insert A at t=0 and B at t=2. Their expiry times are 5 and 7. Both entries fit.", "active": ["n1", "n2"], "values": {"n0": "t=2", "n1": "expires at 5", "n2": "expires at 7"}},
+    {"title": "Make A most recent", "note": "Read A at t=4. It becomes most recent, but its expiry is still 5. If a new item needed space right now, LRU would choose B.", "active": ["n1"], "values": {"n0": "t=4", "n1": "most recent", "n2": "least recent"}},
+    {"title": "Expire A despite its recent hit", "note": "At t=5, a read of A misses because A reached its deadline. B is still fresh. If the cache reclaims expired entries before evicting live ones, it can refill A without evicting B.", "active": ["n1"], "values": {"n0": "t=5", "n1": "expired", "n2": "still fresh"}},
+  ]}
+/>
+
 - Start with LRU (or the library default) plus a TTL; change only after measuring hit ratio on a replayed production trace.
 - Scan-heavy or batch workloads: use an admission or scan-resistant policy, or bypass the cache for scans.
 - Memory limit rather than item count: evict by bytes, and watch large values crowding out many small ones.
