@@ -1185,6 +1185,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/caching/why-cache/", [
       ["Calculate mean latency from cache hits and misses", "Check the cold-cache case"],
     ]],
+    ["/sd/scalability/load-shedding-and-bulkheads/", [
+      ["Keep interactive capacity with a bulkhead", "Admit the interactive request"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

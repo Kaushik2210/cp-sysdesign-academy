@@ -58,6 +58,22 @@ Feature flags and kill switches let operators trigger these modes. Degrade paths
 
 ## Bulkheads
 
+Assume one worker pool can run four requests concurrently. Compare it with two isolated pools of two slots each. Analytics calls stall and hold their slots; interactive requests complete promptly when admitted.
+
+<ConceptWalkthrough
+  title="Keep interactive capacity with a bulkhead"
+  nodes={[
+    {"id": "n0", "label": "Analytics", "x": 19, "y": 50},
+    {"id": "n1", "label": "Interactive", "x": 50, "y": 50},
+    {"id": "n2", "label": "Worker slots", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Share all four slots", "note": "Four stalled analytics calls occupy the shared pool. When the interactive request arrives, no slot is free.", "active": ["n0", "n2"], "values": {"n0": "4 stalled", "n1": "waiting", "n2": "4 / 4 busy"}},
+    {"title": "Reserve two slots per class", "note": "With separate pools, analytics can occupy only its two slots. Other analytics requests wait in a bounded queue or receive a rejection. Two interactive slots are still free.", "active": ["n0", "n1"], "values": {"n0": "2 running", "n1": "2 slots free", "n2": "2 / 4 busy"}},
+    {"title": "Admit the interactive request", "note": "The new request starts immediately in its own pool. The reservation preserves capacity during this failure. Fixed reservations can leave idle slots when the other class is busy.", "active": ["n1", "n2"], "values": {"n0": "2 stalled", "n1": "1 running", "n2": "3 / 4 busy"}},
+  ]}
+/>
+
 Named after ship compartments: a leak floods one compartment, not the hull. In software:
 
 - **Separate thread pools or connection pools per dependency** so a slow payment provider cannot consume all threads the product catalogue needs.
