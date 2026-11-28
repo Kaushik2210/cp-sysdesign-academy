@@ -77,6 +77,16 @@ Every additional hard dependency multiplies in another factor below 1. Two defen
   },
 ]} />
 
+<ConceptWalkthrough title="Calculate availability for required dependencies" nodes={[
+  {"id":"n0","label":"Checkout","x":17,"y":46},
+  {"id":"n1","label":"Inventory","x":50,"y":46},
+  {"id":"n2","label":"Payment","x":83,"y":46},
+]} frames={[
+  {"title":"Name what checkout cannot skip","note":"Checkout, inventory and payment each succeed with probability 0.999 in this toy model. Assume independent outcomes and require all three for a successful checkout.","active":["n0","n1","n2"],"values":{"n0":"0.999","n1":"0.999","n2":"0.999"}},
+  {"title":"Multiply the required outcomes","note":"The end-to-end success probability is 0.999³, or roughly 99.7003%. A checkout that depends on all three services inherits their combined failures.","active":["n0","n1","n2"],"values":{"n0":"required","n1":"required","n2":"99.7003%"}},
+  {"title":"Model an optional service separately","note":"An optional recommendation call can fail while checkout still completes, provided the fallback stays within the checkout deadline. Only required services enter the product in this simplified availability model.","active":["n0"],"values":{"n0":"core succeeds","n1":"still needed","n2":"still needed"}},
+]} />
+
 ## Code: how fast does availability decay?
 
 Each service is up 99.9% of the time ("three nines": about 8.8 hours of downtime a year). The program computes `a^k` exactly, checks it by simulation, and compares ten required dependencies with a design where six of them have fallbacks.
@@ -137,6 +147,16 @@ For each user-facing request, list every service that must answer for it to succ
 2. **Extract when a boundary hurts**: a module that needs independent scaling, a different release cadence, a different technology, or a team that is blocked.
 3. **Strangle gradually.** Route a slice of traffic to the new service behind a facade, move its data, then retire the old code.
 4. **Never share the database.** Move data ownership with the service, and replace joins with API calls, events or a read model (see CQRS).
+
+<ConceptWalkthrough title="Move a service boundary without two writers" nodes={[
+  {"id":"n0","label":"Facade","x":17,"y":46},
+  {"id":"n1","label":"Legacy","x":50,"y":46},
+  {"id":"n2","label":"New service","x":83,"y":46},
+]} frames={[
+  {"title":"Compare behavior without changing the writer","note":"The facade serves live reads from the old module. The new service receives replicated data and runs comparison reads. The old module still owns writes.","active":["n0","n1","n2"],"values":{"n0":"routes reads","n1":"one writer","n2":"shadow reads"}},
+  {"title":"Cut over ownership deliberately","note":"Catch up the replica to a recorded checkpoint. Quiesce or fence writes on the old path and route writes through the facade to the new owner. Avoid letting both paths accept updates to the same records.","active":["n0","n1","n2"],"values":{"n0":"switch route","n1":"writes fenced","n2":"new writer"}},
+  {"title":"Choose rollback with ownership in mind","note":"After the new system accepts writes, a routing rollback alone could expose stale data. Reconcile the writes and fence the current owner before restoring the old write path.","active":["n0","n1","n2"],"values":{"n0":"rollback?","n1":"may be stale","n2":"has new data"}},
+]} />
 
 ## Trade-offs
 
