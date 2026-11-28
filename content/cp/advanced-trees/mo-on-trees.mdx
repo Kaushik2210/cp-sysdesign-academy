@@ -140,14 +140,14 @@ For edge-colour queries, store each edge's colour on its deeper endpoint. Use th
 <ConceptWalkthrough
   title="Convert a tree path into an edge path"
   nodes={[
-    {"id": "n0", "label": "LCA 1", "x": 19, "y": 50},
-    {"id": "n1", "label": "Vertex 3", "x": 50, "y": 50},
-    {"id": "n2", "label": "Vertex 5", "x": 81, "y": 50},
+    {"id": "n0", "label": "LCA", "x": 19, "y": 50},
+    {"id": "n1", "label": "First endpoint", "x": 50, "y": 50},
+    {"id": "n2", "label": "Last endpoint", "x": 81, "y": 50},
   ]}
   frames={[
-    {"title": "Start with the LCA convention", "note": "For a path between 3 and 5 with LCA 1, both endpoints contribute their incoming edges. Any intermediate descendants on the path contribute theirs as well.", "active": ["n1", "n2"], "values": {"n0": "incoming edge?", "n1": "include", "n2": "include"}},
-    {"title": "Skip the extra LCA", "note": "In the non-ancestor case, the tour window already omits 1. Leave it out: its incoming edge lies above the path.", "active": ["n1", "n2"], "values": {"n0": "omit", "n1": "include", "n2": "include"}},
-    {"title": "Remove the LCA for an ancestor query", "note": "For path (1, 5), the ancestor window includes 1. Exclude its incoming edge when reading the answer. A path from 1 to itself has zero edges.", "active": ["n2"], "values": {"n0": "exclude", "n1": "outside path", "n2": "include"}},
+    {"title": "Start with the LCA convention", "note": "For a path between 3 and 5 with LCA 0, both endpoints contribute their incoming edges. Any intermediate descendants on the path contribute theirs as well.", "active": ["n1", "n2"], "values": {"n0": "0: omit", "n1": "3: include", "n2": "5: include"}},
+    {"title": "Skip the extra LCA", "note": "In the non-ancestor case, the tour window already omits 0. Leave it out: the root has no incoming edge.", "active": ["n1", "n2"], "values": {"n0": "omit", "n1": "3: include", "n2": "5: include"}},
+    {"title": "Remove the LCA for an ancestor query", "note": "For path (1, 4), the ancestor window includes 1. Exclude its incoming edge 0–1 when reading the answer. The only edge left is 1–4. A path from 1 to itself has zero edges.", "active": ["n2"], "values": {"n0": "1: exclude", "n1": "1: exclude", "n2": "4: include"}},
   ]}
 />
 
