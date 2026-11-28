@@ -1236,6 +1236,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/queues-and-streaming/stream-processing-basics/", [
       ["Merge event-time sessions with a late event", "Publish one revised session"],
     ]],
+    ["/sd/databases-1/acid-and-transactions/", [
+      ["Trace write skew across separate rows", "Detect a broken invariant"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

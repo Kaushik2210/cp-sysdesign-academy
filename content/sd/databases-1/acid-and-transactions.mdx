@@ -154,6 +154,22 @@ Rule: at least one doctor must be on call. Alice and Bob are both on call. Each 
 
 ## Isolation levels
 
+The on-call roster must always have at least one doctor assigned. The database uses snapshot isolation in this example, and each transaction reads the roster before updating its own row.
+
+<ConceptWalkthrough
+  title="Trace write skew across separate rows"
+  nodes={[
+    {"id": "n0", "label": "Doctor A", "x": 24, "y": 25},
+    {"id": "n1", "label": "Roster", "x": 50, "y": 67},
+    {"id": "n2", "label": "Doctor B", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Read the same snapshot twice", "note": "Both transactions see A and B assigned. Each doctor believes it is safe to remove their own assignment.", "active": ["n0", "n2"], "values": {"n0": "sees both", "n1": "2 assigned", "n2": "sees both"}},
+    {"title": "Update distinct rows", "note": "A marks A unassigned. B marks B unassigned. A check for two transactions writing the same row sees no conflict.", "active": ["n0", "n2"], "values": {"n0": "writes A", "n1": "different rows", "n2": "writes B"}},
+    {"title": "Detect a broken invariant", "note": "Both transactions can commit under snapshot isolation, leaving zero assigned. Serializable isolation must prevent this history. An explicit, shared roster lock also works when all writers lock before reading and recheck the rule.", "active": ["n1"], "values": {"n0": "off", "n1": "0 assigned", "n2": "off"}},
+  ]}
+/>
+
 The SQL standard defines four levels in terms of which anomalies they must prevent. Real databases differ in the details, so check yours.
 
 | Level | Dirty read | Non-repeatable read | Phantom | Write skew |
