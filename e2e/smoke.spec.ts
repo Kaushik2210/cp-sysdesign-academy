@@ -1158,6 +1158,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/advanced-trees/mo-on-trees/", [
       ["Convert a tree path into an edge path", "Remove the LCA for an ancestor query"],
     ]],
+    ["/cp/advanced-trees/small-to-large-merging/", [
+      ["Charge duplicate-colour merges to represented vertices", "Double the charged vertex's group"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

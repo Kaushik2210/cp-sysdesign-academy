@@ -168,6 +168,22 @@ for (int v = n; v >= 1; v--) {
 
 ## Experiment
 
+Track the original vertices represented by each container, even when repeated colours collapse to one entry.
+
+<ConceptWalkthrough
+  title="Charge duplicate-colour merges to represented vertices"
+  nodes={[
+    {"id": "n0", "label": "Left group", "x": 19, "y": 50},
+    {"id": "n1", "label": "Right group", "x": 50, "y": 50},
+    {"id": "n2", "label": "Merged group", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Count vertices and keys separately", "note": "The left group colours are red, red. The right group colours are red, blue, blue. The sets have one and two keys, while the groups have two and three vertices.", "active": ["n0", "n1"], "values": {"n0": "2 vertices \u00b7 1 key", "n1": "3 vertices \u00b7 2 keys", "n2": "pending"}},
+    {"title": "Try inserting the smaller set", "note": "Scan the one left key, red. The destination already contains red. Charge that one attempted insertion to one original vertex from the smaller group.", "active": ["n0", "n1"], "values": {"n0": "scan red", "n1": "red already present", "n2": "1 attempt"}},
+    {"title": "Double the charged vertex's group", "note": "The merged set still has just two keys. Its group now represents five original vertices, so the charged vertex went from a group of size 2 to size 5. This is the doubling used in the bound.", "active": ["n2"], "values": {"n0": "was 2 vertices", "n1": "was 3 vertices", "n2": "5 vertices \u00b7 2 keys"}},
+  ]}
+/>
+
 The program first checks both merge strategies against an explicit scan of every subtree on 300 random small trees. Then it counts the **element insertions** performed while merging, with all colours distinct (the worst case for set sizes), comparing small-to-large with the naive rule "always insert the child's set into the parent's".
 
 <CodeRunner language="python" timeoutMs={30000} code={`import math
