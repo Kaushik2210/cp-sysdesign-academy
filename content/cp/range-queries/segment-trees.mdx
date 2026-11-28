@@ -44,6 +44,16 @@ Query a range and look at which nodes light up; update a leaf and watch only its
 
 Store the leaves at positions `n .. 2n-1` and let node `i` have children `2i` and `2i+1`. No recursion, no `4n` array, and it works for any `n`, not only powers of two.
 
+<ConceptWalkthrough title="Inspect the compact layout with five leaves" nodes={[
+  {"id":"n0","label":"Leaves","x":17,"y":46},
+  {"id":"n1","label":"Node 2","x":50,"y":46},
+  {"id":"n2","label":"Root","x":83,"y":46},
+]} frames={[
+  {"title":"Lay out the leaves","note":"Place A, B, C, D, E in slots 5 through 9. With five leaves, the starting slot is odd. Predict whether the compact tree’s root stores the original string in order.","active":["n0"],"values":{"n0":"slots 5–9","n1":"?","n2":"?"}},
+  {"title":"Build nodes from their children","note":"Node 4 joins slots 8 and 9 to make DE. Node 2 joins node 4 with slot 5 to make DEA. Node 3 joins slots 6 and 7 to make BC.","active":["n1","n2"],"values":{"n0":"A B C D E","n1":"DEA","n2":"DEABC"}},
+  {"title":"Use the query to recover array order","note":"The root DEABC is fine for a commutative sum but has the wrong string order. An ordered query for [0, 5) peels off A on the left, then BC on the left and DE on the right. It returns ABCDE.","active":["n0","n1","n2"],"values":{"n0":"A","n1":"BC then DE","n2":"ABCDE"}},
+]} />
+
 <Tabs>
 <Tab label="Python">
 
@@ -192,6 +202,16 @@ print("1000 random operations agree with brute force")
 The bottom-up query above takes `[l, r)`. Convert `1`-based inclusive `[x, y]` to `l = x - 1`, `r = y`. Mixing conventions is the most common source of off-by-one errors.
 </Callout>
 
+<ConceptWalkthrough title="Translate one-based input before walking the tree" nodes={[
+  {"id":"n0","label":"Input","x":17,"y":46},
+  {"id":"n1","label":"Slice","x":50,"y":46},
+  {"id":"n2","label":"Answer","x":83,"y":46},
+]} frames={[
+  {"title":"Read the endpoints together","note":"The array is [4, 2, 7, 1]. A request for positions 2 through 3 includes both endpoints in the problem’s one-based convention.","active":["n0"],"values":{"n0":"2 through 3","n1":"?","n2":"?"}},
+  {"title":"Translate to a half-open interval","note":"Subtract one from the first endpoint and use the second endpoint unchanged. The query is [1, 3), which selects zero-based indices 1 and 2.","active":["n0","n1"],"values":{"n0":"2 through 3","n1":"[1, 3)","n2":"2 + 7"}},
+  {"title":"Check the length and sum","note":"The inclusive request spans two positions, and 3 − 1 is two. The sum is 9. Translating both endpoints by subtracting one would produce [1, 2) and omit the final value.","active":["n1","n2"],"values":{"n0":"length 2","n1":"[1, 3)","n2":"9"}},
+]} />
+
 ## Pitfalls
 
 1. **Mixing inclusive and half-open ranges** in the same solution.
@@ -200,6 +220,16 @@ The bottom-up query above takes `[l, r)`. Convert `1`-based inclusive `[x, y]` t
 4. **Non-power-of-two `n` with a recursive tree and a too-small array.** Allocate `4n` for the recursive layout.
 5. **Rebuilding the tree on each update.** An update touches only `log n` nodes.
 6. **Using a segment tree where prefix sums suffice.** No updates means no need for it.
+
+<ConceptWalkthrough title="Preserve order with two query accumulators" nodes={[
+  {"id":"n0","label":"Left","x":17,"y":46},
+  {"id":"n1","label":"Right","x":50,"y":46},
+  {"id":"n2","label":"Result","x":83,"y":46},
+]} frames={[
+  {"title":"Peel off the edge leaves","note":"Query [1, 7) in ABCDEFGH. The first boundary checks select B from the left and G from the right. Store them separately.","active":["n0","n1"],"values":{"n0":"B","n1":"G","n2":"pending"}},
+  {"title":"Append left pieces and prepend right pieces","note":"At the next level take CD from the left and EF from the right. The left accumulator becomes BCD. Put EF before G, so the right accumulator becomes EFG.","active":["n0","n1"],"values":{"n0":"BCD","n1":"EFG","n2":"pending"}},
+  {"title":"Join only at the end","note":"Combining the two accumulators gives BCDEFG. Adding pieces to a single accumulator in visitation order would give BGCDEF, which differs when the operation cares about order.","active":["n0","n1","n2"],"values":{"n0":"BCD","n1":"EFG","n2":"BCDEFG"}},
+]} />
 
 ## Practice
 
