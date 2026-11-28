@@ -170,6 +170,16 @@ print("300 random trees: the DP and the two-search method agree")
 
 Pick any vertex, find the farthest vertex `a` from it, then the farthest vertex from `a`: that distance is the diameter. This is short and works for **non-negative** weights. The DP is slightly longer but also adapts to other questions (counts, negative weights, "through the vertex" constraints), so it is worth knowing.
 
+<ConceptWalkthrough title="Break the two-search trick with a negative edge" nodes={[
+  {"id":"n0","label":"Start","x":17,"y":46},
+  {"id":"n1","label":"Sweep","x":50,"y":46},
+  {"id":"n2","label":"Best path","x":83,"y":46},
+]} frames={[
+  {"title":"Start on a weakly connected side","note":"Use the path D–A–B–C with edge weights 1, −100 and 4. Start at A. D is 1 away, B is −100 away and C is −96 away.","active":["n0","n1","n2"],"values":{"n0":"A","n1":"D is farthest","n2":"?"}},
+  {"title":"Sweep again from D","note":"From D, A is 1 away, B is −99 away and C is −95 away. The second sweep returns length 1.","active":["n0","n1"],"values":{"n0":"D","n1":"A at 1","n2":"returns 1"}},
+  {"title":"Inspect the other side of the negative edge","note":"The path B–C has weight 4, and crossing the −100 edge reduces any path that uses it here. The actual diameter is 4. For signed weights, design the DP around whether empty paths are allowed.","active":["n0","n1","n2"],"values":{"n0":"B → C","n1":"edge +4","n2":"diameter 4"}},
+]} />
+
 ## The same pattern for other problems
 
 | problem | state per vertex | combine |
@@ -183,6 +193,16 @@ Pick any vertex, find the farthest vertex `a` from it, then the farthest vertex 
 <Callout type="tip" title="Process in reverse BFS or DFS order">
 Whatever the input numbering, a **parent-before-child order** (from BFS or an iterative DFS) read backwards gives a **child-before-parent order**. Iterate over that list instead of recursing.
 </Callout>
+
+<ConceptWalkthrough title="Compare taking and skipping the parent in tree DP" nodes={[
+  {"id":"n0","label":"Parent A","x":17,"y":46},
+  {"id":"n1","label":"Child B","x":50,"y":46},
+  {"id":"n2","label":"Child C","x":83,"y":46},
+]} frames={[
+  {"title":"Start with two leaves","note":"A has weight 4, B and C have weight 3 each and both are children of A. An independent set cannot contain adjacent vertices. Each leaf has take = 3 and skip = 0.","active":["n0","n1","n2"],"values":{"n0":"weight 4","n1":"take 3","n2":"take 3"}},
+  {"title":"Choose A and block its children","note":"If A is selected, both children must be skipped. Take[A] is 4 + 0 + 0 = 4.","active":["n0"],"values":{"n0":"take 4","n1":"skip 0","n2":"skip 0"}},
+  {"title":"Skip A and optimize both child subtrees","note":"If A is excluded, each child can independently choose its better state. Skip[A] is 3 + 3 = 6, so the best set takes B and C.","active":["n0","n1","n2"],"values":{"n0":"skip 6","n1":"take 3","n2":"take 3"}},
+]} />
 
 ## Pitfalls
 
