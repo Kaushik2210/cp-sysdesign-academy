@@ -137,6 +137,22 @@ The total is **63**. The count below `1 → 2` includes terminal `2` as well as 
 
 ## Code and differential validation
 
+On a virtual tree, count one contribution per edge by asking how many terminal pairs cross it. Try the calculation for a weight-5 edge with four marked vertices.
+
+<ConceptWalkthrough
+  title="Count terminal pairs across a virtual edge"
+  nodes={[
+    {"id": "n0", "label": "Below edge", "x": 19, "y": 50},
+    {"id": "n1", "label": "Edge weight", "x": 50, "y": 50},
+    {"id": "n2", "label": "Outside", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Count marked vertices below", "note": "Suppose the edge leads to a subtree with one of the four marked vertices. The subtree count is 1, regardless of how many unmarked vertices were compressed.", "active": ["n0"], "values": {"n0": "1 terminal", "n1": "5", "n2": "3 terminals"}},
+    {"title": "Choose one terminal on each side", "note": "Each unordered pair crossing this edge has a unique endpoint below and a unique endpoint outside. There are 1 \u00d7 3 = 3 such pairs.", "active": ["n0", "n1", "n2"], "values": {"n0": "1 choice", "n1": "3 pairs cross", "n2": "3 choices"}},
+    {"title": "Add 15 to the distance sum", "note": "The edge contributes 5 \u00d7 3 = 15. Repeat this for each edge. For a pair whose route spans several edges, each edge supplies its own weight.", "active": ["n1"], "values": {"n0": "1 terminal", "n1": "5 \u00d7 3 = 15", "n2": "3 terminals"}},
+  ]}
+/>
+
 The runner builds the example and checks its exact virtual edges. It then compares the pairwise distance sum with a brute-force traversal on the **original** tree from each terminal. The reference reads edge weights directly and uses no LCA table, DFS intervals, or virtual edges. The checks include empty and singleton queries, repeated terminals, a marked original root, zero-weight edges, and seeded random queries over paths, stars, and random trees.
 
 <CodeRunner language="python" code={`from random import Random

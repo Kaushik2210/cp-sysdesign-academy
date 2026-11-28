@@ -1161,6 +1161,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/advanced-trees/small-to-large-merging/", [
       ["Charge duplicate-colour merges to represented vertices", "Double the charged vertex's group"],
     ]],
+    ["/cp/advanced-trees/virtual-trees/", [
+      ["Count terminal pairs across a virtual edge", "Add 15 to the distance sum"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
