@@ -1206,6 +1206,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/dynamic-programming/coin-change/", [
       ["Show how coin loop order changes the count", "Switch to counting by last coin"],
     ]],
+    ["/cp/dynamic-programming/digit-dp/", [
+      ["Distinguish padding from a real zero", "Allow different neighbors"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

@@ -208,6 +208,22 @@ print("500 random (N, S) pairs agree with brute force")
 
 ## When the state needs more than a sum
 
+Count positive numbers up to `105` with no equal adjacent digits. Treat leading zeros as padding. Try deciding the three padded candidates before stepping.
+
+<ConceptWalkthrough
+  title="Distinguish padding from a real zero"
+  nodes={[
+    {"id": "n0", "label": "005", "x": 24, "y": 25},
+    {"id": "n1", "label": "100", "x": 50, "y": 67},
+    {"id": "n2", "label": "101", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Ignore zeros before the number starts", "note": "The padded candidate 005 represents 5. The first two zeros leave started false and previous digit unset. Digit 5 starts the number, so accept it.", "active": ["n0"], "values": {"n0": "accept", "n1": "pending", "n2": "pending"}},
+    {"title": "Remember a zero after the number starts", "note": "For 100, digit 1 starts the number. The next digit 0 is real, so remember it. The final 0 repeats it and causes rejection.", "active": ["n1"], "values": {"n0": "accept", "n1": "reject", "n2": "pending"}},
+    {"title": "Allow different neighbors", "note": "In 101, the real transitions are 1 \u2192 0 and 0 \u2192 1. Both are allowed, so accept. At the end of a count over positive numbers, exclude the all-padding branch.", "active": ["n2"], "values": {"n0": "accept", "n1": "reject", "n2": "accept"}},
+  ]}
+/>
+
 Replace "digit sum so far" by whatever the constraint needs, and keep the same skeleton:
 
 | question | state to remember | free-part table |
