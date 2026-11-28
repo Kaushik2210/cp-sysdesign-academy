@@ -1216,7 +1216,7 @@ test.describe("concept walkthroughs at phone width", () => {
       ["Turn a grid count into a minimum-cost DP", "Take the cheaper predecessor"],
     ]],
     ["/cp/dynamic-programming/interval-dp/", [
-      ["Split a balloon interval at the last burst", "Add the final burst and choose 39"],
+      ["Split a balloon interval at the last burst", "Add the final burst and choose 33"],
     ]],
     ["/cp/dynamic-programming/longest-increasing-subsequence/", [
       ["Pick the binary search bound for duplicates", "Read different optimum lengths"],

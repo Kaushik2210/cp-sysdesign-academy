@@ -211,8 +211,8 @@ Try the array of burst values `[2, 4, 3]` with fixed sentinels of value `1`. Com
   ]}
   frames={[
     {"title": "Freeze the boundary sentinels", "note": "When a balloon is last in the whole interval, its remaining neighbors are the sentinels. While solving either smaller side, its value acts as a fixed boundary.", "active": ["n0", "n1", "n2"], "values": {"n0": "boundary 2", "n1": "boundary 4", "n2": "boundary 3"}},
-    {"title": "Solve the subintervals", "note": "Leaving 2 last gives 30 from bursting 4 then 3. Leaving 4 last gives 8 + 12 = 20. Leaving 3 last gives 36 from bursting 4 then 2.", "active": ["n0", "n1", "n2"], "values": {"n0": "subtotal 30", "n1": "subtotal 20", "n2": "subtotal 36"}},
-    {"title": "Add the final burst and choose 39", "note": "The final burst adds its own value because both sentinels are 1. The totals are 32, 24 and 39. The best schedule bursts 4, then 2, then 3.", "active": ["n2"], "values": {"n0": "32", "n1": "24", "n2": "39"}},
+    {"title": "Solve the subintervals", "note": "Leaving 2 last gives 30 from bursting 4 then 3. Leaving 4 last gives 8 + 12 = 20. Leaving 3 last gives 30 from bursting 4 then 2.", "active": ["n0", "n1", "n2"], "values": {"n0": "subtotal 30", "n1": "subtotal 20", "n2": "subtotal 30"}},
+    {"title": "Add the final burst and choose 33", "note": "The final burst adds its own value because both sentinels are 1. The totals are 32, 24 and 33. The best schedule bursts 4, then 2, then 3.", "active": ["n2"], "values": {"n0": "32", "n1": "24", "n2": "33"}},
   ]}
 />
 
