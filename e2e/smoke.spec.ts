@@ -1018,9 +1018,7 @@ test("concept walkthroughs make duplicate bounds and burst limits visible", asyn
   }
 });
 
-test("concept walkthroughs explain additional examples at phone width", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 800 });
-  await page.emulateMedia({ reducedMotion: "reduce" });
+test.describe("concept walkthroughs at phone width", () => {
   const lessons = [
     ["/cp/sorting-and-searching/binary-search/", [
       ["Keep the first-true boundary in bounds", "A one-element probe still makes progress"],
@@ -1067,19 +1065,38 @@ test("concept walkthroughs explain additional examples at phone width", async ({
       ["Test the heartbeat margin against delays", "Try a longer stall"],
       ["Follow leadership across a network partition", "Repair the term when the network heals"],
     ]],
+    ["/cp/range-queries/segment-trees/", [
+      ["Inspect the compact layout with five leaves", "Use the query to recover array order"],
+      ["Translate one-based input before walking the tree", "Check the length and sum"],
+      ["Preserve order with two query accumulators", "Join only at the end"],
+    ]],
+    ["/sd/consensus-and-coordination/consensus-and-majorities/", [
+      ["Compare a crash with a delayed reply", "Separate progress from agreement"],
+      ["Carry forward an accepted Paxos proposal", "Choose Y with acceptance"],
+      ["Place five replicas to survive one zone loss", "Compare a concentrated placement"],
+    ]],
+    ["/cp/graphs/dijkstra-shortest-paths/", [
+      ["Skip a stale distance in the heap", "Ignore the obsolete record"],
+      ["Recover a route and handle an unreachable target", "Check reachability before following parents"],
+      ["Watch a negative edge invalidate early stopping", "Compute the missed route"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
-    await page.goto(path);
-    for (const [title, finalStep] of walkthroughs) {
-      const walkthrough = page.getByRole("region", { name: title, exact: true });
-      const next = walkthrough.getByRole("button", { name: "Next step", exact: true });
-      await next.click();
-      await next.click();
-      await expect(walkthrough.getByRole("status")).toContainText(finalStep);
-      await expect(next).toBeDisabled();
-    }
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(375);
+    test(path, async ({ page }) => {
+      await page.setViewportSize({ width: 375, height: 800 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto(path);
+      for (const [title, finalStep] of walkthroughs) {
+        const walkthrough = page.getByRole("region", { name: title, exact: true });
+        const next = walkthrough.getByRole("button", { name: "Next step", exact: true });
+        await next.click();
+        await next.click();
+        await expect(walkthrough.getByRole("status")).toContainText(finalStep);
+        await expect(next).toBeDisabled();
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(375);
+    });
   }
 });
 

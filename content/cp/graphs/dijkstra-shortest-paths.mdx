@@ -41,11 +41,21 @@ Dijkstra keeps a min-heap of `(distance, node)` pairs.
 
 With a binary heap the cost is `O((V + E) log V)`.
 
+<ConceptWalkthrough title="Skip a stale distance in the heap" nodes={[
+  {"id":"n0","label":"Heap","x":17,"y":46},
+  {"id":"n1","label":"Best X","x":50,"y":46},
+  {"id":"n2","label":"Action","x":83,"y":46},
+]} frames={[
+  {"title":"Discover two tentative distances","note":"From S, relax edges to X with cost 9 and Y with cost 2. The heap stores both records. Predict which node is expanded next.","active":["n0","n1"],"values":{"n0":"2,Y / 9,X","n1":"9","n2":"pop Y"}},
+  {"title":"Improve X through Y","note":"Pop Y at distance 2. Its edge to X costs 3, so update dist[X] to 5 and push a new record. The old record stays in the heap.","active":["n0","n1","n2"],"values":{"n0":"5,X / 9,X","n1":"5","n2":"push 5"}},
+  {"title":"Ignore the obsolete record","note":"The record at distance 5 finalizes X. When the old 9 later reaches the top, compare it with the stored distance 5 and skip the expansion.","active":["n0","n1","n2"],"values":{"n0":"pop 9,X","n1":"5","n2":"skip 9"}},
+]} />
+
 ## Why it is correct
 
 **Invariant.** Every node popped with `d == dist[u]` already has its true shortest distance.
 
-Suppose `u` is the first node popped with a wrong (too large) distance. The true shortest path to `u` leaves the set of finished nodes through some edge `x -> y`, where `x` is finished and `y` is not. When `x` was finished, `y` was relaxed, so `dist[y]` is at most the true distance to `y`. Since weights are positive, the true distance to `y` is less than the true distance to `u`, so `y` would have been popped before `u`. That contradicts the choice of `u`.
+Suppose `u` is the first node popped with a wrong, too-large distance. A shortest path to `u` leaves the finished set at edge `x -> y`. Relaxing from the finished vertex `x` gives `y` a tentative distance no larger than the length of the path prefix through `y`. With nonnegative weights, that prefix is at most the full shortest distance to `u`. Therefore `y` has a heap entry strictly smaller than the too-large distance proposed for `u`, a contradiction. The argument also covers zero-weight edges.
 
 The proof needs `w >= 0`. With a negative edge, a node that looked finished can still be improved later.
 
@@ -175,14 +185,34 @@ Node 1 is reached in one road (cost 4), but also through `0 -> 2 -> 1` (two road
 
 Store `parent[v] = u` whenever you *improve* `dist[v]`. Follow parents back from the target and reverse the list.
 
+<ConceptWalkthrough title="Recover a route and handle an unreachable target" nodes={[
+  {"id":"n0","label":"Target","x":17,"y":46},
+  {"id":"n1","label":"Parents","x":50,"y":46},
+  {"id":"n2","label":"Route","x":83,"y":46},
+]} frames={[
+  {"title":"Keep the parent of each improvement","note":"S first reaches X with distance 9. After S reaches Y for 2, edge Y → X of cost 3 improves X to 5. Set parent[X] to Y, replacing its earlier parent S.","active":["n0","n1"],"values":{"n0":"X: dist 5","n1":"X ← Y","n2":"pending"}},
+  {"title":"Reverse the chain","note":"Start at X and follow X → Y → S through parent pointers. Reverse that order to return S → Y → X. Its weight is 2 + 3 = 5.","active":["n0","n1","n2"],"values":{"n0":"X","n1":"Y ← S","n2":"S → Y → X"}},
+  {"title":"Check reachability before following parents","note":"An isolated target Z stays at infinity. Its missing parent means no route. The source also has no parent, but it has distance zero and a route containing only itself.","active":["n0","n2"],"values":{"n0":"Z: infinity","n1":"none","n2":"unreachable"}},
+]} />
+
 ## Pitfalls
 
-1. **Negative edges.** Dijkstra silently returns wrong answers. Use Bellman-Ford (`O(VE)`) instead.
+1. **Negative edges.** Finalizing nodes or stopping when the target is popped can return a wrong answer. Use Bellman-Ford (`O(VE)`) for graphs with negative weights.
 2. **Integer overflow.** Distances reach `n * maxW`. Use 64-bit integers and an infinity like `LLONG_MAX / 4`, so `INF + w` cannot overflow.
 3. **Forgetting the stale-entry check.** Without `if d > dist[u]: continue` the answers stay correct, but a node can be expanded many times, which can turn `O(E log V)` into `O(E^2)` on adversarial inputs.
 4. **BFS or a plain queue on weighted edges.** BFS counts edges. Only 0/1 weights allow the [0-1 BFS](/cp/stacks-and-queues/queues-deques-bfs/) deque trick.
 5. **Dense graphs.** With `E` close to `V^2`, an array-based `O(V^2)` Dijkstra (scan for the minimum) beats the heap version.
 6. **Slow input.** Read everything at once with `sys.stdin.read().split()` in Python.
+
+<ConceptWalkthrough title="Watch a negative edge invalidate early stopping" nodes={[
+  {"id":"n0","label":"A","x":17,"y":46},
+  {"id":"n1","label":"B","x":50,"y":46},
+  {"id":"n2","label":"Target","x":83,"y":46},
+]} frames={[
+  {"title":"Queue both direct routes","note":"The directed graph has S → A with weight 2, S → B with weight 5 and B → A with weight −4. Search for a route to A. The first heap record for A has distance 2.","active":["n0","n1"],"values":{"n0":"dist 2","n1":"dist 5","n2":"A"}},
+  {"title":"See why finalizing A fails","note":"A is popped before B because 2 is smaller than 5. Stopping here returns 2. B still has a route that can improve A because its outgoing edge has negative weight.","active":["n0","n2"],"values":{"n0":"popped first","n1":"waiting","n2":"returned 2"}},
+  {"title":"Compute the missed route","note":"The route S → B → A costs 5 − 4 = 1. The graph has no cycle. Negative weight alone breaks the rule that a popped node already has its final distance.","active":["n1","n2"],"values":{"n0":"true dist 1","n1":"edge −4","n2":"missed 1"}},
+]} />
 
 ## Practice
 
