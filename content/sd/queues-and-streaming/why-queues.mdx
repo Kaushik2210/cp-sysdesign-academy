@@ -57,6 +57,22 @@ Rule of thumb: if the question is "who should do this job?", use a queue. If it 
 
 ## Trade-offs you accept
 
+Start with 600 queued jobs. Workers complete 120 jobs per minute while producers add 90 per minute. Estimate the time to recover and compare it with the zero-arrival case.
+
+<ConceptWalkthrough
+  title="Budget for catch-up while producers keep publishing"
+  nodes={[
+    {"id": "n0", "label": "Arrivals", "x": 24, "y": 25},
+    {"id": "n1", "label": "Backlog", "x": 50, "y": 67},
+    {"id": "n2", "label": "Workers", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Measure both rates", "note": "Workers can process 120 jobs per minute, but 90 new jobs arrive each minute. Assume both rates stay constant during recovery.", "active": ["n0", "n2"], "values": {"n0": "90/min", "n1": "600 jobs", "n2": "120/min"}},
+    {"title": "Use net drain rate", "note": "After one minute the queue holds 600 + 90 \u2212 120 = 570 jobs. The backlog falls by 30 per minute.", "active": ["n1"], "values": {"n0": "90 added", "n1": "570 jobs", "n2": "120 done"}},
+    {"title": "Allow twenty minutes to catch up", "note": "At 30 net jobs per minute, draining 600 takes 20 minutes. With zero arrivals it would take 5. At sustained arrivals of 120 or more, the current capacity cannot drain the backlog.", "active": ["n1"], "values": {"n0": "90/min", "n1": "20 min", "n2": "30 net/min"}},
+  ]}
+/>
+
 - **Eventual consistency**: the work is done later, so the user-visible effect lags. You must design the UX around that (pending states, notifications).
 - **Operational complexity**: a broker to run, monitor and secure; lag and backlog become new things to alert on.
 - **Harder debugging**: no single stack trace; use correlation IDs and distributed tracing.

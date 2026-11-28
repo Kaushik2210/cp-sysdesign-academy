@@ -1227,6 +1227,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/dynamic-programming/divide-and-conquer-optimization/", [
       ["Use a consistent tie-break to pass split bounds", "Verify the bounds contain the winners"],
     ]],
+    ["/sd/queues-and-streaming/why-queues/", [
+      ["Budget for catch-up while producers keep publishing", "Allow twenty minutes to catch up"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
