@@ -1233,6 +1233,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/queues-and-streaming/backpressure-retries-and-dlq/", [
       ["Redrive dead letters within spare capacity", "Pause when live traffic consumes the budget"],
     ]],
+    ["/sd/queues-and-streaming/stream-processing-basics/", [
+      ["Merge event-time sessions with a late event", "Publish one revised session"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

@@ -46,6 +46,22 @@ CDC reads a database's own transaction log (MySQL binlog, PostgreSQL WAL) and em
 
 ## Windows and time
 
+Use event-time sessions with a gap strictly below 10 minutes, scoped to a single user. Assume the processor can still revise these sessions and that a delayed event arrives between them.
+
+<ConceptWalkthrough
+  title="Merge event-time sessions with a late event"
+  nodes={[
+    {"id": "n0", "label": "At 10:00", "x": 24, "y": 25},
+    {"id": "n1", "label": "At 10:08", "x": 50, "y": 67},
+    {"id": "n2", "label": "At 10:16", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Start with two sessions", "note": "Events at 10:00 and 10:16 are 16 minutes apart. Before the delayed event arrives, each belongs to its own session.", "active": ["n0", "n2"], "values": {"n0": "session A", "n1": "pending", "n2": "session B"}},
+    {"title": "Bridge both gaps", "note": "An event stamped 10:08 arrives. It is 8 minutes from each existing event, so all three are now connected by gaps under 10 minutes.", "active": ["n0", "n1", "n2"], "values": {"n0": "8 min \u2192", "n1": "bridge", "n2": "\u2190 8 min"}, "edges": [{"from": "n0", "to": "n1"}, {"from": "n1", "to": "n2"}]},
+    {"title": "Publish one revised session", "note": "The merged session contains three events. If provisional results for A and B were already emitted, update the result and retract the obsolete session record, or delay publication until finalization.", "active": ["n1"], "values": {"n0": "merged", "n1": "3 events", "n2": "merged"}},
+  ]}
+/>
+
 Aggregations over an infinite stream need bounded chunks, called **windows**:
 
 - **Tumbling**: fixed, non-overlapping (every 1 minute).
