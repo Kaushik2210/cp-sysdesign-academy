@@ -1209,6 +1209,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/dynamic-programming/digit-dp/", [
       ["Distinguish padding from a real zero", "Allow different neighbors"],
     ]],
+    ["/cp/dynamic-programming/edit-distance-and-lcs/", [
+      ["Recover either LCS at a tied cell", "Reverse the recovered characters"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

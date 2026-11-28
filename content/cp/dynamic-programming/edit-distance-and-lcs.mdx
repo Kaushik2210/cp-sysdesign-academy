@@ -166,6 +166,22 @@ print("60 random pairs agree with breadth-first search")
 
 ## The same table, a different question: LCS
 
+For `ABC` and `BAC`, two different common subsequences reach the optimum. Use one tie in the length table to recover each witness.
+
+<ConceptWalkthrough
+  title="Recover either LCS at a tied cell"
+  nodes={[
+    {"id": "n0", "label": "Cell", "x": 24, "y": 25},
+    {"id": "n1", "label": "Go up", "x": 50, "y": 67},
+    {"id": "n2", "label": "Go left", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Take the shared final C", "note": "At prefix lengths (3,3), both last characters are C. Record C and move diagonally to the comparison of AB with BA.", "active": ["n0"], "values": {"n0": "take C", "n1": "pending", "n2": "pending"}},
+    {"title": "Reach a tie at the mismatch", "note": "The last characters B and A differ. Both neighboring cells have length 1. Going up leaves A versus BA, where A is available. Going left leaves AB versus B, where B is available.", "active": ["n1", "n2"], "values": {"n0": "length 1", "n1": "keep A", "n2": "keep B"}},
+    {"title": "Reverse the recovered characters", "note": "Backtracking records C then A on one route, or C then B on the other. Reverse to obtain AC or BC. The shared optimum length is 2; a deterministic tie-break can pick either witness.", "active": ["n1", "n2"], "values": {"n0": "length 2", "n1": "AC", "n2": "BC"}},
+  ]}
+/>
+
 The **longest common subsequence** keeps letters in order but may skip some. For `ABCBDAB` and `BDCABA` it has length `4` (for example `BCBA`).
 
 ```text
