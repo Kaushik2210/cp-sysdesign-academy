@@ -213,6 +213,16 @@ print("root subtree size:", size[1], "of", n)
 The flattening works for *subtrees*. A path between two arbitrary vertices is not contiguous in the tour. Paths need LCA, binary lifting or heavy-light decomposition.
 </Callout>
 
+<ConceptWalkthrough title="Recognize a subtree and its first excluded index" nodes={[
+  {"id":"n0","label":"Entry order","x":17,"y":46},
+  {"id":"n1","label":"Range","x":50,"y":46},
+  {"id":"n2","label":"Outside","x":83,"y":46},
+]} frames={[
+  {"title":"Write down the DFS entry order","note":"Root 0 has children 1 and 2. Vertex 1 has children 3 and 4. Visit smaller-numbered children first. The entry order is 0, 1, 3, 4, 2.","active":["n0","n1"],"values":{"n0":"0 1 3 4 2","n1":"tin[1] = 1","n2":"?"}},
+  {"title":"Use the subtree size","note":"Vertex 1 has subtree size 3. Its half-open interval is [1, 4), covering vertices 1, 3 and 4. The last inclusive index is 3.","active":["n0","n1","n2"],"values":{"n0":"1 3 4","n1":"[1, 4)","n2":"index 4"}},
+  {"title":"Test the boundary","note":"Vertex 4 has entry index 3 and belongs to the subtree. Vertex 2 has entry index 4 and lies outside it. The half-open upper endpoint is the first excluded index.","active":["n1","n2"],"values":{"n0":"tin[4] = 3","n1":"4 excluded","n2":"vertex 2"}},
+]} />
+
 ## Pitfalls
 
 1. **Recursive DFS on deep trees.** A path of `10^5` vertices overflows the recursion limit in Python and can overflow the stack in C++ and Java.
@@ -221,6 +231,16 @@ The flattening works for *subtrees*. A path between two arbitrary vertices is no
 4. **Assuming `tin` equals the vertex number.** It is the visit order, which depends on the order children are visited.
 5. **Setting instead of adding.** A Fenwick tree supports `add`; to set a value add `new - old`.
 6. **Forgetting disconnected input.** A tree is connected; if the problem gives a forest, run a search from every root.
+
+<ConceptWalkthrough title="Update all root paths that pass through one vertex" nodes={[
+  {"id":"n0","label":"Update","x":17,"y":46},
+  {"id":"n1","label":"Path to 3","x":50,"y":46},
+  {"id":"n2","label":"Path to 2","x":83,"y":46},
+]} frames={[
+  {"title":"Read the initial root paths","note":"For the tree with edges 0–1, 0–2 and 1–3, vertex weights are 2, 4, 3 and 5 for vertices 0 through 3. Root-to-3 has sum 11. Root-to-2 has sum 5.","active":["n1","n2"],"values":{"n0":"node 1: 4","n1":"11","n2":"5"}},
+  {"title":"Increase the weight of vertex 1","note":"Add 3 to vertex 1. Every root path that visits 1 ends in its subtree, so add 3 across the flattened interval for that subtree. In a difference array, start the increment at tin[1] and cancel it at tout[1] + 1, because this lesson stores tout inclusively.","active":["n0","n1"],"values":{"n0":"subtree +3","n1":"visits 1","n2":"skips 1"}},
+  {"title":"Point-query the updated paths","note":"The point representing vertex 3 accumulates the increment and returns 14. The point representing vertex 2 lies outside the interval and still returns 5.","active":["n1","n2"],"values":{"n0":"delta +3","n1":"14","n2":"5"}},
+]} />
 
 ## Practice
 
