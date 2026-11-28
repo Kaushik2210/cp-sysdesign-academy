@@ -37,8 +37,18 @@ A **heartbeat** detector: each node sends "I am alive" every `T` seconds; the mo
 Improvements to the plain timeout:
 
 - **Phi-accrual detector** (used by Cassandra and Akka): instead of a yes/no, output a continuous *suspicion level* `phi` computed from the observed distribution of heartbeat inter-arrival times. Each application picks its own threshold, and the detector adapts when the network becomes jittery.
-- **Indirect probing (SWIM):** before declaring `B` dead, `A` asks `k` other nodes to ping `B`. If any gets an answer, `B` is alive and the problem was only the path from `A`. This removes false positives caused by one broken link.
+- **Indirect probing (SWIM):** after a direct probe times out, `A` asks `k` other nodes to ping `B`. A timely relayed acknowledgement shows that `B` responded through another route. This can prevent a failed direct probe from becoming a false suspicion.
 - **Suspicion state:** a node goes `alive -> suspect -> dead`. A suspected node can refute the rumour by announcing that it is alive (with a higher incarnation number), so brief pauses do not become permanent evictions.
+
+<ConceptWalkthrough title="Probe through a second network path" nodes={[
+  {"id":"n0","label":"Monitor A","x":17,"y":46},
+  {"id":"n1","label":"Helper C","x":50,"y":46},
+  {"id":"n2","label":"Target B","x":83,"y":46},
+]} frames={[
+  {"title":"Direct probe gets no reply","note":"A sends a probe to B and its timeout expires. A has evidence about the direct exchange, with no confirmation about B’s process state.","active":["n0","n2"],"values":{"n0":"timed out","n1":"available","n2":"unknown"}},
+  {"title":"Ask a helper to ping B","note":"A sends a probe request to C. C reaches B and receives a reply, then relays that result to A before the indirect timeout.","active":["n1","n2"],"values":{"n0":"asked C","n1":"got ACK","n2":"responds"}},
+  {"title":"Use the successful indirect reply","note":"A treats B as reachable through C and avoids escalating this investigation. If all indirect probes time out, A can raise suspicion. Timeouts alone leave uncertainty.","active":["n0","n1","n2"],"values":{"n0":"ACK via C","n1":"relay","n2":"alive here"}},
+]} />
 
 ## Gossip
 
@@ -99,6 +109,16 @@ SWIM combines the two ideas: failure detection by random probing, with membershi
     values: {"a":"alive 8","b":"inc 8","c":"alive 8"},
     edges: [{"from":"b","to":"c"},{"from":"c","to":"a"}],
   },
+]} />
+
+<ConceptWalkthrough title="Compare push and pull on the same starting state" nodes={[
+  {"id":"n0","label":"Informed","x":17,"y":46},
+  {"id":"n1","label":"Contact","x":50,"y":46},
+  {"id":"n2","label":"Result","x":83,"y":46},
+]} frames={[
+  {"title":"Begin with one informed peer","note":"Only A knows the update. B and C do not. In this example, a fixed contact choice is used to compare directions, without a claim about average spread speed.","active":["n0"],"values":{"n0":"A knows","n1":"B, C waiting","n2":"1 of 3"}},
+  {"title":"Push the update from a sender","note":"In a push round A chooses B and sends the update. B learns it. C stays uninformed if it receives no message.","active":["n0","n1","n2"],"values":{"n0":"A sends","n1":"A → B","n2":"2 of 3"}},
+  {"title":"Pull the update from a receiver","note":"Reset to the initial state. B chooses A and asks for the update. A replies with the update, and B learns it. Push-pull lets the exchange carry new information in either direction.","active":["n0","n1","n2"],"values":{"n0":"A replies","n1":"B asks A","n2":"2 of 3"}},
 ]} />
 
 ## Code 1: how fast does a rumour spread?

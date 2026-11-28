@@ -1080,6 +1080,30 @@ test.describe("concept walkthroughs at phone width", () => {
       ["Recover a route and handle an unreachable target", "Check reachability before following parents"],
       ["Watch a negative edge invalidate early stopping", "Compute the missed route"],
     ]],
+    ["/cp/graphs/union-find/", [
+      ["See why union by size keeps trees shallow", "Repeat the doubling argument"],
+      ["Keep the component count through repeated unions", "Ignore the redundant merge"],
+    ]],
+    ["/cp/graphs/minimum-spanning-tree/", [
+      ["Exchange an edge across a cut", "Read the exchange argument"],
+      ["Stop with a forest when no spanning tree exists", "Check the spanning-tree condition"],
+    ]],
+    ["/cp/graphs/topological-sort/", [
+      ["Detect a directed cycle on the DFS stack", "Reject this ordering"],
+      ["Use a heap to choose the smallest available vertex", "Finish with the remaining vertex"],
+    ]],
+    ["/sd/distributed-theory/consistency-models/", [
+      ["Check whether a history preserves real time", "Apply the real-time constraint"],
+      ["Keep one reader from going backward", "Enforce the session contract"],
+    ]],
+    ["/sd/distributed-theory/clocks-and-ordering/", [
+      ["Advance a Lamport clock across a message", "Keep logical order distinct from causality"],
+      ["Resolve two concurrent versions explicitly", "Record the merge as a new event"],
+    ]],
+    ["/sd/distributed-theory/failure-detection-and-gossip/", [
+      ["Probe through a second network path", "Use the successful indirect reply"],
+      ["Compare push and pull on the same starting state", "Pull the update from a receiver"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
