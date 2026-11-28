@@ -1248,6 +1248,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/databases-1/indexes-and-query-plans/", [
       ["Track which fields force a base-row lookup", "Add a projected field and recheck coverage"],
     ]],
+    ["/sd/databases-2/read-replicas-and-failover/", [
+      ["Route a session read using its write position", "Use the replica after it catches up"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

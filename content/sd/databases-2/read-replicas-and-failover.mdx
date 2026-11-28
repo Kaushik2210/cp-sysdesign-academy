@@ -23,6 +23,22 @@ Replicas serve two jobs that people often conflate. **Read replicas** exist to a
 
 ## Read replicas
 
+Assume the primary returns a comparable replication position when a profile edit commits. The client carries it into the next read to request read-your-writes for this session.
+
+<ConceptWalkthrough
+  title="Route a session read using its write position"
+  nodes={[
+    {"id": "n0", "label": "Primary", "x": 24, "y": 25},
+    {"id": "n1", "label": "Read rule", "x": 50, "y": 67},
+    {"id": "n2", "label": "Replica", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Commit and return a position", "note": "The primary commits the new name at position 42 and returns 42 to the client. The replica has only applied through 40.", "active": ["n0", "n1"], "values": {"n0": "position 42", "n1": "require \u226542", "n2": "position 40"}},
+    {"title": "Route around replica lag", "note": "The next read carries 42. Since the replica is behind, route to the primary or wait within a bounded budget for the replica to apply the edit.", "active": ["n0", "n1"], "values": {"n0": "serve read", "n1": "40 is behind", "n2": "wait or skip"}},
+    {"title": "Use the replica after it catches up", "note": "After the replica applies through 42 on the same history, it can serve the read for this session. A failover that loses the commit needs separate handling; a position token cannot recover lost data.", "active": ["n1", "n2"], "values": {"n0": "position 42", "n1": "42 is enough", "n2": "serve read"}, "edges": [{"from": "n1", "to": "n2"}]},
+  ]}
+/>
+
 If a workload is 90% reads, sending reads to N followers can multiply read throughput roughly by N while the leader keeps all writes. Typical uses:
 
 - Product pages, feeds and profile reads served from replicas.
