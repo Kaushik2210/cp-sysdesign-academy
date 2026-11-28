@@ -43,6 +43,16 @@ A **negative cycle** is a loop whose weights sum to a negative number; going aro
 
 Cycles that cannot be reached from the source never matter, because their vertices keep infinite distance and are skipped.
 
+<ConceptWalkthrough title="Separate reachable cycles from hidden cycles" nodes={[
+  {"id":"n0","label":"Source side","x":17,"y":46},
+  {"id":"n1","label":"Cycle","x":50,"y":46},
+  {"id":"n2","label":"Result","x":83,"y":46},
+]} frames={[
+  {"title":"Keep the cycle disconnected","note":"The graph has S → T with weight 3 and a separate pair U → V with weight −2, V → U with weight 1. From S, the pair stays at infinity.","active":["n0","n1"],"values":{"n0":"S → T: 3","n1":"U ↔ V","n2":"U,V: ∞"}},
+  {"title":"Skip starts that are unreached","note":"The cycle weighs −1, but its edges cannot relax from infinite distances. Source-specific Bellman–Ford reports T at distance 3 and no reachable negative cycle.","active":["n0","n1","n2"],"values":{"n0":"dist T = 3","n1":"skip U, V","n2":"no report"}},
+  {"title":"Change the question to find any negative cycle","note":"Initialize all vertices to zero, equivalent to adding a super-source with zero-cost edges to all vertices. The pair is now reachable and an improvement survives the final detection pass.","active":["n1","n2"],"values":{"n0":"all start 0","n1":"weight −1","n2":"cycle found"}},
+]} />
+
 ## Why it is correct
 
 After round `k`, `dist[v]` is at most the weight of the best path from the source to `v` that uses at most `k` edges. (Induction: such a path ends with an edge `a -> v` after a path of at most `k - 1` edges to `a`, which round `k - 1` already covered.) A simple path has at most `n - 1` edges, so after round `n - 1` every `dist` is exact, unless a negative cycle lets a walk of `n` or more edges win. That is precisely what an improvement in round `n` reveals.
@@ -188,7 +198,7 @@ print("unreachable negative cycle ignored:", not neg)
 | Johnson's reweighting | all pairs on sparse graphs with negative edges |
 
 <Callout type="tip" title="Constraint check">
-`O(n * m)` is about `10^7` operations for `n = 500` and `m = 2000`, fine; for `n = m = 2·10^5` it is far too slow, and you need Dijkstra, a DAG order or a different idea.
+With `n = 500` and `m = 2000`, `n * m` is one million edge checks. With `n = m = 200,000`, it is 40 billion. Use Dijkstra for nonnegative edges or a topological order for a DAG when the constraints permit.
 </Callout>
 
 ## Pitfalls
@@ -199,6 +209,16 @@ print("unreachable negative cycle ignored:", not neg)
 4. **Reporting a negative cycle that is not reachable from the source**, when the problem only cares about reachable ones (or the opposite).
 5. **Overflow.** Distances reach `n * maxW`; use 64-bit integers.
 6. **Using Bellman-Ford when Dijkstra suffices.** It is `O(nm)` versus `O(m log n)`.
+
+<ConceptWalkthrough title="Stop once a full relaxation pass changes nothing" nodes={[
+  {"id":"n0","label":"Edges","x":17,"y":46},
+  {"id":"n1","label":"Distances","x":50,"y":46},
+  {"id":"n2","label":"Action","x":83,"y":46},
+]} frames={[
+  {"title":"Run the first pass in edge order","note":"Process A → B (2) before S → A (3). A starts unreachable, so the first edge does nothing. The second sets dist[A] to 3.","active":["n0","n1"],"values":{"n0":"AB then SA","n1":"0, 3, ∞","n2":"changed"}},
+  {"title":"Run another pass","note":"Now A can relax B to 3 + 2 = 5. The remaining edge leaves A at 3. There was an improvement, so continue.","active":["n0","n1","n2"],"values":{"n0":"AB then SA","n1":"0, 3, 5","n2":"changed"}},
+  {"title":"Finish only after a complete unchanged pass","note":"Neither edge can improve its destination. The entire distance vector is stable, so another identical pass would also leave it unchanged. An unchanged individual edge would not justify stopping.","active":["n1","n2"],"values":{"n0":"AB then SA","n1":"0, 3, 5","n2":"stop"}},
+]} />
 
 ## Practice
 
