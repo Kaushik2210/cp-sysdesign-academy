@@ -50,6 +50,16 @@ Every model above the last is a **contract on orderings**. Most real products mi
   B->>R: read x
   R-->>B: 2`} caption="An acknowledged write that Bob does not see yet: allowed under eventual and causal consistency, forbidden under linearizability" />
 
+<ConceptWalkthrough title="Check whether a history preserves real time" nodes={[
+  {"id":"n0","label":"Write","x":17,"y":46},
+  {"id":"n1","label":"Read","x":50,"y":46},
+  {"id":"n2","label":"Allowed?","x":83,"y":46},
+]} frames={[
+  {"title":"Fix the observed history","note":"x starts at 1. Alice writes 2 and receives success at time 20. Bob starts a read at time 30 and receives 1. The clients each issued one operation.","active":["n0","n1"],"values":{"n0":"ack at 20","n1":"starts at 30","n2":"value 1"}},
+  {"title":"Try to place the read before the write","note":"A sequential history may order Bob’s read first, then Alice’s write. Each client’s own operation order still holds, so the return value can be legal under sequential consistency.","active":["n0","n1","n2"],"values":{"n0":"comes second","n1":"comes first","n2":"sequential"}},
+  {"title":"Apply the real-time constraint","note":"Linearizability orders the completed write before the later-starting read. With no intervening write, that read must see 2. A return value of 1 makes this history invalid under linearizability.","active":["n0","n1","n2"],"values":{"n0":"must be first","n1":"must see 2","n2":"violates"}},
+]} />
+
 ## CAP stated carefully, and PACELC
 
 **CAP** says: when a **network partition** splits the replicas, an operation can either return an answer that respects consistency (and some replicas must refuse or wait: not *available*) or answer from whatever replica it can reach (available, but possibly *inconsistent*). It is a statement about **behaviour during partitions**, not a menu from which a system picks two properties for ever.
@@ -145,6 +155,16 @@ These match the closed forms. At acknowledgement time exactly `w` replicas hold 
 <Callout type="tip" title="Read-your-writes without strong consistency">
 To make a user always see their own writes on an otherwise eventually consistent system, route that user's reads to the primary for a short window after they write (or remember the last version they wrote and refuse replicas that are behind it). Other users keep fast, possibly stale reads.
 </Callout>
+
+<ConceptWalkthrough title="Keep one reader from going backward" nodes={[
+  {"id":"n0","label":"Replica A","x":17,"y":46},
+  {"id":"n1","label":"Replica B","x":50,"y":46},
+  {"id":"n2","label":"Session","x":83,"y":46},
+]} frames={[
+  {"title":"Read a fresh replica first","note":"A user reads a document at replica A and receives comparable version 7. Replica B remains at version 6. The client remembers what it has observed.","active":["n0","n2"],"values":{"n0":"v7","n1":"v6","n2":"saw v7"}},
+  {"title":"Send the next read to replica B","note":"Require a version at least 7. Replica B can wait until it catches up, or the service can route the request to an eligible replica. Predict what the client would see without this requirement.","active":["n1","n2"],"values":{"n0":"v7","n1":"too old","n2":"require v7"}},
+  {"title":"Enforce the session contract","note":"When the read completes, the user sees version 7 or later. A different session that has only observed version 6 can still read 6. This is a per-session monotonic-read guarantee.","active":["n0","n1","n2"],"values":{"n0":"v7","n1":"v7 now","n2":"never < v7"}},
+]} />
 
 ## Trade-offs
 
