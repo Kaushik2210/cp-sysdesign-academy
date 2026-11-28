@@ -1218,6 +1218,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/dynamic-programming/interval-dp/", [
       ["Split a balloon interval at the last burst", "Add the final burst and choose 39"],
     ]],
+    ["/cp/dynamic-programming/longest-increasing-subsequence/", [
+      ["Pick the binary search bound for duplicates", "Read different optimum lengths"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

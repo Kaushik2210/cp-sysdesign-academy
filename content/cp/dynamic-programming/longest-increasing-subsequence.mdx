@@ -162,6 +162,22 @@ print("strict:", lis_fast(a), " non-decreasing:", lis_fast(a, strict=False))
 
 ## Why bisect_left and not bisect_right
 
+Step through `[2, 2, 3]` with both bound choices. Predict which one allows equal values to extend a subsequence.
+
+<ConceptWalkthrough
+  title="Pick the binary search bound for duplicates"
+  nodes={[
+    {"id": "n0", "label": "Input", "x": 24, "y": 25},
+    {"id": "n1", "label": "Strict", "x": 50, "y": 67},
+    {"id": "n2", "label": "Nondecreasing", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Seed both tails arrays", "note": "The first 2 creates a length-one tail in each variant.", "active": ["n0", "n1", "n2"], "values": {"n0": "2", "n1": "[2]", "n2": "[2]"}},
+    {"title": "Handle the second 2", "note": "For strict increase, lower bound finds the existing 2 and replaces it. For nondecreasing order, upper bound finds the position after the existing 2 and appends.", "active": ["n1", "n2"], "values": {"n0": "2", "n1": "[2]", "n2": "[2, 2]"}},
+    {"title": "Read different optimum lengths", "note": "Value 3 appends in both cases. The strict solution has length 2: 2,3. The nondecreasing solution has length 3: 2,2,3.", "active": ["n1", "n2"], "values": {"n0": "3", "n1": "[2, 3]", "n2": "[2, 2, 3]"}},
+  ]}
+/>
+
 With `bisect_left`, an element equal to a value already in `tails` **replaces** it, so equal values never extend a run: the result is the **strictly** increasing length. With `bisect_right`, an equal element goes after its twin and extends the run: that computes the **non-decreasing** length. Pick based on whether the statement says "increasing" or "non-decreasing".
 
 ## Variations worth knowing
