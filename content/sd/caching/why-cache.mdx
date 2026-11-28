@@ -45,9 +45,9 @@ Consider 100 requests, a 2 ms cache check and a 40 ms origin read. Assume sequen
 <ConceptWalkthrough
   title="Calculate mean latency from cache hits and misses"
   nodes={[
-    {"id": "n0", "label": "Cache hits", "x": 19, "y": 50},
-    {"id": "n1", "label": "Origin reads", "x": 50, "y": 50},
-    {"id": "n2", "label": "Mean", "x": 81, "y": 50},
+    {"id": "n0", "label": "Cache hits", "x": 23, "y": 26},
+    {"id": "n1", "label": "Origin reads", "x": 50, "y": 69},
+    {"id": "n2", "label": "Mean", "x": 77, "y": 26},
   ]}
   frames={[
     {"title": "Measure the origin baseline", "note": "Without a cache, every request goes to the origin. The mean is 40 ms.", "active": ["n1", "n2"], "values": {"n0": "none", "n1": "100", "n2": "40 ms"}},

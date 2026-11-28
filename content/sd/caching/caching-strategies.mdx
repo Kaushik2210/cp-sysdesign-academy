@@ -74,9 +74,9 @@ Compare the same update under two acknowledgement policies. Assume write-back us
 <ConceptWalkthrough
   title="Compare when cache writes become durable"
   nodes={[
-    {"id": "n0", "label": "Client", "x": 19, "y": 50},
-    {"id": "n1", "label": "Cache", "x": 50, "y": 50},
-    {"id": "n2", "label": "Database", "x": 81, "y": 50},
+    {"id": "n0", "label": "Client", "x": 23, "y": 26},
+    {"id": "n1", "label": "Cache", "x": 50, "y": 69},
+    {"id": "n2", "label": "Database", "x": 77, "y": 26},
   ]}
   frames={[
     {"title": "Start with version 1", "note": "The cache and database both hold version 1. The client submits version 2.", "active": ["n0", "n1"], "values": {"n0": "submit v2", "n1": "v1", "n2": "v1"}, "edges": [{"from": "n0", "to": "n1"}]},

@@ -165,9 +165,9 @@ Use a two-entry cache and a five-second TTL measured from insertion. Hits update
 <ConceptWalkthrough
   title="Separate freshness from recency"
   nodes={[
-    {"id": "n0", "label": "Clock", "x": 19, "y": 50},
-    {"id": "n1", "label": "Entry A", "x": 50, "y": 50},
-    {"id": "n2", "label": "Entry B", "x": 81, "y": 50},
+    {"id": "n0", "label": "Clock", "x": 23, "y": 26},
+    {"id": "n1", "label": "Entry A", "x": 50, "y": 69},
+    {"id": "n2", "label": "Entry B", "x": 77, "y": 26},
   ]}
   frames={[
     {"title": "Insert at different times", "note": "Insert A at t=0 and B at t=2. Their expiry times are 5 and 7. Both entries fit.", "active": ["n1", "n2"], "values": {"n0": "t=2", "n1": "expires at 5", "n2": "expires at 7"}},

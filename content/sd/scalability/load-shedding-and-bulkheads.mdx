@@ -63,9 +63,9 @@ Assume one worker pool can run four requests concurrently. Compare it with two i
 <ConceptWalkthrough
   title="Keep interactive capacity with a bulkhead"
   nodes={[
-    {"id": "n0", "label": "Analytics", "x": 19, "y": 50},
-    {"id": "n1", "label": "Interactive", "x": 50, "y": 50},
-    {"id": "n2", "label": "Worker slots", "x": 81, "y": 50},
+    {"id": "n0", "label": "Analytics", "x": 23, "y": 26},
+    {"id": "n1", "label": "Interactive", "x": 50, "y": 69},
+    {"id": "n2", "label": "Worker slots", "x": 77, "y": 26},
   ]}
   frames={[
     {"title": "Share all four slots", "note": "Four stalled analytics calls occupy the shared pool. When the interactive request arrives, no slot is free.", "active": ["n0", "n2"], "values": {"n0": "4 stalled", "n1": "waiting", "n2": "4 / 4 busy"}},
