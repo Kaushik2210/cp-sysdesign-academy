@@ -51,6 +51,22 @@ Rules for retrying well:
 
 ## Dead-letter queues and poison messages
 
+After repairing a downstream dependency, suppose live traffic uses 40 of its 50 requests per second. Decide how quickly to revisit failed jobs, allowing one downstream request per job.
+
+<ConceptWalkthrough
+  title="Redrive dead letters within spare capacity"
+  nodes={[
+    {"id": "n0", "label": "Live work", "x": 24, "y": 25},
+    {"id": "n1", "label": "Redrive", "x": 50, "y": 67},
+    {"id": "n2", "label": "Dependency", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Repair and inspect before retrying", "note": "The dead-letter queue contains both valid jobs that saw a dependency outage and invalid payloads. Separate them so invalid payloads stay quarantined.", "active": ["n1"], "values": {"n0": "40/s", "n1": "inspect", "n2": "50/s cap"}},
+    {"title": "Reintroduce a small batch", "note": "Start redrive at 5 jobs per second. The downstream dependency sees up to 45 requests per second under the assumed steady rates, leaving 5 per second of headroom.", "active": ["n1", "n2"], "values": {"n0": "40/s", "n1": "5/s", "n2": "45/s used"}, "edges": [{"from": "n1", "to": "n2"}]},
+    {"title": "Pause when live traffic consumes the budget", "note": "If live traffic reaches 50 per second, pause redrive. Ramp back up after recovery and keep effects idempotent because the original attempt may already have committed.", "active": ["n0", "n2"], "values": {"n0": "50/s", "n1": "pause", "n2": "full"}},
+  ]}
+/>
+
 A **poison message** is one that fails every time. If the consumer retries it in place and blocks, it halts everything behind it (head-of-line blocking). After the maximum attempts the message is moved to a **dead-letter queue (DLQ)** with its error context, so main traffic continues.
 
 A DLQ is an operational tool, not a trash can:

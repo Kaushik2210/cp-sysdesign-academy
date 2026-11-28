@@ -1230,6 +1230,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/queues-and-streaming/why-queues/", [
       ["Budget for catch-up while producers keep publishing", "Allow twenty minutes to catch up"],
     ]],
+    ["/sd/queues-and-streaming/backpressure-retries-and-dlq/", [
+      ["Redrive dead letters within spare capacity", "Pause when live traffic consumes the budget"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
