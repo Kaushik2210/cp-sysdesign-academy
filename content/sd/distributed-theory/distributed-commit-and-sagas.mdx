@@ -52,6 +52,16 @@ The key property is **atomicity across participants**: either all commit or all 
 
 Blocking can be reduced by making the coordinator **fault tolerant** (replicate its log with a consensus protocol, as Spanner does with Paxos groups), but the protocol stays expensive: several round trips and locks held across them. 2PC is what database engines and XA transaction managers use inside a trusted, low-latency environment.
 
+<ConceptWalkthrough title="Recover a durable two-phase commit decision" nodes={[
+  {"id":"n0","label":"Coordinator","x":17,"y":46},
+  {"id":"n1","label":"Orders","x":50,"y":46},
+  {"id":"n2","label":"Stock","x":83,"y":46},
+]} frames={[
+  {"title":"Persist the decision before sending it","note":"Orders and Stock both durably vote yes. The coordinator records COMMIT, tells Orders and crashes before contacting Stock.","active":["n0","n1","n2"],"values":{"n0":"COMMIT log","n1":"committed","n2":"prepared"}},
+  {"title":"Keep the prepared participant waiting","note":"Stock sees its own yes vote and an unavailable coordinator. It cannot infer the outcome from that information alone. It holds the prepared state until it learns the durable decision.","active":["n1","n2"],"values":{"n0":"offline","n1":"committed","n2":"waits"}},
+  {"title":"Replay the same decision after recovery","note":"The coordinator recovers the COMMIT record and sends that decision again. Stock commits. Orders can recognize a repeated decision for the same transaction and leave its committed state unchanged.","active":["n0","n1","n2"],"values":{"n0":"replay COMMIT","n1":"already done","n2":"commits"}},
+]} />
+
 ## Sagas
 
 A **saga** is a sequence of local transactions `T1, T2, ..., Tn`, each with a **compensating transaction** `C1, ..., Cn` that semantically undoes it (refund the charge, release the reservation). If `Tk` fails, run `C(k-1), ..., C1` in reverse order.
@@ -185,6 +195,16 @@ Running this exact program with Python 3.13 produced:
 The last row shows why participants cannot just time out and abort: `orders` already committed, so aborting `payments` and `stock` would break atomicity. They must wait for the coordinator (or a recovery protocol) to tell them the outcome.
 
 The saga runs behaved as designed. With a failure at shipping (step 3) the log shows `release 2 units`, `refund 40`, `mark order cancelled`, in **reverse order**; with a failure at stock (step 2) only the first two steps are compensated. Between the charge and the refund, other readers could see the order as charged and pending: that visible window is the price of not blocking.
+
+<ConceptWalkthrough title="Compensate one reservation while preserving a later sale" nodes={[
+  {"id":"n0","label":"Available","x":17,"y":46},
+  {"id":"n1","label":"Reservation","x":50,"y":46},
+  {"id":"n2","label":"Sale","x":83,"y":46},
+]} frames={[
+  {"title":"Reserve two units locally","note":"Start with five available units. Saga A reserves two. Availability is now three, and the reservation can be visible while the rest of the saga is pending.","active":["n0","n1"],"values":{"n0":"5 → 3","n1":"holds 2","n2":"none"}},
+  {"title":"Let a separate order consume one unit","note":"Order B buys one of the remaining units. Availability falls from three to two. Then saga A fails and must undo its own reservation.","active":["n0","n1","n2"],"values":{"n0":"3 → 2","n1":"failed","n2":"sold 1"}},
+  {"title":"Release the two units once","note":"Release A’s two units by its reservation ID. Availability rises from two to four and B’s sale remains. Restoring the original count of five would erase the effect of B’s sale.","active":["n0","n1","n2"],"values":{"n0":"2 → 4","n1":"released","n2":"sale kept"}},
+]} />
 
 ## Trade-offs
 

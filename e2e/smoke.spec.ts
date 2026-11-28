@@ -1104,6 +1104,14 @@ test.describe("concept walkthroughs at phone width", () => {
       ["Probe through a second network path", "Use the successful indirect reply"],
       ["Compare push and pull on the same starting state", "Pull the update from a receiver"],
     ]],
+    ["/cp/graphs/bellman-ford/", [
+      ["Separate reachable cycles from hidden cycles", "Change the question to find any negative cycle"],
+      ["Stop once a full relaxation pass changes nothing", "Finish only after a complete unchanged pass"],
+    ]],
+    ["/sd/distributed-theory/distributed-commit-and-sagas/", [
+      ["Recover a durable two-phase commit decision", "Replay the same decision after recovery"],
+      ["Compensate one reservation while preserving a later sale", "Release the two units once"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
