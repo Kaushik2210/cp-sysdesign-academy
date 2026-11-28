@@ -165,6 +165,22 @@ print("states for n = 15:", 1 << 15, "versus 15! =", 1307674368000)
 
 ## The travelling salesman in the same mould
 
+Suppose two tours have visited the same three cities. Predict which one can finish more cheaply when their current cities differ.
+
+<ConceptWalkthrough
+  title="Keep the endpoint in a tour state"
+  nodes={[
+    {"id": "n0", "label": "Ends at B", "x": 24, "y": 25},
+    {"id": "n1", "label": "Same mask", "x": 50, "y": 67},
+    {"id": "n2", "label": "Ends at C", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Compare two partial tours", "note": "From A, the route A \u2192 C \u2192 B costs 9 and A \u2192 B \u2192 C costs 7. Both have visited exactly A, B and C.", "active": ["n0", "n2"], "values": {"n0": "cost 9", "n1": "{A,B,C}", "n2": "cost 7"}},
+    {"title": "Add the closing edge", "note": "Assume B \u2192 A costs 1 and C \u2192 A costs 6. Closing the tours costs 9 + 1 = 10 and 7 + 6 = 13, respectively.", "active": ["n0", "n2"], "values": {"n0": "9 + 1", "n1": "close at A", "n2": "7 + 6"}},
+    {"title": "Retain both endpoints until the end", "note": "The cheaper partial tour loses after closing. Keep one minimum per pair (visited mask, last city). You can discard a dearer route with the same mask and last city because their continuations have the same options and costs.", "active": ["n0"], "values": {"n0": "10 wins", "n1": "two states", "n2": "13"}},
+  ]}
+/>
+
 Visit every city once and return, as cheaply as possible. State: `dp[mask][last]`, the cheapest way to have visited the cities in `mask` ending at `last`. Transition: extend to a city `nxt` not in `mask`. That is `O(2^n * n^2)`, which works up to `n` around `18`, instead of `n!`.
 
 <Callout type="note" title="How large can n be?">

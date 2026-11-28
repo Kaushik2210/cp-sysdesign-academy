@@ -1200,6 +1200,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/graphs/bipartite-graphs/", [
       ["Restart two-coloring in every component", "Detect the conflict in the triangle"],
     ]],
+    ["/cp/dynamic-programming/bitmask-dp/", [
+      ["Keep the endpoint in a tour state", "Retain both endpoints until the end"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
