@@ -162,6 +162,22 @@ With no obstacles, every route has exactly `h - 1` down moves and `w - 1` right 
 
 ## Variations
 
+Replace counts with minimum costs for right-and-down moves. The top row has costs `1, 8`; the bottom row has `2, 3`. Include the starting cell in the route cost.
+
+<ConceptWalkthrough
+  title="Turn a grid count into a minimum-cost DP"
+  nodes={[
+    {"id": "n0", "label": "Top route", "x": 24, "y": 25},
+    {"id": "n1", "label": "Goal", "x": 50, "y": 67},
+    {"id": "n2", "label": "Left route", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Set the start cost", "note": "The top-left cell has cost 1, so its state is 1. Row-major order visits predecessors before the goal.", "active": ["n0", "n2"], "values": {"n0": "start 1", "n1": "pending", "n2": "start 1"}},
+    {"title": "Compute each predecessor", "note": "Moving right first reaches the goal's top neighbor at cost 1 + 8 = 9. Moving down first reaches its left neighbor at cost 1 + 2 = 3.", "active": ["n0", "n2"], "values": {"n0": "cost 9", "n1": "pending", "n2": "cost 3"}},
+    {"title": "Take the cheaper predecessor", "note": "Add the goal cost 3 to min(9, 3) to get 6 via down then right. Blocked or unreachable predecessors have infinite cost, so they contribute no feasible route.", "active": ["n1", "n2"], "values": {"n0": "9", "n1": "min + 3 = 6", "n2": "3"}, "edges": [{"from": "n2", "to": "n1"}]},
+  ]}
+/>
+
 | twist | change |
 | --- | --- |
 | minimum cost path | `dp[i][j] = cost[i][j] + min(dp[i-1][j], dp[i][j-1])` |
