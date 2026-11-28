@@ -1197,6 +1197,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/graphs-ii/functional-graphs-and-binary-lifting/", [
       ["Reduce a large jump after entering the cycle", "Land back at C"],
     ]],
+    ["/cp/graphs/bipartite-graphs/", [
+      ["Restart two-coloring in every component", "Detect the conflict in the triangle"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

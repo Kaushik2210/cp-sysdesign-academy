@@ -210,6 +210,22 @@ print("300 random graphs agree with the exhaustive check")
 
 ## Pitfalls
 
+In a disconnected graph, one successful search only certifies one component. Try a graph with an isolated vertex, one edge, and a separate triangle.
+
+<ConceptWalkthrough
+  title="Restart two-coloring in every component"
+  nodes={[
+    {"id": "n0", "label": "Isolated A", "x": 19, "y": 50},
+    {"id": "n1", "label": "Edge BC", "x": 50, "y": 50},
+    {"id": "n2", "label": "Triangle DEF", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Color the isolated vertex", "note": "A gets either color. No edge is examined, so this component passes immediately.", "active": ["n0"], "values": {"n0": "passes", "n1": "unvisited", "n2": "unvisited"}},
+    {"title": "Start again at B", "note": "Color B with one color and C with the other. The edge BC is valid. There are still unvisited vertices.", "active": ["n1"], "values": {"n0": "passes", "n1": "passes", "n2": "unvisited"}},
+    {"title": "Detect the conflict in the triangle", "note": "Start at D. Its neighbors E and F both receive the opposite color from D. The edge EF joins vertices of the same color, so reject the entire graph.", "active": ["n2"], "values": {"n0": "passes", "n1": "passes", "n2": "E = F"}},
+  ]}
+/>
+
 1. **Starting only from vertex 1.** A graph with several components needs a BFS from each uncoloured vertex.
 2. **Treating a self-loop as fine.** An edge `a - a` joins a vertex to itself, so it is an odd cycle (length 1) and the answer is "not bipartite".
 3. **Checking only tree edges.** The conflict appears on a non-tree edge, so examine every edge from the visited vertex.
