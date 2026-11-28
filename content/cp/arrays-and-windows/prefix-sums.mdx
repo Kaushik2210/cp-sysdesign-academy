@@ -89,6 +89,22 @@ It does **not** work directly for `max`, `min` or `gcd` ranges, since you cannot
 
 ## Counting subarrays with a given sum
 
+Use target sum 2 and array `[2, -2, 2]`. Predict how many earlier prefix starts can match the last value before stepping.
+
+<ConceptWalkthrough
+  title="Count duplicate prefixes as separate starts"
+  nodes={[
+    {"id": "n0", "label": "Prefix sum", "x": 19, "y": 50},
+    {"id": "n1", "label": "Seen zeroes", "x": 50, "y": 50},
+    {"id": "n2", "label": "Matches", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Seed the empty prefix", "note": "Before visiting the array, prefix sum 0 has occurred once at boundary 0. No subarrays have been counted.", "active": ["n1"], "values": {"n0": "0", "n1": "1", "n2": "0"}},
+    {"title": "Return to zero", "note": "The first 2 finds the empty prefix and counts one subarray. Then \u22122 returns the running sum to 0. Looking for prefix \u22122 finds none, and recording this new boundary raises the zero count to two.", "active": ["n0", "n1"], "values": {"n0": "0 after \u22122", "n1": "2", "n2": "1"}},
+    {"title": "Count both starts", "note": "The last 2 needs prior prefix 0. Boundaries 0 and 2 both match, adding the full array and the last element alone. The total is 3.", "active": ["n1", "n2"], "values": {"n0": "2", "n1": "2", "n2": "3"}},
+  ]}
+/>
+
 **Problem.** Count subarrays with sum exactly `K`, where values may be negative.
 
 A subarray `(l, r]` has sum `pre[r] - pre[l] = K`. Scan `r` from left to right, keep a hash map from prefix value to how many times it appeared so far, and add `count[pre[r] - K]`. Seed the map with `pre = 0` seen once (the empty prefix).

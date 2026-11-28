@@ -1164,6 +1164,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/advanced-trees/virtual-trees/", [
       ["Count terminal pairs across a virtual edge", "Add 15 to the distance sum"],
     ]],
+    ["/cp/arrays-and-windows/prefix-sums/", [
+      ["Count duplicate prefixes as separate starts", "Count both starts"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
