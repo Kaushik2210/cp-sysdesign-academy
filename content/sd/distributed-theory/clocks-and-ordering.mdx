@@ -46,6 +46,16 @@ receive (stamp m):     L = max(L, m) + 1, stamp the event with L
 
 **Guarantee:** if `a → b` then `L(a) < L(b)`. **Not guaranteed:** the converse. Two concurrent events get arbitrary relative stamps, so `L(a) < L(b)` does **not** mean `a` happened before `b`. Lamport clocks give a consistent total order (break ties by process id), which is enough for things like fair mutual exclusion, but they cannot detect concurrency.
 
+<ConceptWalkthrough title="Advance a Lamport clock across a message" nodes={[
+  {"id":"n0","label":"Process A","x":17,"y":46},
+  {"id":"n1","label":"Message","x":50,"y":46},
+  {"id":"n2","label":"Process B","x":83,"y":46},
+]} frames={[
+  {"title":"Create a send timestamp","note":"A’s logical clock is 4, and B’s is 2. A increments to 5 and sends a message carrying stamp 5.","active":["n0","n1"],"values":{"n0":"L = 5","n1":"stamp 5","n2":"L = 2"}},
+  {"title":"Receive using both clocks","note":"B computes max(2, 5) + 1 = 6. The receive therefore has a larger logical timestamp than the send. If B’s prior clock were 8, the receive would be 9.","active":["n1","n2"],"values":{"n0":"L = 5","n1":"received","n2":"L = 6"}},
+  {"title":"Keep logical order distinct from causality","note":"A then performs a local event and reaches 6 as well. Neither that event nor B’s receive influenced the other. A process-ID tie-break gives a display order, while the two events remain concurrent.","active":["n0","n2"],"values":{"n0":"event 6","n1":"no new edge","n2":"event 6"}},
+]} />
+
 ## Vector clocks
 
 Each process keeps a vector `V` with one entry per process.
@@ -105,6 +115,16 @@ Compare two stamps `A` and `B`:
     values: {"p1":"[1,0,0]","p2":"[1,2,0]","p3":"[1,2,2]"},
     edges: [{"from":"p2","to":"p3"}],
   },
+]} />
+
+<ConceptWalkthrough title="Resolve two concurrent versions explicitly" nodes={[
+  {"id":"n0","label":"Version A","x":17,"y":46},
+  {"id":"n1","label":"Version B","x":50,"y":46},
+  {"id":"n2","label":"Merged","x":83,"y":46},
+]} frames={[
+  {"title":"Compare the clocks component by component","note":"Two replicas independently edit version [0,0]. A produces [1,0], and B produces [0,1]. Each clock is higher in a different component.","active":["n0","n1"],"values":{"n0":"[1,0]","n1":"[0,1]","n2":"concurrent"}},
+  {"title":"Choose how to merge the values","note":"The vector clocks expose a conflict. An application still needs a policy for the values, such as combining two independent field edits or asking a user to resolve competing edits to one field.","active":["n0","n1","n2"],"values":{"n0":"A’s edit","n1":"B’s edit","n2":"apply policy"}},
+  {"title":"Record the merge as a new event","note":"At replica A, combine the clocks by componentwise maximum to get [1,1]. Increment A’s entry for the local merge to get [2,1]. The new clock dominates both inputs.","active":["n0","n1","n2"],"values":{"n0":"[1,0]","n1":"[0,1]","n2":"[2,1]"}},
 ]} />
 
 ## Where this shows up in real systems
