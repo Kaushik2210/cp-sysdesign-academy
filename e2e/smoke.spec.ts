@@ -1170,6 +1170,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/arrays-and-windows/difference-arrays/", [
       ["Reconstruct a rectangle from four corner events", "Restore the shared corner"],
     ]],
+    ["/sd/caching/caching-strategies/", [
+      ["Compare when cache writes become durable", "Wait for the database before acknowledging"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

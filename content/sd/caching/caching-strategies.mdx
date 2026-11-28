@@ -69,6 +69,22 @@ The cache proactively reloads entries that are about to expire (for example when
 
 ## Write strategies
 
+Compare the same update under two acknowledgement policies. Assume write-back uses one volatile cache with no durable log or replica.
+
+<ConceptWalkthrough
+  title="Compare when cache writes become durable"
+  nodes={[
+    {"id": "n0", "label": "Client", "x": 19, "y": 50},
+    {"id": "n1", "label": "Cache", "x": 50, "y": 50},
+    {"id": "n2", "label": "Database", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Start with version 1", "note": "The cache and database both hold version 1. The client submits version 2.", "active": ["n0", "n1"], "values": {"n0": "submit v2", "n1": "v1", "n2": "v1"}, "edges": [{"from": "n0", "to": "n1"}]},
+    {"title": "Acknowledge write-back before flush", "note": "The cache stores version 2 and acknowledges while the database still has version 1. If this cache crashes now, the acknowledged version 2 is lost.", "active": ["n0", "n1"], "values": {"n0": "success", "n1": "v2 \u00b7 dirty", "n2": "v1"}, "edges": [{"from": "n1", "to": "n0"}]},
+    {"title": "Wait for the database before acknowledging", "note": "In the write-through run, the database commits version 2 before success is sent. A subsequent cache crash can leave a cache miss, but the database can supply version 2.", "active": ["n1", "n2"], "values": {"n0": "success", "n1": "v2", "n2": "v2 \u00b7 committed"}, "edges": [{"from": "n1", "to": "n2"}]},
+  ]}
+/>
+
 ### Write-through
 
 Every write goes to the cache and the database synchronously, in the same operation, before acknowledging.
@@ -82,7 +98,7 @@ Every write goes to the cache and the database synchronously, in the same operat
   D-->>C: ok
   C-->>A: ok (both updated)`} />
 
-- Cache is always consistent with the database for written keys; reads after writes are hits.
+- A successful write updates both stores in the illustrated path. Partial failures and concurrent writes still need an ordering or invalidation strategy.
 - Write latency is the sum of both; data nobody reads again still occupies the cache.
 
 ### Write-back (write-behind)
