@@ -1179,6 +1179,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/databases-2/hot-keys-and-hot-partitions/", [
       ["Spread timestamp writes and merge the reads", "Fan out and merge in timestamp order"],
     ]],
+    ["/sd/queues-and-streaming/delivery-semantics-and-idempotency/", [
+      ["Handle out-of-order events by payload type", "Ignore an old snapshot and detect delta gaps"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

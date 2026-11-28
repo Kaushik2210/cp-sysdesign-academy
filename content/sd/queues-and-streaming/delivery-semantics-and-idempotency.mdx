@@ -69,6 +69,22 @@ Fix: in one database transaction, `INSERT INTO processed(id) VALUES ('m-17')` (u
 
 ## Ordering
 
+Suppose each event carries the complete replacement status of one order. Predict what happens when version 3 arrives before version 2.
+
+<ConceptWalkthrough
+  title="Handle out-of-order events by payload type"
+  nodes={[
+    {"id": "n0", "label": "Arrival", "x": 19, "y": 50},
+    {"id": "n1", "label": "Stored order", "x": 50, "y": 50},
+    {"id": "n2", "label": "Safe action", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Start at version 1", "note": "The order is placed. Version 2 represents packed and version 3 represents shipped. Traffic can deliver them out of order.", "active": ["n1"], "values": {"n0": "waiting", "n1": "v1 \u00b7 placed"}},
+    {"title": "Apply the newer snapshot", "note": "Version 3 arrives first. An atomic conditional write updates the stored status to shipped only if the stored version is below 3.", "active": ["n0", "n1"], "values": {"n0": "v3 \u00b7 shipped", "n1": "v3 \u00b7 shipped", "n2": "apply"}, "edges": [{"from": "n0", "to": "n1"}]},
+    {"title": "Ignore an old snapshot and detect delta gaps", "note": "Version 2 arrives later. For a complete status snapshot, the version guard safely skips it. For an incremental event such as add one item, a gap can lose an effect. Buffer and fetch missing events, or recover from a snapshot.", "active": ["n0", "n2"], "values": {"n0": "v2 \u00b7 packed", "n1": "v3 \u00b7 shipped", "n2": "skip old snapshot"}},
+  ]}
+/>
+
 - Brokers usually guarantee order only within a unit: a Kafka partition, an SQS FIFO message group, a single RabbitMQ queue with a single consumer.
 - To keep related events in order, route them by key (`order_id`, `user_id`) to the same partition or group. Unrelated keys can proceed in parallel.
 - Ordering breaks with: multiple competing consumers on one queue, retries that reinsert a failed message behind newer ones, producer retries without idempotence reordering in flight batches, and repartitioning that changes the key mapping.
