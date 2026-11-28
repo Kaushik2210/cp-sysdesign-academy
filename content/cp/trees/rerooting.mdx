@@ -117,6 +117,16 @@ Typical problems: the farthest vertex from each vertex (keep the top two down de
 For "distance to the farthest vertex" there is a shortcut: the farthest vertex from any vertex is one of the two diameter endpoints. Rerooting is the technique that keeps working when the quantity is not a distance.
 </Callout>
 
+<ConceptWalkthrough title="Exclude one direction from a maximum" nodes={[
+  {"id":"n0","label":"Branch B","x":17,"y":46},
+  {"id":"n1","label":"Branch C","x":50,"y":46},
+  {"id":"n2","label":"Upward","x":83,"y":46},
+]} frames={[
+  {"title":"Remember both tied maxima","note":"At A, the best distances through B and C are each 4. The best distance upward is 2. Find the farthest distance available to B through A.","active":["n0","n1","n2"],"values":{"n0":"4 via B","n1":"4 via C","n2":"2 upward"}},
+  {"title":"Exclude the child receiving the message","note":"Remove direction B from the candidate set. Direction C still offers 4. Keeping only the maximum value without its source can lose this distinction.","active":["n1","n2"],"values":{"n0":"excluded","n1":"4 remains","n2":"2 remains"}},
+  {"title":"Cross the edge into B","note":"If edge A–B has length 1, the outgoing message gives B distance 1 + 4 = 5 through A. Keep the best two distinct directions or use prefix and suffix maxima.","active":["n0","n1","n2"],"values":{"n0":"1 + 4","n1":"chosen","n2":"result 5"}},
+]} />
+
 ## Code
 
 BFS order keeps it iterative, so a path of `2·10^5` vertices is safe.
@@ -270,6 +280,16 @@ print("300 random trees agree with BFS from every vertex")
 4. **Recursion depth.** A path graph has depth `n`; recursive DFS overflows the stack in Python and in Java's default stack. Use BFS order as above.
 5. **Overflow.** Distance sums reach about `n^2 / 2`, which is `2·10^10` for `n = 2·10^5`: use 64-bit integers.
 6. **Forgetting the root's answer.** `ans[root] = down[root]` is the seed; everything else is derived from it.
+
+<ConceptWalkthrough title="Reroot a distance sum across a weighted edge" nodes={[
+  {"id":"n0","label":"B side","x":17,"y":46},
+  {"id":"n1","label":"A side","x":50,"y":46},
+  {"id":"n2","label":"Net","x":83,"y":46},
+]} frames={[
+  {"title":"Cut the edge mentally","note":"In a six-vertex tree the edge A–B has weight 3. Cutting it leaves two vertices on B’s side and four on A’s side. Move the root from A to B.","active":["n0","n1"],"values":{"n0":"2 vertices","n1":"4 vertices","n2":"weight 3"}},
+  {"title":"Account for the vertices that get closer","note":"Each vertex on B’s side becomes 3 units closer. Its contribution to the change in the distance sum is −2 × 3 = −6 for the whole side.","active":["n0","n2"],"values":{"n0":"−6","n1":"pending","n2":"−6"}},
+  {"title":"Account for the vertices that get farther","note":"Each of the four vertices on A’s side becomes 3 units farther away. Add 12. The net change is 6, so B’s distance sum is A’s sum plus 6.","active":["n0","n1","n2"],"values":{"n0":"−6","n1":"+12","n2":"+6"}},
+]} />
 
 ## Practice
 
