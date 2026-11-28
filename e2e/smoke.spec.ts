@@ -1224,6 +1224,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/dynamic-programming/convex-hull-trick/", [
       ["Remove an equal-slope line before finding intersections", "Keep the smaller intercept"],
     ]],
+    ["/cp/dynamic-programming/divide-and-conquer-optimization/", [
+      ["Use a consistent tie-break to pass split bounds", "Verify the bounds contain the winners"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

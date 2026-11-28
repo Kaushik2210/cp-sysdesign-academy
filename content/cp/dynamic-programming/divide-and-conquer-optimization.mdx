@@ -236,6 +236,22 @@ print("300 random inputs: divide and conquer equals the O(k n^2) DP")
 
 ## Choosing among DP optimisations
 
+Split prefixes of four, five and six unit jobs into exactly two nonempty groups. Minimize the sum of squared group sizes. Break ties by choosing the smallest split index.
+
+<ConceptWalkthrough
+  title="Use a consistent tie-break to pass split bounds"
+  nodes={[
+    {"id": "n0", "label": "4 jobs", "x": 24, "y": 25},
+    {"id": "n1", "label": "5 jobs", "x": 50, "y": 67},
+    {"id": "n2", "label": "6 jobs", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Find the middle answer first", "note": "For five jobs, split after 2 or 3. Both give 2\u00b2 + 3\u00b2 = 13. Pick j = 2 under the leftmost tie rule.", "active": ["n1"], "values": {"n0": "pending", "n1": "j = 2", "n2": "pending"}},
+    {"title": "Pass the middle split to both sides", "note": "Given monotone leftmost optima for this cost, use j \u2264 2 on the left and j \u2265 2 on the right. Include the middle split in both searches.", "active": ["n0", "n2"], "values": {"n0": "j \u2264 2", "n1": "shared 2", "n2": "j \u2265 2"}},
+    {"title": "Verify the bounds contain the winners", "note": "Four jobs split as 2 + 2 for score 8. Six split as 3 + 3 for score 18. The chosen indices 2, 2, 3 are nondecreasing. This trace illustrates the invariant; the cost function still needs a proof for general inputs.", "active": ["n0", "n1", "n2"], "values": {"n0": "j = 2", "n1": "j = 2", "n2": "j = 3"}},
+  ]}
+/>
+
 | optimisation | needs | time | typical shape |
 | --- | --- | --- | --- |
 | **divide and conquer** (this lesson) | monotone `opt` (quadrangle inequality); layers `dp[j][...]` | `O(k n log n)` | partition into `k` groups |
