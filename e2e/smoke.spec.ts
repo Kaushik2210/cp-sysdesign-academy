@@ -1191,6 +1191,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/graphs-ii/floyd-warshall-and-matrix-powers/", [
       ["Find which distances a negative cycle invalidates", "Check reachability on both sides"],
     ]],
+    ["/cp/graphs-ii/euler-paths-and-hierholzer/", [
+      ["Reject an Euler tour with unused edges", "Compare the output with m + 1"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

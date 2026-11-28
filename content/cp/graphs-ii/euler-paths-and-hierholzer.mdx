@@ -37,6 +37,22 @@ The degree condition is necessary; together with connectivity of the edges it is
 
 ### Hierholzer's algorithm
 
+Consider two disconnected triangles on vertices `A, B, C` and `D, E, F`. Try the degree test first, then check whether one traversal consumed every edge.
+
+<ConceptWalkthrough
+  title="Reject an Euler tour with unused edges"
+  nodes={[
+    {"id": "n0", "label": "Triangle ABC", "x": 19, "y": 50},
+    {"id": "n1", "label": "Triangle DEF", "x": 50, "y": 50},
+    {"id": "n2", "label": "Trail size", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Pass the local degree check", "note": "Every vertex has degree 2. The parity condition for an undirected Euler circuit passes, but it says nothing about connectivity.", "active": ["n0", "n1"], "values": {"n0": "all even", "n1": "all even", "n2": "6 edges total"}},
+    {"title": "Follow the component of A", "note": "Starting at A, the walk A \u2192 B \u2192 C \u2192 A uses all three edges in the first component. There is no edge to D, E or F.", "active": ["n0", "n2"], "values": {"n0": "3 used", "n1": "3 unused", "n2": "4 vertices"}},
+    {"title": "Compare the output with m + 1", "note": "A complete tour needs 7 vertex positions because there are 6 edges. The output has only 4 positions, so reject it.", "active": ["n1", "n2"], "values": {"n0": "used", "n1": "unreachable", "n2": "4 \u2260 7"}},
+  ]}
+/>
+
 Walk along unused edges from the start until you are stuck. In a graph that passes the degree test you can only get stuck at the start (circuit) or at the designated end. The walk may have missed edges, which hang off vertices on the walk as unused **sub-circuits**. Hierholzer splices them in. The neat implementation is a depth-first search that records a vertex **when it is finished**:
 
 ```text
