@@ -36,6 +36,16 @@ A consensus protocol lets a group of nodes each **propose** a value and requires
 
 **FLP impossibility.** Fischer, Lynch and Paterson showed that in a fully *asynchronous* network (no bound on message delay) with even **one** crash-prone node, no deterministic protocol can guarantee **both** safety and termination: you cannot tell a crashed node from a slow one, so you can wait forever. Real protocols sidestep this: they **always** preserve safety (agreement and validity) and guarantee termination only when the network is *reasonably behaved* for long enough (partial synchrony), using timeouts and randomisation. Raft and Paxos work this way: during a partition or a storm they may stall, but they will never return two different answers.
 
+<ConceptWalkthrough title="Compare a crash with a delayed reply" nodes={[
+  {"id":"n0","label":"Observer","x":17,"y":46},
+  {"id":"n1","label":"Crash","x":50,"y":46},
+  {"id":"n2","label":"Slow peer","x":83,"y":46},
+]} frames={[
+  {"title":"Start with the same observation","note":"Node A sent a request and has received no reply after 100 ms. In one execution B crashed before replying. In the other, B’s reply is still in transit.","active":["n0","n1","n2"],"values":{"n0":"no reply","n1":"silent","n2":"silent"}},
+  {"title":"Let a timeout expire","note":"At 150 ms A has seen the same events in both executions. The timeout can start a recovery attempt. It cannot establish that B crashed in a network with no delay bound.","active":["n0"],"values":{"n0":"times out","n1":"silent","n2":"in transit"}},
+  {"title":"Separate progress from agreement","note":"At 220 ms the delayed reply can arrive in the slow execution. A protocol still needs rules for when decisions are safe. This illustrates the ambiguity behind FLP. The impossibility theorem requires a stronger argument than a single timeout.","active":["n0","n2"],"values":{"n0":"reply arrives","n1":"silent","n2":"at 220 ms"}},
+]} />
+
 **Why a majority.** With `n = 2f + 1` nodes, a protocol that needs `f + 1` of them to take any step:
 
 - tolerates `f` crash failures (the remaining `f + 1` still form a majority),
@@ -57,10 +67,20 @@ An **even** cluster size buys nothing: 4 nodes tolerate the same single failure 
 
 ## The two main families
 
-- **Paxos** (Lamport): proposers send *prepare(n)* to acceptors, which *promise* not to accept anything older and report the highest value they accepted; the proposer then sends *accept(n, value)*, choosing the reported value if there was one. A value is chosen when a majority accepts it. **Multi-Paxos** runs this repeatedly to build a log. Famously subtle to implement.
+- **Paxos** (Lamport): proposers send *prepare(n)* to acceptors, which promise to reject proposals numbered below `n` and report their highest-numbered accepted proposal, if any. From a majority of replies, the proposer takes the value attached to the highest reported proposal number or chooses a fresh value if none was reported. A majority accepting its proposal chooses the value. **Multi-Paxos** runs consensus repeatedly to build a log.
 - **Raft** (Ongaro, Ousterhout): designed for understandability. It makes one server the **leader**, which sequences all commands, and splits the problem into leader election, log replication and safety. The next lessons walk through it.
 
 Others: ZAB (ZooKeeper), Viewstamped Replication, and Byzantine protocols such as PBFT.
+
+<ConceptWalkthrough title="Carry forward an accepted Paxos proposal" nodes={[
+  {"id":"n0","label":"Acceptor A","x":17,"y":46},
+  {"id":"n1","label":"Acceptor C","x":50,"y":46},
+  {"id":"n2","label":"Proposer","x":83,"y":46},
+]} frames={[
+  {"title":"Observe two earlier acceptances","note":"In one Paxos instance, A previously accepted proposal 4 with value X. C accepted proposal 5 with value Y after a prepare quorum that reported no earlier acceptance. Each value was accepted by just one node, so neither was chosen at that point.","active":["n0","n1"],"values":{"n0":"4 / X","n1":"5 / Y","n2":"prepare 6"}},
+  {"title":"Gather promises for proposal 6","note":"A and C form a majority of three acceptors. They promise to reject lower proposals and report their accepted proposals. The proposer needs the value attached to the highest reported proposal number.","active":["n0","n1","n2"],"values":{"n0":"reports 4/X","n1":"reports 5/Y","n2":"pick 5/Y"}},
+  {"title":"Choose Y with acceptance","note":"The proposer sends accept(6, Y). If A and C both accept it and no higher promise blocks them, proposal 6 reaches a majority and Y is chosen.","active":["n0","n1","n2"],"values":{"n0":"accept 6/Y","n1":"accept 6/Y","n2":"Y chosen"}},
+]} />
 
 <ConceptWalkthrough title="Follow a majority through a partition" nodes={[
   { id: "a", label: "A", x: 22, y: 25 },
@@ -131,6 +151,16 @@ Running this exact program with Python 3.13 produced:
 | 9 | 4 | 100.00000% | 100.0000% | 99.9109% |
 
 Three things stand out. Two nodes are **worse than one** (98.01% against 99.00%): both must be up. Four nodes are **worse than three** (99.9408% against 99.9702%) because they tolerate the same one failure but have more things that can break. And the steep improvement from 1 to 3 to 5 nodes (99.00% to 99.97% to 99.999%) explains why production clusters use 3 or 5. Beyond that, more nodes add write latency (the leader must reach a bigger majority) for almost no availability gain, and the model assumes independent failures; a shared rack, switch or software bug can take down several nodes at once, which is why replicas are spread across failure domains.
+
+<ConceptWalkthrough title="Place five replicas to survive one zone loss" nodes={[
+  {"id":"n0","label":"Zone A","x":17,"y":46},
+  {"id":"n1","label":"Zone B","x":50,"y":46},
+  {"id":"n2","label":"Zone C","x":83,"y":46},
+]} frames={[
+  {"title":"Start with an even spread across zones","note":"Put two replicas in A, two in B and one in C. A write needs three replicas. Predict whether losing the largest zone leaves enough.","active":["n0","n1","n2"],"values":{"n0":"2 replicas","n1":"2 replicas","n2":"1 replica"}},
+  {"title":"Remove one zone","note":"Lose zone A. The two replicas in B and the one in C still make a majority. The service can recover leadership and resume writes once the remaining replicas can communicate.","active":["n1","n2"],"values":{"n0":"offline","n1":"2 live","n2":"1 live"}},
+  {"title":"Compare a concentrated placement","note":"Move one replica from B to A for a 3–1–1 layout. If A goes offline, only two replicas remain. Both layouts use five machines, and only the first survives every single-zone loss.","active":["n0","n1","n2"],"values":{"n0":"3 offline","n1":"1 live","n2":"1 live"}},
+]} />
 
 ## Where consensus is used
 
