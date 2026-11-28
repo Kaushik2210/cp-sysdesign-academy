@@ -43,6 +43,16 @@ If a heap replaces the plain queue, you always take the **smallest** available v
 
 Run a depth-first search and append a vertex **after** all of its descendants are finished. Reversing that list gives a topological order. A cycle shows up as an edge to a vertex that is still "in progress". Kahn's version is usually simpler and avoids recursion limits.
 
+<ConceptWalkthrough title="Detect a directed cycle on the DFS stack" nodes={[
+  {"id":"n0","label":"Vertex A","x":17,"y":46},
+  {"id":"n1","label":"Vertex B","x":50,"y":46},
+  {"id":"n2","label":"Vertex C","x":83,"y":46},
+]} frames={[
+  {"title":"Follow prerequisites forward","note":"The edges are A → B, B → C and C → A. Start DFS at A, then visit B. Mark both as in progress until their descendants finish.","active":["n0","n1"],"values":{"n0":"in progress","n1":"in progress","n2":"unseen"}},
+  {"title":"Find the edge back to an ancestor","note":"At C, follow edge C → A. A is still in progress, which means the DFS tree already has a path from A to C. Together they form a cycle.","active":["n0","n2"],"values":{"n0":"in progress","n1":"in progress","n2":"backs to A"}},
+  {"title":"Reject this ordering","note":"No topological order can satisfy this cycle. An edge to a finished vertex is different because it does not return to the active path.","active":["n0","n1","n2"],"values":{"n0":"cycle","n1":"cycle","n2":"cycle"}},
+]} />
+
 ## Why it works
 
 A vertex with in-degree `0` among the remaining vertices has no unplaced prerequisite, so putting it next never breaks a rule. Removing it only helps others. If at some point every remaining vertex has in-degree at least `1`, follow incoming edges backwards: with finitely many vertices you must revisit one, which is a cycle.
@@ -211,6 +221,16 @@ print("longest chain:", max(longest.values()))
 <Callout type="tip" title="Shortest paths on a DAG need no heap">
 On a DAG, relax the edges in topological order. Each vertex is final when you reach it, so you get shortest (or longest) paths in `O(n + m)`, even with negative weights.
 </Callout>
+
+<ConceptWalkthrough title="Use a heap to choose the smallest available vertex" nodes={[
+  {"id":"n0","label":"Available","x":17,"y":46},
+  {"id":"n1","label":"Pick","x":50,"y":46},
+  {"id":"n2","label":"Order","x":83,"y":46},
+]} frames={[
+  {"title":"Choose among all available vertices","note":"The only edge is 1 → 2, and vertex 3 is isolated. Vertices 1 and 3 are ready. Both can start a valid order. For the lexicographically smallest order, choose 1.","active":["n0","n1"],"values":{"n0":"{1,3}","n1":"1","n2":"1"}},
+  {"title":"Include newly unlocked vertices","note":"Removing 1 unlocks 2. A FIFO queue that put 3 in first would choose 3 next. The min-heap compares both available choices and chooses 2.","active":["n0","n1","n2"],"values":{"n0":"{2,3}","n1":"2","n2":"1,2"}},
+  {"title":"Finish with the remaining vertex","note":"Take 3 last. The result 1,2,3 is lexicographically smaller than 1,3,2, even though both satisfy the prerequisite.","active":["n0","n1","n2"],"values":{"n0":"{3}","n1":"3","n2":"1,2,3"}},
+]} />
 
 ## Pitfalls
 
