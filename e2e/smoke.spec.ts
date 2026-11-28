@@ -1221,6 +1221,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/dynamic-programming/longest-increasing-subsequence/", [
       ["Pick the binary search bound for duplicates", "Read different optimum lengths"],
     ]],
+    ["/cp/dynamic-programming/convex-hull-trick/", [
+      ["Remove an equal-slope line before finding intersections", "Keep the smaller intercept"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

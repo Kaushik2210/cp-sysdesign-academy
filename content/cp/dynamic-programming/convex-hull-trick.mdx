@@ -209,6 +209,22 @@ print("400 random inputs: the hull trick equals the O(n^2) DP")
 
 ## Variants and when the monotonicity fails
 
+For a minimum query, two candidate lines may have identical slopes. Compare `2x + 3` and `2x + 6` before computing any intersection.
+
+<ConceptWalkthrough
+  title="Remove an equal-slope line before finding intersections"
+  nodes={[
+    {"id": "n0", "label": "Line A", "x": 24, "y": 25},
+    {"id": "n1", "label": "At x", "x": 50, "y": 67},
+    {"id": "n2", "label": "Line B", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Compare at zero", "note": "At x = 0, A gives 3 and B gives 6. A is lower by 3.", "active": ["n0", "n2"], "values": {"n0": "3", "n1": "0", "n2": "6"}},
+    {"title": "Check a negative coordinate", "note": "At x = \u22124, A gives \u22125 and B gives \u22122. The gap stays 3 because both lines change by the same amount.", "active": ["n0", "n2"], "values": {"n0": "\u22125", "n1": "\u22124", "n2": "\u22122"}},
+    {"title": "Keep the smaller intercept", "note": "A is lower at every coordinate. Discard B before applying the intersection formula, which would divide by zero for equal slopes. If the intercepts also match, either line gives the same value.", "active": ["n0"], "values": {"n0": "keep +3", "n1": "same slope", "n2": "drop +6"}},
+  ]}
+/>
+
 | situation | tool |
 | --- | --- |
 | slopes sorted, queries sorted (this lesson) | monotone deque, `O(n)` |
