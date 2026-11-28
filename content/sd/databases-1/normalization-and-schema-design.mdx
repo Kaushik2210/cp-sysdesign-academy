@@ -98,6 +98,22 @@ Each fact now lives once; a city change is one row update.
 
 ## Denormalization: when and how
 
+A normalized order stores quantities on its line items. A denormalized header also stores a quantity total for fast reads. Follow what happens when the two writes can fail independently.
+
+<ConceptWalkthrough
+  title="Keep a denormalized total consistent"
+  nodes={[
+    {"id": "n0", "label": "Line items", "x": 24, "y": 25},
+    {"id": "n1", "label": "Write path", "x": 50, "y": 67},
+    {"id": "n2", "label": "Order total", "x": 76, "y": 25},
+  ]}
+  frames={[
+    {"title": "Derive the initial value", "note": "Two line items have quantities 2 and 3. The stored total and a fresh sum both return 5.", "active": ["n0", "n2"], "values": {"n0": "2 + 3", "n1": "in sync", "n2": "5"}},
+    {"title": "Let the two writes split", "note": "An update changes 3 to 4 and commits on its own. The process stops before updating the header. Readers of the header now see stale data.", "active": ["n0", "n2"], "values": {"n0": "2 + 4", "n1": "crash", "n2": "5, stale"}},
+    {"title": "Commit the line and its total together", "note": "If both records share a database, change them in one transaction. With separate stores, choose an eventual-consistency contract and make the projection replayable and reconcilable.", "active": ["n0", "n1", "n2"], "values": {"n0": "2 + 4", "n1": "one commit", "n2": "6"}, "edges": [{"from": "n0", "to": "n1"}, {"from": "n1", "to": "n2"}]},
+  ]}
+/>
+
 Joins cost CPU and I/O, and in sharded systems cross-shard joins are expensive or impossible. Common denormalizations:
 
 - **Copying a column** (store `customer_name` on the order so order pages never join).

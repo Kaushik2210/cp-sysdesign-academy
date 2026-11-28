@@ -1239,6 +1239,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/databases-1/acid-and-transactions/", [
       ["Trace write skew across separate rows", "Detect a broken invariant"],
     ]],
+    ["/sd/databases-1/normalization-and-schema-design/", [
+      ["Keep a denormalized total consistent", "Commit the line and its total together"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
