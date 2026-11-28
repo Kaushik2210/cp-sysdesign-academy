@@ -49,6 +49,23 @@ Caches do not help writes. Options:
 
 ### Skewed key design
 
+First compare the query paths for an append-heavy time-series key. Use a toy table with three logical buckets and assume the requested time window intersects each bucket.
+
+<ConceptWalkthrough
+  title="Spread timestamp writes and merge the reads"
+  nodes={[
+    {"id": "n0", "label": "Bucket 0", "x": 13, "y": 50},
+    {"id": "n1", "label": "Bucket 1", "x": 38, "y": 50},
+    {"id": "n2", "label": "Bucket 2", "x": 62, "y": 50},
+    {"id": "n3", "label": "Range query", "x": 87, "y": 50},
+  ]}
+  frames={[
+    {"title": "Send increasing times to one range", "note": "With timestamp as the leading key, incoming writes all target the bucket that owns the current upper range. Older buckets receive none of this new traffic.", "active": ["n2"], "values": {"n0": "older range", "n1": "older range", "n2": "new writes"}},
+    {"title": "Prefix the key with a bucket", "note": "Use (hash(event ID) mod 3, timestamp). In this example, the three new event IDs hash to distinct buckets. A balanced hash spreads arrival load if buckets are placed across separate physical partitions.", "active": ["n0", "n1", "n2"], "values": {"n0": "new write", "n1": "new write", "n2": "new write"}},
+    {"title": "Fan out and merge in timestamp order", "note": "The reader requests its time interval in all three buckets. If their sorted results are [10, 16], [12] and [14, 17], a three-way merge returns [10, 12, 14, 16, 17].", "active": ["n3"], "values": {"n0": "10, 16", "n1": "12", "n2": "14, 17", "n3": "10, 12, 14, 16, 17"}, "edges": [{"from": "n0", "to": "n3"}, {"from": "n1", "to": "n3"}, {"from": "n2", "to": "n3"}]},
+  ]}
+/>
+
 - Avoid monotonically increasing keys on range-partitioned stores. Prefix with a hash or bucket (`hash(id) % 16 + timestamp`) so writes fan out across ranges, then query the buckets in parallel.
 - **Split the hot partition**: stores with dynamic splitting divide a hot range into two; some can isolate a single hot key into its own partition.
 - **Move hot tenants** in a directory-based scheme to dedicated shards.

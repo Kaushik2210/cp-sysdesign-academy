@@ -1176,6 +1176,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/sd/caching/eviction-policies/", [
       ["Separate freshness from recency", "Expire A despite its recent hit"],
     ]],
+    ["/sd/databases-2/hot-keys-and-hot-partitions/", [
+      ["Spread timestamp writes and merge the reads", "Fan out and merge in timestamp order"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {
