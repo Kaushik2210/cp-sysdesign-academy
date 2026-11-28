@@ -181,6 +181,16 @@ All four methods return the same balance; the snapshot only changes the work. Lo
 
 **Poor fits:** simple CRUD, data without meaningful history, teams new to eventual consistency, and cases where every query needs read-your-writes behaviour with no lag. Event sourcing is a heavy commitment; CQRS alone (separate read model, plain tables for writes) is often enough.
 
+<ConceptWalkthrough title="Replay the tail after loading a snapshot" nodes={[
+  {"id":"n0","label":"Stream","x":17,"y":46},
+  {"id":"n1","label":"Snapshot","x":50,"y":46},
+  {"id":"n2","label":"Load cost","x":83,"y":46},
+]} frames={[
+  {"title":"Count the full replay","note":"A single stream contains 10,000 events. Without a snapshot, rehydrating the aggregate applies all 10,000. The read model has its own checkpoint.","active":["n0","n2"],"values":{"n0":"10,000","n1":"none","n2":"10,000"}},
+  {"title":"Start from a snapshot at version 9,900","note":"Load the aggregate state after event 9,900. To reconstruct current state, replay events 9,901 through 10,000 in order.","active":["n0","n1","n2"],"values":{"n0":"10,000","n1":"version 9,900","n2":"100 events"}},
+  {"title":"Keep projection progress separate","note":"This snapshot makes the write-side aggregate faster to load. A read model still resumes from its own projection checkpoint, so read-model lag can remain.","active":["n0","n1","n2"],"values":{"n0":"source log","n1":"write state","n2":"own offset"}},
+]} />
+
 ## Hard parts
 
 - **Eventual consistency of read models.** After a command succeeds, the user's next query may not show it yet. Mitigations: return the new state in the command response, route the user's reads to the write side briefly, or wait for the projector to reach the event's position.
@@ -189,6 +199,16 @@ All four methods return the same balance; the snapshot only changes the work. Lo
 - **Privacy and deletion.** Immutable logs conflict with the right to be forgotten; use encryption with per-user keys (crypto-shredding) or keep personal data outside the events.
 - **Concurrency.** Use optimistic concurrency on the stream version, and design commands to be idempotent.
 - **Cross-aggregate invariants.** An aggregate is the consistency boundary; rules spanning aggregates need sagas or eventual processes.
+
+<ConceptWalkthrough title="Reject a stale append to an event stream" nodes={[
+  {"id":"n0","label":"Command A","x":17,"y":46},
+  {"id":"n1","label":"Stream","x":50,"y":46},
+  {"id":"n2","label":"Command B","x":83,"y":46},
+]} frames={[
+  {"title":"Read the same expected version","note":"Both commands load stream version 4 and compute decisions against that state. They each request an append only if the version is still 4.","active":["n0","n1","n2"],"values":{"n0":"expects 4","n1":"version 4","n2":"expects 4"}},
+  {"title":"Let just one append win","note":"A’s atomic compare-and-append succeeds and creates version 5. B’s append with expected version 4 fails the version check.","active":["n0","n1","n2"],"values":{"n0":"commits","n1":"version 5","n2":"rejected"}},
+  {"title":"Reload and recheck the business rule","note":"B reloads version 5 and runs its command against the updated state. It may now be invalid. If still valid, it can attempt an append with expected version 5.","active":["n1","n2"],"values":{"n0":"done","n1":"reload v5","n2":"re-evaluate"}},
+]} />
 
 ## Trade-offs
 
