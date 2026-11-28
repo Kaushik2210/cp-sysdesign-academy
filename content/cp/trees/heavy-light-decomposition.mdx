@@ -334,6 +334,16 @@ print("300 random trees with random updates: HLD equals the parent-walk answer")
 
 If you only need LCA or only subtree sums, an [Euler tour](/cp/trees/euler-tour-subtree-queries/) or binary lifting is simpler. HLD is the tool for **path aggregates with updates**.
 
+<ConceptWalkthrough title="Include a light edge and exclude the LCA slot" nodes={[
+  {"id":"n0","label":"Light chain","x":17,"y":46},
+  {"id":"n1","label":"Main chain","x":50,"y":46},
+  {"id":"n2","label":"Sum","x":83,"y":46},
+]} frames={[
+  {"title":"Store each edge on its deeper endpoint","note":"Use edges 0–1 of weight 6, 1–3 of weight 4 and 0–2 of weight 2. Put 0, 1 and 3 on the main chain. Vertex 2 heads its own chain and stores the weight of edge 0–2.","active":["n0","n1","n2"],"values":{"n0":"2 stores 2","n1":"1:6 / 3:4","n2":"?"}},
+  {"title":"Climb from the light chain","note":"For path 3 to 2, consume the range containing its light-chain head 2. This includes the edge to its parent 0. Move the endpoint from 2 to 0.","active":["n0","n1"],"values":{"n0":"include 2","n1":"now 3 to 0","n2":"2"}},
+  {"title":"Exclude the LCA on the shared chain","note":"The remaining edge path runs from 0 to 3, so aggregate positions belonging to 1 and 3. Position 0 represents no edge on this path. The answer is 2 + 6 + 4 = 12.","active":["n0","n1","n2"],"values":{"n0":"2","n1":"6 + 4","n2":"12"}},
+]} />
+
 ## Pitfalls
 
 1. **Wrong chain top to move.** Always move the vertex whose **chain head** is deeper, not the deeper vertex itself; otherwise you can jump past the LCA.
@@ -343,6 +353,16 @@ If you only need LCA or only subtree sums, an [Euler tour](/cp/trees/euler-tour-
 5. **Recursion depth.** The recursive formulation overflows the stack on a path of `2·10^5` vertices. Use BFS order as here, or an explicit stack.
 6. **Segment tree identity.** Use a value below every possible weight (`-10^18`, not `0`) for a maximum, or negative weights break.
 7. **Forgetting `log^2`.** Path queries cost `O(log^2 n)`, which is fine for `q = 2·10^5`; for harder limits combine with a segment tree that supports `O(1)` or `O(log)` per chain.
+
+<ConceptWalkthrough title="Keep the traversal direction when joining path chunks" nodes={[
+  {"id":"n0","label":"Upward","x":17,"y":46},
+  {"id":"n1","label":"Downward","x":50,"y":46},
+  {"id":"n2","label":"Path","x":83,"y":46},
+]} frames={[
+  {"title":"Split the path into two directions","note":"A tree has chains A–C–D and B–E, with edge A–B. The query walks from D to E. The first chain is stored top-down as A,C,D, and the second as B,E.","active":["n0","n1"],"values":{"n0":"A,C,D","n1":"B,E","n2":"D to E"}},
+  {"title":"Reverse the chunk that the query walks upward","note":"The query travels D → C → A through the first chain, so this chunk needs reverse order. It then travels B → E in the second chain’s stored order.","active":["n0","n1","n2"],"values":{"n0":"D,C,A","n1":"B,E","n2":"join left first"}},
+  {"title":"Combine in path order","note":"The result is D,C,A,B,E. A concatenation or matrix-product query must preserve this order. Keep forward and reverse summaries or use an equivalent direction-aware merge.","active":["n0","n1","n2"],"values":{"n0":"D,C,A","n1":"B,E","n2":"D,C,A,B,E"}},
+]} />
 
 ## Practice
 
