@@ -47,6 +47,16 @@ Why: take an MST that does not contain this edge `e`. Adding `e` creates a cycle
 
 Kruskal applies this repeatedly. When it considers an edge that joins components `A` and `B`, every cheaper edge has already been decided, so this edge is the cheapest one crossing the split "`A` versus everything else".
 
+<ConceptWalkthrough title="Exchange an edge across a cut" nodes={[
+  {"id":"n0","label":"New edge","x":17,"y":46},
+  {"id":"n1","label":"Old edge","x":50,"y":46},
+  {"id":"n2","label":"Tree cost","x":83,"y":46},
+]} frames={[
+  {"title":"Start from a candidate tree","note":"The tree has edges A–B (4), B–C (3) and C–D (4), for total 11. Across the cut {A,B} versus {C,D}, the graph also has A–D of weight 2.","active":["n0","n1"],"values":{"n0":"A–D: 2","n1":"B–C: 3","n2":"11"}},
+  {"title":"Add the cheaper crossing edge","note":"Adding A–D creates the cycle A–B–C–D–A. The cycle crosses the cut twice. Removing B–C breaks the cycle and keeps the graph connected.","active":["n0","n1"],"values":{"n0":"add A–D","n1":"drop B–C","n2":"11 + 2 − 3"}},
+  {"title":"Read the exchange argument","note":"The resulting tree costs 10, so the original tree could not have been minimum. If the exchanged crossing edges had tied, replacing one with the other would keep the same cost.","active":["n0","n2"],"values":{"n0":"cost 2","n1":"cost 3","n2":"10"}},
+]} />
+
 ## Code
 
 <Tabs>
@@ -223,6 +233,16 @@ Both give a tree of the same total weight (the tree itself may differ when weigh
     },
   ]}
 />
+
+<ConceptWalkthrough title="Stop with a forest when no spanning tree exists" nodes={[
+  {"id":"n0","label":"Group 1","x":17,"y":46},
+  {"id":"n1","label":"Group 2","x":50,"y":46},
+  {"id":"n2","label":"Result","x":83,"y":46},
+]} frames={[
+  {"title":"Start with two disconnected groups","note":"The graph has edges A–B (1), B–C (2), A–C (3) and D–E (4). No edge connects {A,B,C} to {D,E}. Predict how many edges Kruskal can select.","active":["n0","n1"],"values":{"n0":"A B C","n1":"D E","n2":"?"}},
+  {"title":"Build each component’s tree","note":"Choose A–B and B–C. Skip A–C because it closes a cycle. Then select D–E. The selected cost is 1 + 2 + 4 = 7.","active":["n0","n1","n2"],"values":{"n0":"AB, BC","n1":"DE","n2":"3 edges"}},
+  {"title":"Check the spanning-tree condition","note":"A spanning tree on five vertices needs four edges. The scan finishes with three and leaves two components, so return impossibility if the problem asks for one tree. The selected edges form a minimum spanning forest.","active":["n0","n1","n2"],"values":{"n0":"3 vertices","n1":"2 vertices","n2":"no single tree"}},
+]} />
 
 ## Pitfalls
 
