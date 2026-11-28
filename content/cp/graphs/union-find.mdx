@@ -38,7 +38,17 @@ Two tricks make it nearly constant time.
 | **Path compression** | after `find`, point every node on the walked path straight at the root |
 | **Union by size** | hang the smaller tree under the larger root, so trees stay shallow |
 
-With both, the amortized cost per operation is `O(alpha(n))`, where `alpha` is the inverse Ackermann function and is at most 4 for any input that fits in the universe. With only one of them it is `O(log n)`, still fine for most problems.
+With both, the amortized cost per operation is `O(alpha(n))`, where `alpha` is the inverse Ackermann function and is tiny at practical input sizes. Union by size alone gives a worst-case `O(log n)` bound. Path compression shortens paths as they are visited. A first lookup in a deep tree can still be expensive if unions attach roots without a size or rank rule.
+
+<ConceptWalkthrough title="See why union by size keeps trees shallow" nodes={[
+  {"id":"n0","label":"Vertex","x":17,"y":46},
+  {"id":"n1","label":"Old set","x":50,"y":46},
+  {"id":"n2","label":"New set","x":83,"y":46},
+]} frames={[
+  {"title":"Track an element whose depth increases","note":"Vertex x belongs to a component of size 2. It becomes deeper only if its root is attached under another root.","active":["n0","n1"],"values":{"n0":"depth 1","n1":"size 2","n2":"?"}},
+  {"title":"Attach only under a large enough set","note":"Union by size moves the root of x’s component under a component of size at least 2. The merged component has size at least 4.","active":["n1","n2"],"values":{"n0":"depth 2","n1":"size 2","n2":"size ≥ 4"}},
+  {"title":"Repeat the doubling argument","note":"For x to become deeper again, its current component must be attached under one at least as large. That raises its component size to at least 8. No component can exceed n vertices, so depth without compression is at most floor(log₂ n).","active":["n0","n2"],"values":{"n0":"depth 3","n1":"size ≥ 4","n2":"size ≥ 8"}},
+]} />
 
 ## Example, step by step
 
@@ -163,6 +173,16 @@ print("size of group of 4:", size[find(4)])
 <Callout type="note" title="Deletions are not supported">
 Union-find cannot undo a merge cheaply. If edges are also removed, process the queries **offline in reverse** (turning removals into additions) or use an offline divide-and-conquer with rollback (union by size without path compression).
 </Callout>
+
+<ConceptWalkthrough title="Keep the component count through repeated unions" nodes={[
+  {"id":"n0","label":"Request","x":17,"y":46},
+  {"id":"n1","label":"Roots","x":50,"y":46},
+  {"id":"n2","label":"Count","x":83,"y":46},
+]} frames={[
+  {"title":"Start with four singleton sets","note":"The vertices are A, B, C and D. Union(A, B) joins two distinct roots and lowers the component count from four to three.","active":["n0","n1","n2"],"values":{"n0":"union A B","n1":"distinct","n2":"4 → 3"}},
+  {"title":"Connect C through B","note":"Union(B, C) first finds B’s current root. B’s component and C’s component differ, so the count falls to two.","active":["n0","n1","n2"],"values":{"n0":"union B C","n1":"distinct","n2":"3 → 2"}},
+  {"title":"Ignore the redundant merge","note":"Union(A, C) finds the same root on both sides. The connected groups remain {A, B, C} and {D}. Decrement the count only when a union actually links two roots.","active":["n1","n2"],"values":{"n0":"union A C","n1":"equal","n2":"stays 2"}},
+]} />
 
 ## Pitfalls
 
