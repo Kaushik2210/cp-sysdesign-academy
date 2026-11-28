@@ -1194,6 +1194,9 @@ test.describe("concept walkthroughs at phone width", () => {
     ["/cp/graphs-ii/euler-paths-and-hierholzer/", [
       ["Reject an Euler tour with unused edges", "Compare the output with m + 1"],
     ]],
+    ["/cp/graphs-ii/functional-graphs-and-binary-lifting/", [
+      ["Reduce a large jump after entering the cycle", "Land back at C"],
+    ]],
   ] as const;
 
   for (const [path, walkthroughs] of lessons) {

@@ -43,6 +43,22 @@ The same table solves **k-th ancestor** in a rooted tree (point the root at itse
 
 ### Tail and cycle
 
+Trace the successor chain `A → B → C → D → E → C`. Predict the destination after 11 jumps from A.
+
+<ConceptWalkthrough
+  title="Reduce a large jump after entering the cycle"
+  nodes={[
+    {"id": "n0", "label": "Tail", "x": 19, "y": 50},
+    {"id": "n1", "label": "Cycle entry", "x": 50, "y": 50},
+    {"id": "n2", "label": "Destination", "x": 81, "y": 50},
+  ]}
+  frames={[
+    {"title": "Count the steps to entry", "note": "From A, two jumps reach C. The tail length is 2 and the cycle is C \u2192 D \u2192 E \u2192 C, with length 3.", "active": ["n0", "n1"], "values": {"n0": "A \u2192 B", "n1": "C at step 2", "n2": "pending"}, "edges": [{"from": "n0", "to": "n1"}]},
+    {"title": "Subtract the tail before taking the remainder", "note": "Eleven total jumps leave 9 after reaching C. Since 9 mod 3 is 0, those jumps complete three full turns.", "active": ["n1"], "values": {"n0": "11 \u2212 2 = 9", "n1": "9 mod 3 = 0", "n2": "pending"}},
+    {"title": "Land back at C", "note": "The destination is C. Using 11 mod 3 directly from the entry would incorrectly land at E. For fewer than two jumps, stay on the tail and skip the remainder step.", "active": ["n2"], "values": {"n0": "tail length 2", "n1": "cycle length 3", "n2": "C"}, "edges": [{"from": "n1", "to": "n2"}]},
+  ]}
+/>
+
 Walk from `v` recording the first time each vertex appears. The first repeat gives `mu` (the index of the repeated vertex) and `lambda` (walk length minus `mu`). Then for `k < mu + lambda` the answer is the `k`-th walked vertex, otherwise the `(mu + (k - mu) mod lambda)`-th. This is `O(mu + lambda)` per start, so it suits single queries, or all queries once you precompute tails and cycle positions for every vertex.
 
 ### Floyd's tortoise and hare
